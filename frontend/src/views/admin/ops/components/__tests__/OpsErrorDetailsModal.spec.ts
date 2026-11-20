@@ -1,5 +1,6 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import Select from '@/components/common/Select.vue'
 import OpsErrorDetailsModal from '../OpsErrorDetailsModal.vue'
 
 const mocks = vi.hoisted(() => ({
@@ -39,6 +40,37 @@ describe('OpsErrorDetailsModal', () => {
 
     expect(mocks.listUpstreamErrors).toHaveBeenCalledTimes(1)
     expect(mocks.listUpstreamErrors.mock.calls[0][0]).toMatchObject({ page: 1, page_size: 10, phase: 'upstream' })
+  })
+
+  // Opening resets the filters, the upstream list's phase among them: the filter watchers must not load a second time.
+  it('loads the upstream list once when it opens', async () => {
+    const wrapper = shallowMount(OpsErrorDetailsModal, {
+      props: { show: false, timeRange: '1h', errorType: 'upstream' },
+      global: { renderStubDefaultSlot: true }
+    })
+    await flushPromises()
+    expect(mocks.listUpstreamErrors).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(mocks.listUpstreamErrors).toHaveBeenCalledTimes(1)
+    expect(mocks.listUpstreamErrors.mock.calls[0][0]).toMatchObject({ page: 1, phase: 'upstream' })
+
+    // Closed and opened again: once more, not twice.
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(mocks.listUpstreamErrors).toHaveBeenCalledTimes(2)
+
+    // A filter chosen after the reset still loads on its own.
+    const phaseSelect = wrapper
+      .findAllComponents(Select)
+      .find((select) => (select.props('options') as Array<{ value: unknown }>).some((option) => option.value === 'network'))
+    expect(phaseSelect).toBeTruthy()
+    phaseSelect!.vm.$emit('update:modelValue', 'network')
+    await flushPromises()
+    expect(mocks.listUpstreamErrors).toHaveBeenCalledTimes(3)
+    expect(mocks.listUpstreamErrors.mock.calls[2][0]).toMatchObject({ phase: 'network' })
   })
 
   it('loads nothing while closed, and loads on opening', async () => {

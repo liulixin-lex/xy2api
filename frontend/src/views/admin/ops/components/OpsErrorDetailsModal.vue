@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -153,7 +153,20 @@ async function fetchErrorLogs() {
   }
 }
 
+// Opening (and Reset) set several filters and load once: the watchers below would load again for each value it
+// changes (the upstream list's phase, a page or a search left from before), so they stand aside until this flush ends.
+let resetting = false
+let searchTimeout: number | null = null
+function holdFilterWatchers() {
+  resetting = true
+  if (searchTimeout) window.clearTimeout(searchTimeout)
+  void nextTick(() => {
+    resetting = false
+  })
+}
+
   function resetFilters() {
+    holdFilterWatchers()
     q.value = ''
     statusCode.value = null
     phase.value = props.errorType === 'upstream' ? 'upstream' : ''
@@ -171,6 +184,7 @@ watch(
   (open) => {
     if (!open) return
     if (props.resumeState) return
+    holdFilterWatchers()
     page.value = 1
     pageSize.value = 10
     resetFilters()
@@ -190,16 +204,15 @@ watch(
 watch(
   () => [page.value, pageSize.value] as const,
   () => {
-    if (!props.show) return
+    if (!props.show || resetting) return
     fetchErrorLogs()
   }
 )
 
-let searchTimeout: number | null = null
 watch(
   () => q.value,
   () => {
-    if (!props.show) return
+    if (!props.show || resetting) return
     if (searchTimeout) window.clearTimeout(searchTimeout)
     searchTimeout = window.setTimeout(() => {
       page.value = 1
@@ -211,7 +224,7 @@ watch(
 watch(
   () => [statusCode.value, phase.value, errorOwner.value, viewMode.value] as const,
   () => {
-    if (!props.show) return
+    if (!props.show || resetting) return
     page.value = 1
     fetchErrorLogs()
   }
