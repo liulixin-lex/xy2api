@@ -852,8 +852,8 @@ describe('admin UsersView', () => {
   })
 
   // Follow-ups after #96 (package A): the phone info row is "N 条 · ● 实时 [刷新][列][⋯]"; "⋯" holds the attributes
-  // config and the bulk actions with their text.
-  it('puts the attributes config and the bulk actions behind the phone toolbar\'s "⋯"', async () => {
+  // config and the bulk actions with their text, and the search shows a short hint.
+  it('puts the attributes config and the bulk actions behind the phone toolbar\'s "⋯", with a short search hint', async () => {
     const matchMedia = window.matchMedia
     window.matchMedia = ((query: string) => ({
       matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
@@ -867,6 +867,7 @@ describe('admin UsersView', () => {
       listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
       const wrapper = mountBulkDeleteView()
       await flushPromises()
+      expect(wrapper.get('.table-toolbar__input').attributes('placeholder')).toBe('admin.users.searchUsersShort')
       expect(wrapper.find('[data-test="bulk-actions"]').exists()).toBe(false)
       expect(wrapper.find('button[aria-label="admin.users.attributes.configButton"]').exists()).toBe(false)
 

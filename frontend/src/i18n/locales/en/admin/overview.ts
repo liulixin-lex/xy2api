@@ -556,6 +556,7 @@ export default {
       deleteConfirmMessage: "Are you sure you want to delete user '{email}'? This action cannot be undone.",
       searchPlaceholder: 'Search by email, username, notes, or API key...',
       searchUsers: 'Search by email, username, notes, or API key',
+      searchUsersShort: 'Email, name, notes, key',
       roleFilter: 'Role Filter',
       allRoles: 'All Roles',
       allStatus: 'All Status',

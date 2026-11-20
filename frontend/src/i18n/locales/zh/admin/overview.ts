@@ -556,6 +556,7 @@ export default {
       deleteConfirmMessage: "确定要删除用户 '{email}' 吗？此操作无法撤销。",
       searchPlaceholder: '邮箱/用户名/备注/API Key 模糊搜索...',
       searchUsers: '搜索邮箱、用户名、备注或 API Key',
+      searchUsersShort: '邮箱、用户名、备注或 Key',
       roleFilter: '角色筛选',
       allRoles: '全部角色',
       allStatus: '全部状态',

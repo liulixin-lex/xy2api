@@ -16,8 +16,8 @@
               <input
                 v-model="searchQuery"
                 type="text"
-                :placeholder="t('admin.users.searchUsers')"
-                class="table-toolbar__input"
+                :placeholder="phone ? t('admin.users.searchUsersShort') : t('admin.users.searchUsers')"
+                class="table-toolbar__input users-search"
                 @input="handleSearch"
               />
             </label>
@@ -2417,6 +2417,17 @@ onUnmounted(() => {
 .dense-cells :deep(tbody td) {
   padding-right: var(--cell-pad-x);
   padding-left: var(--cell-pad-x);
+}
+/* A phone: the short hint whole at 390, where the field has 151px beside "筛选" and "添加" (141px in English); the
+   hint is 147px at 12px (133px in English), 195px at 16px. Narrower it ends in an ellipsis. Typed text stays 16px,
+   so the browser does not zoom in. */
+@media (max-width: 767px) {
+  .users-search {
+    text-overflow: ellipsis;
+  }
+  .users-search::placeholder {
+    font-size: 12px;
+  }
 }
 /* The bulk menu's button (12.9-5): the count in a slot as wide as three digits, empty until a row is ticked, so the
    button keeps its width; below 1024px a badge on the corner of the 40px square, the chevron gone. */
