@@ -2,8 +2,8 @@ import type { Directive } from 'vue'
 import { anyOverlayOpen } from './overlayStack'
 
 /**
- * v-tip="text": short tip (design spec E): shown after 400ms hover, or on keyboard focus (an element not wholly in
- * view is scrolled in first, at once); hidden on leave, blur, scroll or Escape. With no layer open Escape only closes
+ * v-tip="text": short tip (design spec E): shown after 400ms hover, or on keyboard focus (Tab to an element not
+ * wholly in view scrolls it in first, at once); hidden on leave, blur, scroll or Escape. With no layer open Escape only closes
  * the tip; while a popover, panel or dialog is open the key goes on to it as well, so one press closes both (7m-2).
  * One shared element with role="tooltip"; while it is shown the target's aria-describedby also points to it (the
  * target's own description stays). No native title. Empty text = no tip. Line breaks in the text are kept.
@@ -58,7 +58,20 @@ function onPressElsewhere(event: Event) {
 }
 /** The kind of the latest press: a mouse click's tip still goes on mouseleave, as a hover tip does. */
 let pressType = ''
-if (typeof window !== 'undefined') window.addEventListener('pointerdown', (event) => { pressType = event.pointerType }, true)
+/**
+ * Whether the focus that comes next is Tab's (or Shift+Tab's): only that focus may scroll the page for its tip
+ * (showOnFocus). A focus given back by a script (a closing panel's preventScroll), a click or any other key leaves the
+ * page where it is. Set by the key, cleared on its keyup, on a press and when a focus reads it.
+ */
+let tabbing = false
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointerdown', (event) => {
+    pressType = event.pointerType
+    tabbing = false
+  }, true)
+  window.addEventListener('keydown', (event) => { tabbing = event.key === 'Tab' }, true)
+  window.addEventListener('keyup', () => { tabbing = false }, true)
+}
 
 function tip() {
   if (!tipEl || !tipEl.isConnected) {
@@ -204,13 +217,16 @@ function wholeInView(el: HTMLElement) {
  * also stops a smooth scroll the browser started for the focus. Not behavior: 'instant', which older Safari ignores.
  */
 function jumpIntoView(el: HTMLElement) {
-  const root = document.documentElement
-  const before = root.style.scrollBehavior
-  root.style.scrollBehavior = 'auto'
+  const style = document.documentElement.style
+  // The root's own declaration, value and priority, put back as it was (or none, as it was).
+  const value = style.getPropertyValue('scroll-behavior')
+  const priority = style.getPropertyPriority('scroll-behavior')
+  style.setProperty('scroll-behavior', 'auto', 'important')
   try {
     el.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   } finally {
-    root.style.scrollBehavior = before
+    if (value) style.setProperty('scroll-behavior', value, priority)
+    else style.removeProperty('scroll-behavior')
   }
 }
 
@@ -218,14 +234,15 @@ function jumpIntoView(el: HTMLElement) {
 let pending: { target: TipTarget; cancel: () => void } | null = null
 
 /**
- * Keyboard focus on an element not wholly in view would have the browser scroll it in, smoothly, and a scroll hides
- * the tip. So the element is scrolled in here at once, and the tip shows two frames later, once that jump's scroll
- * events have gone by, if the element still has keyboard focus; a scroll after that hides it as any other. Escape
- * (passed on to an open layer, as for a shown tip), blur or unmount before then cancel it.
+ * Tab to an element not wholly in view would have the browser scroll it in, smoothly, and a scroll hides the tip. So
+ * the element is scrolled in here at once; a focus from anywhere else (a script giving it back with preventScroll, a
+ * click) leaves the page as it is. The tip shows two frames later, once a jump's scroll events have gone by, if the
+ * element still has keyboard focus; a scroll after that hides it as any other. Escape (passed on to an open layer, as
+ * for a shown tip), blur or unmount before then cancel it.
  */
-function showOnFocus(target: TipTarget) {
+function showOnFocus(target: TipTarget, byTab: boolean) {
   pending?.cancel()
-  if (!wholeInView(target)) jumpIntoView(target)
+  if (byTab && !wholeInView(target)) jumpIntoView(target)
   let frame = 0
   const onKey = (event: KeyboardEvent) => {
     if (event.key !== 'Escape') return
@@ -294,7 +311,11 @@ export const vTip: Directive<TipTarget, TipText> = {
   mounted(el, binding) {
     el.__tipText = binding.value ?? ''
     const handlers: Record<string, (event: Event) => void> = {
-      focus: () => { if (keyboardFocus(el)) showOnFocus(el) },
+      focus: () => {
+        const byTab = tabbing
+        tabbing = false
+        if (keyboardFocus(el)) showOnFocus(el, byTab)
+      },
       blur: () => {
         if (pending?.target === el) pending.cancel()
         if (current === el) hide()
