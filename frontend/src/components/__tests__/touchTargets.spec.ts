@@ -119,5 +119,16 @@ describe('touch targets', () => {
     expect(px(input, 'font-size')).toBe(16)
     expect(source).toMatch(/\.users-colsheet \{\s*display: grid;\s*gap: 8px;/)
   })
+
+  // Step 2 acceptance: on a phone a switch scrolled half under the frozen "⋯" column touched it, a tap beside "⋯"
+  // reaching the switch. The column starts with an 8px opaque strip that takes the tap and carries the edge line.
+  it('table: an 8px tap-catching strip before the frozen right column on a phone with touch', () => {
+    const source = read('common/DataTable.vue')
+    const block = mediaBlocks(source, '(max-width: 767px) and (pointer: coarse)')
+    expect(block).toMatch(/\.dt-layout-table :deep\(\.sticky-col-right\)::before \{\s*position: absolute;\s*top: 0;\s*bottom: 0;\s*left: -8px;\s*width: 8px;\s*background: inherit;/)
+    expect(block).toMatch(/\.is-scrollable :deep\(\.sticky-col-right\)::before \{\s*box-shadow: inset 1px 0 0 var\(--color-line-strong\);/)
+    // Keyboard focus keeps clear of the strip too.
+    expect(source).toContain("right: Math.round(rightCell ? width(rightCell) + stripWidth : 0)")
+  })
 })
 

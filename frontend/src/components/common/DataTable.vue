@@ -245,9 +245,12 @@ const measureFreeze = (wrapper: HTMLElement) => {
   const width = (el: Element) => el.getBoundingClientRect().width
   const left = Array.from(firstRow?.querySelectorAll('.sticky-col-left, .sticky-col-left-first, .sticky-col-left-second') ?? []).reduce((sum, th) => sum + width(th), 0)
   const rightCell = firstRow?.querySelector('.sticky-col-right')
+  // A phone's touch strip on the frozen right column's left (below) covers 8px more.
+  const strip = rightCell ? getComputedStyle(rightCell, '::before') : null
+  const stripWidth = strip && strip.content !== 'none' && strip.position === 'absolute' ? parseFloat(strip.width) || 0 : 0
   const next = {
     left: Math.round(left),
-    right: Math.round(rightCell ? width(rightCell) : 0),
+    right: Math.round(rightCell ? width(rightCell) + stripWidth : 0),
     top: Math.round(wrapper.querySelector<HTMLElement>(':scope > table > thead')?.getBoundingClientRect().height ?? 0)
   }
   const now = freezeInsets.value
@@ -1266,6 +1269,26 @@ defineExpose({
     max-width: 44px;
     padding-inline: 0;
     text-align: center;
+  }
+}
+/* Touch on a phone: the frozen right column starts with an 8px opaque strip that takes a tap, so a control scrolled
+   half under it (an account's scheduling switch) stays 8px clear of "⋯" and a tap beside "⋯" cannot reach it
+   (step 2 acceptance, plan item 17). The strip carries the column's edge line. */
+@media (max-width: 767px) and (pointer: coarse) {
+  .dt-layout-table :deep(.sticky-col-right)::before {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -8px;
+    width: 8px;
+    background: inherit;
+    content: '';
+  }
+  .is-scrollable :deep(.sticky-col-right) {
+    box-shadow: none;
+  }
+  .is-scrollable :deep(.sticky-col-right)::before {
+    box-shadow: inset 1px 0 0 var(--color-line-strong);
   }
 }
 /* Touch (pointer: coarse): rows at least 48px, the header 40px, a check box's hit area 40px (the box itself keeps
