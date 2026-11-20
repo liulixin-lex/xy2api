@@ -14,6 +14,10 @@ func (h *OpenAIGatewayHandler) handleOpenAISelectionError(c *gin.Context, cls no
 		h.handleFailoverExhausted(c, failure, streamStarted)
 		return
 	}
+	if cls.Code == "OPENAI_TIER_ROUTE_CONFLICT" || cls.Code == "OPENAI_TIER_CAPABILITY_UNAVAILABLE" {
+		h.handleStreamingAwareErrorWithCode(c, cls.Status, "api_error", cls.Code, cls.Message, streamStarted, false)
+		return
+	}
 	if cls.Code != "responses_required" {
 		h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
 		return

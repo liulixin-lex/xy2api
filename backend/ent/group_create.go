@@ -808,6 +808,62 @@ func (_c *GroupCreate) SetNillableFreeOpenaiFast(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetOpenaiFastMode sets the "openai_fast_mode" field.
+func (_c *GroupCreate) SetOpenaiFastMode(v string) *GroupCreate {
+	_c.mutation.SetOpenaiFastMode(v)
+	return _c
+}
+
+// SetNillableOpenaiFastMode sets the "openai_fast_mode" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableOpenaiFastMode(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetOpenaiFastMode(*v)
+	}
+	return _c
+}
+
+// SetOpenaiUltrafastMode sets the "openai_ultrafast_mode" field.
+func (_c *GroupCreate) SetOpenaiUltrafastMode(v string) *GroupCreate {
+	_c.mutation.SetOpenaiUltrafastMode(v)
+	return _c
+}
+
+// SetNillableOpenaiUltrafastMode sets the "openai_ultrafast_mode" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableOpenaiUltrafastMode(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetOpenaiUltrafastMode(*v)
+	}
+	return _c
+}
+
+// SetOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field.
+func (_c *GroupCreate) SetOpenaiTierPolicyVersion(v int) *GroupCreate {
+	_c.mutation.SetOpenaiTierPolicyVersion(v)
+	return _c
+}
+
+// SetNillableOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableOpenaiTierPolicyVersion(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetOpenaiTierPolicyVersion(*v)
+	}
+	return _c
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (_c *GroupCreate) SetFreeOpenaiUltrafast(v bool) *GroupCreate {
+	_c.mutation.SetFreeOpenaiUltrafast(v)
+	return _c
+}
+
+// SetNillableFreeOpenaiUltrafast sets the "free_openai_ultrafast" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableFreeOpenaiUltrafast(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetFreeOpenaiUltrafast(*v)
+	}
+	return _c
+}
+
 // SetRequireOauthOnly sets the "require_oauth_only" field.
 func (_c *GroupCreate) SetRequireOauthOnly(v bool) *GroupCreate {
 	_c.mutation.SetRequireOauthOnly(v)
@@ -1269,6 +1325,22 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultFreeOpenaiFast
 		_c.mutation.SetFreeOpenaiFast(v)
 	}
+	if _, ok := _c.mutation.OpenaiFastMode(); !ok {
+		v := group.DefaultOpenaiFastMode
+		_c.mutation.SetOpenaiFastMode(v)
+	}
+	if _, ok := _c.mutation.OpenaiUltrafastMode(); !ok {
+		v := group.DefaultOpenaiUltrafastMode
+		_c.mutation.SetOpenaiUltrafastMode(v)
+	}
+	if _, ok := _c.mutation.OpenaiTierPolicyVersion(); !ok {
+		v := group.DefaultOpenaiTierPolicyVersion
+		_c.mutation.SetOpenaiTierPolicyVersion(v)
+	}
+	if _, ok := _c.mutation.FreeOpenaiUltrafast(); !ok {
+		v := group.DefaultFreeOpenaiUltrafast
+		_c.mutation.SetFreeOpenaiUltrafast(v)
+	}
 	if _, ok := _c.mutation.RequireOauthOnly(); !ok {
 		v := group.DefaultRequireOauthOnly
 		_c.mutation.SetRequireOauthOnly(v)
@@ -1488,6 +1560,18 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.FreeOpenaiFast(); !ok {
 		return &ValidationError{Name: "free_openai_fast", err: errors.New(`ent: missing required field "Group.free_openai_fast"`)}
+	}
+	if _, ok := _c.mutation.OpenaiFastMode(); !ok {
+		return &ValidationError{Name: "openai_fast_mode", err: errors.New(`ent: missing required field "Group.openai_fast_mode"`)}
+	}
+	if _, ok := _c.mutation.OpenaiUltrafastMode(); !ok {
+		return &ValidationError{Name: "openai_ultrafast_mode", err: errors.New(`ent: missing required field "Group.openai_ultrafast_mode"`)}
+	}
+	if _, ok := _c.mutation.OpenaiTierPolicyVersion(); !ok {
+		return &ValidationError{Name: "openai_tier_policy_version", err: errors.New(`ent: missing required field "Group.openai_tier_policy_version"`)}
+	}
+	if _, ok := _c.mutation.FreeOpenaiUltrafast(); !ok {
+		return &ValidationError{Name: "free_openai_ultrafast", err: errors.New(`ent: missing required field "Group.free_openai_ultrafast"`)}
 	}
 	if _, ok := _c.mutation.RequireOauthOnly(); !ok {
 		return &ValidationError{Name: "require_oauth_only", err: errors.New(`ent: missing required field "Group.require_oauth_only"`)}
@@ -1805,6 +1889,22 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.FreeOpenaiFast(); ok {
 		_spec.SetField(group.FieldFreeOpenaiFast, field.TypeBool, value)
 		_node.FreeOpenaiFast = value
+	}
+	if value, ok := _c.mutation.OpenaiFastMode(); ok {
+		_spec.SetField(group.FieldOpenaiFastMode, field.TypeString, value)
+		_node.OpenaiFastMode = value
+	}
+	if value, ok := _c.mutation.OpenaiUltrafastMode(); ok {
+		_spec.SetField(group.FieldOpenaiUltrafastMode, field.TypeString, value)
+		_node.OpenaiUltrafastMode = value
+	}
+	if value, ok := _c.mutation.OpenaiTierPolicyVersion(); ok {
+		_spec.SetField(group.FieldOpenaiTierPolicyVersion, field.TypeInt, value)
+		_node.OpenaiTierPolicyVersion = value
+	}
+	if value, ok := _c.mutation.FreeOpenaiUltrafast(); ok {
+		_spec.SetField(group.FieldFreeOpenaiUltrafast, field.TypeBool, value)
+		_node.FreeOpenaiUltrafast = value
 	}
 	if value, ok := _c.mutation.RequireOauthOnly(); ok {
 		_spec.SetField(group.FieldRequireOauthOnly, field.TypeBool, value)
@@ -2981,6 +3081,60 @@ func (u *GroupUpsert) SetFreeOpenaiFast(v bool) *GroupUpsert {
 // UpdateFreeOpenaiFast sets the "free_openai_fast" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateFreeOpenaiFast() *GroupUpsert {
 	u.SetExcluded(group.FieldFreeOpenaiFast)
+	return u
+}
+
+// SetOpenaiFastMode sets the "openai_fast_mode" field.
+func (u *GroupUpsert) SetOpenaiFastMode(v string) *GroupUpsert {
+	u.Set(group.FieldOpenaiFastMode, v)
+	return u
+}
+
+// UpdateOpenaiFastMode sets the "openai_fast_mode" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOpenaiFastMode() *GroupUpsert {
+	u.SetExcluded(group.FieldOpenaiFastMode)
+	return u
+}
+
+// SetOpenaiUltrafastMode sets the "openai_ultrafast_mode" field.
+func (u *GroupUpsert) SetOpenaiUltrafastMode(v string) *GroupUpsert {
+	u.Set(group.FieldOpenaiUltrafastMode, v)
+	return u
+}
+
+// UpdateOpenaiUltrafastMode sets the "openai_ultrafast_mode" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOpenaiUltrafastMode() *GroupUpsert {
+	u.SetExcluded(group.FieldOpenaiUltrafastMode)
+	return u
+}
+
+// SetOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field.
+func (u *GroupUpsert) SetOpenaiTierPolicyVersion(v int) *GroupUpsert {
+	u.Set(group.FieldOpenaiTierPolicyVersion, v)
+	return u
+}
+
+// UpdateOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOpenaiTierPolicyVersion() *GroupUpsert {
+	u.SetExcluded(group.FieldOpenaiTierPolicyVersion)
+	return u
+}
+
+// AddOpenaiTierPolicyVersion adds v to the "openai_tier_policy_version" field.
+func (u *GroupUpsert) AddOpenaiTierPolicyVersion(v int) *GroupUpsert {
+	u.Add(group.FieldOpenaiTierPolicyVersion, v)
+	return u
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (u *GroupUpsert) SetFreeOpenaiUltrafast(v bool) *GroupUpsert {
+	u.Set(group.FieldFreeOpenaiUltrafast, v)
+	return u
+}
+
+// UpdateFreeOpenaiUltrafast sets the "free_openai_ultrafast" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateFreeOpenaiUltrafast() *GroupUpsert {
+	u.SetExcluded(group.FieldFreeOpenaiUltrafast)
 	return u
 }
 
@@ -4354,6 +4508,69 @@ func (u *GroupUpsertOne) SetFreeOpenaiFast(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateFreeOpenaiFast() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateFreeOpenaiFast()
+	})
+}
+
+// SetOpenaiFastMode sets the "openai_fast_mode" field.
+func (u *GroupUpsertOne) SetOpenaiFastMode(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiFastMode(v)
+	})
+}
+
+// UpdateOpenaiFastMode sets the "openai_fast_mode" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOpenaiFastMode() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiFastMode()
+	})
+}
+
+// SetOpenaiUltrafastMode sets the "openai_ultrafast_mode" field.
+func (u *GroupUpsertOne) SetOpenaiUltrafastMode(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiUltrafastMode(v)
+	})
+}
+
+// UpdateOpenaiUltrafastMode sets the "openai_ultrafast_mode" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOpenaiUltrafastMode() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiUltrafastMode()
+	})
+}
+
+// SetOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field.
+func (u *GroupUpsertOne) SetOpenaiTierPolicyVersion(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiTierPolicyVersion(v)
+	})
+}
+
+// AddOpenaiTierPolicyVersion adds v to the "openai_tier_policy_version" field.
+func (u *GroupUpsertOne) AddOpenaiTierPolicyVersion(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddOpenaiTierPolicyVersion(v)
+	})
+}
+
+// UpdateOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOpenaiTierPolicyVersion() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiTierPolicyVersion()
+	})
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (u *GroupUpsertOne) SetFreeOpenaiUltrafast(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetFreeOpenaiUltrafast(v)
+	})
+}
+
+// UpdateFreeOpenaiUltrafast sets the "free_openai_ultrafast" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateFreeOpenaiUltrafast() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateFreeOpenaiUltrafast()
 	})
 }
 
@@ -5926,6 +6143,69 @@ func (u *GroupUpsertBulk) SetFreeOpenaiFast(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateFreeOpenaiFast() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateFreeOpenaiFast()
+	})
+}
+
+// SetOpenaiFastMode sets the "openai_fast_mode" field.
+func (u *GroupUpsertBulk) SetOpenaiFastMode(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiFastMode(v)
+	})
+}
+
+// UpdateOpenaiFastMode sets the "openai_fast_mode" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOpenaiFastMode() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiFastMode()
+	})
+}
+
+// SetOpenaiUltrafastMode sets the "openai_ultrafast_mode" field.
+func (u *GroupUpsertBulk) SetOpenaiUltrafastMode(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiUltrafastMode(v)
+	})
+}
+
+// UpdateOpenaiUltrafastMode sets the "openai_ultrafast_mode" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOpenaiUltrafastMode() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiUltrafastMode()
+	})
+}
+
+// SetOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field.
+func (u *GroupUpsertBulk) SetOpenaiTierPolicyVersion(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiTierPolicyVersion(v)
+	})
+}
+
+// AddOpenaiTierPolicyVersion adds v to the "openai_tier_policy_version" field.
+func (u *GroupUpsertBulk) AddOpenaiTierPolicyVersion(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddOpenaiTierPolicyVersion(v)
+	})
+}
+
+// UpdateOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOpenaiTierPolicyVersion() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiTierPolicyVersion()
+	})
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (u *GroupUpsertBulk) SetFreeOpenaiUltrafast(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetFreeOpenaiUltrafast(v)
+	})
+}
+
+// UpdateFreeOpenaiUltrafast sets the "free_openai_ultrafast" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateFreeOpenaiUltrafast() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateFreeOpenaiUltrafast()
 	})
 }
 

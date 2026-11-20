@@ -17,6 +17,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/geminicli"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/pkg/typesafe"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
@@ -358,15 +359,6 @@ func groupSupportsOpenAIFast(platform string) bool {
 	return platform == PlatformOpenAI || platform == PlatformComposite
 }
 
-func sanitizeGroupOpenAIFast(group *Group) {
-	if group == nil || !groupSupportsOpenAIFast(group.Platform) {
-		if group != nil {
-			group.ForceOpenAIFast = false
-			group.FreeOpenAIFast = false
-		}
-	}
-}
-
 func normalizeCreateGroupInputForSimpleMode(input *CreateGroupInput) {
 	if input == nil {
 		return
@@ -417,6 +409,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	modelPricing, err := normalizeGroupModelPricing(platform, input.ModelPricing)
 	if err != nil {
 		return nil, err
+	}
+	for i := range modelPricing {
+		modelPricing[i].UltrafastMultiplierSet = false
 	}
 	longContextPricingScope, longContextPricingModels, err := NormalizeLongContextPricingConfig(
 		input.LongContextPricingScope,
@@ -667,7 +662,17 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ReasoningEffortMappings:     reasoningEffortMappings,
 	}
 	sanitizeGroupMessagesDispatchFields(group)
-	sanitizeGroupOpenAIFast(group)
+	legacyForce := input.LegacyForceOpenAIFast
+	if legacyForce == nil && input.ForceOpenAIFast {
+		legacyForce = &input.ForceOpenAIFast
+	}
+	if err := applyGroupOpenAITierPolicy(group, &UpdateGroupInput{
+		ForceOpenAIFast: legacyForce, OpenAIFastMode: input.OpenAIFastMode,
+		OpenAIUltrafastMode: input.OpenAIUltrafastMode, OpenAITierPolicyVersion: input.OpenAITierPolicyVersion,
+		FreeOpenAIUltrafast: input.FreeOpenAIUltrafast,
+	}, true); err != nil {
+		return nil, err
+	}
 	if group.Platform != PlatformOpenAI && group.Platform != PlatformComposite {
 		group.AllowLive = false
 	}
@@ -773,13 +778,28 @@ func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Con
 }
 
 func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *UpdateGroupInput) (*Group, error) {
-	if err := s.operatorGroupUpdateRules(ctx, id, input); err != nil {
-		return nil, err
-	}
-	group, err := s.groupRepo.GetByID(ctx, id)
+	scope, _, err := s.operatorScope(ctx)
 	if err != nil {
 		return nil, err
 	}
+	if s.groupRepo == nil {
+		return nil, operatorUnavailable()
+	}
+	group, err := s.groupRepo.GetByID(ctx, id)
+	if err != nil {
+		if scope != nil && !scope.Has(operatoraccess.FlagUsersBalanceAdjust) {
+			return nil, operatorLoadError(err, ErrGroupNotFound)
+		}
+		return nil, err
+	}
+	if err := s.operatorGroupUpdateRules(ctx, id, input, group); err != nil {
+		return nil, err
+	}
+	if err := checkConfigurationRevision(input.Revision, group.UpdatedAt); err != nil {
+		return nil, err
+	}
+	expectedUpdatedAt := group.UpdatedAt
+	group.ExpectedUpdatedAt = &expectedUpdatedAt
 	if err := s.validateSimpleModeGroupAccess(group); err != nil {
 		return nil, err
 	}
@@ -854,7 +874,10 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		if normalizeErr != nil {
 			return nil, normalizeErr
 		}
-		group.ModelPricing = modelPricing
+		group.ModelPricing, err = mergeUltrafastPricing(group.ModelPricing, modelPricing, input.Revision != nil)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// 订阅相关字段
@@ -1071,12 +1094,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.AllowLive != nil {
 		group.AllowLive = *input.AllowLive
 	}
-	if input.ForceOpenAIFast != nil {
-		group.ForceOpenAIFast = *input.ForceOpenAIFast
-	}
-	if input.FreeOpenAIFast != nil {
-		group.FreeOpenAIFast = *input.FreeOpenAIFast
-	}
+
 	if input.RequireOAuthOnly != nil {
 		group.RequireOAuthOnly = *input.RequireOAuthOnly
 	}
@@ -1124,7 +1142,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.ReasoningEffortMappings = reasoningEffortMappings
 	}
 	sanitizeGroupMessagesDispatchFields(group)
-	sanitizeGroupOpenAIFast(group)
+	if err := applyGroupOpenAITierPolicy(group, input, false); err != nil {
+		return nil, err
+	}
 	if group.Platform != PlatformOpenAI && group.Platform != PlatformComposite {
 		group.AllowLive = false
 	}
@@ -1217,6 +1237,9 @@ func normalizeGroupModelPricing(platform string, pricing []ChannelModelPricing) 
 	}
 	if err := validatePricingEntries(out); err != nil {
 		return nil, err
+	}
+	for i := range out {
+		out[i].FastMultiplierExcessPrecision = false
 	}
 	return out, nil
 }

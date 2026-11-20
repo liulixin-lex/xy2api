@@ -1350,11 +1350,16 @@ export default {
         enableAnyway: 'Enable anyway'
       },
       openaiFast: {
-        title: 'OpenAI Fast mode',
-        force: 'Force Fast (priority)',
-        hint: 'Forces service_tier=priority on OpenAI requests in this group, overriding the global Fast/Flex policy. Fast unit prices apply; the group rate multiplier stays unchanged. Applies to new requests after saving; existing WebSocket sessions must reconnect.',
-        free: 'Free Fast',
-        freeHint: 'Fast requests in this group still use the priority tier, but customers are charged the equivalent Standard price.'
+        title: "OpenAI service tiers",
+        scope: "Applies to OpenAI GPT text requests, including those routed through a composite group. You can force one tier on or turn both off.",
+        inherit: "Follow request and system rules",
+        forceOn: "Force on",
+        forceOff: "Force off",
+        waive: "Waive {tier} premium",
+        billing: "A waiver affects the customer charge only. For example, if Standard costs $1 and Fast costs $2, Free Fast caps the charge at $1 before the group rate applies.",
+        migrate: "Use the new tier policy when saving",
+        legacy: "This group uses legacy billing. With the new policy, forced tiers require a supported route and a verified upstream downgrade can lower the bill. Leave unchecked to keep the existing policy.",
+        fallback: "On a fallback route, the serving group supplies the price card and any premium waivers.",
       },
       invalidRequestFallback: {
         title: 'Invalid Request Fallback Group',

@@ -41,36 +41,65 @@ func resolveAccountStatsCost(
 	if len(reasoningEfforts) > 0 {
 		reasoningEffort = reasoningEfforts[0]
 	}
-	if channelService == nil || upstreamModel == "" {
+	return accountStatsCostForCredential(ctx, channelService, billingService, accountID, groupID, upstreamModel, tokens, requestCount, totalCost, serviceTier, pricingAt, longContextPricingEnabled, reasoningEffort, nil)
+}
+
+// Keep contract, mirror, and catalog ordering consistent with admission. Legacy
+// usage retains the historical channel requirement and zero-price fallback.
+func accountStatsCostForCredential(ctx context.Context, cs *ChannelService, bs *BillingService,
+	accountID, groupID int64, model string, tokens UsageTokens, count int, total float64, tier string,
+	at time.Time, longContext bool, effort string, procurement *Account) *float64 {
+	if model == "" {
 		return nil
 	}
-	channel, err := channelService.GetChannelForGroup(ctx, groupID)
-	if err != nil || channel == nil {
-		return nil
-	}
-
-	platform := channelService.GetGroupPlatform(ctx, groupID)
-
-	// 优先级 1：自定义规则（始终尝试）
-	if cost := tryCustomRules(channel, accountID, groupID, platform, upstreamModel, tokens, requestCount, reasoningEffort); cost != nil {
-		return cost
-	}
-
-	// 优先级 2：渠道开启"应用模型定价到账号统计"时，直接使用客户计费（倍率前）
-	if channel.ApplyPricingToAccountStats {
-		cost := totalCost
-		if cost <= 0 {
+	var channel *Channel
+	var platform string
+	if cs != nil {
+		var err error
+		channel, err = cs.GetChannelForGroup(ctx, groupID)
+		if err != nil {
 			return nil
 		}
-		return &cost
+		if channel != nil {
+			platform = cs.GetGroupPlatform(ctx, groupID)
+			if procurement != nil {
+				platform = PlatformOpenAI
+			}
+		}
 	}
-
-	// 优先级 3：模型定价文件（LiteLLM）默认价格
-	if billingService != nil {
-		return tryModelFilePricing(billingService, upstreamModel, tokens, serviceTier, pricingAt, longContextPricingEnabled, reasoningEffort)
+	if channel != nil {
+		if procurement == nil {
+			if cost := tryCustomRules(channel, accountID, groupID, platform, model, tokens, count, effort); cost != nil {
+				return cost
+			}
+		} else if card := matchedAccountStatsPrice(channel, accountID, groupID, platform, model); card != nil {
+			cost := accountStatsContractCost(card, tokens, count)
+			if cost != nil {
+				*cost *= reasoningEffortBillingMultiplier(effort, card.ReasoningEffortMultipliers)
+				return cost
+			}
+		}
+		if channel.ApplyPricingToAccountStats {
+			if total <= 0 && procurement == nil {
+				return nil
+			}
+			return &total
+		}
+	} else if procurement == nil {
+		return nil
 	}
-
-	return nil
+	if bs == nil {
+		return nil
+	}
+	if procurement != nil {
+		buy := openAITierCatalogPurchase(ctx, bs, procurement, model, tier, at, longContext)
+		buy.Tokens, buy.ReasoningEffort = tokens, effort
+		if cost, err := bs.CalculateCostUnified(buy); err == nil && cost != nil {
+			return &cost.TotalCost
+		}
+		return nil
+	}
+	return tryModelFilePricing(bs, model, tokens, tier, at, longContext, effort)
 }
 
 // tryModelFilePricing 使用模型定价文件（LiteLLM/fallback）中的价格计算费用。
@@ -114,20 +143,50 @@ func tryCustomRules(
 	if len(reasoningEfforts) > 0 {
 		reasoningEffort = reasoningEfforts[0]
 	}
-	modelLower := strings.ToLower(model)
-	for _, rule := range channel.AccountStatsPricingRules {
-		if !matchAccountStatsRule(&rule, accountID, groupID) {
-			continue
+	p := matchedAccountStatsPrice(channel, accountID, groupID, platform, model)
+	if p == nil {
+		return nil
+	}
+	cost := calculateStatsCost(p, tokens, requestCount)
+	if cost != nil {
+		*cost *= reasoningEffortBillingMultiplier(reasoningEffort, p.ReasoningEffortMultipliers)
+	}
+	return cost
+}
+
+func matchedAccountStatsPrice(channel *Channel, accountID, groupID int64, platform, model string) *ChannelModelPricing {
+	if channel == nil {
+		return nil
+	}
+	for i := range channel.AccountStatsPricingRules {
+		rule := &channel.AccountStatsPricingRules[i]
+		if matchAccountStatsRule(rule, accountID, groupID) {
+			if p := findPricingForModel(rule.Pricing, platform, strings.ToLower(model)); p != nil {
+				return p
+			}
 		}
-		pricing := findPricingForModel(rule.Pricing, platform, modelLower)
-		if pricing == nil {
-			continue // 规则匹配但模型不在规则定价中，继续下一条
-		}
-		cost := calculateStatsCost(pricing, tokens, requestCount)
-		if cost != nil {
-			*cost *= reasoningEffortBillingMultiplier(reasoningEffort, pricing.ReasoningEffortMultipliers)
-		}
+	}
+	return nil
+}
+
+// Advanced tier contracts can explicitly price a billed component at zero.
+// A missing price still falls through to the next source.
+func accountStatsContractCost(rule *ChannelModelPricing, t UsageTokens, count int) *float64 {
+	cost := calculateStatsCost(rule, t, count)
+	if cost != nil {
 		return cost
+	}
+	if rule.BillingMode != "" && rule.BillingMode != BillingModeToken {
+		if rule.PerRequestPrice != nil && *rule.PerRequestPrice == 0 {
+			return new(float64)
+		}
+		return nil
+	}
+	p := accountStatsPriceAt(rule, t.InputTokens+t.OutputTokens+t.CacheReadTokens+t.CacheCreationTokens)
+	if (t.InputTokens > 0 && p.InputPrice != nil) || (t.OutputTokens > 0 && p.OutputPrice != nil) ||
+		(t.CacheReadTokens > 0 && p.CacheReadPrice != nil) || (t.CacheCreationTokens > 0 && p.CacheWritePrice != nil) ||
+		(t.CacheCreation1hTokens > 0 && p.CacheWrite1hPrice != nil) || (t.ImageOutputTokens > 0 && p.ImageOutputPrice != nil) {
+		return new(float64)
 	}
 	return nil
 }
@@ -217,24 +276,22 @@ func calculatePerRequestStatsCost(pricing *ChannelModelPricing, requestCount int
 	return &cost
 }
 
+// Contract intervals use total usage (including output), unlike customer
+// context pricing. The returned card contains the rates for exactly one tier.
+func accountStatsPriceAt(pricing *ChannelModelPricing, totalTokens int) *ChannelModelPricing {
+	if iv := FindMatchingInterval(pricing.Intervals, totalTokens); iv != nil {
+		return &ChannelModelPricing{InputPrice: iv.InputPrice, OutputPrice: iv.OutputPrice,
+			CacheWritePrice: iv.CacheWritePrice, CacheWrite1hPrice: iv.CacheWrite1hPrice, CacheReadPrice: iv.CacheReadPrice}
+	}
+	return pricing
+}
+
 // calculateTokenStatsCost Token 计费。
 // If the pricing has intervals, find the matching interval by total token count
 // and use its prices instead of the flat pricing fields.
 func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *float64 {
-	p := pricing
-	if len(pricing.Intervals) > 0 {
-		totalTokens := tokens.InputTokens + tokens.OutputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens
-		if iv := FindMatchingInterval(pricing.Intervals, totalTokens); iv != nil {
-			p = &ChannelModelPricing{
-				InputPrice:        iv.InputPrice,
-				OutputPrice:       iv.OutputPrice,
-				CacheWritePrice:   iv.CacheWritePrice,
-				CacheWrite1hPrice: iv.CacheWrite1hPrice,
-				CacheReadPrice:    iv.CacheReadPrice,
-				PerRequestPrice:   iv.PerRequestPrice,
-			}
-		}
-	}
+	totalTokens := tokens.InputTokens + tokens.OutputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens
+	p := accountStatsPriceAt(pricing, totalTokens)
 	deref := func(ptr *float64) float64 {
 		if ptr == nil {
 			return 0
@@ -273,6 +330,7 @@ func applyAccountStatsCost(
 	totalCost float64,
 	pricingAt time.Time,
 	longContextPricingEnabled bool,
+	procurementAccount ...*Account,
 ) {
 	model := upstreamModel
 	if model == "" {
@@ -290,9 +348,15 @@ func applyAccountStatsCost(
 	if usageLog != nil && usageLog.ReasoningEffort != nil {
 		reasoningEffort = *usageLog.ReasoningEffort
 	}
-	usageLog.AccountStatsCost = resolveAccountStatsCost(
-		ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost, serviceTier, pricingAt, longContextPricingEnabled, reasoningEffort,
-	)
+	var procurement *Account
+	if len(procurementAccount) > 0 {
+		procurement = procurementAccount[0]
+	}
+	if procurement == nil {
+		usageLog.AccountStatsCost = resolveAccountStatsCost(ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost, serviceTier, pricingAt, longContextPricingEnabled, reasoningEffort)
+		return
+	}
+	usageLog.AccountStatsCost = accountStatsCostForCredential(ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost, serviceTier, pricingAt, longContextPricingEnabled, reasoningEffort, procurement)
 }
 
 // accountStatsLongContextPricingEnabled 判断账号统计成本是否计入长上下文阶梯。

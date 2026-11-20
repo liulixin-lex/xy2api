@@ -93,7 +93,13 @@ func ApplyOpenAIServiceTierBillingResolution(account *Account, group *Group, res
 		return ServiceTierBillingResolution{}
 	}
 	requested := optionalStringValue(result.ServiceTier)
-	if groupForcesOpenAIFast(group, account) && normalizeBillingServiceTier(requested) == OpenAIFastTierPriority {
+	legacyForce := group != nil && group.OpenAITierPolicyVersion < 2 && groupForcesOpenAIFast(group, account)
+	if d := result.TierDecision; d != nil {
+		requested = d.OutboundTier
+		result.ServiceTier = normalizeOpenAIServiceTier(requested)
+		legacyForce = d.LegacyForceFast && d.PolicyVersion < 2
+	}
+	if legacyForce && normalizeBillingServiceTier(requested) == OpenAIFastTierPriority {
 		return ServiceTierBillingResolution{
 			Requested: OpenAIFastTierPriority,
 			Observed:  normalizeBillingServiceTier(result.UpstreamResponseServiceTier),

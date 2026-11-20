@@ -118,6 +118,10 @@ type Group struct {
 	AllowLive                   bool
 	ForceOpenAIFast             bool // 强制 OpenAI 网关请求使用 service_tier=priority
 	FreeOpenAIFast              bool // OpenAI Fast 请求按 Standard 价格向用户计费
+	OpenAIFastMode              string
+	OpenAIUltrafastMode         string
+	OpenAITierPolicyVersion     int
+	FreeOpenAIUltrafast         bool
 	RequireOAuthOnly            bool // 仅允许非 apikey 类型账号关联（OpenAI/Antigravity/Anthropic/Gemini）
 	RequirePrivacySet           bool // 调度时仅允许 privacy 已成功设置的账号（OpenAI/Antigravity/Anthropic/Gemini）
 	DefaultMappedModel          string
@@ -149,8 +153,9 @@ type Group struct {
 	ProfitMinMargin      float64 // 最低毛利率，小数存储（0.30=30%）
 	ProfitSafetyBuffer   float64 // 安全缓冲，小数，与 margin 相加后从 D 中扣除
 
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	ExpectedUpdatedAt *time.Time
 
 	AccountGroups           []AccountGroup
 	AccountCount            int64

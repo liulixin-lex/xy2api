@@ -65,7 +65,8 @@ func NewModelPricingResolver(channelService *ChannelService, billingService *Bil
 
 // PricingInput 定价解析输入
 type PricingInput struct {
-	Purpose string
+	Purpose   string
+	PricingAt time.Time
 
 	Model   string
 	GroupID *int64 // nil 表示不检查渠道
@@ -76,9 +77,14 @@ type PricingInput struct {
 // 1. 获取基础定价（LiteLLM → Fallback）
 // 2. 如果指定了 GroupID，查找渠道定价并覆盖
 func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) *ResolvedPricing {
+	if prices := openAITierPricesFromContext(ctx); prices != nil {
+		r = &ModelPricingResolver{channelService: r.channelService, billingService: prices.billing}
+		input.PricingAt = prices.at
+	}
 	longContextPricingEnabled := input.Group.LongContextPricingAppliesToModel(input.Model)
 	longContextAccountOverrideBlocked := !input.Group.allowsAccountLongContextPricingOverride()
 	if groupPricing := matchGroupModelPricing(input.Group, input.Model); groupPricing != nil {
+		groupPricing = openAITierPriceCard(ctx, input.Model, groupPricing)
 		// Group token cards only override the first-tier / flat rates.
 		// Long-context ladders come from official presets, gated by the checkbox.
 		if groupPricing.BillingMode == "" || groupPricing.BillingMode == BillingModeToken {
@@ -86,7 +92,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 			stripped.Intervals = nil
 			groupPricing = &stripped
 		}
-		resolved := r.resolveConfiguredPricing(groupPricing, input.Model, PricingSourceGroup, input.Purpose)
+		resolved := r.resolveConfiguredPricing(groupPricing, input.Model, PricingSourceGroup, input.PricingAt)
 		resolved.longContextPricingEnabled = longContextPricingEnabled
 		resolved.longContextAccountOverrideBlocked = longContextAccountOverrideBlocked
 		return resolved
@@ -94,7 +100,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 
 	var chPricing *ChannelModelPricing
 	if input.GroupID != nil && r.channelService != nil {
-		chPricing = r.lookupChannelPricingNormalized(ctx, *input.GroupID, input.Model)
+		chPricing = openAITierPriceCard(ctx, input.Model, r.lookupChannelPricingNormalized(ctx, *input.GroupID, input.Model))
 		if chPricing != nil {
 			mode := chPricing.BillingMode
 			if mode == "" {
@@ -116,7 +122,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 	}
 
 	// 1. 获取基础定价
-	basePricing, source, provenance := r.resolveBasePricing(input.Model, input.Purpose)
+	basePricing, source, provenance := r.resolveBasePricing(input.Model, input.PricingAt)
 
 	resolved := &ResolvedPricing{
 		Mode:                   BillingModeToken,
@@ -133,14 +139,12 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 		resolved.Source = PricingSourceChannel
 		resolved.channelPricing = chPricing
 		r.applyTokenOverrides(chPricing, resolved)
-	} else if input.GroupID != nil && r.channelService != nil {
-		r.applyChannelOverrides(ctx, *input.GroupID, input.Model, resolved)
 	}
 
 	return resolved
 }
 
-func (r *ModelPricingResolver) resolveConfiguredPricing(config *ChannelModelPricing, model, source, purpose string) *ResolvedPricing {
+func (r *ModelPricingResolver) resolveConfiguredPricing(config *ChannelModelPricing, model, source string, pricingAt time.Time) *ResolvedPricing {
 	mode := config.BillingMode
 	if mode == "" {
 		mode = BillingModeToken
@@ -150,7 +154,7 @@ func (r *ModelPricingResolver) resolveConfiguredPricing(config *ChannelModelPric
 		r.applyRequestTierOverrides(config, resolved)
 		return resolved
 	}
-	resolved.BasePricing, _, resolved.PricingSource = r.resolveBasePricing(model, purpose)
+	resolved.BasePricing, _, resolved.PricingSource = r.resolveBasePricing(model, pricingAt)
 	resolved.SupportsCacheBreakdown = resolved.BasePricing != nil && resolved.BasePricing.SupportsCacheBreakdown
 	r.applyTokenOverrides(config, resolved)
 	return resolved
@@ -180,8 +184,8 @@ func matchGroupModelPricing(group *Group, model string) *ChannelModelPricing {
 }
 
 // resolveBasePricing 从 LiteLLM 或 Fallback 获取基础定价
-func (r *ModelPricingResolver) resolveBasePricing(model, purpose string) (*ModelPricing, string, json.RawMessage) {
-	pricing, provenance, err := r.billingService.getModelPricingAtWithSource(model, time.Time{})
+func (r *ModelPricingResolver) resolveBasePricing(model string, pricingAt time.Time) (*ModelPricing, string, json.RawMessage) {
+	pricing, provenance, err := r.billingService.getModelPricingAtWithSource(model, pricingAt)
 	if err != nil {
 		return nil, PricingSourceFallback, nil
 	}
@@ -212,29 +216,6 @@ func (r *ModelPricingResolver) lookupChannelPricingNormalized(ctx context.Contex
 	return r.channelService.GetChannelModelPricing(ctx, groupID, normalized)
 }
 
-// applyChannelOverrides 应用渠道定价覆盖
-func (r *ModelPricingResolver) applyChannelOverrides(ctx context.Context, groupID int64, model string, resolved *ResolvedPricing) {
-	chPricing := r.lookupChannelPricingNormalized(ctx, groupID, model)
-	if chPricing == nil {
-		return
-	}
-
-	resolved.Source = PricingSourceChannel
-	resolved.channelPricing = chPricing
-	resolved.Mode = chPricing.BillingMode
-	if resolved.Mode == "" {
-		resolved.Mode = BillingModeToken
-	}
-
-	switch resolved.Mode {
-	case BillingModeToken:
-		r.applyTokenOverrides(chPricing, resolved)
-	case BillingModePerRequest, BillingModeImage, BillingModeVideo:
-		resolved.PricingSource = configuredPricingSource(nil, chPricing, PricingSourceChannel)
-		r.applyRequestTierOverrides(chPricing, resolved)
-	}
-}
-
 // applyTokenOverrides 应用 token 模式的渠道覆盖
 func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricing, resolved *ResolvedPricing) {
 	resolved.PricingSource = configuredPricingSource(resolved.PricingSource, chPricing, resolved.Source)
@@ -259,6 +240,7 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 		}
 	}
 	resolved.BasePricing.FastMultiplier = chPricing.FastMultiplier
+	resolved.BasePricing.UltrafastMultiplierOverride = chPricing.UltrafastMultiplier
 	resolved.BasePricing.FlexMultiplier = chPricing.FlexMultiplier
 	resolved.BasePricing.ReasoningEffortMultipliers = maps.Clone(chPricing.ReasoningEffortMultipliers)
 	applyChannelImagePriceOverrides(chPricing, resolved.BasePricing)

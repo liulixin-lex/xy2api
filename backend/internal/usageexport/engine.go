@@ -155,7 +155,7 @@ func (e *Engine) Rate(ctx context.Context, owner int64, scope string, limit int)
 	return rate(ctx, e.DB, owner, scope, limit)
 }
 func (e *Engine) Create(ctx context.Context, owner int64, scope, key string, o Options) (*Task, error) {
-	if owner <= 0 || (scope != "user" && scope != "admin") || (scope == "user" && (o.Format != "csv" || o.Filters.UserID != owner)) || (scope == "admin" && o.Format != "xlsx") || o.Version != 1 {
+	if owner <= 0 || (scope != "user" && scope != "admin") || (scope == "user" && (o.Format != "csv" || o.Filters.UserID != owner)) || (scope == "admin" && o.Format != "xlsx") || (o.Version != 1 && o.Version != ServiceTierFormatVersion) || (scope == "user" && o.IncludeInternalTierDetails) {
 		return nil, fail(400, "EXPORT_INVALID_OPTIONS")
 	}
 	if len(key) < 8 || len(key) > 128 {
@@ -167,6 +167,14 @@ func (e *Engine) Create(ctx context.Context, owner int64, scope, key string, o O
 	}
 	sum := sha256.Sum256(b)
 	fingerprint := hex.EncodeToString(sum[:])
+	previousFingerprint := ""
+	if o.Version == ServiceTierFormatVersion {
+		previous := o
+		previous.Version, previous.IncludeInternalTierDetails = 1, false
+		previousJSON, _ := json.Marshal(previous)
+		previousHash := sha256.Sum256(previousJSON)
+		previousFingerprint = hex.EncodeToString(previousHash[:])
+	}
 	tx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -178,7 +186,7 @@ func (e *Engine) Create(ctx context.Context, owner int64, scope, key string, o O
 	var id, prior string
 	err = tx.QueryRowContext(ctx, `SELECT task_id,fingerprint FROM usage_export_keys WHERE owner_id=$1 AND scope=$2 AND key=$3`, owner, scope, key).Scan(&id, &prior)
 	if err == nil {
-		if prior != fingerprint {
+		if prior != fingerprint && prior != previousFingerprint {
 			return nil, fail(409, "EXPORT_IDEMPOTENCY_CONFLICT")
 		}
 		return scanTask(tx.QueryRowContext(ctx, `SELECT `+taskJSON+` FROM usage_export_tasks WHERE id=$1`, id))
@@ -192,7 +200,7 @@ func (e *Engine) Create(ctx context.Context, owner int64, scope, key string, o O
 		if err = tx.QueryRowContext(ctx, `SELECT fingerprint FROM usage_export_tasks WHERE id=$1`, active.ID).Scan(&fp); err != nil {
 			return nil, err
 		}
-		if fp != fingerprint || active.Scope != scope {
+		if (fp != fingerprint && fp != previousFingerprint) || active.Scope != scope {
 			return nil, fail(409, "EXPORT_ALREADY_ACTIVE")
 		}
 		id = active.ID

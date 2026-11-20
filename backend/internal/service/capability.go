@@ -42,6 +42,9 @@ func capabilityMarkExtraKey(model, protocol, shape string) string {
 }
 
 func validCapabilityMark(m CapabilityMark) bool {
+	if m.Reason == "tier_unsupported" {
+		return m.Model != "" && (m.Protocol == resilience.CapabilityProtocolChat || m.Protocol == resilience.CapabilityProtocolResponses || m.Protocol == "compact") && (m.Shape == "tier:priority" || m.Shape == "tier:ultrafast" || m.Shape == "tier:default")
+	}
 	return m.Model != "" && (m.Protocol == resilience.CapabilityProtocolResponses || m.Protocol == resilience.CapabilityProtocolChat) &&
 		(m.Shape == "stream" || m.Shape == "non_stream" || m.Shape == "*") &&
 		(m.Reason == "model_unsupported" || m.Reason == "request_unsupported")
