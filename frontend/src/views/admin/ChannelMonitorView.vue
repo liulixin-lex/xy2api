@@ -26,7 +26,7 @@
             <button
               type="button"
               role="tab"
-              class="tab flex-1 sm:flex-none"
+              class="tab flex-1 sm:flex-none [@media(pointer:coarse)]:min-h-10"
               :class="adminMonitorTab === 'v2' ? 'tab-active' : ''"
               :aria-selected="adminMonitorTab === 'v2'"
               @click="adminMonitorTab = 'v2'"
@@ -36,7 +36,7 @@
             <button
               type="button"
               role="tab"
-              class="tab flex-1 sm:flex-none"
+              class="tab flex-1 sm:flex-none [@media(pointer:coarse)]:min-h-10"
               :class="adminMonitorTab === 'legacy' ? 'tab-active' : ''"
               :aria-selected="adminMonitorTab === 'legacy'"
               @click="adminMonitorTab = 'legacy'"
@@ -49,7 +49,7 @@
 
       <MonitorSettingsPanel v-if="adminMonitorTab === 'v2'" />
 
-      <TablePageLayout v-else>
+      <TablePageLayout v-else table-layout>
       <template #filters>
         <MonitorFiltersBar
           v-model:search="searchQuery"
@@ -65,10 +65,18 @@
       </template>
 
       <template #table>
-        <DataTable :columns="columns" :data="monitors" :loading="loading">
+        <DataTable
+          layout="table"
+          :scroll-label="t('admin.channelMonitor.title')"
+          :columns="columns"
+          :data="monitors"
+          :loading="loading"
+          :sticky-actions-column="!phone"
+        >
           <template #cell-name="{ row, value }">
-            <div class="flex items-center gap-1.5">
-              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            <!-- The frozen identity column: at most 240px, the name cut with "…" and whole on a tap. -->
+            <div class="flex max-w-[240px] items-center gap-1.5">
+              <TableIdentityCell :primary="value" />
               <HelpTooltip v-if="row.api_key_decrypt_failed" :content="t('admin.channelMonitor.apiKeyDecryptFailed')">
                 <Icon name="exclamationTriangle" size="sm" class="text-red-500" />
               </HelpTooltip>
@@ -98,7 +106,10 @@
           </template>
 
           <template #cell-enabled="{ row }">
-            <Toggle :modelValue="row.enabled" :disabled="!canManage" class="disabled:cursor-not-allowed disabled:opacity-60" @update:modelValue="toggleEnabled(row)" />
+            <!-- The label is the switch's 40px touch area (a click on it clicks the switch). -->
+            <label class="inline-flex cursor-pointer items-center [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:min-h-10">
+              <Toggle :modelValue="row.enabled" :disabled="!canManage" class="disabled:cursor-not-allowed disabled:opacity-60" @update:modelValue="toggleEnabled(row)" />
+            </label>
           </template>
 
           <template #cell-actions="{ row }">
@@ -192,6 +203,8 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Icon from '@/components/icons/Icon.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
+import { usePhoneViewport } from '@/composables/useTableViewport'
 import Toggle from '@/components/common/Toggle.vue'
 import MonitorFiltersBar from '@/components/admin/monitor/MonitorFiltersBar.vue'
 import MonitorFormDialog from '@/components/admin/monitor/MonitorFormDialog.vue'
@@ -206,6 +219,7 @@ import { isChannelMonitorV1Mode } from '@/utils/featureFlags'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
 const { t } = useI18n()
+const phone = usePhoneViewport()
 const appStore = useAppStore()
 const { canManage } = useAdminPermission('channels')
 const isV1Mode = computed(() => isChannelMonitorV1Mode())
