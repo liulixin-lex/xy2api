@@ -358,6 +358,6 @@ describe('touch and phone sizes', () => {
     expect(portal).toMatch(/^@media \(pointer: coarse\) \{\s*\.select-dropdown-portal \.select-search-input \{\s*font-size: 16px;\s*\}\s*\.select-dropdown-portal--sm \.select-option \{\s*min-height: 40px;/)
     // Last in the sheet: nothing after it sets the search box's size again.
     expect(portal.slice(portal.indexOf('}\n}'))).not.toContain('.select-search-input {')
-    expect(toolbar).toMatch(/@media \(any-pointer: coarse\) \{\s*\.table-toolbar--compact :deep\(\.table-toolbar__btn\) \{\s*min-height: 40px;/)
+    expect(toolbar).toMatch(/@media \(any-pointer: coarse\) \{[^}]*?\.table-toolbar--compact :deep\(\.table-toolbar__btn\) \{\s*min-width: 40px;\s*min-height: 40px;/)
   })
 })

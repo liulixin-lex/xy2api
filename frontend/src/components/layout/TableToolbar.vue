@@ -538,7 +538,9 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
   }
 }
 @media (any-pointer: coarse) {
+  /* min-width too: a secondary action whose wide label is hidden is a 32px square there. */
   .table-toolbar--compact :deep(.table-toolbar__btn) {
+    min-width: 40px;
     min-height: 40px;
   }
   .table-toolbar--compact :deep(.table-toolbar__icon-btn) {
