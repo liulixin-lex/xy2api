@@ -443,6 +443,77 @@ describe('admin UsageView columns per width', () => {
     w.unmount()
   })
 
+  // Review after acceptance, items 1 and 2: the count and its exactness come from the answer for the query on screen.
+  // While a page or filter is on its way, or after it failed, no count (an earlier total says nothing about it); an
+  // empty page past the first goes back to the last page its answer allows and asks again.
+  describe('the count follows the answer for the query on screen', () => {
+    const rows = (n: number, from = 1) => Array.from({ length: n }, (_, i) => ({ id: from + i, source: 'usage', created_at: '2026-11-20T00:00:00Z' }))
+    const pager = (w: ReturnType<typeof mountView>) => w.findComponent({ name: 'Pagination' })
+    const later = () => { let resolve!: (v: unknown) => void; let reject!: (e: unknown) => void; const promise = new Promise((res, rej) => { resolve = res; reject = rej }); return { promise, resolve, reject } }
+
+    it('hides the count while the next page is on its way, then shows the exact one', async () => {
+      setPhone(true)
+      list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 })
+      const w = mountView()
+      await flushPromises()
+      expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
+      const next = later()
+      list.mockReturnValueOnce(next.promise)
+      ;(w.vm as any).handlePageChange(2)
+      await flushPromises()
+      expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
+      expect(pager(w).props('totalExact')).toBe(false)
+      expect(pager(w).props('total')).toBe(41)
+      next.resolve({ items: rows(7, 21), total: 27, pages: 2 })
+      await flushPromises()
+      expect(w.get('[data-testid="usage-count"]').exists()).toBe(true)
+      expect(pager(w).props('totalExact')).toBe(true)
+      expect(pager(w).props('total')).toBe(27)
+      w.unmount()
+    })
+
+    it('hides the old count while a narrowed list is on its way and after it failed', async () => {
+      setPhone(true)
+      list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 }).mockResolvedValueOnce({ items: rows(7), total: 7, pages: 1 })
+      const w = mountView()
+      await flushPromises()
+      ;(w.vm as any).applyFilters()
+      await flushPromises()
+      expect(w.find('[data-testid="usage-count"]').exists()).toBe(true)
+      const narrowed = later()
+      list.mockReturnValueOnce(narrowed.promise)
+      ;(w.vm as any).filters = { ...(w.vm as any).filters, user_id: 7 }
+      ;(w.vm as any).applyFilters()
+      await flushPromises()
+      expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
+      narrowed.reject(new Error('down'))
+      await flushPromises()
+      expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
+      expect(pager(w).props('totalExact')).toBe(false)
+      w.unmount()
+    })
+
+    it('goes back from an empty page past the end to the last page with rows', async () => {
+      setPhone(true)
+      list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 })
+      const w = mountView()
+      await flushPromises()
+      // 47 rows became 6 before page 3 was opened: page 3 and then page 2 come back empty with their offsets.
+      list.mockResolvedValueOnce({ items: [], total: 40, pages: 2 })
+        .mockResolvedValueOnce({ items: [], total: 20, pages: 1 })
+        .mockResolvedValueOnce({ items: rows(6), total: 6, pages: 1 })
+      list.mockClear()
+      ;(w.vm as any).handlePageChange(3)
+      await flushPromises()
+      expect(list.mock.calls.map(([params]) => (params as { page: number }).page)).toEqual([3, 2, 1])
+      expect((w.vm as any).pagination.page).toBe(1)
+      expect(w.get('[data-testid="usage-count"]').exists()).toBe(true)
+      expect(pager(w).props('total')).toBe(6)
+      expect(pager(w).props('totalExact')).toBe(true)
+      w.unmount()
+    })
+  })
+
   // Browser acceptance (step 1), item 6: the errors tab's phone defaults: user, category, status, time and details.
   it('shows the errors tab\'s phone defaults below 768px', async () => {
     setPhone(true)

@@ -19,4 +19,8 @@ describe('usageTotalIsExact', () => {
       expect(usageTotalIsExact(filters, { page: 1, pageSize: 20, rows: 20, total: 21 })).toBe(true)
     }
   })
+  it('never takes an empty page past the first as a count (its total is only its offset)', () => {
+    expect(usageTotalIsExact(none, { page: 3, pageSize: 20, rows: 0, total: 40 })).toBe(false)
+    expect(usageTotalIsExact({ user_id: 7 }, { page: 3, pageSize: 20, rows: 0, total: 6 })).toBe(false)
+  })
 })

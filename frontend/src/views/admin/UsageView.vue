@@ -164,7 +164,7 @@
               </div>
             </template>
           </UsageTable>
-          <Pagination v-if="usageTotal > 0" :page="pagination.page" :total="usageTotal" :total-exact="usageTotalExact" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+          <Pagination v-if="usageTotal > 0" :page="pagination.page" :total="usagePaginationTotal" :total-exact="usageTotalExact" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
         </div>
         <div v-show="activeTab === 'errors'" class="overflow-hidden rounded-b-2xl">
           <OpsErrorLogTable
@@ -460,6 +460,10 @@ const usageRowId = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
 // to it, each with its generation. The other cards keep the last stats answer until a new one arrives, as before.
 const statsCard = useUsageStatsState(() => JSON.stringify(filters.value))
 const usageStatsState = statsCard.phase
+/** The query a list answer is for: filters, page, page size and sort. */
+const usageQuery = () => JSON.stringify([filters.value, pagination.page, pagination.page_size, sortState.sort_by, sortState.sort_order])
+/** The last list answer the table took, with what it was asked for (an active load's or the 5 s check's). */
+const usageAnswer = ref<{ query: string; filters: AdminUsageQueryParams; page: number; pageSize: number; rows: number; total: number } | null>(null)
 const liveUsage = useLiveTable<AdminUsageLog>({
   getId: usageRowId,
   fetchPage: async (signal) => {
@@ -467,8 +471,12 @@ const liveUsage = useLiveTable<AdminUsageLog>({
     // asked. The 5 s membership check uses the same request but starts no stats, so its failure says nothing about
     // them (fourth review). The engine sets `loading` before an active load asks, and runs no check during one.
     const list = liveUsage.loading.value ? statsCard.listStarted() : null
+    const asked = { query: usageQuery(), filters: { ...filters.value }, page: pagination.page, pageSize: pagination.page_size }
     try {
-      return await adminAPI.usage.list(buildUsageListParams(pagination.page, pagination.page_size, false), { signal })
+      const answer = await adminAPI.usage.list(buildUsageListParams(asked.page, asked.pageSize, false), { signal })
+      // The engine aborts what a newer load replaces: an answer that comes back unaborted is the one it takes.
+      if (!signal.aborted) usageAnswer.value = { ...asked, rows: answer.items.length, total: answer.total }
+      return answer
     } catch (error) {
       if (!signal.aborted) list?.failed()
       throw error
@@ -484,11 +492,28 @@ const liveUsage = useLiveTable<AdminUsageLog>({
   tasks: [{ name: 'stats', intervalMs: 30_000, run: (signal) => runStatsTask(signal) }]
 })
 const { rows: usageRows, loading: usageLoading, total: usageTotal, pending, pendingMore, status: liveStatus } = liveUsage
-/** The usage total is a count, not "this page's end + 1" (see usageTotalIsExact); the errors list always counts. */
-const usageTotalExact = computed(() => usageTotalIsExact(filters.value, {
-  page: pagination.page, pageSize: pagination.page_size, rows: usageRows.value.length, total: usageTotal.value,
-}))
+/** The answer for the query on screen; none while a new page, filter or sort is on its way, or after it failed. */
+const currentUsageAnswer = computed(() => (usageAnswer.value?.query === usageQuery() ? usageAnswer.value : null))
+/**
+ * The usage total is a count (see usageTotalIsExact), judged on the answer for the query on screen only: an earlier
+ * answer's total says nothing about this page or filter. The errors list always counts.
+ */
+const usageTotalExact = computed(() => {
+  const answer = currentUsageAnswer.value
+  return !!answer && usageTotalIsExact(answer.filters, answer)
+})
 const countShown = computed(() => activeTab.value === 'errors' || usageTotalExact.value)
+/** The pagination's total; while a page is on its way (or failed) an open range for the page asked for. */
+const usagePaginationTotal = computed(() =>
+  currentUsageAnswer.value ? usageTotal.value : Math.max(usageTotal.value, pagination.page * pagination.page_size + 1)
+)
+// A page past the end (rows went since the pages were counted) comes back empty with only its offset as the total:
+// back to the last page that answer allows, asked again (each step is a lower page, page 1 ends it).
+watch(currentUsageAnswer, (answer) => {
+  if (!answer || answer.page <= 1 || answer.rows > 0) return
+  pagination.page = Math.min(answer.page - 1, Math.max(1, Math.ceil(answer.total / answer.pageSize)))
+  void reloadUsage()
+})
 const newRecordsText = (n: string) => t('admin.usage.newRecords', { n })
 const usageRowClass = (row: AdminUsageLog) =>
   liveUsage.transitioning.value || liveUsage.isDimmed(usageRowId(row)) ? 'opacity-60' : undefined
