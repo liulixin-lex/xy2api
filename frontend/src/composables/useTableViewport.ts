@@ -1,5 +1,6 @@
 import { computed, onScopeDispose, ref } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
+import { usePointerCoarse } from './usePointerCoarse'
 import { SHORT_VIEWPORT_PX, visibleHeight } from '@/components/layout/tableRegion'
 
 /**
@@ -42,6 +43,8 @@ export function usePhoneViewport() {
 export function useTableViewport() {
   const phone = usePhoneViewport()
   const desktop = useMediaQuery(DESKTOP_QUERY)
-  const coarse = useMediaQuery(COARSE_QUERY)
+  // Touch as the rest of the app tells it (usePointerCoarse: no fine pointer), so a test environment that matches every
+  // query reads as a mouse.
+  const coarse = usePointerCoarse()
   return { phone, desktop, coarse }
 }

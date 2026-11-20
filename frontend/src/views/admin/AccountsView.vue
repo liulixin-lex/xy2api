@@ -1541,6 +1541,31 @@ onUnmounted(() => cancelModalPrefetch?.())
 .account-table :deep(th.acol-expires_at) { --acc-w: var(--acc-w-expires_at); }
 .account-table :deep(th.acol-notes) { --acc-w: var(--acc-w-notes); }
 
+/* Row buttons: 28px icon squares with a mouse; the touch and phone rules below make them 40px. The base comes first so
+   those rules win (same specificity, later in the sheet). */
+.acc-op {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+/* The icon takes the brand teal under the pointer (12.1-6). */
+@media (hover: hover) {
+  .acc-op:hover {
+    background: var(--color-bg-control-hover);
+    color: theme('colors.primary.500');
+  }
+}
+/* The pencil at the prototype's 14px (7i-8). */
+.acc-op--edit svg {
+  width: 14px;
+  height: 14px;
+}
 /* A check box in a label: on a touch screen the label is the 44px column's whole width and 44px high, the box itself
    keeping its size (mobile list plan). */
 .acc-hit {
@@ -1628,27 +1653,5 @@ onUnmounted(() => cancelModalPrefetch?.())
 .acc-check:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-.acc-op {
-  display: inline-grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-secondary);
-}
-/* The icon takes the brand teal under the pointer (12.1-6). */
-@media (hover: hover) {
-  .acc-op:hover {
-    background: var(--color-bg-control-hover);
-    color: theme('colors.primary.500');
-  }
-}
-/* The pencil at the prototype's 14px (7i-8). */
-.acc-op--edit svg {
-  width: 14px;
-  height: 14px;
 }
 </style>

@@ -24,7 +24,7 @@
  * Phones and touch (mobile list plan): below 768px the name column is the frozen identity column at
  * clamp(120px, 36vw, 160px) (CSS, --table-identity-width), so the table's minimum is `columns` plus that width, and the
  * actions column holds only "⋯" in 44px; on a touch screen the check box column is 44px, room for its 40px hit area,
- * and from 768px the actions column 92px, room for two 40px buttons 8px apart.
+ * and from 768px the actions column 104px, room for two 40px buttons 8px apart.
  */
 export const COLUMN_WIDTHS: Record<string, [number, number]> = {
   select: [36, 40], status: [128, 140], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [149, 164],
@@ -50,8 +50,8 @@ export interface AccountColumnLayout {
 
 export const PHONE_ACTIONS_WIDTH = 44
 export const TOUCH_SELECT_WIDTH = 44
-/** Touch from 768px: edit and "⋯" at 40px, 8px apart, after the column's 4px. */
-export const TOUCH_ACTIONS_WIDTH = 92
+/** Touch from 768px: edit and "⋯" at 40px, 8px apart, inside the column's 4px and 12px of padding. */
+export const TOUCH_ACTIONS_WIDTH = 104
 
 /** The widths of the columns `keys` (the name column left out) in a scroll container `tableWidth` wide. */
 export function accountColumnLayout(keys: string[], tableWidth: number, device: { phone?: boolean; touch?: boolean } = {}): AccountColumnLayout {
