@@ -179,7 +179,7 @@
                 </div>
               </div>
 
-              <div class="py-1">
+              <div class="user-menu__list py-1">
                 <!-- Below 768px the header has no room for every entry and the page's name with each button its own 40px:
                      the search, the model plaza and the subscriptions sit here, and the docs below 640px. -->
                 <button type="button" class="dropdown-item w-full md:hidden" data-test="menu-search" @click="closeDropdown(); openPalette()">
@@ -283,7 +283,7 @@
                 </div>
               </div>
 
-              <div v-if="showOnboardingButton" class="border-t border-gray-100 py-1 dark:border-dark-700">
+              <div v-if="showOnboardingButton" class="user-menu__list border-t border-gray-100 py-1 dark:border-dark-700">
                 <button @click="handleReplayGuide" class="dropdown-item w-full">
                   <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
                     <path
@@ -294,7 +294,7 @@
                 </button>
               </div>
 
-              <div class="border-t border-gray-100 py-1 dark:border-dark-700">
+              <div class="user-menu__list border-t border-gray-100 py-1 dark:border-dark-700">
                 <button
                   @click="handleLogout"
                   class="dropdown-item w-full text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
@@ -489,6 +489,15 @@ onBeforeUnmount(() => {
     min-width: 40px;
     min-height: 40px;
     justify-content: center;
+  }
+  /* The user menu's items, the ones moved in from the header among them: 40px high and 8px apart. */
+  .user-menu__list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .user-menu__list > .dropdown-item {
+    min-height: 40px;
   }
 }
 /* The user menu never runs past the visible height (a phone on its side, with the balance in it): it scrolls on its
