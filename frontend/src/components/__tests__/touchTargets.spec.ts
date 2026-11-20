@@ -130,5 +130,44 @@ describe('touch targets', () => {
     // Keyboard focus keeps clear of the strip too.
     expect(source).toContain("right: Math.round(rightCell ? width(rightCell) + stripWidth : 0)")
   })
-})
 
+  // Follow-ups after #96, package A item 3: touch targets outside the tables.
+  it('date range picker: the trigger, the presets, the date fields and "apply" are 40px high, presets 8px apart', () => {
+    const source = read('common/DateRangePicker.vue')
+    expect(px(touchRule(source, '.date-picker-trigger'), 'min-height')).toBe(40)
+    expect(px(touchRule(source, '.date-picker-presets'), 'gap')).toBe(8)
+    expect(px(touchRule(source, '.date-picker-preset'), 'min-height')).toBe(40)
+    expect(px(touchRule(source, '.date-picker-apply'), 'min-height')).toBe(40)
+    const input = touchRule(source, '.date-picker-input')
+    expect(px(input, 'min-height')).toBe(40)
+    expect(px(input, 'font-size')).toBe(16)
+  })
+
+  it('sidebar: submenu links are 40px high and 8px from every neighbour', () => {
+    const source = read('layout/AppSidebar.vue')
+    expect(source).toContain('class="sidebar-sublist mb-1 ')
+    expect(source).toContain('class="sidebar-link sidebar-sublink ')
+    const list = touchRule(source, '.sidebar-sublist')
+    expect(list).toContain('flex-direction: column;')
+    expect(px(list, 'gap')).toBe(8)
+    // The group button above and the next item below sit 4px (mb-1) outside the list.
+    expect(source).toMatch(/class="sidebar-link mb-1 w-full"/)
+    expect(px(list, 'padding-top')).toBe(4)
+    expect(px(list, 'padding-bottom')).toBe(4)
+    const link = touchRule(source, '.sidebar-sublink')
+    expect(px(link, 'min-height')).toBe(40)
+    expect(link).toContain('margin-bottom: 0;')
+  })
+
+  it('usage charts: every toggle button is 40px high on touch, its neighbours 8px apart', () => {
+    for (const name of ['ModelDistributionChart', 'GroupDistributionChart', 'EndpointDistributionChart']) {
+      const source = read(`charts/${name}.vue`)
+      const buttons = source.match(/class="rounded-md px-2\.5 py-1 text-xs font-medium transition-colors[^"]*"/g) ?? []
+      expect(buttons.length, name).toBeGreaterThan(0)
+      for (const button of buttons) expect(button, name).toContain('[@media(pointer:coarse)]:min-h-10')
+      const groups = source.match(/class="inline-flex rounded-lg [^"]*"/g) ?? []
+      expect(groups.length, name).toBeGreaterThan(0)
+      for (const group of groups) expect(group, name).toContain('[@media(pointer:coarse)]:gap-2')
+    }
+  })
+})

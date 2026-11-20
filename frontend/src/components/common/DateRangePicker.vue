@@ -424,6 +424,30 @@ onUnmounted(() => {
   @apply transition-colors duration-150;
 }
 
+/* Touch: every target at least 40px tall, neighbours 8px apart; mouse sizes unchanged. */
+@media (pointer: coarse) {
+  .date-picker-trigger {
+    min-height: 40px;
+  }
+
+  .date-picker-presets {
+    gap: 8px;
+  }
+
+  .date-picker-preset {
+    min-height: 40px;
+  }
+
+  .date-picker-input {
+    min-height: 40px;
+    font-size: 16px;
+  }
+
+  .date-picker-apply {
+    min-height: 40px;
+  }
+}
+
 /* Dropdown animation */
 .date-picker-dropdown-enter-active,
 .date-picker-dropdown-leave-active {
