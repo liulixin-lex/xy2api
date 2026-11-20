@@ -1049,7 +1049,7 @@ describe('admin usage latency: the user wait first', () => {
     const last = wrapper.get('[data-testid="usage-latency-last-attempt"]')
     expect(last.text()).toBe('800ms')
     expect(last.classes()).toContain('text-emerald-600')
-    expect(parts(wrapper)).toEqual(['usage.latencyWaitShort', '51.00s', '·', 'usage.latencyLastAttemptShort', '800ms'])
+    expect(parts(wrapper)).toEqual(['usage.latencyWaitShort', '51.00s', '·', 'usage.latencyLastAttempt', '800ms'])
     // The admin page never uses the user page's plain first-token label: its first token is the last attempt's.
     expect(cell(wrapper).text()).not.toContain('usage.latencyFirstToken')
     const labels = cell(wrapper).findAll('span.text-xs')
@@ -1110,6 +1110,22 @@ describe('admin usage latency: the user wait first', () => {
     const userLabel = label(await openDetail(user))
     expect(userLabel.textContent).toBe('usage.latencyDuration')
     expect(userLabel.hasAttribute('title')).toBe(false)
+  })
+
+  // Desktop hover on the latency cell: the same lines as the detail dialog's latency (one component), no tips inside.
+  it.each([
+    ['admin', { showEndToEnd: true, showTokenSpeed: true }, ['usage.latencyEndToEnd', '51.00s', 'usage.latencyLastAttempt', '800ms', 'usage.latencyLastAttemptDuration', '1m 10s', 'Avg TPS', '—']],
+    ['user', { showTokenSpeed: true }, ['usage.latencyFirstToken', '800ms', 'usage.latencyDuration', '1m 10s', 'Avg TPS', '—']],
+  ] as const)('shows the %s page\'s latency breakdown on hover, as in the detail', async (_, props, expected) => {
+    const wrapper = mountLatency(props)
+    await wrapper.get('[data-testid="usage-latency-tip"]').trigger('mouseenter')
+    const tip = wrapper.get('.fixed')
+    expect(tip.findAll('dt, dd').map((el) => el.text())).toEqual(expected)
+    expect(tip.find('[title]').exists()).toBe(false)
+    const detail = await openDetail(wrapper)
+    expect(detail.findAll('dt, dd').slice(0, expected.length).map((el) => el.text())).toEqual(expected)
+    await wrapper.get('[data-testid="usage-latency-tip"]').trigger('mouseleave')
+    expect(wrapper.find('.fixed').exists()).toBe(false)
   })
 
   // The user page's one line: "first token X · duration Y", each graded, no admin-only figure or tip.

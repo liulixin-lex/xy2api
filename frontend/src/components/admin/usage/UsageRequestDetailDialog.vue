@@ -5,33 +5,7 @@
 
       <section class="py-4" :aria-labelledby="`${uid}-latency`">
         <h4 :id="`${uid}-latency`" class="mb-2 font-semibold text-gray-900 dark:text-white">{{ t('usage.latency') }}</h4>
-        <dl class="space-y-1.5">
-          <template v-if="showEndToEnd">
-            <div class="flex items-center justify-between gap-4">
-              <dt class="text-gray-500 dark:text-gray-400" :title="t('usage.latencyEndToEndHint')">{{ t('usage.latencyEndToEnd') }}</dt>
-              <dd v-if="row.end_to_end_first_output_ms != null" data-testid="usage-detail-e2e" class="font-medium tabular-nums text-gray-900 dark:text-gray-100">{{ formatLatency(row.end_to_end_first_output_ms) }}</dd>
-              <dd v-else data-testid="usage-detail-e2e" class="cursor-help text-gray-400 dark:text-gray-500" :title="t('usage.latencyEndToEndUnknownHint')">{{ t('usage.latencyUnknown') }}</dd>
-            </div>
-            <div class="flex items-center justify-between gap-4">
-              <dt class="text-gray-500 dark:text-gray-400" :title="t('usage.latencyLastAttemptHint')">{{ t('usage.latencyLastAttempt') }}</dt>
-              <dd v-if="row.first_token_ms != null" data-testid="usage-detail-first-token" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatLatency(row.first_token_ms) }}</dd>
-              <dd v-else data-testid="usage-detail-first-token" class="cursor-help text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptUnknownHint')">{{ t('usage.latencyUnknown') }}</dd>
-            </div>
-          </template>
-          <div v-else class="flex items-center justify-between gap-4">
-            <dt class="text-gray-500 dark:text-gray-400">{{ t('usage.latencyFirstToken') }}</dt>
-            <dd v-if="row.first_token_ms != null" data-testid="usage-detail-first-token" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatLatency(row.first_token_ms) }}</dd>
-            <dd v-else data-testid="usage-detail-first-token" class="text-gray-400 dark:text-gray-500">—</dd>
-          </div>
-          <div class="flex items-center justify-between gap-4">
-            <dt class="text-gray-500 dark:text-gray-400" :title="showEndToEnd ? t('usage.latencyLastAttemptDurationHint') : undefined">{{ showEndToEnd ? t('usage.latencyLastAttemptDuration') : t('usage.latencyDuration') }}</dt>
-            <dd data-testid="usage-detail-duration" class="font-medium tabular-nums" :class="row.duration_ms == null ? 'text-gray-400 dark:text-gray-500' : LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms)]">{{ formatLatency(row.duration_ms) }}</dd>
-          </div>
-          <div v-if="showTokenSpeed && hasUsageTokenMetrics(row)" class="flex items-center justify-between gap-4">
-            <dt class="text-gray-500 dark:text-gray-400" :title="showEndToEnd ? t('usage.outputTpsHint') : undefined">{{ t('usage.outputTps') }}</dt>
-            <dd data-testid="usage-token-speed" class="whitespace-nowrap font-medium tabular-nums text-gray-900 dark:text-gray-100">{{ formatTokenSpeed(row) }}</dd>
-          </div>
-        </dl>
+        <UsageLatencyBreakdown :row="row" variant="panel" :show-end-to-end="showEndToEnd" :show-token-speed="showTokenSpeed" />
       </section>
 
       <section class="py-4" :aria-labelledby="`${uid}-tokens`">
@@ -116,16 +90,14 @@ import { computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { formatFullLogTime, formatReasoningEffort } from '@/utils/format'
-import { LATENCY_TEXT_CLASSES, durationSeverity, firstTokenSeverity } from '@/utils/latencyHealth'
-import { formatTokenSpeed, hasUsageTokenMetrics } from '@/utils/usageMetrics'
 import { getBillingModeLabel, getDisplayBillingMode, isImageUsage } from '@/utils/billingMode'
 import { formatImageBillingSize } from '@/utils/imageUsage'
+import UsageLatencyBreakdown from './UsageLatencyBreakdown.vue'
 import UsageTokenBreakdown from './UsageTokenBreakdown.vue'
 import UsageCostBreakdown from './UsageCostBreakdown.vue'
 import {
   crossGroup,
   endpointPair,
-  formatLatency,
   groupLabel,
   hasModelAudit,
   hasReasoningEffortMapping,

@@ -217,8 +217,8 @@
         </template>
 
         <!--
-          一行摘要。管理端“等待 X · 首字 Y”：用户等待（端到端首输出）中性色，末次首字按分档着色；用户端“首字 X · 耗时 Y”。
-          色条上端按首字分档，下端按耗时分档（耗时的数值和平均 TPS 在明细里）。
+          一行摘要。管理端“等待 X · 末次首字 Y”：用户等待（端到端首输出）中性色，末次首字按分档着色；用户端“首字 X · 耗时 Y”。
+          色条上端按首字分档，下端按耗时分档；末次耗时、平均 TPS 在电脑端悬停提示和明细里。
         -->
         <template #cell-latency="{ row }">
           <div class="flex items-center justify-end gap-2 whitespace-nowrap" data-testid="usage-latency-summary">
@@ -233,7 +233,7 @@
                 <span v-if="row.end_to_end_first_output_ms != null" data-testid="usage-latency-e2e" class="text-sm font-medium tabular-nums text-gray-700 dark:text-gray-300">{{ formatLatency(row.end_to_end_first_output_ms) }}</span>
                 <span v-else data-testid="usage-latency-e2e" class="cursor-help text-sm text-gray-400 dark:text-gray-500" :title="t('usage.latencyEndToEndUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
                 <span class="text-gray-300 dark:text-gray-600" aria-hidden="true">·</span>
-                <span class="text-xs text-gray-500 dark:text-gray-400" :title="t('usage.latencyLastAttemptHint')">{{ t('usage.latencyLastAttemptShort') }}</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400" :title="t('usage.latencyLastAttemptHint')">{{ t('usage.latencyLastAttempt') }}</span>
                 <span v-if="row.first_token_ms != null" data-testid="usage-latency-last-attempt" class="text-sm font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatLatency(row.first_token_ms) }}</span>
                 <span v-else data-testid="usage-latency-last-attempt" class="cursor-help text-sm text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
               </template>
@@ -246,6 +246,17 @@
                 <span data-testid="usage-latency-duration" class="text-sm font-medium tabular-nums" :class="row.duration_ms == null ? 'text-gray-400 dark:text-gray-500' : LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms)]">{{ formatLatency(row.duration_ms) }}</span>
               </template>
             </span>
+            <!-- Latency Detail Tooltip（与明细里的延迟同一组件：末次耗时、平均 TPS 等） -->
+            <div
+              class="group/latency relative"
+              data-testid="usage-latency-tip"
+              @mouseenter="showLatencyTooltip($event, row)"
+              @mouseleave="hideLatencyTooltip"
+            >
+              <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover/latency:bg-blue-100 dark:bg-gray-700 dark:group-hover/latency:bg-blue-900/50">
+                <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover/latency:text-blue-500 dark:text-gray-500 dark:group-hover/latency:text-blue-400" />
+              </div>
+            </div>
           </div>
         </template>
 
@@ -353,6 +364,23 @@
     </div>
   </Teleport>
 
+  <!-- Latency Tooltip Portal -->
+  <Teleport to="body">
+    <div
+      v-if="latencyTooltipData"
+      class="fixed z-[9999] pointer-events-none -translate-y-1/2"
+      :style="{
+        left: latencyTooltipPosition.x + 'px',
+        top: latencyTooltipPosition.y + 'px'
+      }"
+    >
+      <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
+        <UsageLatencyBreakdown :row="latencyTooltipData" :show-end-to-end="props.showEndToEnd" :show-token-speed="props.showTokenSpeed" />
+        <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
+      </div>
+    </div>
+  </Teleport>
+
   <UsageRequestDetailDialog
     :row="detailRow"
     :show-end-to-end="props.showEndToEnd"
@@ -390,6 +418,7 @@ import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
+import UsageLatencyBreakdown from './UsageLatencyBreakdown.vue'
 import UsageTokenBreakdown from './UsageTokenBreakdown.vue'
 import UsageCostBreakdown from './UsageCostBreakdown.vue'
 import UsageRequestDetailDialog from './UsageRequestDetailDialog.vue'
@@ -588,5 +617,17 @@ const showTokenTooltip = (event: MouseEvent, row: AdminUsageLog) => {
 const hideTokenTooltip = () => {
   tokenTooltipVisible.value = false
   tokenTooltipData.value = null
+}
+
+// Latency tooltip (desktop hover): the same lines as the detail dialog's latency
+const latencyTooltipPosition = ref({ x: 0, y: 0 })
+const latencyTooltipData = ref<AdminUsageLog | null>(null)
+const showLatencyTooltip = (event: MouseEvent, row: AdminUsageLog) => {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  latencyTooltipPosition.value = { x: rect.right + 8, y: rect.top + rect.height / 2 }
+  latencyTooltipData.value = row
+}
+const hideLatencyTooltip = () => {
+  latencyTooltipData.value = null
 }
 </script>
