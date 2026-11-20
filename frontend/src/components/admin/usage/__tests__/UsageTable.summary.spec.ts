@@ -29,7 +29,7 @@ const row = {
   group_id: 8, group: { id: 8, name: 'Backup' }, origin_group_id: 3, origin_group_name: 'Main',
 }
 
-const CELLS = ['user', 'api_key', 'account', 'model', 'endpoint', 'group', 'tokens', 'cost', 'latency', 'created_at']
+const CELLS = ['user', 'api_key', 'account', 'model', 'endpoint', 'group', 'tokens', 'cost', 'latency', 'created_at', 'actions']
 const DataTableStub = {
   props: ['data', 'layout'],
   template: `<div><div v-for="row in data" :key="row.id" :data-row="row.id">
@@ -187,19 +187,21 @@ describe('UsageTable on the shared table layout (B)', () => {
   })
 
   // Owner ruling: one line on a phone (rows near 53px, about ten a screen); the id and the deleted mark are in the detail.
+  // Review: the email is a 40px-high target (a pseudo-element), and the detail opens from the frozen right column.
   it('makes the admin page\'s first column a one-line identity cell on a phone, the email still opening the balance', async () => {
     setPhone(true)
     const wrapper = mountTable({ ...ADMIN, columns: [{ key: 'user', label: 'User' }, { key: 'account', label: 'Account' }, { key: 'created_at', label: 'Time' }] })
-    const identity = cell(wrapper, 'user').get('[data-test="table-identity"]')
-    expect(identity.text()).toBe('alice@example.com')
-    expect(identity.find('.table-identity__secondary').exists()).toBe(false)
+    const email = cell(wrapper, 'user').get('[data-testid="usage-identity-user"]')
+    expect(email.text()).toBe('alice@example.com')
+    expect(email.classes()).toEqual(expect.arrayContaining(['relative', 'before:absolute', 'before:-inset-y-3']))
+    expect(email.get('span').classes()).toContain('truncate')
     expect(cell(wrapper, 'user').text()).not.toContain('#12')
-    await identity.get('button').trigger('click')
+    await email.trigger('click')
     expect(wrapper.emitted('userClick')).toEqual([[12, 'alice@example.com']])
     // Only the frozen first column: the API key is a plain cell here.
     expect(cell(wrapper, 'api_key').find('[data-test="table-identity"]').exists()).toBe(false)
     // What the second line carried is in the row's detail.
-    await cell(wrapper, 'created_at').get('button').trigger('click')
+    await cell(wrapper, 'actions').get('button').trigger('click')
     const user = wrapper.get('[data-testid="usage-detail-user"]')
     expect(user.get('dt').text()).toBe('admin.usage.user')
     expect(user.findAll('dd > span').map((el) => el.text())).toEqual(['alice@example.com', '#12', '· admin.usage.userDeletedBadge'])
@@ -222,4 +224,65 @@ describe('UsageTable on the shared table layout (B)', () => {
     expect(cell(wide, 'user').find('[data-test="table-identity"]').exists()).toBe(false)
     expect(cell(wide, 'user').text()).toContain('alice@example.com')
   })
+})
+
+// Review fixes (mobile list plan, step 1 review): items 3, 5, 8 and the adopted suggestions on the detail.
+describe('UsageTable after review', () => {
+  const setWidth = (width: number) => vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => {
+    const min = /min-width:\s*(\d+)px/.exec(query)
+    return {
+      matches: min ? width >= Number(min[1]) : true, media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList
+  })
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it.each([390, 834])('puts "Details" in a frozen right column below 1024px (%ipx), not beside the time', async (width) => {
+    setWidth(width)
+    const wrapper = mountTable(ADMIN)
+    expect(cell(wrapper, 'created_at').find('button').exists()).toBe(false)
+    const button = cell(wrapper, 'actions').get('[data-testid="usage-detail-open"]')
+    expect(button.attributes('aria-label')).toBe('usage.requestDetail.open:{"time":"11-20 06:54:11"}')
+    expect(button.classes()).toEqual(expect.arrayContaining(['h-10', 'w-10']))
+    await button.trigger('click')
+    expect(wrapper.find('[data-testid="usage-request-detail"]').exists()).toBe(true)
+  })
+
+  it('names the actions column "Details" below 1024px and adds none from 1024px', () => {
+    const ColumnsStub = { props: ['data', 'columns', 'layout'], template: '<div />' }
+    const mountWith = () => mount(UsageTable, {
+      props: { data: [row] as never, ...ADMIN, columns: [{ key: 'user', label: 'User' }] },
+      global: { stubs: { DataTable: ColumnsStub, Icon: true, Teleport: true } },
+    })
+    setWidth(834)
+    expect(mountWith().findComponent(ColumnsStub).props('columns').map((c: { key: string }) => c.key)).toEqual(['user', 'actions'])
+    vi.restoreAllMocks()
+    setWidth(1280)
+    expect(mountWith().findComponent(ColumnsStub).props('columns').map((c: { key: string }) => c.key)).toEqual(['user'])
+  })
+
+  it('flips a hover tip to the left of its icon, and keeps it inside the viewport, when it would leave on the right', async () => {
+    const wrapper = mountTable(ADMIN)
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1100)
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200)
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(120)
+    const trigger = cell(wrapper, 'latency').get('[data-testid="usage-latency-tip"]')
+    vi.spyOn(trigger.element, 'getBoundingClientRect').mockReturnValue({ left: 1070, right: 1086, top: 580, bottom: 596, width: 16, height: 16, x: 1070, y: 580, toJSON: () => ({}) } as DOMRect)
+    await trigger.trigger('mouseenter')
+    await nextTick()
+    await nextTick()
+    const tip = wrapper.get('.fixed')
+    expect(tip.attributes('style')).toContain('left: 862px') // 1070 - 8 - 200
+    expect(tip.attributes('style')).toContain('top: 532px') // 600 - 8 - 120 / 2
+    expect(tip.find('.left-full').exists()).toBe(true)
+    expect(tip.find('.right-full').exists()).toBe(false)
+  })
+
+  it('hides the hover-only info icons on touch screens, where "Details" carries them', () => {
+    const wrapper = mountTable(ADMIN)
+    for (const key of ['tokens', 'cost']) expect(cell(wrapper, key).get('.group.relative').classes()).toContain('[@media(hover:none)]:hidden')
+    expect(cell(wrapper, 'latency').get('[data-testid="usage-latency-tip"]').classes()).toContain('[@media(hover:none)]:hidden')
+  })
+
 })

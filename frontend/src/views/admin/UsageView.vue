@@ -65,8 +65,8 @@
           </div>
         </template>
       </UsageOverview>
-      <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
-      <div class="card">
+      <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感；手机上贴到屏幕两边（同账号页的表格） -->
+      <div class="card max-md:-mx-4 max-md:rounded-none max-md:border-x-0">
         <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
           <button
             v-for="tab in detailTabs"

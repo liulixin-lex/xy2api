@@ -1,5 +1,5 @@
 <template>
-  <div :class="flat ? '' : 'card overflow-hidden'">
+  <div :class="flat ? '' : 'card overflow-hidden max-md:-mx-4 max-md:rounded-none max-md:border-x-0'">
     <div
       v-if="showIpGeoToolbar"
       class="flex items-center justify-end gap-2 border-b border-gray-200 px-4 py-2 dark:border-dark-700"
@@ -22,7 +22,7 @@
       <DataTable
         ref="tableRef"
         layout="table"
-        :columns="columns"
+        :columns="tableColumns"
         :data="data"
         :row-key="rowKey"
         :row-class="rowClass"
@@ -32,56 +32,62 @@
         :default-sort-order="defaultSortOrder"
         @sort="(key, order) => $emit('sort', key, order)"
       >
-        <!-- 手机上第一列冻结为身份列：一行邮箱，超长省略，点邮箱照旧看充值记录；#编号和“已删除”在明细里（一行保住手机行高） -->
+        <!--
+          手机上第一列冻结为身份列：一行邮箱，超长省略，点邮箱照旧看充值记录（伪元素把可点区域扩到 40px 高）；#编号和“已删除”在明细里。
+          从 768px 起这一列（平板上也冻结）最宽 240px，邮箱超长省略、悬停看全文，编号和“已删除”跟在后面。
+        -->
         <template #cell-user="{ row }">
-          <TableIdentityCell v-if="identityKey === 'user'">
-            <template #primary>
-              <button
-                v-if="row.user?.email"
-                type="button"
-                class="block max-w-full truncate text-left text-primary-600 underline decoration-dashed underline-offset-2 dark:text-primary-400"
-                @click.stop="$emit('userClick', row.user_id, row.user?.email)"
-              >{{ row.user.email }}</button>
-              <CellEmpty v-else />
-            </template>
-          </TableIdentityCell>
-          <div v-else class="text-sm">
+          <template v-if="identityKey === 'user'">
             <button
               v-if="row.user?.email"
-              class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+              type="button"
+              data-testid="usage-identity-user"
+              class="relative block w-full text-left text-sm font-medium text-primary-600 before:absolute before:inset-x-0 before:-inset-y-3 before:content-[''] dark:text-primary-400"
+              :title="row.user.email"
               @click="$emit('userClick', row.user_id, row.user?.email)"
-              :title="t('admin.usage.clickToViewBalance')"
+            ><span class="block truncate underline decoration-dashed underline-offset-2">{{ row.user.email }}</span></button>
+            <CellEmpty v-else />
+          </template>
+          <div v-else class="flex max-w-[240px] items-center text-sm" data-testid="usage-user-cell">
+            <button
+              v-if="row.user?.email"
+              type="button"
+              class="min-w-0 truncate font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+              @click="$emit('userClick', row.user_id, row.user?.email)"
+              :title="`${row.user.email}\n${t('admin.usage.clickToViewBalance')}`"
             >
               {{ row.user.email }}
             </button>
             <CellEmpty v-else />
-            <span v-if="row.user?.deleted_at" class="ml-1 inline-flex items-center rounded px-1 py-px text-xs font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30">
+            <span v-if="row.user?.deleted_at" class="ml-1 inline-flex flex-none items-center rounded px-1 py-px text-xs font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30">
               {{ t('admin.usage.userDeletedBadge') }}
             </span>
-            <span class="ml-1 tabular-nums text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
+            <span class="ml-1 flex-none tabular-nums text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
           </div>
         </template>
 
         <template #cell-api_key="{ row }">
           <TableIdentityCell v-if="identityKey === 'api_key' && row.api_key?.name" :primary="row.api_key.name" />
-          <span v-else-if="row.api_key?.name" class="text-sm text-gray-900 dark:text-white">{{ row.api_key.name }}</span>
+          <span v-else-if="row.api_key?.name" class="block max-w-[240px] truncate text-sm text-gray-900 dark:text-white" :title="row.api_key.name">{{ row.api_key.name }}</span>
           <CellEmpty v-else />
         </template>
 
         <template #cell-account="{ row }">
-          <span v-if="row.account?.name" class="text-sm text-gray-900 dark:text-white">{{ row.account.name }}</span>
-          <CellEmpty v-else />
-          <!-- 后端 0.6.5 请求层：换号后成功的请求标"已救回"，换过号的标次数；与账号同一行 -->
-          <span v-if="row.result === 2 || (row.switches ?? 0) > 0" class="ml-1.5 inline-flex gap-x-1.5 text-xs" data-testid="usage-request-marks">
-            <span v-if="row.result === 2" class="text-amber-600 dark:text-amber-400">{{ t('admin.usage.resultRescued') }}</span>
-            <span v-if="(row.switches ?? 0) > 0" class="text-gray-500 dark:text-gray-400">{{ t('admin.usage.switches', { n: row.switches }) }}</span>
+          <span class="inline-flex max-w-[280px] items-baseline align-middle">
+            <span v-if="row.account?.name" class="min-w-0 truncate text-sm text-gray-900 dark:text-white" :title="row.account.name">{{ row.account.name }}</span>
+            <CellEmpty v-else />
+            <!-- 后端 0.6.5 请求层：换号后成功的请求标"已救回"，换过号的标次数；与账号同一行 -->
+            <span v-if="row.result === 2 || (row.switches ?? 0) > 0" class="ml-1.5 inline-flex flex-none gap-x-1.5 text-xs" data-testid="usage-request-marks">
+              <span v-if="row.result === 2" class="text-amber-600 dark:text-amber-400">{{ t('admin.usage.resultRescued') }}</span>
+              <span v-if="(row.switches ?? 0) > 0" class="text-gray-500 dark:text-gray-400">{{ t('admin.usage.switches', { n: row.switches }) }}</span>
+            </span>
           </span>
         </template>
 
         <!-- 请求模型和发往上游的模型写在同一行（a → b）；上游答回的模型不一致属少见的异常，另起一行标出 -->
         <template #cell-model="{ row }">
-          <div class="text-sm">
-            <div data-testid="usage-model-steps">
+          <div class="max-w-[280px] text-sm">
+            <div class="truncate" data-testid="usage-model-steps" :title="modelSteps(row).join(' → ')">
               <template v-for="(step, i) in modelSteps(row)" :key="i">
                 <span v-if="i > 0" class="mx-1 text-gray-400 dark:text-gray-500" aria-hidden="true">→</span>
                 <span :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'">{{ step }}</span>
@@ -89,7 +95,7 @@
             </div>
             <div
               v-if="hasModelAudit(row)"
-              class="mt-0.5 text-xs"
+              class="mt-0.5 truncate text-xs"
               :class="isLikelyModelVariant(row) ? 'text-amber-600 dark:text-amber-400' : 'text-orange-600 dark:text-orange-400'"
               :title="modelAuditTitle(row, t)"
             >
@@ -118,7 +124,7 @@
 
         <!-- 入站端点；管理端上游端点不同时同一行“入站 → 上游”，两者带名称的完整值在悬停和明细里 -->
         <template #cell-endpoint="{ row }">
-          <span class="text-xs" :title="endpointTitle(row)" data-testid="usage-endpoint">
+          <span class="block max-w-[280px] truncate text-xs" :title="endpointTitle(row)" data-testid="usage-endpoint">
             <span v-if="endpointPair(row, showUpstreamEndpoint).inbound" class="text-gray-700 dark:text-gray-300">{{ endpointPair(row, showUpstreamEndpoint).inbound }}</span>
             <CellEmpty v-else />
             <template v-if="upstreamDiffers(row)">
@@ -191,7 +197,7 @@
             <!-- Token Detail Tooltip（账单明细只有 usage 行才有） -->
             <div
               v-if="!isUnbilled(row)"
-              class="group relative"
+              class="group relative [@media(hover:none)]:hidden"
               @mouseenter="showTokenTooltip($event, row)"
               @mouseleave="hideTokenTooltip"
             >
@@ -221,7 +227,7 @@
             </span>
             <!-- Cost Detail Tooltip -->
             <div
-              class="group relative"
+              class="group relative [@media(hover:none)]:hidden"
               @mouseenter="showTooltip($event, row)"
               @mouseleave="hideTooltip"
             >
@@ -264,7 +270,7 @@
             </span>
             <!-- Latency Detail Tooltip（与明细里的延迟同一组件：末次耗时、平均 TPS 等） -->
             <div
-              class="group/latency relative"
+              class="group/latency relative [@media(hover:none)]:hidden"
               data-testid="usage-latency-tip"
               @mouseenter="showLatencyTooltip($event, row)"
               @mouseleave="hideLatencyTooltip"
@@ -276,11 +282,15 @@
           </div>
         </template>
 
-        <!-- 时间（今年省略年份）+ 每行一个“明细”按钮：点按、Enter、Space 打开同一个明细对话框 -->
+        <!--
+          时间（今年省略年份）。从 1024px 起时间旁一个“明细”按钮；1024 以下“明细”在右侧冻结的 44px 列里（与账号页“⋯”同一做法），
+          不用横滑到最后一列。点按、Enter、Space 都打开同一个明细对话框。
+        -->
         <template #cell-created_at="{ row, value }">
           <div class="flex items-center gap-3 whitespace-nowrap">
             <span class="text-sm tabular-nums text-gray-600 dark:text-gray-400">{{ formatLogTime(value) }}</span>
             <button
+              v-if="desktop"
               type="button"
               data-testid="usage-detail-open"
               class="relative rounded text-xs font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors before:absolute before:-inset-x-2 before:-inset-y-3 before:content-[''] hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
@@ -288,6 +298,23 @@
               aria-haspopup="dialog"
               @click="detailRow = row"
             >{{ t('usage.requestDetail.button') }}</button>
+          </div>
+        </template>
+
+        <template #cell-actions="{ row }">
+          <!-- A 40px button in a block whose negative margins give back 20px: the row stays one text line high. -->
+          <div class="-my-2.5 flex justify-center">
+            <button
+              type="button"
+              data-testid="usage-detail-open"
+              class="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+              :aria-label="t('usage.requestDetail.open', { time: formatLogTime(row.created_at) })"
+              :title="t('usage.requestDetail.button')"
+              aria-haspopup="dialog"
+              @click="detailRow = row"
+            >
+              <Icon name="document" size="sm" />
+            </button>
           </div>
         </template>
 
@@ -350,15 +377,14 @@
   <Teleport to="body">
     <div
       v-if="tokenTooltipVisible"
+      ref="tokenTipEl"
       class="fixed z-[9999] pointer-events-none -translate-y-1/2"
-      :style="{
-        left: tokenTooltipPosition.x + 'px',
-        top: tokenTooltipPosition.y + 'px'
-      }"
+      :style="{ left: tokenTip.x + 'px', top: tokenTip.y + 'px' }"
     >
       <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
         <UsageTokenBreakdown v-if="tokenTooltipData" :row="tokenTooltipData" :show-cache-hit-rate="props.showCacheHitRate" />
-        <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
+        <div v-if="tokenTip.side === 'right'" class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
+        <div v-else class="absolute left-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-l-[6px] border-t-[6px] border-b-transparent border-l-gray-900 border-t-transparent dark:border-l-gray-800"></div>
       </div>
     </div>
   </Teleport>
@@ -367,15 +393,14 @@
   <Teleport to="body">
     <div
       v-if="tooltipVisible"
+      ref="costTipEl"
       class="fixed z-[9999] pointer-events-none -translate-y-1/2"
-      :style="{
-        left: tooltipPosition.x + 'px',
-        top: tooltipPosition.y + 'px'
-      }"
+      :style="{ left: costTip.x + 'px', top: costTip.y + 'px' }"
     >
       <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
         <UsageCostBreakdown v-if="tooltipData" :row="tooltipData" :show-account-billing="showAccountBilling" />
-        <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
+        <div v-if="costTip.side === 'right'" class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
+        <div v-else class="absolute left-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-l-[6px] border-t-[6px] border-b-transparent border-l-gray-900 border-t-transparent dark:border-l-gray-800"></div>
       </div>
     </div>
   </Teleport>
@@ -384,15 +409,14 @@
   <Teleport to="body">
     <div
       v-if="latencyTooltipData"
+      ref="latencyTipEl"
       class="fixed z-[9999] pointer-events-none -translate-y-1/2"
-      :style="{
-        left: latencyTooltipPosition.x + 'px',
-        top: latencyTooltipPosition.y + 'px'
-      }"
+      :style="{ left: latencyTip.x + 'px', top: latencyTip.y + 'px' }"
     >
       <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
-        <UsageLatencyBreakdown :row="latencyTooltipData" :show-end-to-end="props.showEndToEnd" :show-token-speed="props.showTokenSpeed" />
-        <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
+        <UsageLatencyBreakdown v-if="latencyTooltipData" :row="latencyTooltipData" :show-end-to-end="props.showEndToEnd" :show-token-speed="props.showTokenSpeed" />
+        <div v-if="latencyTip.side === 'right'" class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
+        <div v-else class="absolute left-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-l-[6px] border-t-[6px] border-b-transparent border-l-gray-900 border-t-transparent dark:border-l-gray-800"></div>
       </div>
     </div>
   </Teleport>
@@ -411,7 +435,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { formatLogTime, formatReasoningEffort, formatUsd } from '@/utils/format'
@@ -530,8 +554,15 @@ const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 
  * Below 768px the table's first column is frozen as the identity column (the shared table layout): the admin page's
  * user, the user page's API key. Its cell becomes the two-line identity cell; from 768px the cells stay as they are.
  */
-const { phone } = useTableViewport()
+const { phone, desktop } = useTableViewport()
 const identityKey = computed(() => (phone.value ? props.columns[0]?.key ?? null : null))
+/**
+ * Below 1024px a 44px "Details" column frozen on the right (the table's actions column, as the accounts list's "⋯"), so
+ * a row's detail is one tap away without scrolling to the time; from 1024px the button sits beside the time.
+ */
+const tableColumns = computed<Column[]>(() =>
+  desktop.value ? props.columns : [...props.columns, { key: 'actions', label: t('usage.requestDetail.button'), class: 'text-center' }]
+)
 /** The page lists users (the admin page): the request detail names the user, with the id and a deleted mark. */
 const showsUsers = computed(() => props.columns.some((col) => col.key === 'user'))
 
@@ -586,14 +617,44 @@ const copyRequestId = (requestId: string) => copyIdentifier(requestId, t('admin.
 const copyUpstreamRequestId = (upstreamRequestId: string) =>
   copyIdentifier(upstreamRequestId, t('admin.usage.upstreamRequestIdCopied'))
 
+// Hover tips (desktop): to the right of their icon, or on its left when they would leave the viewport there; kept
+// inside it top to bottom. Measured once they render, so a tip's real size decides.
+type TipPlace = { x: number; y: number; side: 'right' | 'left' }
+const TIP_GAP = 8
+const placeTip = async (anchor: DOMRect, place: { value: TipPlace }, el: { value: HTMLElement | null }) => {
+  place.value = { x: anchor.right + TIP_GAP, y: anchor.top + anchor.height / 2, side: 'right' }
+  await nextTick()
+  const box = el.value
+  if (!box) return
+  const width = box.offsetWidth
+  const height = box.offsetHeight
+  const room = window.innerWidth - TIP_GAP
+  let x = anchor.right + TIP_GAP
+  let side: TipPlace['side'] = 'right'
+  if (x + width > room) {
+    const left = anchor.left - TIP_GAP - width
+    if (left >= TIP_GAP) {
+      x = left
+      side = 'left'
+    } else {
+      x = Math.max(TIP_GAP, room - width)
+    }
+  }
+  const half = height / 2
+  const y = Math.min(Math.max(anchor.top + anchor.height / 2, TIP_GAP + half), window.innerHeight - TIP_GAP - half)
+  place.value = { x, y, side }
+}
+
 // Tooltip state - cost
 const tooltipVisible = ref(false)
-const tooltipPosition = ref({ x: 0, y: 0 })
+const costTip = ref<TipPlace>({ x: 0, y: 0, side: 'right' })
+const costTipEl = ref<HTMLElement | null>(null)
 const tooltipData = ref<AdminUsageLog | null>(null)
 
 // Tooltip state - token
 const tokenTooltipVisible = ref(false)
-const tokenTooltipPosition = ref({ x: 0, y: 0 })
+const tokenTip = ref<TipPlace>({ x: 0, y: 0, side: 'right' })
+const tokenTipEl = ref<HTMLElement | null>(null)
 const tokenTooltipData = ref<AdminUsageLog | null>(null)
 
 const getRequestTypeBadgeClass = (row: AdminUsageLog): string => {
@@ -620,12 +681,10 @@ function latencyBarClasses(row: AdminUsageLog) {
 
 // Cost tooltip functions
 const showTooltip = (event: MouseEvent, row: AdminUsageLog) => {
-  const target = event.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   tooltipData.value = row
-  tooltipPosition.value.x = rect.right + 8
-  tooltipPosition.value.y = rect.top + rect.height / 2
   tooltipVisible.value = true
+  void placeTip(rect, costTip, costTipEl)
 }
 
 const hideTooltip = () => {
@@ -635,12 +694,10 @@ const hideTooltip = () => {
 
 // Token tooltip functions
 const showTokenTooltip = (event: MouseEvent, row: AdminUsageLog) => {
-  const target = event.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   tokenTooltipData.value = row
-  tokenTooltipPosition.value.x = rect.right + 8
-  tokenTooltipPosition.value.y = rect.top + rect.height / 2
   tokenTooltipVisible.value = true
+  void placeTip(rect, tokenTip, tokenTipEl)
 }
 
 const hideTokenTooltip = () => {
@@ -649,12 +706,13 @@ const hideTokenTooltip = () => {
 }
 
 // Latency tooltip (desktop hover): the same lines as the detail dialog's latency
-const latencyTooltipPosition = ref({ x: 0, y: 0 })
+const latencyTip = ref<TipPlace>({ x: 0, y: 0, side: 'right' })
+const latencyTipEl = ref<HTMLElement | null>(null)
 const latencyTooltipData = ref<AdminUsageLog | null>(null)
 const showLatencyTooltip = (event: MouseEvent, row: AdminUsageLog) => {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  latencyTooltipPosition.value = { x: rect.right + 8, y: rect.top + rect.height / 2 }
   latencyTooltipData.value = row
+  void placeTip(rect, latencyTip, latencyTipEl)
 }
 const hideLatencyTooltip = () => {
   latencyTooltipData.value = null
