@@ -173,7 +173,7 @@
                 v-else
                 :value="activeAttributeFilters[attr.id] ?? ''"
                 :type="attr.type === 'number' ? 'number' : 'text'"
-                class="table-toolbar__input table-toolbar__input--plain"
+                class="input users-sheet__input"
                 :placeholder="attr.name"
                 @input="typeSheetAttribute(attr.id, ($event.target as HTMLInputElement).value)"
                 @change="setSheetAttribute(attr.id, ($event.target as HTMLInputElement).value, true)"
@@ -223,7 +223,7 @@
               </button>
               <div
                 v-if="showFilterDropdown"
-                class="absolute right-0 top-full z-50 mt-1 w-48 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
+                class="users-menu absolute right-0 top-full z-50 mt-1 w-48 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
                 <!-- Built-in filters -->
                 <button
@@ -285,7 +285,7 @@
               </button>
               <div
                 v-if="showColumnDropdown && !phone"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
+                class="users-menu absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
                 <button
                   v-for="col in toggleableColumns"
@@ -358,7 +358,7 @@
                 v-if="bulkMenuOpen"
                 ref="bulkMenuRef"
                 role="menu"
-                class="absolute right-0 top-full mt-1 w-44 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
+                class="users-menu absolute right-0 top-full mt-1 w-44 rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
                 :style="{ zIndex: bulkMenuLayer.zIndex.value }"
                 data-test="bulk-menu"
               >
@@ -631,7 +631,7 @@
                 <!-- 弹出菜单：今日 / 近30天，点击进行三态循环切换。 -->
                 <div
                   v-if="openUsageSortMenu === usageKey"
-                  class="absolute right-0 top-full z-50 mt-1 min-w-[120px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                  class="users-menu absolute right-0 top-full z-50 mt-1 min-w-[120px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
                 >
                   <button
                     v-for="metric in (['today', 'total'] as const)"
@@ -808,7 +808,7 @@
         :style="{ top: menuPosition.top + 'px', left: menuPosition.left + 'px', zIndex: actionMenuLayer.zIndex.value, maxHeight: menuMaxHeight ? menuMaxHeight + 'px' : undefined, overflowY: menuMaxHeight ? 'auto' : undefined }"
         ref="actionMenuRef"
       >
-        <div class="py-1">
+        <div class="users-menu py-1">
           <template v-for="user in users" :key="user.id">
             <template v-if="user.id === activeMenuId">
               <!-- A phone: the row's direct buttons first (mobile list plan). -->
@@ -2266,10 +2266,20 @@ onUnmounted(() => {
   background: var(--color-bg-control-hover);
   color: var(--color-text-primary);
 }
-/* The menu's items on touch: 40px to hit. */
+/* On touch every menu and popover list of the page (the row's, the usage sort's, the bulk one, the filter and column
+   settings): 40px items, 8px apart. */
 @media (pointer: coarse) {
-  .action-menu-content button {
+  .users-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .users-menu > button {
     min-height: 40px;
+  }
+  .users-sheet__input {
+    min-height: 40px;
+    font-size: 16px;
   }
   .users-ops {
     gap: 8px;
@@ -2288,9 +2298,6 @@ onUnmounted(() => {
     min-width: 40px;
     min-height: 40px;
     justify-content: center;
-  }
-  .usage-sort-trigger [data-test^="usage-sort-usage"] {
-    min-height: 40px;
   }
 }
 /* A phone's filter sheet: one field per filter, its name above it. */
@@ -2348,7 +2355,7 @@ onUnmounted(() => {
 /* A phone's column settings: one row per column, 44px to hit. */
 .users-colsheet {
   display: grid;
-  gap: 4px;
+  gap: 8px;
   margin: 0 -8px;
 }
 .users-colsheet__item,

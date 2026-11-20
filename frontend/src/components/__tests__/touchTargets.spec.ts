@@ -104,5 +104,20 @@ describe('touch targets', () => {
     expect(px(rule, 'min-width')).toBe(40)
     expect(px(rule, 'min-height')).toBe(40)
   })
+
+  // Astra review (users page): the row menu, the usage sort, the bulk menu, the filter and column settings, the
+  // column sheet and the sheet's text field.
+  it("users page: its menus' items 40px and 8px apart, the sheet's text field 40px at 16px", () => {
+    const source = read('../views/admin/UsersView.vue')
+    expect(source.match(/class="users-menu /g)).toHaveLength(5)
+    const menu = touchRule(source, '.users-menu')
+    expect(menu).toContain('flex-direction: column;')
+    expect(px(menu, 'gap')).toBe(8)
+    expect(px(touchRule(source, '.users-menu > button'), 'min-height')).toBe(40)
+    const input = touchRule(source, '.users-sheet__input')
+    expect(px(input, 'min-height')).toBe(40)
+    expect(px(input, 'font-size')).toBe(16)
+    expect(source).toMatch(/\.users-colsheet \{\s*display: grid;\s*gap: 8px;/)
+  })
 })
 
