@@ -67,7 +67,6 @@
           <PendingChangesPill :count="pending" :label="changesText" :tip="t('common.pendingChanges.tip')" @merge="applyPending" />
           <DataTable
             ref="dataTableRef"
-            layout="table"
             :scroll-label="t('admin.accounts.title')"
             :columns="cols"
             :data="rows"

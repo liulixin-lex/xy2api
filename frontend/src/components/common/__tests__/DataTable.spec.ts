@@ -1,7 +1,9 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ref } from 'vue'
 import DataTable from '../DataTable.vue'
+import { TABLE_REGION_KEY } from '@/components/layout/tableRegion'
 import dataTableSource from '../DataTable.vue?raw'
 
 vi.mock('vue-i18n', () => ({
@@ -110,14 +112,15 @@ describe('DataTable', () => {
     expect(wrapper.findAll('tbody tr[aria-hidden="true"]')).toHaveLength(0)
   })
 
-  it('switches to windowed rendering once row count exceeds virtualizeThreshold', async () => {
+  it('switches to windowed rendering once row count exceeds virtualizeThreshold (in a bounded table region)', async () => {
     const data = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
     const wrapper = mount(DataTable, {
       props: {
         columns: [{ key: 'name', label: 'Name' }],
         data,
         virtualizeThreshold: 3
-      }
+      },
+      global: { provide: { [TABLE_REGION_KEY as symbol]: ref(true) } }
     })
 
     await wrapper.vm.$nextTick()
@@ -329,7 +332,8 @@ describe('DataTable', () => {
         rowSelectable: (row: { id: number }) => row.id === 2
       }
     })
-    const header = wrapper.get<HTMLInputElement>(`[data-test="select-all${viewport === 'mobile' ? '-mobile' : ''}"]`)
+    // The table at both widths (cards are gone): its header check box selects the page.
+    const header = wrapper.get<HTMLInputElement>('[data-test="select-all"]')
     const inputs = wrapper.findAll<HTMLInputElement>('[data-test="select-row"]')
     expect(inputs.map(input => input.element.disabled)).toEqual([true, false])
     await inputs[0].trigger('change')
@@ -346,120 +350,5 @@ describe('DataTable', () => {
     await wrapper.setProps({ data: [{ id: 1, name: 'Protected' }] })
     expect(header.element.disabled).toBe(true)
     wrapper.unmount()
-  })
-
-  it('lays a card out as the leading column in the head, the others as label-over-value fields, the actions in the foot', () => {
-    stubMobileMatchMedia()
-    const wrapper = mount(DataTable, {
-      props: {
-        columns: [{ key: 'name', label: 'Name' }, { key: 'usage', label: 'Usage' }, { key: 'actions', label: '' }],
-        data: [{ id: 1, name: 'one', usage: 'snapshot' }],
-        rowKey: 'id'
-      },
-      slots: {
-        'cell-usage': '<div data-test="usage-cell">snapshot</div>',
-        'cell-actions': '<button data-test="edit">edit</button>'
-      }
-    })
-
-    const card = wrapper.get('.table-card')
-    expect(card.get('.table-card__head [data-field="name"]').text()).toBe('one')
-    const field = card.get('.table-card__fields [data-field="usage"]')
-    expect(field.get('dt').text()).toBe('Usage')
-    expect(field.get('dd [data-test="usage-cell"]').text()).toBe('snapshot')
-    expect(card.get('.table-card__foot [data-test="edit"]').exists()).toBe(true)
-  })
-
-  it('puts a column marked cardHeadEnd at the right of the card\'s head, not among the fields', () => {
-    stubMobileMatchMedia()
-    const wrapper = mount(DataTable, {
-      props: {
-        columns: [{ key: 'name', label: 'Name' }, { key: 'usage', label: 'Usage' }, { key: 'status', label: 'Status', cardHeadEnd: true }],
-        data: [{ id: 1, name: 'one', usage: 'snapshot', status: 'active' }],
-        rowKey: 'id'
-      },
-      slots: { 'cell-status': '<span data-test="status-cell">{{ params.value }}</span>' }
-    })
-    const card = wrapper.get('.table-card')
-    expect(card.get('.table-card__head .table-card__end [data-test="status-cell"]').text()).toBe('active')
-    expect(card.findAll('.table-card__fields [data-field]').map((field) => field.attributes('data-field'))).toEqual(['usage'])
-  })
-
-  it('lays a column marked cardFullRow across the whole card, the others in its two columns (7r-6)', () => {
-    stubMobileMatchMedia()
-    const wrapper = mount(DataTable, {
-      props: {
-        columns: [{ key: 'name', label: 'Name' }, { key: 'group', label: 'Group' }, { key: 'usage', label: 'Usage', cardFullRow: true }],
-        data: [{ id: 1, name: 'one', group: 'g', usage: 'bars' }],
-        rowKey: 'id'
-      }
-    })
-    const fields = wrapper.findAll('.table-card__fields [data-field]')
-    expect(fields.map((field) => [field.attributes('data-field'), field.classes('col-span-full')])).toEqual([['group', false], ['usage', true]])
-  })
-
-  it('lets a page draw its own card, with any column\'s cell drawn the way the table draws it', () => {
-    stubMobileMatchMedia()
-    const wrapper = mount(DataTable, {
-      props: { columns: [{ key: 'name', label: 'Name' }, { key: 'usage', label: 'Usage' }], data: [{ id: 1, name: 'one', usage: 'snapshot' }], rowKey: 'id' },
-      slots: {
-        'cell-usage': '<b data-test="usage-cell">{{ params.value }}</b>',
-        card: `<template #card="{ row, cell }"><div data-test="own-card">{{ row.name }}<component :is="cell" column="usage" :row="row" /></div></template>`
-      }
-    })
-    const card = wrapper.get('.table-card')
-    expect(card.find('.table-card__head').exists()).toBe(false)
-    expect(card.get('[data-test="own-card"]').text()).toBe('onesnapshot')
-    expect(card.get('[data-test="usage-cell"]').text()).toBe('snapshot')
-  })
-
-  it('offers current-page select all in the mobile card layout', async () => {
-    stubMobileMatchMedia()
-    const wrapper = mount(DataTable, {
-      props: {
-        columns: [{ key: 'name', label: 'Name' }],
-        data: [
-          { id: 1, name: 'One' },
-          { id: 2, name: 'Two' }
-        ],
-        rowKey: 'id',
-        selectable: true,
-        selectedKeys: [99]
-      }
-    })
-
-    await wrapper.get('[data-test="select-all-mobile"]').setValue(true)
-
-    expect(wrapper.emitted('update:selectedKeys')?.at(-1)?.[0]).toEqual([99, 1, 2])
-  })
-
-  it('lets mobile users pick a sort field and flip the order', async () => {
-    stubMobileMatchMedia()
-    const wrapper = mount(DataTable, {
-      props: {
-        columns: [
-          { key: 'name', label: 'Name', sortable: true },
-          { key: 'count', label: 'Count', sortable: true },
-          { key: 'note', label: 'Note' }
-        ],
-        data: [
-          { id: 1, name: 'B', count: 2 },
-          { id: 2, name: 'A', count: 3 },
-          { id: 3, name: 'C', count: 1 }
-        ],
-        rowKey: 'id',
-        serverSideSort: true
-      }
-    })
-
-    const select = wrapper.get('[data-test="mobile-sort-key"]')
-    expect(select.findAll('option:not([disabled])').map((option) => option.text())).toEqual(['Name', 'Count'])
-    expect(wrapper.find('[data-test="mobile-sort-order"]').exists()).toBe(false)
-
-    await select.setValue('count')
-    expect(wrapper.emitted('sort')?.at(-1)).toEqual(['count', 'asc'])
-
-    await wrapper.get('[data-test="mobile-sort-order"]').trigger('click')
-    expect(wrapper.emitted('sort')?.at(-1)).toEqual(['count', 'desc'])
   })
 })

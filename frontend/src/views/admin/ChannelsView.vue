@@ -50,7 +50,6 @@
 
       <template #table>
         <DataTable
-          layout="table"
           :scroll-label="t('admin.channels.title')"
           :columns="columns"
           :data="channels"

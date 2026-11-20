@@ -99,7 +99,6 @@
 
       <template #table>
         <DataTable
-          layout="table"
           :scroll-label="t('keys.title')"
           :columns="columns"
           :data="apiKeys"

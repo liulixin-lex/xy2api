@@ -135,7 +135,6 @@
       <!-- Table -->
       <template #table>
         <DataTable
-          layout="table"
           :scroll-label="t('admin.audit.title')"
           :columns="columns"
           :data="logs"

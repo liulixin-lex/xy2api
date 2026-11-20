@@ -34,7 +34,6 @@
 
     <template #table>
       <DataTable
-        layout="table"
         :scroll-label="t('supportTickets.title')"
         :columns="columns"
         :data="tickets"

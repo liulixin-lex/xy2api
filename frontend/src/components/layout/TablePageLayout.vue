@@ -39,7 +39,7 @@ import { TABLE_REGION_KEY, useTableRegion } from './tableRegion'
 
 const props = defineProps<{
   /**
-   * The table layout (mobile list plan; with DataTable `layout="table"`): the table keeps its card frame on a tablet
+   * The table layout (mobile list plan): the table keeps its card frame on a tablet
    * and a desktop and runs edge to edge on a phone. While the table region fits (useTableRegion: tall enough, room
    * for the header and a row after the toolbar, tags, bulk bar and pagination) the page fills the visible height and
    * only the region scrolls, both ways under its sticky header; otherwise the whole page scrolls. At every width.

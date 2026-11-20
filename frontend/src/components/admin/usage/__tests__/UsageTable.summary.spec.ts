@@ -31,7 +31,7 @@ const row = {
 
 const CELLS = ['user', 'api_key', 'account', 'model', 'endpoint', 'group', 'tokens', 'cost', 'latency', 'created_at', 'actions']
 const DataTableStub = {
-  props: ['data', 'layout'],
+  props: ['data'],
   template: `<div><div v-for="row in data" :key="row.id" :data-row="row.id">
     ${CELLS.map((key) => `<div data-cell="${key}"><slot name="cell-${key}" :row="row" :value="row.${key}" /></div>`).join('')}
   </div></div>`
@@ -186,10 +186,6 @@ describe('UsageTable on the shared table layout (B)', () => {
   }) as unknown as MediaQueryList)
   afterEach(() => { vi.restoreAllMocks() })
 
-  it('asks for the table at every width', () => {
-    expect(mountTable(ADMIN).findComponent(DataTableStub).props('layout')).toBe('table')
-  })
-
   // Owner ruling: one line on a phone (rows near 53px, about ten a screen); the id and the deleted mark are in the detail.
   // Review: the email is a 40px-high target (a pseudo-element), and the detail opens from the frozen right column.
   it('makes the admin page\'s first column a one-line identity cell on a phone, the email still opening the balance', async () => {
@@ -276,7 +272,7 @@ describe('UsageTable after review', () => {
   })
 
   it('names the actions column "Details" below 1024px and adds none from 1024px', () => {
-    const ColumnsStub = { props: ['data', 'columns', 'layout'], template: '<div />' }
+    const ColumnsStub = { props: ['data', 'columns'], template: '<div />' }
     const mountWith = () => mount(UsageTable, {
       props: { data: [row] as never, ...ADMIN },
       global: { stubs: { DataTable: ColumnsStub, Icon: true, Teleport: true } },

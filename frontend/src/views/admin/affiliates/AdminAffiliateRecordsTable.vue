@@ -26,7 +26,6 @@
 
       <template #table>
         <DataTable
-          layout="table"
           :scroll-label="t(titleKey)"
           :columns="columns"
           :data="records"

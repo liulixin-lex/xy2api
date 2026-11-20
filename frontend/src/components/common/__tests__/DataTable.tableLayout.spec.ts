@@ -40,7 +40,7 @@ const inRegion = (bounded: boolean, props: Record<string, unknown>) =>
     components: { DataTable },
     setup() {
       provide(TABLE_REGION_KEY, computed(() => bounded))
-      return () => h(DataTable, { layout: 'table', ...props })
+      return () => h(DataTable, { ...props })
     }
   }))
 
@@ -49,10 +49,10 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('DataTable layout="table" below 1024px', () => {
+describe('DataTable below 1024px', () => {
   it('mounts the table, not cards, with the sticky header and no mobile sort bar or select-all line', () => {
     stubPhone()
-    const wrapper = mount(DataTable, { props: { layout: 'table', columns, data: rows(1, 2), rowKey: 'id', selectable: true } })
+    const wrapper = mount(DataTable, { props: { columns, data: rows(1, 2), rowKey: 'id', selectable: true } })
     expect(wrapper.find('.table-cards').exists()).toBe(false)
     expect(wrapper.find('table thead.table-header').exists()).toBe(true)
     expect(wrapper.findAll('tbody tr[data-row-id]')).toHaveLength(2)
@@ -61,17 +61,10 @@ describe('DataTable layout="table" below 1024px', () => {
     expect(wrapper.get('.table-wrapper').classes()).toContain('dt-layout-table')
   })
 
-  it('keeps the cards layout as it was for a page that has not moved', () => {
-    stubPhone()
-    const wrapper = mount(DataTable, { props: { columns, data: rows(1), rowKey: 'id' } })
-    expect(wrapper.find('.table-cards').exists()).toBe(true)
-    expect(wrapper.find('table').exists()).toBe(false)
-  })
-
   it('freezes the built-in check box column with the first column, each check box in a label as big as its cell', () => {
     stubPhone()
     const wrapper = mount(DataTable, {
-      props: { layout: 'table', columns: [...columns, { key: 'other', label: 'Other' }, { key: 'actions', label: '' }], data: rows(1), rowKey: 'id', selectable: true }
+      props: { columns: [...columns, { key: 'other', label: 'Other' }, { key: 'actions', label: '' }], data: rows(1), rowKey: 'id', selectable: true }
     })
     const headers = wrapper.findAll('thead th')
     expect(headers[0].classes()).toEqual(expect.arrayContaining(['sticky-col', 'sticky-col-left-first']))
@@ -89,7 +82,7 @@ describe('DataTable layout="table" below 1024px', () => {
   it('sorts from the header button: a click anywhere on the cell or the key on the focused button, aria-sort on the th', async () => {
     stubPhone()
     const wrapper = mount(DataTable, {
-      props: { layout: 'table', columns, data: rows(2, 1), rowKey: 'id', serverSideSort: true }
+      props: { columns, data: rows(2, 1), rowKey: 'id', serverSideSort: true }
     })
     const th = wrapper.get('thead th')
     const button = th.get('button.dt-sort[data-test="sort-name"]')
@@ -112,7 +105,7 @@ describe('DataTable layout="table" below 1024px', () => {
     const both = [{ key: 'id', label: 'ID', sortable: true }, { key: 'last_used_at', label: 'Last used', sortable: true }]
     localStorage.setItem('table-sort', JSON.stringify({ key: 'id', order: 'asc' }))
     const wrapper = mount(DataTable, {
-      props: { layout: 'table', columns: both, data: rows(1), rowKey: 'id', serverSideSort: true, sort: { key: 'id', order: 'asc' }, sortStorageKey: 'table-sort', defaultSortKey: 'last_used_at', defaultSortOrder: 'desc' }
+      props: { columns: both, data: rows(1), rowKey: 'id', serverSideSort: true, sort: { key: 'id', order: 'asc' }, sortStorageKey: 'table-sort', defaultSortKey: 'last_used_at', defaultSortOrder: 'desc' }
     })
     const ariaSort = () => Object.fromEntries(wrapper.findAll('thead th').map((th) => [th.text(), th.attributes('aria-sort')]))
     expect(ariaSort()).toEqual({ ID: 'ascending', 'Last used': 'none' })
@@ -138,7 +131,7 @@ describe('DataTable layout="table" below 1024px', () => {
   it('leaves the arrows as the page has them when the page keeps its sort after a header click', async () => {
     stubPhone()
     const wrapper = mount(DataTable, {
-      props: { layout: 'table', columns, data: rows(1), rowKey: 'id', serverSideSort: true, sort: { key: 'name', order: 'asc' }, sortStorageKey: 'table-sort' }
+      props: { columns, data: rows(1), rowKey: 'id', serverSideSort: true, sort: { key: 'name', order: 'asc' }, sortStorageKey: 'table-sort' }
     })
     const th = wrapper.get('thead th')
     await th.get('button.dt-sort').trigger('click')
@@ -157,7 +150,7 @@ describe('DataTable layout="table" below 1024px', () => {
     const rect = (left: number, width: number, top = 0, height = 40) => () => ({ left, width, right: left + width, top, height, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect
     const wrapper = mount(DataTable, {
       attachTo: document.body,
-      props: { layout: 'table', columns: [{ key: 'name', label: 'Name' }, { key: 'state', label: 'State' }, { key: 'actions', label: '' }], data: rows(1), rowKey: 'id', selectable: true },
+      props: { columns: [{ key: 'name', label: 'Name' }, { key: 'state', label: 'State' }, { key: 'actions', label: '' }], data: rows(1), rowKey: 'id', selectable: true },
       slots: { 'cell-state': '<button data-test="switch">s</button>', 'cell-actions': '<button>⋯</button>' }
     })
     const box = wrapper.get('.table-wrapper').element as HTMLElement
@@ -195,7 +188,7 @@ describe('DataTable layout="table" below 1024px', () => {
   // Opus review, suggestion 5: a table area that scrolls sideways is a named region that takes keyboard focus.
   it('names its scroll area and lets it take keyboard focus while it scrolls sideways', async () => {
     stubPhone()
-    const wrapper = mount(DataTable, { props: { layout: 'table', scrollLabel: 'Accounts', columns, data: rows(1), rowKey: 'id' } })
+    const wrapper = mount(DataTable, { props: { scrollLabel: 'Accounts', columns, data: rows(1), rowKey: 'id' } })
     const box = wrapper.get('.table-wrapper')
     expect(box.attributes('role')).toBe('region')
     expect(box.attributes('aria-label')).toBe('Accounts')
@@ -206,14 +199,14 @@ describe('DataTable layout="table" below 1024px', () => {
     await nextTick()
     await nextTick()
     expect(box.attributes('tabindex')).toBe('0')
-    expect(mount(DataTable, { props: { layout: 'table', columns, data: rows(1) } }).get('.table-wrapper').attributes('role')).toBeUndefined()
+    expect(mount(DataTable, { props: { columns, data: rows(1) } }).get('.table-wrapper').attributes('role')).toBeUndefined()
   })
 
   // Astra second re-review #2: the page renders again (an equal new object) before it takes the click's sort.
   it('keeps a click waiting through an equal new sort object, and stores it once the page takes it', async () => {
     stubPhone()
     const wrapper = mount(DataTable, {
-      props: { layout: 'table', columns, data: rows(1), rowKey: 'id', serverSideSort: true, sort: { key: 'name', order: 'asc' }, sortStorageKey: 'table-sort' }
+      props: { columns, data: rows(1), rowKey: 'id', serverSideSort: true, sort: { key: 'name', order: 'asc' }, sortStorageKey: 'table-sort' }
     })
     await wrapper.get('[data-test="sort-name"]').trigger('click')
     expect(wrapper.emitted('sort')).toEqual([['name', 'desc']])
@@ -229,7 +222,7 @@ describe('DataTable layout="table" below 1024px', () => {
   // Astra third re-review #2: no `sort` (the table's own order) and `null` (the page's, with no order) differ.
   it('clears the arrow when a page takes over the sort with no order', async () => {
     stubPhone()
-    const wrapper = mount(DataTable, { props: { layout: 'table', columns, data: rows(1), rowKey: 'id' } })
+    const wrapper = mount(DataTable, { props: { columns, data: rows(1), rowKey: 'id' } })
     await wrapper.get('[data-test="sort-name"]').trigger('click')
     expect(wrapper.get('thead th').attributes('aria-sort')).toBe('ascending')
     await wrapper.setProps({ sort: null })
@@ -245,7 +238,6 @@ describe('DataTable layout="table" below 1024px', () => {
     stubPhone()
     const wrapper = mount(DataTable, {
       props: {
-        layout: 'table',
         columns,
         data: [{ id: 1, name: 'Protected' }, { id: 2, name: 'Allowed' }],
         rowKey: 'id',
@@ -266,7 +258,7 @@ describe('DataTable layout="table" below 1024px', () => {
 
   it('keeps the same row nodes through a reload with rows on screen', async () => {
     stubPhone()
-    const wrapper = mount(DataTable, { props: { layout: 'table', columns, data: rows(1, 2), rowKey: 'id' } })
+    const wrapper = mount(DataTable, { props: { columns, data: rows(1, 2), rowKey: 'id' } })
     const before = wrapper.get('tbody tr[data-row-id="1"]').element
     await wrapper.setProps({ loading: true })
     expect(wrapper.get('tbody tr[data-row-id="1"]').element).toBe(before)
@@ -292,14 +284,11 @@ describe('DataTable layout="table" below 1024px', () => {
     expect((natural.findComponent(DataTable).vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(false)
     expect(natural.findAll('tbody tr[data-row-id]')).toHaveLength(12)
     // Outside TablePageLayout the page scrolls, no windowing: on a phone and on a desktop alike (Astra review #8).
-    const alone = mount(DataTable, { props: { layout: 'table', columns, data, rowKey: 'id', virtualizeThreshold: 3 } })
+    const alone = mount(DataTable, { props: { columns, data, rowKey: 'id', virtualizeThreshold: 3 } })
     expect((alone.vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(false)
     Object.defineProperty(window, 'matchMedia', { writable: true, value: () => ({ matches: true, media: '', addEventListener: vi.fn(), removeEventListener: vi.fn() }) })
-    const wide = mount(DataTable, { props: { layout: 'table', columns, data, rowKey: 'id', virtualizeThreshold: 3 } })
+    const wide = mount(DataTable, { props: { columns, data, rowKey: 'id', virtualizeThreshold: 3 } })
     expect((wide.vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(false)
-    // The cards layout keeps its desktop rule.
-    const legacy = mount(DataTable, { props: { columns, data, rowKey: 'id', virtualizeThreshold: 3 } })
-    expect((legacy.vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(true)
   })
 
   it('tracks its size while mounted: the frozen columns\' edge line follows the sideways scroll', async () => {
@@ -313,7 +302,7 @@ describe('DataTable layout="table" below 1024px', () => {
       disconnect() {}
     })
     const width = ref(900)
-    const wrapper = mount(DataTable, { props: { layout: 'table', columns, data: rows(1), rowKey: 'id' } })
+    const wrapper = mount(DataTable, { props: { columns, data: rows(1), rowKey: 'id' } })
     await nextTick()
     await nextTick()
     const box = wrapper.get('.table-wrapper').element as HTMLElement

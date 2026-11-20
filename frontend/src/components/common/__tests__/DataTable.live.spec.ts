@@ -1,8 +1,9 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { nextTick, reactive } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 
 import DataTable from '../DataTable.vue'
+import { TABLE_REGION_KEY } from '@/components/layout/tableRegion'
 import dataTableSource from '../DataTable.vue?raw'
 
 vi.mock('vue-i18n', () => ({
@@ -67,12 +68,6 @@ describe('DataTable row classes', () => {
     expect(wrapper.get('tr[data-row-id="1"]').classes()).not.toContain('opacity-50')
     expect(calls).toEqual([2])
   })
-
-  it('applies rowClass to mobile cards', () => {
-    stubViewport(false)
-    const wrapper = mount(DataTable, { props: { columns, data: [{ ...rows(1)[0], dim: true }], rowKey: 'id', rowClass: (row: Row) => row.dim && 'opacity-50' } })
-    expect(wrapper.get('[data-field="name"]').element.closest('.table-card')!.classList).toContain('opacity-50')
-  })
 })
 
 describe('DataTable scroll to top', () => {
@@ -97,7 +92,11 @@ describe('DataTable scroll to top', () => {
 
   it('also resets the virtualizer when the table is virtualized', async () => {
     stubViewport(true)
-    const wrapper = mount(DataTable, { props: { columns, data: rows(1, 2, 3), rowKey: 'id', virtualizeThreshold: 1 } })
+    // Rows are windowed only in a bounded table region (TablePageLayout's).
+    const wrapper = mount(DataTable, {
+      props: { columns, data: rows(1, 2, 3), rowKey: 'id', virtualizeThreshold: 1 },
+      global: { provide: { [TABLE_REGION_KEY as symbol]: ref(true) } }
+    })
     await nextTick()
     const vm = wrapper.vm as unknown as { shouldVirtualize: boolean; virtualizer: { scrollToOffset: (offset: number) => void }; scrollToTop: () => void }
     expect(vm.shouldVirtualize).toBe(true)
@@ -126,19 +125,6 @@ describe('DataTable scroll to top', () => {
 })
 
 describe('DataTable scroll to top, more cases', () => {
-  it('scrolls up when a page sort is picked in the mobile sort bar', async () => {
-    stubViewport(false)
-    const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => undefined)
-    const wrapper = mount(DataTable, {
-      props: { columns, data: rows(1, 2), rowKey: 'id', pageSorts: [{ key: 'usage', label: 'Usage' }] },
-      attachTo: document.body
-    })
-    placeAt(wrapper.element, -400)
-    await wrapper.get('[data-test="mobile-sort-key"]').setValue('usage')
-    expect(wrapper.emitted('pageSort')).toEqual([['usage']])
-    expect(scrollBy).toHaveBeenCalledWith(0, -400)
-    wrapper.unmount()
-  })
 
   it('does not scroll on its own for rows without a stable key', async () => {
     stubViewport(true)
@@ -169,20 +155,6 @@ describe('DataTable at top', () => {
     list.scrollTop = 30
     expect(table.isAtTop()).toBe(false)
     wrapper.unmount()
-  })
-})
-
-describe('DataTable mobile progress bar', () => {
-  it('comes and goes without changing the list classes or what comes before the first card', async () => {
-    stubViewport(false)
-    const wrapper = mount(DataTable, { props: { columns, data: rows(1, 2), rowKey: 'id' } })
-    const firstCard = wrapper.get('[data-field="name"]').element.closest('.table-card')!
-    const before = firstCard.previousElementSibling
-    const classes = wrapper.classes()
-    await wrapper.setProps({ loading: true })
-    expect(wrapper.find('[data-test="table-progress"]').exists()).toBe(true)
-    expect(firstCard.previousElementSibling).toBe(before) // the stack's spacing before the first card stays
-    expect(wrapper.classes()).toEqual(classes)
   })
 })
 

@@ -2,7 +2,6 @@
   <!-- The table at every width (mobile list plan): the order number freezes as the identity; the actions (one to three
        buttons with text) scroll with the row on a phone, where they do not fit its 44px frozen column. -->
   <DataTable
-    layout="table"
     :scroll-label="scrollLabel"
     :columns="columns"
     :data="orders"

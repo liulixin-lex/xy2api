@@ -66,7 +66,6 @@
 
       <template #table>
         <DataTable
-          layout="table"
           :scroll-label="t('admin.channelMonitor.title')"
           :columns="columns"
           :data="monitors"

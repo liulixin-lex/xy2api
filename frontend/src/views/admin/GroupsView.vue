@@ -176,7 +176,6 @@
         <DataTable
           ref="groupsTableRef"
           class="dense-cells"
-          layout="table"
           :scroll-label="t('admin.groups.title')"
           :columns="columns"
           :data="groups"
@@ -4735,7 +4734,7 @@ const allColumns = computed<Column[]>(() => {
     { key: "platform", label: t("admin.groups.columns.platform"), sortable: true },
     // A number column: right-aligned, thousands separators (mobile list plan item 19).
     { key: "account_count", label: t("admin.groups.columns.accounts"), sortable: true, class: "text-right" },
-    { key: "status", label: t("admin.groups.columns.status"), sortable: true, cardHeadEnd: true },
+    { key: "status", label: t("admin.groups.columns.status"), sortable: true },
     { key: "actions", label: t("admin.groups.columns.actions"), sortable: false },
   ];
   if (authStore.isSimpleMode) return basic;

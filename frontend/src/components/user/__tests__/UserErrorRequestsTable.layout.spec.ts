@@ -1,5 +1,5 @@
-// Mobile list plan (step 1): the user usage page's errors tab uses the table at every width, its columns and row action
-// as they were.
+// Mobile list plan (step 1): the user usage page's errors tab, a table at every width, its columns and row action as
+// they were.
 import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
@@ -13,14 +13,13 @@ vi.mock('vue-i18n', async () => ({
 }))
 
 describe('UserErrorRequestsTable layout', () => {
-  it('asks DataTable for the table, rows still opening their detail', () => {
-    const DataTableStub = { name: 'DataTable', props: { layout: String, clickableRows: Boolean }, template: '<div />' }
+  it('keeps its rows opening their detail', () => {
+    const DataTableStub = { name: 'DataTable', props: { clickableRows: Boolean }, template: '<div />' }
     const wrapper = mount(UserErrorRequestsTable, {
       props: { rows: [], total: 0, loading: false, page: 1, pageSize: 20 },
       global: { stubs: { DataTable: DataTableStub, Pagination: true, UserErrorDetailModal: true } },
     })
     const table = wrapper.findComponent(DataTableStub)
-    expect(table.props('layout')).toBe('table')
     expect(table.props('clickableRows')).toBe(true)
   })
 

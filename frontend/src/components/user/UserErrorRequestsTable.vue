@@ -4,7 +4,6 @@
       <IpGeoBatchToolbar :ips="rows.map((r) => r.client_ip)" @failed="emit('ipGeoBatchFailed')" />
 
       <DataTable
-        layout="table"
         :columns="columns"
         :data="rows"
         :loading="loading"
