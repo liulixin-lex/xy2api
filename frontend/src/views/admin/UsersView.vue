@@ -114,6 +114,7 @@
                   <div class="w-full">
                     <Select
                       :model-value="value"
+                      :aria-label="getAttributeDefinitionName(Number(attrId))"
                       size="sm"
                       :options="[
                         { value: '', label: getAttributeDefinitionName(Number(attrId)) },
