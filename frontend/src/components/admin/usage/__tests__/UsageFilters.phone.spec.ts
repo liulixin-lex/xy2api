@@ -90,6 +90,25 @@ describe('UsageFilters below 768px', () => {
     expect(tags()).toHaveLength(3)
   })
 
+  // Review item 6: a tag names what is filtered on, not what is typed in the box afterwards.
+  it('names the chosen user, not the search draft typed after choosing', async () => {
+    setPhone(true)
+    const model = filtersWith({ user_id: 7, account_id: 3 })
+    const w = mountFilters({}, model)
+    ;(w.vm as unknown as { setUserKeyword: (email: string) => void; setAccountKeyword: (name: string) => void }).setUserKeyword('seven@example.com')
+    ;(w.vm as unknown as { setAccountKeyword: (name: string) => void }).setAccountKeyword('acc-3')
+    await nextTick()
+    const tags = () => w.findAll('[data-testid="usage-filter-tag"]').map((tag) => tag.text())
+    expect(tags()).toEqual(['admin.usage.userFilter：seven@example.com', 'admin.usage.account：acc-3'])
+    await w.get('[data-test="toolbar-filter-button"]').trigger('click')
+    await nextTick()
+    const sheet = w.get('[data-test="filter-sheet"]')
+    await sheet.get('input[placeholder="admin.usage.searchUserPlaceholder"]').setValue('other')
+    await sheet.get('input[placeholder="admin.usage.searchAccountPlaceholder"]').setValue('draft')
+    expect(tags()).toEqual(['admin.usage.userFilter：seven@example.com', 'admin.usage.account：acc-3'])
+    expect(model.user_id).toBe(7)
+  })
+
   it('clears every chosen filter from the sheet in one change, keeping the date range', async () => {
     setPhone(true)
     const model = filtersWith({ model: 'gpt-6.1', request_type: 'stream', native_compaction_v2: true })

@@ -239,7 +239,8 @@
 
       <!-- Right: actions -->
       <div v-if="showActions" class="flex w-full flex-wrap items-center justify-end gap-3 sm:ml-auto sm:w-auto">
-        <!-- The page's live indicator, next to the refresh button -->
+        <!-- The sort while its column is hidden, then the page's live indicator, next to the refresh button -->
+        <slot name="sort-hint" />
         <slot name="status" />
         <button type="button" @click="$emit('refresh')" class="btn btn-secondary">
           {{ t('common.refresh') }}
@@ -322,6 +323,13 @@ const accountSearchRef = ref<HTMLElement | null>(null)
 
 const userKeyword = ref('')
 const userResults = ref<SimpleUser[]>([])
+/**
+ * The names of the chosen user, API key and account, for the phone tags: what is filtered on, never the search box's
+ * draft (typing in a box after choosing changes nothing until another result is picked).
+ */
+const chosenUser = ref('')
+const chosenApiKey = ref('')
+const chosenAccount = ref('')
 const showUserDropdown = ref(false)
 let userSearchTimeout: ReturnType<typeof setTimeout> | null = null
 let userSearchSequence = 0
@@ -433,10 +441,10 @@ const tags = computed<UsageFilterTag[]>(() => {
   const f = filters.value
   const out: UsageFilterTag[] = []
   const add = (key: string, label: string, text: string) => out.push({ key, label, text })
-  if (chosen(f.user_id)) add('user', t('admin.usage.userFilter'), userKeyword.value || `#${f.user_id}`)
-  if (chosen(f.api_key_id)) add('api_key', t('usage.apiKeyFilter'), apiKeyKeyword.value || `#${f.api_key_id}`)
+  if (chosen(f.user_id)) add('user', t('admin.usage.userFilter'), chosenUser.value || `#${f.user_id}`)
+  if (chosen(f.api_key_id)) add('api_key', t('usage.apiKeyFilter'), chosenApiKey.value || `#${f.api_key_id}`)
   if (chosen(f.model)) add('model', t('usage.model'), String(f.model))
-  if (chosen(f.account_id)) add('account', t('admin.usage.account'), accountKeyword.value || `#${f.account_id}`)
+  if (chosen(f.account_id)) add('account', t('admin.usage.account'), chosenAccount.value || `#${f.account_id}`)
   if (props.mode !== 'errors') {
     if (chosen(f.request_type)) add('request_type', t('usage.type'), optionLabel(requestTypeOptions.value, f.request_type))
     if (chosen(f.native_compaction_v2)) add('native_compaction_v2', t('usage.compactionFilter'), optionLabel(compactionOptions.value, f.native_compaction_v2))
@@ -532,6 +540,7 @@ const selectUser = async (u: SimpleUser) => {
   userKeyword.value = u.email
   showUserDropdown.value = false
   filters.value.user_id = u.id
+  chosenUser.value = u.email
   clearApiKey()
 
   // Auto-load API keys for this user
@@ -558,6 +567,7 @@ const selectApiKey = (k: SimpleApiKey) => {
   apiKeyKeyword.value = k.name || String(k.id)
   showApiKeyDropdown.value = false
   filters.value.api_key_id = k.id
+  chosenApiKey.value = k.name || `#${k.id}`
   emitChange()
 }
 
@@ -593,6 +603,7 @@ const selectAccount = (a: SimpleAccount) => {
   accountKeyword.value = a.name
   showAccountDropdown.value = false
   filters.value.account_id = a.id
+  chosenAccount.value = a.name
   emitChange()
 }
 
@@ -648,6 +659,7 @@ watch(
       clearPendingUserSearch()
       userKeyword.value = ''
       userResults.value = []
+      chosenUser.value = ''
     }
   }
 )
@@ -658,6 +670,7 @@ watch(
     if (!apiKeyId) {
       apiKeyKeyword.value = ''
       apiKeyResults.value = []
+      chosenApiKey.value = ''
     }
   }
 )
@@ -668,6 +681,7 @@ watch(
     if (!accountId) {
       accountKeyword.value = ''
       accountResults.value = []
+      chosenAccount.value = ''
     }
   }
 )
@@ -691,6 +705,7 @@ onUnmounted(() => {
 const setUserKeyword = (email: string) => {
   clearPendingUserSearch()
   userKeyword.value = email
+  chosenUser.value = email
   userResults.value = []
   showUserDropdown.value = false
 }
@@ -701,6 +716,7 @@ const getUserSearchRevision = () => userSearchSequence
 const setAccountKeyword = (name: string) => {
   if (accountSearchTimeout) clearTimeout(accountSearchTimeout)
   accountKeyword.value = name
+  chosenAccount.value = name
   accountResults.value = []
   showAccountDropdown.value = false
 }
