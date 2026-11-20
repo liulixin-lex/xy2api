@@ -7373,6 +7373,9 @@ const saveSortOrder = async () => {
 onMounted(() => {
   void reloadGroups();
   if (!authStore.isSimpleMode) {
+    // The category filter's options: on a phone the filter is in the closed sheet, so the page asks for them itself
+    // (shared with the inline filter's own request, Astra review 1).
+    void groupCategories.reload();
     void loadLiveCapability();
     loadModelAllowlistCandidates("create", 0, createForm.platform);
   }

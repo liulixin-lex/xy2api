@@ -554,6 +554,17 @@ describe('admin GroupsView column settings', () => {
       expect(localStorage.getItem('group-hidden-columns-narrow')).toBeNull()
     })
 
+    // Astra review 1: the category filter lives in the closed sheet on a phone; the page loads its options itself.
+    it('loads the categories for the sheet\'s category filter without the inline filter', async () => {
+      setPhone()
+      listGroupCategories.mockResolvedValue([{ id: 3, name: 'VIP', sort_order: 0, group_count: 2 }])
+      const wrapper = await mountView()
+      expect(listGroupCategories).toHaveBeenCalled()
+      await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[data-test="filter-sheet"] [data-filter="group_category"]').exists()).toBe(true)
+    })
+
     it('shows the phone toolbar: count, filters as removable tags, columns in a sheet', async () => {
       setPhone()
       const wrapper = await mountView()
