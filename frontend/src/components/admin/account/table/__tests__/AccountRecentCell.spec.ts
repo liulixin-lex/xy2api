@@ -153,9 +153,17 @@ describe('AccountRecentCell', () => {
     expect(tip.hidden).toBe(true)
     expect(cell.attributes('aria-describedby')).toBeUndefined()
     expect(mountCell(null).attributes('tabindex')).toBeUndefined()
-    // The table cell clips outside its 72px: the shared focus ring is drawn inside the cell.
-    const file = '../AccountRecentCell.vue'
-    expect(readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8')).toMatch(/\.recent\.sq-focus:focus-visible \{\s*outline-offset: -2px;\s*\}/)
+    // The ring never covers the text: the cell keeps the shared ring outside its content (the card has room); in the
+    // table, whose cell clips outside 72px, the page draws it inside the column's cell, in the side padding.
+    const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
+    expect(source('../AccountRecentCell.vue')).not.toMatch(/outline/)
+    // Scrolled to, the table cell keeps that padding (about 10px above and below) in view, so the whole ring shows.
+    expect(source('../../../../../views/admin/AccountsView.vue')).toMatch(
+      /\.account-table :deep\(td\.acol-sq_recent \.recent:not\(\.recent--card\)\) \{\s*scroll-margin-top: 10px;\s*scroll-margin-bottom: 10px;\s*\}/
+    )
+    expect(source('../../../../../views/admin/AccountsView.vue')).toMatch(
+      /@supports selector\(:has\(\*\)\) \{\s*\.account-table :deep\(td\.acol-sq_recent:has\(\.recent:focus-visible\)\) \{\s*outline: 2px solid var\(--sq-ring\);\s*outline-offset: -2px;\s*\}\s*\.account-table :deep\(td\.acol-sq_recent \.recent:focus-visible\) \{\s*outline: none;\s*\}/
+    )
   })
 
   it('reads as the contract writes it with the real messages, in Chinese and English', () => {
@@ -196,6 +204,9 @@ describe('AccountRecentCell', () => {
     expect(read('en', quality({ slow_10s: { n: 33, slow: 8, timeouts: 1 } })).rows[1][2]).toBe('8 slow (1 timeout)')
     expect(read('en', thin).rows.map((row) => row[2])).toEqual(['12 samples · too few', '1 slow · too few', '0/1 request · too few', '0 turns · too few'])
     expect(read('en', thin).cell.slice(0, 2)).toEqual(['First', 'T/O'])
+    // Chinese shows the full word already: no second copy for screen readers.
+    expect(mount(AccountRecentCell, { props: { quality: thin }, global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { en, zh } as never })] } })
+      .find('[data-dim="ttfo"] .sr-only').exists()).toBe(false)
     expect(mount(AccountRecentCell, { props: { quality: thin }, global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en, zh } as never })] } })
       .get('[data-dim="ttfo"] .sr-only').text()).toBe('Timeout')
   })
