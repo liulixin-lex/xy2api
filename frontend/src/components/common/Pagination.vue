@@ -37,11 +37,11 @@
       </div>
     </div>
 
-    <div class="pager-wide hidden lg:flex lg:flex-1 lg:items-center lg:justify-between">
+    <div ref="wideRef" class="pager-wide hidden min-w-0 lg:flex lg:flex-1 lg:items-center lg:justify-between" :class="{ 'pager-wide--wrap': wrapRow }">
       <!-- Desktop pagination info -->
       <div class="flex items-center space-x-3">
         <!-- "第 1–20 条，共 74 条 · 每页 [20]" (mobile list plan, copy); "第 1–20 条" when the total is not exact -->
-        <p class="text-sm tabular-nums text-gray-700 dark:text-gray-300" data-test="pagination-range">
+        <p class="whitespace-nowrap text-sm tabular-nums text-gray-700 dark:text-gray-300" data-test="pagination-range">
           {{
             totalExact
               ? t('pagination.range', { from: formatCount(fromItem), to: formatCount(toItem), total: formatCount(total) })
@@ -51,13 +51,14 @@
 
         <!-- Page size selector -->
         <div v-if="showPageSizeSelector" class="flex items-center space-x-2">
-          <span class="text-sm text-gray-700 dark:text-gray-300"
+          <span class="whitespace-nowrap text-sm text-gray-700 dark:text-gray-300"
             ><span aria-hidden="true">· </span>{{ t('pagination.perPage') }}</span
           >
-          <div class="page-size-select w-20">
+          <div class="page-size-select w-20 shrink-0">
             <Select
               :model-value="pageSize"
               :options="pageSizeSelectOptions"
+              :aria-label="t('pagination.perPage')"
               @update:model-value="handlePageSizeChange"
             />
           </div>
@@ -131,12 +132,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import Select from './Select.vue'
 import { getConfiguredTablePageSizeOptions, normalizeTablePageSize } from '@/utils/tablePreferences'
 import { setPersistedPageSize } from '@/composables/usePersistedPageSize'
+import { useMediaQuery } from '@vueuse/core'
 
 const i18n = useI18n()
 const { t } = i18n
@@ -200,9 +202,21 @@ const pageSizeSelectOptions = computed(() => {
 
 const jumpPage = ref('')
 
+/**
+ * Pages shown either side of the current one in the wide row: 2, fewer where the row is too narrow for them (an iPad
+ * at 1024px with thousands of pages), down to 0 (first, current, last).
+ */
+const siblings = ref(2)
+/** Even with none either side the pages do not fit beside the range: they take a line of their own. */
+const wrapRow = ref(false)
+const wideRef = ref<HTMLElement | null>(null)
+/** The row runs past its edge: its range and page size keep one line and their width, so a tight row overflows. */
+const tooTight = (row: HTMLElement) => row.scrollWidth > row.clientWidth + 1
+
 const visiblePages = computed(() => {
   const pages: (number | string)[] = []
-  const maxVisible = 7
+  const around = siblings.value
+  const maxVisible = around * 2 + 3
   const total = totalPages.value
 
   if (total <= maxVisible) {
@@ -214,8 +228,8 @@ const visiblePages = computed(() => {
     // Always show first page
     pages.push(1)
 
-    const start = Math.max(2, props.page - 2)
-    const end = Math.min(total - 1, props.page + 2)
+    const start = Math.max(2, props.page - around)
+    const end = Math.min(total - 1, props.page + around)
 
     // Add ellipsis before if needed
     if (start > 2) {
@@ -238,6 +252,53 @@ const visiblePages = computed(() => {
 
   return pages
 })
+
+/** Shows as many pages around the current one as the wide row holds without running past its edge. */
+let fitting = false
+let fitAgain = false
+async function fitPages() {
+  if (fitting) {
+    fitAgain = true
+    return
+  }
+  fitting = true
+  try {
+    do {
+      fitAgain = false
+      siblings.value = 2
+      wrapRow.value = false
+      await nextTick()
+      const row = wideRef.value
+      // Hidden below 1024px (the narrow row shows no page buttons).
+      if (!row || !row.clientWidth) continue
+      while (siblings.value > 0 && tooTight(row)) {
+        siblings.value--
+        await nextTick()
+      }
+      if (tooTight(row)) wrapRow.value = true
+    } while (fitAgain)
+  } finally {
+    fitting = false
+  }
+}
+// Touch sizes and wraps the row differently (the styles' own query): a change of pointer refits too.
+const coarse = useMediaQuery('(pointer: coarse)')
+watch(() => [props.page, props.total, props.pageSize, coarse.value], () => { void fitPages() }, { flush: 'post' })
+let observer: ResizeObserver | null = null
+let lastWidth = -1
+onMounted(() => {
+  void fitPages()
+  if (typeof ResizeObserver === 'undefined' || !wideRef.value?.parentElement) return
+  // Its width only: fewer pages can change the row's height (a line of its own on touch), which must not refit.
+  observer = new ResizeObserver(([entry]) => {
+    const width = Math.round(entry.contentRect.width)
+    if (width === lastWidth) return
+    lastWidth = width
+    void fitPages()
+  })
+  observer.observe(wideRef.value.parentElement)
+})
+onBeforeUnmount(() => observer?.disconnect())
 
 const goToPage = (newPage: number) => {
   if (newPage >= 1 && newPage <= totalPages.value && newPage !== props.page) {
@@ -266,6 +327,15 @@ const submitJump = () => {
 <style scoped>
 .page-size-select :deep(.select-trigger) {
   @apply px-3 py-1.5 text-sm;
+}
+/* Too narrow for the pages even with none either side of the current one (1024px, thousands of pages): they take a
+   line of their own, on the right. Touch does so first (below). */
+.pager-wide--wrap {
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.pager-wide--wrap > .pager-nav {
+  margin-left: auto;
 }
 /* Touch (pointer: coarse, mobile list plan): every control 40px to hit and 8px apart, so the page buttons part from
    their joined group; the jump field takes 16px type (no zoom on focus). Where a long run of pages does not fit beside

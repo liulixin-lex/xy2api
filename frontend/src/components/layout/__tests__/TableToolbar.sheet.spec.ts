@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { h, nextTick } from 'vue'
 
 import TableToolbar from '../TableToolbar.vue'
@@ -34,6 +37,7 @@ afterEach(() => {
   width = 1440
 })
 afterAll(() => { window.matchMedia = original })
+enableAutoUnmount(afterEach)
 
 const slots = {
   info: () => h('span', '20+ items'),
@@ -44,9 +48,10 @@ const slots = {
 const mountAt = (at: number, props: Record<string, unknown> = {}, extra: Record<string, () => unknown> = {}) => {
   width = at
   return mount(TableToolbar, {
+    attachTo: document.body,
     props: { compact: true, filterSheet: true, filterCount: 2, ...props },
     slots: { ...slots, ...extra },
-    global: { stubs: { Icon: true, BottomSheet: { props: ['show'], template: '<div v-if="show" data-test="sheet"><slot /></div>' } } }
+    global: { stubs: { Icon: true, BottomSheet: { props: ['show', 'testId'], template: '<div v-if="show" role="dialog"><div :data-test="testId"><slot /></div><slot name="footer" /></div>' } } }
   })
 }
 
@@ -101,3 +106,66 @@ describe('TableToolbar phone first row', () => {
     }
   })
 })
+
+describe('TableToolbar keeps the focus across its switch', () => {
+  const fields = {
+    sheet: () => [h('label', { 'data-filter': 'model' }, [h('input', { 'data-test': 'sheet-model' })]), h('input', { 'data-filter': 'status', 'data-test': 'sheet-status' })],
+    filters: () => h('div', [h('button', { type: 'button', 'data-filter': 'model', 'data-test': 'inline-model' }), h('button', { type: 'button', 'data-filter': 'status', 'data-test': 'inline-status' })])
+  }
+  const active = () => (document.activeElement as HTMLElement | null)?.dataset.test
+
+  it('moves from a sheet field to its inline twin when the sheet closes at 1024px', async () => {
+    const wrapper = mountAt(1023, { sheetBelow: 'desktop' }, fields)
+    await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+    ;(wrapper.get('[data-test="sheet-status"]').element as HTMLElement).focus()
+    setWidth(1024)
+    await flushPromises()
+    expect(active()).toBe('inline-status')
+    wrapper.unmount()
+  })
+
+  it('moves to the first inline filter when the focused field has no twin, and to "Filters" going back', async () => {
+    const wrapper = mountAt(1023, { sheetBelow: 'desktop' }, { ...fields, sheet: () => h('input', { 'data-test': 'sheet-other' }) })
+    await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+    ;(wrapper.get('[data-test="sheet-other"]').element as HTMLElement).focus()
+    setWidth(1100)
+    await flushPromises()
+    expect(active()).toBe('inline-model')
+    setWidth(900)
+    await flushPromises()
+    expect(active()).toBe('toolbar-filter-button')
+    wrapper.unmount()
+  })
+
+  it('moves from the sheet footer to the first inline filter', async () => {
+    const wrapper = mountAt(1023, { sheetBelow: 'desktop' }, fields)
+    await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+    ;(wrapper.get('[data-test="filter-sheet-done"]').element as HTMLElement).focus()
+    setWidth(1024)
+    await flushPromises()
+    expect(active()).toBe('inline-model')
+  })
+
+  it('leaves the focus alone when it was not in the toolbar', async () => {
+    const outside = document.body.appendChild(Object.assign(document.createElement('button'), { type: 'button' }))
+    outside.dataset.test = 'outside'
+    const wrapper = mountAt(1023, { sheetBelow: 'desktop' }, fields)
+    outside.focus()
+    setWidth(1024)
+    await flushPromises()
+    expect(active()).toBe('outside')
+    wrapper.unmount()
+    outside.remove()
+  })
+})
+
+// Astra post-acceptance review #2: at 320px the merged info row put "Filters" over the live status. The row wraps and
+// the actions take the next line, on the right (measured in Chrome; jsdom lays nothing out).
+describe('TableToolbar phone info row', () => {
+  it('wraps, the actions to a line of their own on the right, wrapping within it if they must', () => {
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../TableToolbar.vue'), 'utf8')
+    expect(source).toMatch(/\.table-toolbar--phone \.table-toolbar__info-row \{\s*display: flex;\s*flex-wrap: wrap;/)
+    expect(source).toMatch(/\.table-toolbar--phone \.table-toolbar__actions \{\s*flex: 0 1 auto;\s*flex-wrap: wrap;\s*margin-left: auto;/)
+  })
+})
+

@@ -45,4 +45,16 @@ describe('AppHeader page title on narrow screens', () => {
     expect(source).toContain('class="dropdown user-menu right-0 mt-2 w-56"')
     expect(source).toMatch(/\.user-menu \{\s*max-height: calc\(100vh - 72px\);\s*max-height: calc\(100dvh - 72px\);\s*overflow-y: auto;\s*overscroll-behavior: contain;/)
   })
+
+  // Astra post-acceptance review #1: at 360px with 40px buttons the menu button and the search overlapped, and the
+  // title had no room from 390px down. Below 768px the secondary entries sit in the user menu.
+  it('folds the search, the model plaza and the subscriptions into the user menu below 768px, the docs below 640px', () => {
+    expect(source).toMatch(/class="header-hit hidden [^"]* md:flex"\s*:title="`\$\{t\('commandPalette\.open'\)\}/)
+    expect(source).toMatch(/:aria-label="t\('nav\.modelPlaza'\)"\s*class="header-hit hidden [^"]* md:flex"/)
+    expect(source).toContain('<SubscriptionProgressMini v-if="user && subscriptionFeatureEnabled" class="hidden md:block" />')
+    expect(source).toContain('class="dropdown-item w-full md:hidden" data-test="menu-search" @click="closeDropdown(); openPalette()"')
+    expect(source).toMatch(/v-if="modelPlazaEnabled"[^>]*class="dropdown-item md:hidden" data-test="menu-model-plaza"/)
+    expect(source).toMatch(/v-if="subscriptionFeatureEnabled && hasActiveSubscriptions" to="\/subscriptions" class="dropdown-item md:hidden"/)
+    expect(source).toMatch(/v-if="docUrl"[^>]*class="dropdown-item sm:hidden" data-test="menu-docs"/)
+  })
 })

@@ -1,7 +1,7 @@
 <template>
   <!-- filterSheet below 768px (`sheetBelow` 'tablet') or 1024px ('desktop'): the phone toolbar (mobile list plan,
        item 15). Without #search and #create it has no first row: "Filters" leads the info row's actions. -->
-  <div v-if="phoneSheet" class="table-toolbar table-toolbar--compact table-toolbar--phone" data-test="table-toolbar-phone">
+  <div v-if="phoneSheet" ref="phoneRef" class="table-toolbar table-toolbar--compact table-toolbar--phone" data-test="table-toolbar-phone">
     <div v-if="$slots.search || $slots.create" class="table-toolbar__row" data-test="toolbar-first-row">
       <div v-if="$slots.search" class="table-toolbar__search"><slot name="search" /></div>
       <button v-if="$slots.sheet" v-bind="sheetButton" @click="sheetOpen = true">
@@ -37,7 +37,7 @@
       </template>
     </BottomSheet>
   </div>
-  <div v-else class="table-toolbar" :class="{ 'table-toolbar--compact': compact, 'table-toolbar--sheet': filterSheet }">
+  <div v-else ref="rowRef" class="table-toolbar" :class="{ 'table-toolbar--compact': compact, 'table-toolbar--sheet': filterSheet }">
     <div class="table-toolbar__main">
       <div v-if="$slots.search" class="table-toolbar__search"><slot name="search" /></div>
       <div v-if="filled($slots.filters)" class="table-toolbar__filters" data-test="toolbar-filters"><slot name="filters" /></div>
@@ -51,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { Comment, Fragment, Text, computed, ref, watch, type Slot, type VNode } from 'vue'
+import { Comment, Fragment, Text, computed, nextTick, ref, watch, type Slot, type VNode } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import BottomSheet from '@/components/common/BottomSheet.vue'
@@ -97,6 +97,9 @@ import { useTableViewport } from '@/composables/useTableViewport'
  *   records), so 768-1023px has no row layout; the row layout then starts at 1024px. Default 'tablet' (768px).
  * - Without #search and #create the phone toolbar has no first row: "Filters n" leads the info row's actions, 40px
  *   high like them, with the same count and name.
+ * - Crossing the width where the toolbar changes form keeps the focus: from the sheet (which closes) to the inline
+ *   field with the same `data-filter="<key>"` as the focused one (the page marks a field and its inline twin alike),
+ *   else the first inline filter, else the search; from the row to "Filters".
  */
 const props = defineProps<{
   compact?: boolean
@@ -120,8 +123,32 @@ const sheetButton = computed(() => ({
   'aria-label': props.filterCount ? t('common.table.filtersActive', { n: props.filterCount }) : t('common.table.filters'),
   'data-test': 'toolbar-filter-button'
 }))
-// The sheet belongs to the phone toolbar: leaving it (crossing 768px, or 1024px with 'desktop') closes it.
-watch(phoneSheet, (on) => { if (!on) sheetOpen.value = false })
+const phoneRef = ref<HTMLElement | null>(null)
+const rowRef = ref<HTMLElement | null>(null)
+const FOCUSABLE = 'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+const firstFocusable = (el: Element | null | undefined) => (el ? ((el.matches(FOCUSABLE) ? el : el.querySelector(FOCUSABLE)) as HTMLElement | null) : null)
+/** The row's field for a sheet field: the same `data-filter`, else the first inline filter, else the search. */
+function inlineTwin(key: string | undefined) {
+  const row = rowRef.value
+  if (!row) return null
+  const same = key ? row.querySelector(`[data-filter=${JSON.stringify(key)}]`) : null
+  return firstFocusable(same) ?? firstFocusable(row.querySelector('.table-toolbar__filters')) ?? firstFocusable(row.querySelector('.table-toolbar__search'))
+}
+// The sheet belongs to the phone toolbar: leaving it (crossing 768px, or 1024px with 'desktop') closes it. The switch
+// removes the focused field, so focus moves to its counterpart instead of falling to the page (Astra review, 5).
+watch(phoneSheet, async (on) => {
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  const before = on ? rowRef.value : phoneRef.value
+  // In the sheet: its fields, or its header and footer (the dialog around them).
+  const inSheet = !!active?.closest('[role="dialog"]')?.querySelector('[data-test="filter-sheet"]')
+  const held = !!active && (inSheet || !!before?.contains(active))
+  const key = active?.closest<HTMLElement>('[data-filter]')?.dataset.filter
+  if (!on) sheetOpen.value = false
+  if (!held) return
+  await nextTick()
+  const target = on ? phoneRef.value?.querySelector<HTMLElement>('[data-test="toolbar-filter-button"]') : inlineTwin(key)
+  target?.focus()
+}, { flush: 'pre' })
 defineExpose({ openSheet: () => { sheetOpen.value = true }, closeSheet: () => { sheetOpen.value = false } })
 
 /**
@@ -459,6 +486,7 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
 }
 .table-toolbar--phone .table-toolbar__info-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -478,9 +506,12 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
 .table-toolbar--phone .table-toolbar__sep {
   color: var(--color-text-muted);
 }
+/* When the info and the actions ("Filters" among them) do not fit one line, the actions take the next one, on the
+   right, and wrap within it if they must: nothing overlaps, every target keeps its 8px. */
 .table-toolbar--phone .table-toolbar__actions {
-  flex: none;
-  flex-wrap: nowrap;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 .table-toolbar__sheet-btn {
   gap: 6px;
