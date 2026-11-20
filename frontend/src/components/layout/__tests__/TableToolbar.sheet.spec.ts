@@ -52,7 +52,7 @@ const mountAt = (at: number, props: Record<string, unknown> = {}, extra: Record<
     attachTo: document.body,
     props: { compact: true, filterSheet: true, filterCount: 2, ...props },
     slots: { ...slots, ...extra },
-    global: { stubs: { Icon: true, BottomSheet: { props: ['show', 'testId'], template: '<div v-if="show" role="dialog"><div :data-test="testId"><slot /></div><slot name="footer" /></div>' } } }
+    global: { stubs: { Icon: true, BottomSheet: { props: ['show', 'testId'], template: '<div v-if="show" role="dialog"><div class="sheet-panel" tabindex="-1" :data-test="testId"><slot /></div><slot name="footer" /></div>' } } }
   })
 }
 
@@ -166,6 +166,27 @@ describe('TableToolbar keeps the focus across its switch', () => {
     setWidth(1024)
     await flushPromises()
     expect(active()).toBe('inline-model')
+  })
+
+  // Safari: pressing the Select does not focus it, so its list's opener is the sheet's panel (focused on opening).
+  it('moves from an open Select opened by a press that did not focus it, to its inline twin', async () => {
+    const options = Array.from({ length: 8 }, (_, i) => ({ value: i, label: `model ${i}` }))
+    const wrapper = mountAt(1023, { sheetBelow: 'desktop' }, {
+      ...fields,
+      // The Select is the second filter, so the first-filter fallback would land elsewhere.
+      sheet: () => [h('input', { 'data-filter': 'model', 'data-test': 'sheet-model' }), h('div', { 'data-filter': 'status' }, [h(Select, { modelValue: 0, options, searchable: true })])]
+    })
+    await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+    const panel = wrapper.get('.sheet-panel').element as HTMLElement
+    panel.focus()
+    // The press opens the list without focusing the trigger: the panel holds focus as the list opens (its opener).
+    expect(document.activeElement).toBe(panel)
+    await wrapper.get('.select-trigger').trigger('click')
+    await flushPromises()
+    document.querySelector<HTMLInputElement>('.select-dropdown-portal input[type="text"]')!.focus()
+    setWidth(1024)
+    await flushPromises()
+    expect(active()).toBe('inline-status')
   })
 
   it('leaves the focus alone when it was not in the toolbar', async () => {
