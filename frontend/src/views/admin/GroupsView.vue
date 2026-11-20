@@ -60,31 +60,37 @@
               v-model="filters.platform"
               size="sm"
               :options="platformFilterOptions"
-              :placeholder="t('admin.groups.allPlatforms')"
+              :aria-label="t('admin.groups.columns.platform')"
               data-filter="platform"
               class="table-toolbar__filter"
               @change="applyGroupFilters"
-            />
+            >
+              <template #selected="{ option }">{{ option && option.value !== '' ? option.label : t('admin.groups.columns.platform') }}</template>
+            </Select>
             <Select
               v-model="filters.status"
               size="sm"
               :options="statusOptions"
-              :placeholder="t('admin.groups.allStatus')"
+              :aria-label="t('admin.groups.columns.status')"
               data-filter="status"
               class="table-toolbar__filter"
               @change="applyGroupFilters"
-            />
+            >
+              <template #selected="{ option }">{{ option && option.value !== '' ? option.label : t('admin.groups.columns.status') }}</template>
+            </Select>
             <Select
               v-if="!authStore.isSimpleMode"
               v-model="filters.is_exclusive"
               size="sm"
               :options="exclusiveOptions"
-              :placeholder="t('admin.groups.allGroups')"
+              :aria-label="t('admin.groups.columns.type')"
               data-filter="is_exclusive"
               class="table-toolbar__filter"
               @change="applyGroupFilters"
-            />
-            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" size="sm" data-filter="group_category" class="table-toolbar__filter" @change="applyGroupFilters" />
+            >
+              <template #selected="{ option }">{{ option && option.value !== '' ? option.label : t('admin.groups.columns.type') }}</template>
+            </Select>
+            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" size="sm" :field-label="t('admin.groupCategories.column')" data-filter="group_category" class="table-toolbar__filter" @change="applyGroupFilters" />
           </template>
 
           <template #actions>
