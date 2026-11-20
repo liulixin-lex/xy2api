@@ -44,3 +44,28 @@ describe('TableToolbar below 1024px', () => {
     expect(narrow).toMatch(/\n {2}:where\(\.table-toolbar:not\(\.table-toolbar--sheet\)\) \.table-toolbar__main \{\s*flex: none;\s*\}/)
   })
 })
+
+// Mobile list plan, item 15: the sideways filter row below 1024px fades out at an edge with more filters past it.
+describe('TableToolbar filter row fade', () => {
+  it('fades the edges that have filters past them, following the scroll', async () => {
+    const wrapper = mount(TableToolbar, { slots: { filters: () => h('div', { class: 'f' }, 'filters') }, attachTo: document.body })
+    const row = wrapper.get('[data-test="toolbar-filters"]')
+    const el = row.element as HTMLElement
+    Object.defineProperty(el, 'clientWidth', { configurable: true, value: 300 })
+    Object.defineProperty(el, 'scrollWidth', { configurable: true, value: 700 })
+    el.scrollLeft = 0
+    await row.trigger('scroll')
+    expect(row.classes()).toEqual(expect.arrayContaining(['is-fade-end']))
+    expect(row.classes()).not.toContain('is-fade-start')
+    el.scrollLeft = 200
+    await row.trigger('scroll')
+    expect(row.classes()).toEqual(expect.arrayContaining(['is-fade-start', 'is-fade-end']))
+    el.scrollLeft = 400
+    await row.trigger('scroll')
+    expect(row.classes()).toContain('is-fade-start')
+    expect(row.classes()).not.toContain('is-fade-end')
+    expect(source).toMatch(/\.table-toolbar__filters\.is-fade-start \{\s*-webkit-mask-image: linear-gradient\(to right, transparent, #000 24px\);/)
+    wrapper.unmount()
+  })
+})
+

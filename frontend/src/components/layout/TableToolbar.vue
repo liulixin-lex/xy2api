@@ -40,7 +40,14 @@
   <div v-else ref="rowRef" class="table-toolbar" :class="{ 'table-toolbar--compact': compact, 'table-toolbar--sheet': filterSheet }">
     <div class="table-toolbar__main">
       <div v-if="$slots.search" class="table-toolbar__search"><slot name="search" /></div>
-      <div v-if="filled($slots.filters)" class="table-toolbar__filters" data-test="toolbar-filters"><slot name="filters" /></div>
+      <div
+        v-if="filled($slots.filters)"
+        ref="filtersRef"
+        class="table-toolbar__filters"
+        :class="{ 'is-fade-start': fade.start, 'is-fade-end': fade.end }"
+        data-test="toolbar-filters"
+        @scroll.passive="updateFade"
+      ><slot name="filters" /></div>
     </div>
     <div class="table-toolbar__actions">
       <div v-if="$slots.status" class="table-toolbar__status"><slot name="status" /></div>
@@ -51,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { Comment, Fragment, Text, computed, nextTick, ref, watch, type Slot, type VNode } from 'vue'
+import { Comment, Fragment, Text, computed, nextTick, onBeforeUnmount, reactive, ref, watch, type Slot, type VNode } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import BottomSheet from '@/components/common/BottomSheet.vue'
@@ -127,6 +134,29 @@ const sheetButton = computed(() => ({
 }))
 const phoneRef = ref<HTMLElement | null>(null)
 const rowRef = ref<HTMLElement | null>(null)
+
+/**
+ * The filter row below 1024px scrolls sideways (mobile list plan, item 15): an edge with more filters past it fades
+ * out, so the row reads as one that goes on. Measured on scroll and whenever the row or its filters change size.
+ */
+const filtersRef = ref<HTMLElement | null>(null)
+const fade = reactive({ start: false, end: false })
+const updateFade = () => {
+  const row = filtersRef.value
+  fade.start = !!row && row.scrollLeft > 1
+  fade.end = !!row && row.scrollLeft + row.clientWidth < row.scrollWidth - 1
+}
+let fadeObserver: ResizeObserver | null = null
+watch(filtersRef, (row) => {
+  fadeObserver?.disconnect()
+  fadeObserver = null
+  updateFade()
+  if (!row || typeof ResizeObserver === 'undefined') return
+  fadeObserver = new ResizeObserver(updateFade)
+  fadeObserver.observe(row)
+  Array.from(row.children).forEach((child) => fadeObserver!.observe(child))
+}, { flush: 'post' })
+onBeforeUnmount(() => fadeObserver?.disconnect())
 const FOCUSABLE = 'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
 const firstFocusable = (el: Element | null | undefined) => (el ? ((el.matches(FOCUSABLE) ? el : el.querySelector(FOCUSABLE)) as HTMLElement | null) : null)
 /** The row's field for a sheet field: the same `data-filter`, else the first inline filter, else the search. */
@@ -402,6 +432,21 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
     margin-inline: -24px;
     padding-inline: 24px;
     scroll-padding-inline: 24px;
+  }
+}
+/* The sideways filter row fades out at an edge with more filters past it (24px, the screen's edge). */
+@media (max-width: 1023px) {
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters.is-fade-start {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 24px);
+    mask-image: linear-gradient(to right, transparent, #000 24px);
+  }
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters.is-fade-end {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  }
+  :where(.table-toolbar:not(.table-toolbar--sheet)) .table-toolbar__filters.is-fade-start.is-fade-end {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
   }
 }
 /* Compact below 1024px: the narrow layout's 40px controls; the divider goes (the row has no room for it). */
