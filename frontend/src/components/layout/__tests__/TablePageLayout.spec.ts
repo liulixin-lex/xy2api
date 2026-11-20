@@ -145,4 +145,37 @@ describe('TablePageLayout table layout: one decision for region or page scroll (
     expect(mountLayout({}).classes()).not.toContain('table-page-layout--table')
     expect(regions.at(-1)).toBe(true)
   })
+
+  // Astra re-review #1: scrolling a windowed table down grows its top spacer row (780px after 600px). Measured as a
+  // row, it read as "no room", the page switched to page scroll and back, and the list jumped to the top. Five steps
+  // of 600px down must keep the region, measured on a data row.
+  it('keeps the region while a windowed table scrolls deep: its spacer row is not a row', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
+    const Table = defineComponent({
+      setup() {
+        inject(TABLE_REGION_KEY)
+        return () => h('div', { class: 'table-wrapper' }, [h('table', [h('thead'), h('tbody', [h('tr', { 'aria-hidden': 'true', class: 'spacer' }), h('tr', { 'data-row-id': '9' })])])])
+      }
+    })
+    const wrapper = mount(TablePageLayout, { props: { tableLayout: true }, slots: { table: () => h(Table) }, attachTo: document.body })
+    const el = wrapper.element as HTMLElement
+    const box = el.querySelector('.table-wrapper') as HTMLElement
+    // 844 − 65 − 32 = 747 for the page; the toolbar and pagination take 180.
+    Object.defineProperty(el, 'offsetHeight', { configurable: true, get: () => 747 })
+    Object.defineProperty(box, 'offsetHeight', { configurable: true, get: () => 567 })
+    Object.defineProperty(box.querySelector('thead')!, 'offsetHeight', { configurable: true, get: () => 45 })
+    Object.defineProperty(box.querySelector('tr[data-row-id]')!, 'offsetHeight', { configurable: true, get: () => 78 })
+    let spacer = 0
+    Object.defineProperty(box.querySelector('tr.spacer')!, 'offsetHeight', { configurable: true, get: () => spacer })
+    const modes: boolean[] = []
+    for (let step = 1; step <= 5; step++) {
+      spacer = step * 600 + 180
+      window.dispatchEvent(new Event('resize'))
+      await nextTick()
+      modes.push(wrapper.classes().includes('table-page-layout--region'))
+    }
+    expect(modes).toEqual([true, true, true, true, true])
+    wrapper.unmount()
+  })
 })

@@ -25,8 +25,9 @@
       </div>
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown. They keep their size; below
-           1280px (a tablet, or a desktop beside the open navigation) the docs and model plaza links, the frozen amount
-           and the user's name fold to their icons, the balance and the avatar, so the page's name keeps its room. -->
+           1440px (a tablet, or a desktop beside the open navigation) the docs and model plaza links and the frozen amount
+           fold to their icons and the balance, below 1280px the user's name to the avatar, so the page's name keeps its
+           room. -->
       <div class="flex shrink-0 items-center gap-1 sm:gap-3">
         <!-- Page search (Ctrl/⌘K) -->
         <button
@@ -54,7 +55,7 @@
           class="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
         >
           <Icon name="book" size="sm" />
-          <span class="hidden xl:inline">{{ t('nav.docs') }}</span>
+          <span class="hidden min-[1440px]:inline">{{ t('nav.docs') }}</span>
         </a>
 
         <!-- Model Plaza Entry (icon only below sm) -->
@@ -66,7 +67,7 @@
           class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
         >
           <Icon name="grid" size="sm" />
-          <span class="hidden xl:inline">{{ t('nav.modelPlaza') }}</span>
+          <span class="hidden min-[1440px]:inline">{{ t('nav.modelPlaza') }}</span>
         </router-link>
 
         <!-- Language Switcher -->
@@ -98,7 +99,7 @@
           </span>
           <span
             v-if="frozenBalance > 0"
-            class="hidden rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200 xl:inline"
+            class="hidden rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200 min-[1440px]:inline"
           >
             {{ balanceFrozenLabel }}
           </span>

@@ -1,7 +1,7 @@
 <template>
   <div ref="rootRef" class="today" data-test="account-today">
     <template v-for="line in lines" :key="line.key">
-      <span class="today__k" :data-label="line.key" v-tip="() => labelTip(line.key, line.label)">{{ line.label }}</span>
+      <span class="today__k" :data-label="line.key" v-tip="() => labelTip(line.key, line.label)" @click="labelTip(line.key, line.label) && showTipNow($event.currentTarget)">{{ line.label }}</span>
       <span class="today__v" :class="{ 'today__v--na': line.text === NO_VALUE }" :data-key="line.key" v-tip="line.text !== line.exact ? line.exact : ''" @click="line.text !== line.exact && showTipNow($event.currentTarget)">{{ line.text }}</span>
     </template>
   </div>
@@ -12,8 +12,9 @@
  * Today's stats (spec 7a, 7b): four lines (requests, tokens, account cost, user charge), labels left and values right.
  * Counts are compact (three significant digits, the full value in the tip; a tap shows it at once, touch has no
  * hover); amounts are exact, two decimals with thousands separators (mobile list plan: "$1,234.56", not "$1.23K").
- * A value never gives way: a label that does not fit ends in "…" (English), its tip has it whole. Before the stats are
- * in, every line reads a light "—", not 0 (7d-6).
+ * Labels are short enough to show whole beside "$99,999.99" in the column's 128px (English "Acct cost", "Charged").
+ * A value never gives way: past that a label ends in "…", and hovering or tapping it shows it whole. Before the stats
+ * are in, every line reads a light "—", not 0 (7d-6).
  */
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'

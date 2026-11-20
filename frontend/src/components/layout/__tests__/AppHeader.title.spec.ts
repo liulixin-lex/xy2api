@@ -22,10 +22,12 @@ describe('AppHeader page title on narrow screens', () => {
   })
 
   // Opus review, suggestion 8: on the user side at 768–1023px every item on the right squeezed the title to 0px.
-  it('folds the right side\'s labels below 1280px so the title keeps its room', () => {
-    expect(source).toContain(`<span class="hidden xl:inline">{{ t('nav.docs') }}</span>`)
-    expect(source).toContain(`<span class="hidden xl:inline">{{ t('nav.modelPlaza') }}</span>`)
+  // Astra re-review, suggestion: at 1280 beside the open navigation the English title still got 12px; the links and
+  // the frozen amount now fold below 1440px.
+  it('folds the right side\'s labels below 1440px and the name below 1280px so the title keeps its room', () => {
+    expect(source).toContain(`<span class="hidden min-[1440px]:inline">{{ t('nav.docs') }}</span>`)
+    expect(source).toContain(`<span class="hidden min-[1440px]:inline">{{ t('nav.modelPlaza') }}</span>`)
     expect(source).toMatch(/<div class="hidden min-w-0 max-w-\[10rem\] text-left xl:block">\s*<div class="truncate/)
-    expect(source).toMatch(/v-if="frozenBalance > 0"\s*class="hidden [^"]*xl:inline"/)
+    expect(source).toMatch(/v-if="frozenBalance > 0"\s*class="hidden [^"]*min-\[1440px\]:inline"/)
   })
 })
