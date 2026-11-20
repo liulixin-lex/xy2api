@@ -114,6 +114,7 @@
                   :gate-off="qualityMeta?.global_enabled === false && qualityMeta?.stale === false"
                   @open-quality="(groupId: number) => openQuality(row, groupId)"
                   @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
+                  @edit-groups-at="(opener: HTMLElement) => openGroupsEditorAt(row, groupsAnchor(opener) ?? opener, false, opener)"
                 />
               </div>
             </template>

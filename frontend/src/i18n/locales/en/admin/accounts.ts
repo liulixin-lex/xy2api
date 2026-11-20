@@ -36,6 +36,9 @@ export default {
           timeoutShort: 'T/O'
         },
         dotStates: { ok: 'Normal', back: 'Rear', trial: 'Trial', unknown: 'Unknown', exempt: 'Exempt', stopped: 'Stopped' },
+        groupsSheetTitle: 'Groups of {name}',
+        groupsSheetOpen: 'Groups of {name} ({n}), tap to see them',
+        groupsSheetNone: 'In no group',
         pillTip: '{name} · {state}',
         pillNoQuality: 'No quality data',
         pillBackUntil: 'back in {time}',

@@ -36,6 +36,9 @@ export default {
           timeoutShort: '超时'
         },
         dotStates: { ok: '正常', back: '后排', trial: '试用', unknown: '未知', exempt: '豁免', stopped: '停止' },
+        groupsSheetTitle: '{name} 的分组',
+        groupsSheetOpen: '{name} 的分组（{n} 个），点按查看',
+        groupsSheetNone: '未加入任何分组',
         pillTip: '{name} · {state}',
         pillNoQuality: '无质量数据',
         pillBackUntil: '{time} 后恢复',
