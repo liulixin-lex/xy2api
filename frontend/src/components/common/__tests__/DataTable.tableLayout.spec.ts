@@ -209,6 +209,23 @@ describe('DataTable layout="table" below 1024px', () => {
     expect(mount(DataTable, { props: { layout: 'table', columns, data: rows(1) } }).get('.table-wrapper').attributes('role')).toBeUndefined()
   })
 
+  // Astra second re-review #2: the page renders again (an equal new object) before it takes the click's sort.
+  it('keeps a click waiting through an equal new sort object, and stores it once the page takes it', async () => {
+    stubPhone()
+    const wrapper = mount(DataTable, {
+      props: { layout: 'table', columns, data: rows(1), rowKey: 'id', serverSideSort: true, sort: { key: 'name', order: 'asc' }, sortStorageKey: 'table-sort' }
+    })
+    await wrapper.get('[data-test="sort-name"]').trigger('click')
+    expect(wrapper.emitted('sort')).toEqual([['name', 'desc']])
+    await wrapper.setProps({ sort: { key: 'name', order: 'asc' } })
+    expect(wrapper.get('thead th').attributes('aria-sort')).toBe('ascending')
+    expect(localStorage.getItem('table-sort')).toBeNull()
+    await wrapper.setProps({ sort: { key: 'name', order: 'desc' } })
+    expect(wrapper.get('thead th').attributes('aria-sort')).toBe('descending')
+    expect(JSON.parse(localStorage.getItem('table-sort')!)).toEqual({ key: 'name', order: 'desc' })
+    localStorage.clear()
+  })
+
   it('selects only eligible rows and keeps keys from other pages', async () => {
     stubPhone()
     const wrapper = mount(DataTable, {
