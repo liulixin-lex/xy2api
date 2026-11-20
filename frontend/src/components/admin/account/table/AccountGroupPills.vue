@@ -133,7 +133,6 @@ import { iqModelLabel } from '@/components/admin/account/iqCheckPresentation'
 import { useLiveClock } from '@/composables/useLiveClock'
 import { usePointerCoarse } from '@/composables/usePointerCoarse'
 import { qualityOpenerKey } from '@/composables/useSchedLayers'
-import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 import type { Account, AdminGroup } from '@/types'
 import { anyOverlayOpen, overlaysClosed } from '@/utils/overlayStack'
 import { kindName } from '@/utils/schedQualityFormat'
@@ -147,7 +146,7 @@ const props = defineProps<{
   /** The account's groups, already in the groups page's order. */
   groups: AdminGroup[]
   /** The account's quality summary; null for accounts without quality data. */
-  quality: (AccountQualityView & Pick<BackendAccountSummary, 'ttfo'>) | null
+  quality: AccountQualityView | null
   readonly?: boolean
   /** Quality scheduling is switched off (a fresh summary's global_enabled; a stale one cannot tell): an unknown dot says so. */
   gateOff?: boolean

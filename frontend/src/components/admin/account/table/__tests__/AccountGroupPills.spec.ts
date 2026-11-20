@@ -13,13 +13,13 @@ vi.mock('vue-i18n', async () => ({
   useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key), te: () => true })
 }))
 
-type Quality = Pick<BackendAccountSummary, 'group_status' | 'stop' | 'rear' | 'trial' | 'exemptions' | 'ttfo'>
+type Quality = Pick<BackendAccountSummary, 'group_status' | 'stop' | 'rear' | 'trial' | 'exemptions'>
 const group = (id: number) => ({ id, name: `Group ${id}`, platform: 'openai', status: 'active' }) as AdminGroup
 /** Every group passing, but for the identities given (H.11: the summary's group_status). */
 const statuses = (patch: Quality['group_status'] = {}): Quality['group_status'] =>
   ({ ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [String(i + 1), 'pass' as const])), ...patch })
 const baseQuality = (patch: Partial<Quality> = {}): Quality => ({
-  group_status: statuses(), stop: null, rear: [], trial: [], exemptions: [], ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 2800, gap_p50_ms: 1600, n: 30 }, ...patch
+  group_status: statuses(), stop: null, rear: [], trial: [], exemptions: [], ...patch
 })
 const quality = baseQuality()
 const mountPills = (count: number, withQuality: Quality | boolean = true) => mount(AccountGroupPills, {
@@ -208,7 +208,7 @@ describe('AccountGroupPills', () => {
     const noTrial = mountPills(1, { ...baseQuality({ group_status: statuses({ 1: 'trial' }) }), trial: null } as never)
     expect(cardOf(noTrial.get('[data-test="group-pill-dot"]'))).toMatchObject({ chip: { text: 'admin.accounts.table.dotStates.trial' }, rows: [] })
     // Unknown may come from any line, not only first output: the tip says why and points at the panel, no TTFT count.
-    const unknown = mountPills(1, baseQuality({ group_status: statuses({ 1: 'unknown' }), ttfo: { first_event_p50_ms: null, first_output_p50_ms: null, gap_p50_ms: null, n: 12 } }))
+    const unknown = mountPills(1, baseQuality({ group_status: statuses({ 1: 'unknown' }) }))
     expect(cardOf(unknown.get('[data-test="group-pill-dot"]'))).toMatchObject({
       chip: { text: 'admin.accounts.table.dotStates.unknown', tone: 'observe' }, rows: [['admin.accounts.table.tip.reason', 'admin.accounts.table.tip.unknownWhy']]
     })

@@ -439,30 +439,29 @@ describe('SchedQualityPanel', () => {
     alone.unmount()
     backendSummary.mockClear()
     const quality = {
-      account_id: 7, reset_at: null, stop: null, rear: [], exemptions: [],
-      ttfo: { first_event_p50_ms: 1100, first_output_p50_ms: 12_300, gap_p50_ms: 11_200, n: 40 },
-      error: { n: 40, short: false, red: false, rate: 0.01 },
-      cache: { ratio: 0.4, turns: 2, all_ratio: 0.7, all_requests: 90 }
+      account_id: 7, reset_at: null, stop: null, rear: [], exemptions: [], recent_since: null,
+      first_output: { n: 40, timeouts: 3, p50_ms: 12_300 },
+      slow_10s: { n: 38, slow: 21, timeouts: 1 },
+      error: { n: 40, short: true, red: false, rate: 0.025, failed: 1 },
+      cache: { ratio: 0.4, turns: 2 }
     }
     const row = { id: 7, name: 'acc-7', platform: 'openai', type: 'oauth', quality } as never
     mount(withSchedHost(SchedQualityPanel, { row: () => row }), { attachTo: document.body, props: { account: () => row } })
     await openOn()
     expect(backendSummary).not.toHaveBeenCalled()
-    const value = (key: string) => document.querySelector(`[data-qp-recent="${key}"] .rrow__v`)!
-    // First token as the line judges it (first useful output), the first event and the gap under it; cache over the
-    // continuation turns (muted: under 20) and over every successful request (N14).
-    expect(value('ttfo').textContent).toBe('12.3s')
-    expect(value('ttfo_event').textContent).toBe('1.1s')
-    expect(document.querySelector('[data-qp-recent="ttfo_event"] .rrow__g')!.textContent).toBe('admin.schedQuality.panel.gap:{"value":"11.2s"}')
-    expect(value('cache').textContent).toBe('40%')
-    expect(value('cache').classList.contains('rrow__v--na')).toBe(true)
-    expect(value('cache_all').textContent).toBe('70%')
-    expect(value('cache_all').classList.contains('rrow__v--na')).toBe(false)
-    // The whole account's value beside the strictest groups' threshold: no "over the line", no amber, a note that the
-    // threshold judges per group and model (7k-1).
-    expect(value('ttfo').className).toBe('rrow__v')
-    expect(document.querySelector('[data-qp-recent="ttfo"] .rrow__g')!.textContent).toBe('admin.schedQuality.panel.threshold:{"value":"≤ 10.0s"}')
-    expect(document.querySelector('[data-test="qp-threshold-note"]')!.textContent).toBe('admin.schedQuality.panel.thresholdNote')
+    // The recent cell's four rows with their samples (muted under the sample minimum), and nothing beside them to
+    // compare with: no strictest threshold, no note on one (7k-1).
+    const rows = Array.from(document.querySelectorAll('[data-qp-section="recent"] .rrow:not([data-qp-recent="ratio"])'), (el) => [
+      el.getAttribute('data-qp-recent'), ...Array.from(el.children, (child) => `${child.textContent}${child.classList.contains('rrow__v--na') ? ' (muted)' : ''}`)
+    ])
+    const tooFew = (note: string) => `admin.accounts.table.tip.tooFew:${JSON.stringify({ note })}`
+    expect(rows).toEqual([
+      ['ttfo', 'admin.accounts.table.recent.firstOutput', '12.3s', 'admin.accounts.table.tip.count:{"n":40}'],
+      ['slow', 'admin.accounts.table.recent.slow', '55%', 'admin.accounts.table.tip.slowTimeouts:{"n":21,"timeouts":1}'],
+      ['error', 'admin.accounts.table.dims.error', '2.5% (muted)', tooFew('admin.accounts.table.tip.failed:{"failed":1,"n":40}')],
+      ['cache', 'admin.accounts.table.recent.cacheTurns', '40% (muted)', tooFew('admin.accounts.table.tip.turns:{"n":2}')]
+    ])
+    expect(document.querySelector('[data-test="qp-threshold-note"]')).toBeNull()
   })
 
   it('shows each line\'s identity: unknown in grey with 证据不够, trial with its time left, rear with its stay and end', async () => {
