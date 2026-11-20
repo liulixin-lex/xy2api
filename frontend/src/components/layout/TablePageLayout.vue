@@ -1,5 +1,12 @@
 <template>
-  <div class="table-page-layout" :class="{ 'mobile-mode': isMobile }">
+  <div
+    class="table-page-layout"
+    :class="{
+      'mobile-mode': isMobile && !tableLayout,
+      'table-page-layout--table': tableLayout,
+      'table-page-layout--region': tableLayout && isMobile && region
+    }"
+  >
     <!-- 固定区域：操作按钮 -->
     <div v-if="$slots.actions" class="layout-section-fixed">
       <slot name="actions" />
@@ -25,22 +32,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, provide } from 'vue'
+import { useShortViewport, useTableViewport } from '@/composables/useTableViewport'
+import { TABLE_REGION_KEY } from './tableRegion'
 
-const isMobile = ref(false)
+const props = defineProps<{
+  /**
+   * The table layout below 1024px (mobile list plan; with DataTable `layout="table"`): the table keeps its card frame
+   * on a tablet and runs edge to edge on a phone, and the page fills the visible height, the toolbar and pagination
+   * at their own height and the table region the rest, scrolling both ways under its sticky header. Below 500px of
+   * visible height the whole page scrolls instead.
+   */
+  tableLayout?: boolean
+  /** With `tableLayout`: the whole page scrolls below 1024px, never the table region on its own. */
+  pageScroll?: boolean
+}>()
 
-const checkMobile = () => {
-  isMobile.value = window.innerWidth < 1024
-}
-
-onMounted(() => {
-  checkMobile()
-  window.addEventListener('resize', checkMobile)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', checkMobile)
-})
+const { desktop } = useTableViewport()
+const isMobile = computed(() => !desktop.value)
+const short = useShortViewport()
+/** Below 1024px the table region is bounded (and windows its rows) only in the table layout, on a tall enough screen. */
+const region = computed(() => !props.pageScroll && !short.value)
+provide(TABLE_REGION_KEY, computed(() => desktop.value || (!!props.tableLayout && region.value)))
 </script>
 
 <style scoped>
@@ -98,6 +111,37 @@ onUnmounted(() => {
 
 .table-scroll-container :deep(td) {
   @apply px-5 py-4 text-sm text-fg-primary border-b border-line-row;
+}
+
+/* The table layout below 1024px (mobile list plan). Sections 12px apart. In the bounded region the page is the
+   visible height less the header (64px and its 1px border) and main's padding (16px, 24px from 768px): dvh follows
+   the browser's address bar, vh is the fallback. The table region alone scrolls; nothing outside it does. */
+@media (max-width: 1023px) {
+  .table-page-layout--table {
+    gap: 12px;
+  }
+  .table-page-layout--table:not(.table-page-layout--region) .layout-section-scrollable {
+    flex: none;
+  }
+  .table-page-layout--region {
+    height: calc(100vh - 65px - 2rem);
+    height: calc(100dvh - 65px - 2rem);
+  }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  .table-page-layout--region {
+    height: calc(100vh - 65px - 3rem);
+    height: calc(100dvh - 65px - 3rem);
+  }
+}
+/* A phone: the table runs to the screen's edges, without the card's rounded frame. */
+@media (max-width: 767px) {
+  .table-page-layout--table .table-scroll-container {
+    margin-inline: -16px;
+    border-inline: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
 }
 
 /* 移动端：恢复正常滚动；各区之间按原型收紧到 12px */
