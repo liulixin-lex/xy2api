@@ -16,8 +16,8 @@
               <input
                 v-model="searchQuery"
                 type="text"
-                :placeholder="t('admin.users.searchUsers')"
-                class="table-toolbar__input"
+                :placeholder="t('admin.users.searchUsersShort')"
+                class="table-toolbar__input users-search"
                 @input="handleSearch"
               />
             </label>
@@ -335,9 +335,9 @@
                 </button>
               </div>
             </div>
-            <span v-if="canManage" class="table-toolbar__divider" aria-hidden="true"></span>
+            <span v-if="canManage && !phone" class="table-toolbar__divider" aria-hidden="true"></span>
             <button
-              v-if="canManage"
+              v-if="canManage && !phone"
               type="button"
               @click="showAttributesModal = true"
               class="table-toolbar__btn table-toolbar__btn--secondary"
@@ -349,22 +349,24 @@
             </button>
 
             <!-- The four bulk actions in one menu (12.9-5), disabled until a row is ticked, the count on the button in a
-                 slot that keeps its width: ticking rows changes neither the toolbar's rows nor the table's place. -->
+                 slot that keeps its width: ticking rows changes neither the toolbar's rows nor the table's place. On a
+                 phone (mobile list plan, "N 条 · ● 实时 [刷新][列][⋯]") the button is "⋯", always open-able, and its
+                 menu starts with the attributes config; the bulk items stay disabled until a row is ticked. -->
             <div v-if="canManage" ref="bulkRootRef" class="relative">
               <button
                 ref="bulkButtonRef"
                 type="button"
                 class="table-toolbar__btn table-toolbar__btn--secondary users-bulk"
-                data-test="bulk-actions"
-                :disabled="selectedCount === 0"
+                :data-test="phone ? 'users-tools' : 'bulk-actions'"
+                :disabled="!phone && selectedCount === 0"
                 aria-haspopup="menu"
                 :aria-expanded="bulkMenuOpen ? 'true' : 'false'"
-                :aria-label="t('admin.users.bulkActions')"
-                v-tip="selectedCount ? t('admin.users.bulkLimits.selectedCount', { count: selectedCount }) : t('admin.users.bulkActions')"
+                :aria-label="phone ? t('admin.users.moreActions') : t('admin.users.bulkActions')"
+                v-tip="selectedCount ? t('admin.users.bulkLimits.selectedCount', { count: selectedCount }) : phone ? t('admin.users.moreActions') : t('admin.users.bulkActions')"
                 @click="bulkMenuOpen = !bulkMenuOpen"
               >
-                <Icon name="users" size="sm" />
-                <span class="table-toolbar__label">{{ t('admin.users.bulkActions') }}</span>
+                <Icon :name="phone ? 'more' : 'users'" size="sm" />
+                <span class="table-toolbar__label">{{ phone ? t('admin.users.moreActions') : t('admin.users.bulkActions') }}</span>
                 <span class="users-bulk__count" :class="{ 'is-empty': selectedCount === 0 }" data-test="bulk-count">{{ selectedCount || '' }}</span>
                 <Icon name="chevronDown" size="xs" class="users-bulk__chevron" />
               </button>
@@ -376,17 +378,26 @@
                 :style="{ zIndex: bulkMenuLayer.zIndex.value }"
                 data-test="bulk-menu"
               >
-                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-edit-limits" @click="bulkMenuOpen = false; showBulkEditModal = true">
+                <template v-if="phone">
+                  <button type="button" role="menuitem" :class="BULK_ITEM" data-test="tools-attributes" @click="bulkMenuOpen = false; showAttributesModal = true">
+                    {{ t('admin.users.attributes.configButton') }}
+                  </button>
+                  <div class="my-1 border-t border-line-popover" role="separator"></div>
+                  <p class="px-4 text-xs text-gray-500 dark:text-gray-400" data-test="tools-bulk-caption">
+                    {{ selectedCount ? t('admin.users.bulkSelected', { count: selectedCount }) : t('admin.users.bulkNoneSelected') }}
+                  </p>
+                </template>
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-edit-limits" :disabled="selectedCount === 0" @click="bulkMenuOpen = false; showBulkEditModal = true">
                   {{ t('admin.users.bulkLimits.label') }}
                 </button>
-                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-enable-users" :disabled="bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('active')">
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-enable-users" :disabled="selectedCount === 0 || bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('active')">
                   {{ t('admin.users.enable') }}
                 </button>
-                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-disable-users" :disabled="bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('disabled')">
+                <button type="button" role="menuitem" :class="BULK_ITEM" data-test="bulk-disable-users" :disabled="selectedCount === 0 || bulkStatusUpdating" @click="bulkMenuOpen = false; openBulkStatus('disabled')">
                   {{ t('admin.users.disable') }}
                 </button>
-                <div class="my-1 border-t border-line-popover"></div>
-                <button type="button" role="menuitem" :class="[BULK_ITEM, BULK_DANGER]" data-test="bulk-delete-users" :disabled="bulkDeleting" @click="bulkMenuOpen = false; bulkDeleteIds = [...selectedIds]">
+                <div class="my-1 border-t border-line-popover" role="separator"></div>
+                <button type="button" role="menuitem" :class="[BULK_ITEM, BULK_DANGER]" data-test="bulk-delete-users" :disabled="selectedCount === 0 || bulkDeleting" @click="bulkMenuOpen = false; bulkDeleteIds = [...selectedIds]">
                   {{ t('common.delete') }}
                 </button>
               </div>
@@ -1705,8 +1716,10 @@ const bulkMenuLayer = useOverlayLayer(bulkMenuOpen, {
   },
   onCovered: () => { bulkMenuOpen.value = false }
 })
-watch(selectedCount, (count) => {
-  if (count === 0) bulkMenuOpen.value = false
+// The phone's "⋯" menu holds the attributes config too and stays open with nothing ticked, its bulk items disabled.
+// Wider, or on leaving the phone layout, nothing ticked closes it: the wide bulk button is disabled then and could not.
+watch([selectedCount, phone], ([count, isPhone]) => {
+  if (count === 0 && !isPhone) bulkMenuOpen.value = false
 })
 const userRowClass = (row: LiveUser) =>
   liveUsers.transitioning.value || liveUsers.isDimmed(row.id) ? 'opacity-60' : undefined
@@ -2405,6 +2418,25 @@ onUnmounted(() => {
 .dense-cells :deep(tbody td) {
   padding-right: var(--cell-pad-x);
   padding-left: var(--cell-pad-x);
+}
+/* The search hint is the short one at every width (the full text stays the field's name): the field is at most 220px,
+   178px for text, and the full hint (209px in Chinese at the desktop's 13px, 273px in English) was cut even at 1440.
+   The short one is 159px at the field's 13px; with touch, where the field is 16px, it is 14px (171px), and on a phone,
+   where the field has 151px at 390 beside "筛选" and "添加", 12px (147px; 133px in English). Narrower (an iPad in
+   landscape, whose actions leave the field 176px) it ends in an ellipsis. Only the hint shrinks: typed text stays
+   16px on touch, so the browser does not zoom in. */
+.users-search {
+  text-overflow: ellipsis;
+}
+@media (pointer: coarse) {
+  .users-search::placeholder {
+    font-size: 14px;
+  }
+}
+@media (max-width: 767px) {
+  .users-search::placeholder {
+    font-size: 12px;
+  }
 }
 /* The bulk menu's button (12.9-5): the count in a slot as wide as three digits, empty until a row is ticked, so the
    button keeps its width; below 1024px a badge on the corner of the 40px square, the chevron gone. */

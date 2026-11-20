@@ -93,4 +93,39 @@ describe('DateRangePicker', () => {
       }
     ])
   })
+
+  // A 320px phone: the dropdown (at most the screen less 8px each side) moves left to keep 8px from the right edge.
+  it('keeps its dropdown on screen with an 8px margin', async () => {
+    const width = vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(320)
+    const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(304)
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 100 } as DOMRect)
+    try {
+      const today = formatLocalDate(new Date())
+      const wrapper = mount(DateRangePicker, {
+        props: { startDate: today, endDate: today },
+        global: { stubs: { Icon: true } }
+      })
+      await wrapper.get('.date-picker-trigger').trigger('click')
+      // 100 + 304 runs 92px past 312 (320 less 8).
+      expect(wrapper.get('.date-picker-dropdown').attributes('style')).toContain('left: -92px')
+
+      // Never past 8px from the left edge: a trigger at 16px moves 8px at most.
+      await wrapper.get('.date-picker-trigger').trigger('click')
+      rect.mockReturnValue({ left: 16 } as DOMRect)
+      offset.mockReturnValue(320)
+      await wrapper.get('.date-picker-trigger').trigger('click')
+      expect(wrapper.get('.date-picker-dropdown').attributes('style')).toContain('left: -8px')
+
+      // Room enough: where it was.
+      await wrapper.get('.date-picker-trigger').trigger('click')
+      width.mockReturnValue(1440)
+      await wrapper.get('.date-picker-trigger').trigger('click')
+      expect(wrapper.get('.date-picker-dropdown').attributes('style')).toBeUndefined()
+      wrapper.unmount()
+    } finally {
+      width.mockRestore()
+      offset.mockRestore()
+      rect.mockRestore()
+    }
+  })
 })

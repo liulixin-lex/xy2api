@@ -508,6 +508,9 @@ export default {
     // Users
     users: {
       bulkActions: 'Bulk actions',
+      moreActions: 'More actions',
+      bulkSelected: 'Bulk actions · {count} selected',
+      bulkNoneSelected: 'Select users for bulk actions',
       title: 'User Management',
       description: 'Manage users and their permissions',
       liveDetail: 'balance and concurrency every 10 s, usage every 30 s',
@@ -553,6 +556,7 @@ export default {
       deleteConfirmMessage: "Are you sure you want to delete user '{email}'? This action cannot be undone.",
       searchPlaceholder: 'Search by email, username, notes, or API key...',
       searchUsers: 'Search by email, username, notes, or API key',
+      searchUsersShort: 'Email, name, notes, key',
       roleFilter: 'Role Filter',
       allRoles: 'All Roles',
       allStatus: 'All Status',

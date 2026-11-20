@@ -21,7 +21,12 @@
     </button>
 
     <Transition name="date-picker-dropdown">
-      <div v-if="isOpen" class="date-picker-dropdown">
+      <div
+        v-if="isOpen"
+        ref="dropdownRef"
+        class="date-picker-dropdown"
+        :style="dropdownShift ? { left: `${dropdownShift}px` } : undefined"
+      >
         <!-- Quick presets -->
         <div class="date-picker-presets">
           <button
@@ -260,6 +265,25 @@ const toggle = () => {
   isOpen.value = !isOpen.value
 }
 
+// On a narrow phone (320px), or with the trigger near the right edge, the dropdown would run off the screen. It is at
+// most the viewport less 8px each side (CSS), and moves left until it keeps 8px from the right edge, never past 8px
+// from the left one.
+const DROPDOWN_MARGIN = 8
+const dropdownRef = ref<HTMLElement | null>(null)
+const dropdownShift = ref(0)
+const fitDropdown = () => {
+  const container = containerRef.value
+  const dropdown = dropdownRef.value
+  if (!container || !dropdown) return
+  const left = container.getBoundingClientRect().left
+  const overflow = left + dropdown.offsetWidth - (document.documentElement.clientWidth - DROPDOWN_MARGIN)
+  dropdownShift.value = -Math.max(0, Math.min(overflow, left - DROPDOWN_MARGIN))
+}
+watch(isOpen, (open) => {
+  if (open) fitDropdown()
+  else dropdownShift.value = 0
+}, { flush: 'post' })
+
 const apply = () => {
   emit('update:startDate', localStartDate.value)
   emit('update:endDate', localEndDate.value)
@@ -311,6 +335,7 @@ watch(
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleEscape)
+  window.addEventListener('resize', fitDropdown)
   // Initialize active preset detection
   onDateChange()
 })
@@ -318,6 +343,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   document.removeEventListener('keydown', handleEscape)
+  window.removeEventListener('resize', fitDropdown)
 })
 </script>
 
@@ -357,7 +383,8 @@ onUnmounted(() => {
   @apply border border-gray-200 dark:border-dark-700;
   @apply shadow-lg shadow-black/10 dark:shadow-black/30;
   @apply overflow-hidden;
-  @apply min-w-[320px];
+  min-width: min(320px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
 }
 
 .date-picker-presets {
@@ -422,6 +449,43 @@ onUnmounted(() => {
   @apply bg-primary-600 text-white;
   @apply hover:bg-primary-700;
   @apply transition-colors duration-150;
+}
+
+/* Touch: every target at least 40px tall, neighbours 8px apart; mouse sizes unchanged. */
+@media (pointer: coarse) {
+  .date-picker-trigger {
+    min-height: 40px;
+  }
+
+  .date-picker-presets {
+    gap: 8px;
+  }
+
+  .date-picker-preset {
+    min-height: 40px;
+  }
+
+  .date-picker-input {
+    min-height: 40px;
+    font-size: 16px;
+  }
+
+  .date-picker-apply {
+    min-height: 40px;
+  }
+}
+
+/* Below 360px the two date fields do not fit side by side in the dropdown (at most the screen less 16px; the row needs
+   334px with 16px touch text): one above the other, the arrow gone. */
+@media (max-width: 359px) {
+  .date-picker-custom {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .date-picker-separator {
+    display: none;
+  }
 }
 
 /* Dropdown animation */

@@ -17,7 +17,9 @@
       <!-- Table -->
       <OrderTable :orders="orders" :loading="loading" :scroll-label="t('nav.myOrders')">
         <template #actions="{ row }">
-          <div class="flex items-center gap-2 [@media(pointer:coarse)]:-my-1.5">
+          <!-- A phone: the buttons wrap within the screen width less the ID, the page's 16px margins and 24px of cell padding, so
+               with the table scrolled all the way none sits under the frozen columns. -->
+          <div class="flex items-center gap-2 [@media(pointer:coarse)]:-my-1.5 max-md:flex-wrap max-md:max-w-[calc(100vw_-_58px_-_var(--table-identity-width))]">
             <button v-if="row.payment_type === 'stripe_hosted'" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium [@media(pointer:coarse)]:min-h-10 text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20" @click="router.push({ path: '/payment/result', query: { order_id: row.id, out_trade_no: row.out_trade_no } })">
               <Icon name="arrowRight" size="sm" />
               <span>{{ t('common.view') }}</span>
