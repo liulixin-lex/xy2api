@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
         <TableToolbar>
           <template #search>
@@ -40,24 +40,21 @@
 
       <template #table>
         <DataTable
+          layout="table"
+          :scroll-label="t('admin.announcements.title')"
           :columns="columns"
           :data="announcements"
           :loading="loading"
           :server-side-sort="true"
+          :sticky-actions-column="!phone"
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"
         >
           <template #cell-title="{ value, row }">
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="truncate font-medium text-gray-900 dark:text-white">{{ value }}</span>
-              </div>
-              <div class="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-dark-400">
-                <span>#{{ row.id }}</span>
-                <span class="text-gray-300 dark:text-dark-700">·</span>
-                <span>{{ formatDateTime(row.created_at) }}</span>
-              </div>
+            <!-- The frozen identity column: at most 240px, both lines cut with "…" and whole on a tap. -->
+            <div class="max-w-[240px]">
+              <TableIdentityCell :primary="value" :secondary="`#${row.id} · ${formatListDateTime(row.created_at)}`" />
             </div>
           </template>
 
@@ -99,48 +96,53 @@
             <div class="text-sm text-gray-600 dark:text-gray-300">
               <div>
                 <span class="font-medium">{{ t('admin.announcements.form.startsAt') }}:</span>
-                <span class="ml-1">{{ row.starts_at ? formatDateTime(row.starts_at) : t('admin.announcements.timeImmediate') }}</span>
+                <span class="ml-1">{{ row.starts_at ? formatListDateTime(row.starts_at) : t('admin.announcements.timeImmediate') }}</span>
               </div>
               <div class="mt-0.5">
                 <span class="font-medium">{{ t('admin.announcements.form.endsAt') }}:</span>
-                <span class="ml-1">{{ row.ends_at ? formatDateTime(row.ends_at) : t('admin.announcements.timeNever') }}</span>
+                <span class="ml-1">{{ row.ends_at ? formatListDateTime(row.ends_at) : t('admin.announcements.timeNever') }}</span>
               </div>
             </div>
           </template>
 
           <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
+            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatListDateTime(value) }}</span>
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center space-x-1">
+            <!-- Touch: 40px buttons 8px apart. On a phone the column scrolls with the row (four buttons do not fit its 44px). -->
+            <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2">
               <button
                 @click="openPreview(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
                 :title="t('admin.announcements.preview')"
+                :aria-label="t('admin.announcements.preview')"
               >
                 <Icon name="eye" size="sm" />
               </button>
               <button
                 @click="openReadStatus(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
                 :title="t('admin.announcements.readStatus')"
+                :aria-label="t('admin.announcements.readStatus')"
               >
                 <Icon name="chartBar" size="sm" />
               </button>
               <button
                 v-if="canManage"
                 @click="openEditDialog(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-600 dark:hover:text-gray-300"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-600 dark:hover:text-gray-300"
                 :title="t('common.edit')"
+                :aria-label="t('common.edit')"
               >
                 <Icon name="edit" size="sm" />
               </button>
               <button
                 v-if="canManage"
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                 :title="t('common.delete')"
+                :aria-label="t('common.delete')"
               >
                 <Icon name="trash" size="sm" />
               </button>
@@ -264,7 +266,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { adminAPI } from '@/api/admin'
-import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
+import { formatDateTimeLocalInput, formatListDateTime, parseDateTimeLocalInput } from '@/utils/format'
 import type { AdminGroup, Announcement, AnnouncementTargeting } from '@/types'
 import type { Column } from '@/components/common/types'
 
@@ -278,6 +280,8 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Icon from '@/components/icons/Icon.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
+import { usePhoneViewport } from '@/composables/useTableViewport'
 import { vTip } from '@/utils/tip'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
@@ -286,6 +290,7 @@ import AnnouncementReadStatusDialog from '@/components/admin/announcements/Annou
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 
 const { t } = useI18n()
+const phone = usePhoneViewport()
 const appStore = useAppStore()
 const { canManage } = useAdminPermission('announcements')
 
