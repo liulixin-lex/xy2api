@@ -68,6 +68,7 @@
           <DataTable
             ref="dataTableRef"
             layout="table"
+            :scroll-label="t('admin.accounts.title')"
             :columns="cols"
             :data="rows"
             :loading="loading"

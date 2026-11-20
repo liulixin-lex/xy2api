@@ -172,6 +172,23 @@ describe('DataTable layout="table" below 1024px', () => {
     wrapper.unmount()
   })
 
+  // Opus review, suggestion 5: a table area that scrolls sideways is a named region that takes keyboard focus.
+  it('names its scroll area and lets it take keyboard focus while it scrolls sideways', async () => {
+    stubPhone()
+    const wrapper = mount(DataTable, { props: { layout: 'table', scrollLabel: 'Accounts', columns, data: rows(1), rowKey: 'id' } })
+    const box = wrapper.get('.table-wrapper')
+    expect(box.attributes('role')).toBe('region')
+    expect(box.attributes('aria-label')).toBe('Accounts')
+    expect(box.attributes('tabindex')).toBeUndefined()
+    Object.defineProperty(box.element, 'clientWidth', { configurable: true, get: () => 390 })
+    Object.defineProperty(box.element, 'scrollWidth', { configurable: true, get: () => 900 })
+    await wrapper.setProps({ data: rows(1, 2) })
+    await nextTick()
+    await nextTick()
+    expect(box.attributes('tabindex')).toBe('0')
+    expect(mount(DataTable, { props: { layout: 'table', columns, data: rows(1) } }).get('.table-wrapper').attributes('role')).toBeUndefined()
+  })
+
   it('selects only eligible rows and keeps keys from other pages', async () => {
     stubPhone()
     const wrapper = mount(DataTable, {

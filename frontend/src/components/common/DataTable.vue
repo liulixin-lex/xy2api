@@ -155,6 +155,9 @@
       'dt-builtin-select': layout === 'table' && selectable
     }"
     :style="freezePadding"
+    :tabindex="scrollLabel && isScrollable ? 0 : undefined"
+    :role="scrollLabel ? 'region' : undefined"
+    :aria-label="scrollLabel || undefined"
     @focusin="revealFocused"
     :aria-busy="loading ? 'true' : undefined"
   >
@@ -566,6 +569,11 @@ interface Props {
    * column 44px. `cards` is the old narrow layout, kept only until every page has moved (then it and this prop go).
    */
   layout?: 'cards' | 'table'
+  /**
+   * The table's name for a screen reader (mobile list plan): the scroll area is a named region, and while it scrolls
+   * sideways it takes keyboard focus, so the arrow keys can scroll it.
+   */
+  scrollLabel?: string
   columns: Column[]
   data: any[]
   loading?: boolean
@@ -1392,6 +1400,11 @@ defineExpose({
 .is-scrollable :deep(.sticky-col-right) {
   box-shadow: inset 1px 0 0 var(--color-line-strong);
 }
+/* The scroll area itself takes keyboard focus while it scrolls sideways (scrollLabel): its ring is drawn inside. */
+.table-wrapper:focus-visible {
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: -2px;
+}
 /* ---- The table layout (mobile list plan) ---- */
 /* The built-in check box column is exactly 44px, its border box whatever padding the page gives cells (TablePageLayout
    has 20px): the first column freezes right after it, at --select-col-width, the two meeting without overlap. The
@@ -1677,6 +1690,25 @@ defineExpose({
 }
 .dark .table-wrapper::-webkit-scrollbar-thumb:hover {
   background-color: rgba(209, 213, 219, 0.9) !important;
+}
+
+/* The corner where the two scrollbars meet takes the table's surface, not the browser's white (both themes). */
+.table-wrapper::-webkit-scrollbar-corner {
+  background-color: var(--color-bg-surface) !important;
+}
+
+/* Touch (mobile list plan): a finger scrolls the table itself, so the bars are 6px hints, not 12px targets. */
+@media (pointer: coarse) {
+  .table-wrapper {
+    scrollbar-width: thin !important;
+  }
+  .table-wrapper::-webkit-scrollbar {
+    width: 6px !important;
+    height: 6px !important;
+  }
+  .table-wrapper::-webkit-scrollbar-thumb {
+    border-width: 1px !important;
+  }
 }
 
 /* 3. 仅给真正的 Firefox 留的后路 */
