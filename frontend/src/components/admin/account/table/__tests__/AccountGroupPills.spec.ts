@@ -292,6 +292,35 @@ describe('AccountGroupPills', () => {
     plain.unmount()
   })
 
+  // Astra re-review, suggestion: switching the main pointer to a mouse and back to touch reopened an old sheet.
+  it('closes the touch sheet when the pointer becomes a mouse, so it does not come back by itself', async () => {
+    const matchMedia = window.matchMedia
+    let fine = false
+    const listeners = new Set<(event: { matches: boolean }) => void>()
+    window.matchMedia = ((query: string) => ({
+      get matches() { return query.includes('pointer: fine') ? fine : !fine },
+      media: query,
+      addEventListener: (_: string, listener: (event: { matches: boolean }) => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: (event: { matches: boolean }) => void) => listeners.delete(listener)
+    })) as unknown as typeof window.matchMedia
+    onTestFinished(() => { window.matchMedia = matchMedia })
+    const setFine = async (next: boolean) => {
+      fine = next
+      listeners.forEach((listener) => listener({ matches: next }))
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    const wrapper = mountPills(3)
+    await wrapper.get('button[data-test="group-pills"]').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('[data-test="groups-sheet"]')).not.toBeNull()
+    await setFine(true)
+    expect(document.querySelector('[data-test="groups-sheet"]')).toBeNull()
+    await setFine(false)
+    expect(document.querySelector('[data-test="groups-sheet"]')).toBeNull()
+    wrapper.unmount()
+  })
+
   it('keeps a tip a tap brought up through the mouse events after the tap, until a press elsewhere or 4s (7q-6)', async () => {
     vi.useFakeTimers()
     onTestFinished(() => { vi.useRealTimers() })

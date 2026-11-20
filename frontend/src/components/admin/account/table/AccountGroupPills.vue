@@ -128,7 +128,7 @@
  * quality panel on that group, and managers edit the groups from the sheet's foot (`edit-groups-at`, with the cell as
  * the picker's anchor). Editing also goes through the row menu's "edit groups". A mouse keeps the two zones.
  */
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import BottomSheet from '@/components/common/BottomSheet.vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
@@ -188,6 +188,9 @@ const sheetOpen = ref(false)
 /** The quality panel gives focus back to the element with its opener key: the cell, for the group opened last. */
 const openerKey = ref<string | undefined>(undefined)
 const sheetItems = computed(() => props.groups.map((group) => ({ group, state: stateOf(group) })))
+// The sheet belongs to the touch layout: leaving it (a mouse becomes the main pointer) closes the sheet, so it does not
+// open again by itself on the next switch back to touch.
+watch(coarse, (touch) => { if (!touch) sheetOpen.value = false })
 /** The sheet closes first (focus back on the cell), then the layer it asked for opens. */
 const openGroup = async (groupId: number) => {
   openerKey.value = qualityOpenerKey(props.account.id, groupId)
