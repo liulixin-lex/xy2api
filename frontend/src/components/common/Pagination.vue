@@ -58,6 +58,7 @@
             <Select
               :model-value="pageSize"
               :options="pageSizeSelectOptions"
+              :aria-label="t('pagination.perPage')"
               @update:model-value="handlePageSizeChange"
             />
           </div>
