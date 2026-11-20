@@ -56,6 +56,7 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import BottomSheet from '@/components/common/BottomSheet.vue'
 import { useTableViewport } from '@/composables/useTableViewport'
+import { focusOrigin } from '@/utils/overlayStack'
 
 /**
  * The toolbar of a table page, in TablePageLayout's #filters slot (spec 8.6, prototype):
@@ -99,7 +100,8 @@ import { useTableViewport } from '@/composables/useTableViewport'
  *   high like them, with the same count and name.
  * - Crossing the width where the toolbar changes form keeps the focus: from the sheet (which closes) to the inline
  *   field with the same `data-filter="<key>"` as the focused one (the page marks a field and its inline twin alike),
- *   else the first inline filter, else the search; from the row to "Filters".
+ *   else the first inline filter, else the search; from the row to "Filters". Focus in a list opened from a field
+ *   (a Select's, teleported out of the sheet) counts as on that field (overlayStack's focusOrigin).
  */
 const props = defineProps<{
   compact?: boolean
@@ -137,14 +139,13 @@ function inlineTwin(key: string | undefined) {
 // The sheet belongs to the phone toolbar: leaving it (crossing 768px, or 1024px with 'desktop') closes it. The switch
 // removes the focused field, so focus moves to its counterpart instead of falling to the page (Astra review, 5).
 watch(phoneSheet, async (on) => {
-  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  const before = on ? rowRef.value : phoneRef.value
-  // In the sheet: its fields, or its header and footer (the dialog around them).
-  const inSheet = !!active?.closest('[role="dialog"]')?.querySelector('[data-test="filter-sheet"]')
-  const held = !!active && (inSheet || !!before?.contains(active))
-  const key = active?.closest<HTMLElement>('[data-filter]')?.dataset.filter
+  // What goes: the row, or the sheet (its fields, header and footer: the dialog around them) and the phone toolbar.
+  // The sheet comes first, so a Select open in it answers before "Filters" (expanded too while the sheet is open).
+  const sheet = document.querySelector('[data-test="filter-sheet"]')?.closest('[role="dialog"]')
+  const origin = focusOrigin(on ? [rowRef.value] : [sheet, phoneRef.value])
+  const key = origin?.closest<HTMLElement>('[data-filter]')?.dataset.filter
   if (!on) sheetOpen.value = false
-  if (!held) return
+  if (!origin) return
   await nextTick()
   const target = on ? phoneRef.value?.querySelector<HTMLElement>('[data-test="toolbar-filter-button"]') : inlineTwin(key)
   target?.focus()

@@ -6,6 +6,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { h, nextTick } from 'vue'
 
 import TableToolbar from '../TableToolbar.vue'
+import Select from '@/components/common/Select.vue'
 
 // The phone toolbar's extent and its first row (mobile list plan, usage records): `sheetBelow="desktop"` keeps the
 // phone toolbar below 1024px; a page with neither #search nor #create has no first row, "Filters" leads the actions.
@@ -141,6 +142,27 @@ describe('TableToolbar keeps the focus across its switch', () => {
     const wrapper = mountAt(1023, { sheetBelow: 'desktop' }, fields)
     await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
     ;(wrapper.get('[data-test="filter-sheet-done"]').element as HTMLElement).focus()
+    setWidth(1024)
+    await flushPromises()
+    expect(active()).toBe('inline-model')
+  })
+
+  // Astra re-review: a Select's list hangs outside the sheet; its search box focused, the switch dropped focus.
+  it("moves from an open Select's search box, outside the sheet, to the Select's inline twin", async () => {
+    const options = Array.from({ length: 8 }, (_, i) => ({ value: i, label: `model ${i}` }))
+    const wrapper = mountAt(1023, { sheetBelow: 'desktop' }, {
+      ...fields,
+      sheet: () => h('div', { 'data-filter': 'model' }, [h(Select, { modelValue: 0, options, searchable: true })])
+    })
+    await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+    const trigger = wrapper.get('.select-trigger')
+    ;(trigger.element as HTMLElement).focus()
+    await trigger.trigger('click')
+    await flushPromises()
+    const search = document.querySelector<HTMLInputElement>('.select-dropdown-portal input[type="text"]')
+    expect(search).not.toBeNull()
+    search!.focus()
+    expect(wrapper.element.contains(document.activeElement)).toBe(false)
     setWidth(1024)
     await flushPromises()
     expect(active()).toBe('inline-model')
