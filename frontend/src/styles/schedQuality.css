@@ -150,6 +150,8 @@
 .sq-tip__h { color: var(--color-tooltip-muted); font-size: 11px; }
 .sq-tip__first { color: var(--color-tooltip-muted); }
 .sq-tip__end { color: var(--color-tooltip-muted); text-align: right; }
+/* A card whose notes wrap (wrapEnd in utils/tip.ts): the note takes two lines rather than cut the label or the value. */
+.sq-tip__grid--wrap .sq-tip__end { white-space: normal; overflow-wrap: anywhere; }
 .sq-tip__tone--ok { color: var(--tip-ok); }
 .sq-tip__tone--back { color: var(--tip-back); }
 .sq-tip__tone--exempt { color: var(--tip-exempt); }

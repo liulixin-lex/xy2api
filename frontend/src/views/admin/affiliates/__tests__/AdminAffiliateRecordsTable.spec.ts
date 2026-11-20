@@ -105,11 +105,11 @@ describe('AdminAffiliateRecordsTable', () => {
     await flushPromises()
 
     const row = wrapper.get('[data-test="row-0"]')
-    expect(row.get('[data-test="cell-order"]').text()).toBe('-')
-    expect(row.get('[data-test="cell-order_amount"]').text()).toBe('-')
-    expect(row.get('[data-test="cell-pay_amount"]').text()).toBe('-')
-    expect(row.get('[data-test="cell-payment_type"]').text()).toBe('-')
-    expect(row.get('[data-test="cell-order_status"]').text()).toBe('-')
+    // Empty cells read as the shared light "—".
+    for (const key of ['order', 'order_amount', 'pay_amount', 'payment_type', 'order_status']) {
+      expect(row.get(`[data-test="cell-${key}"]`).text()).toBe('—')
+      expect(row.find(`[data-test="cell-${key}"] [data-test="cell-empty"]`).exists()).toBe(true)
+    }
     expect(row.get('[data-test="cell-rebate_amount"]').text()).toBe('$2.00')
     expect(wrapper.find('[data-test="affiliate-withdraw-open"]').exists()).toBe(false)
   })

@@ -3,31 +3,36 @@
     <div class="flex h-16 items-center justify-between gap-2 px-2 sm:px-4 md:px-6">
       <!-- Left: Mobile Menu Toggle + Page Title. From 1024px the title area takes the room the right side leaves and the
            description is cut with an ellipsis, so a long one never widens the page (7s-2). -->
-      <div class="flex shrink-0 items-center gap-2 sm:gap-4 lg:min-w-0 lg:flex-1">
+      <!-- Below 1024px the page's name sits right of the menu button on one line, cut with an ellipsis before the
+           buttons on the right give way (they keep their size down to 320px; mobile list plan). -->
+      <div class="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
         <button
           @click="toggleMobileSidebar"
-          class="btn-ghost btn-icon lg:hidden"
+          class="btn-ghost btn-icon shrink-0 lg:hidden"
           :aria-label="t('common.toggleMenu')"
         >
           <Icon name="menu" size="md" />
         </button>
 
-        <div class="hidden min-w-0 lg:block">
-          <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+        <div class="min-w-0">
+          <h1 class="truncate text-base font-semibold text-gray-900 dark:text-white lg:text-lg" data-test="page-title">
             {{ pageTitle }}
           </h1>
-          <p v-if="pageDescription" class="truncate text-xs text-gray-500 dark:text-dark-400">
+          <p v-if="pageDescription" class="hidden truncate text-xs text-gray-500 dark:text-dark-400 lg:block">
             {{ pageDescription }}
           </p>
         </div>
       </div>
 
-      <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
-      <div class="flex min-w-0 items-center gap-1 sm:gap-3">
+      <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown. They keep their size; below
+           1440px (a tablet, or a desktop beside the open navigation) the docs and model plaza links and the frozen amount
+           fold to their icons and the balance, below 1280px the user's name to the avatar, so the page's name keeps its
+           room. -->
+      <div class="header-tools flex shrink-0 items-center gap-1 sm:gap-3">
         <!-- Page search (Ctrl/⌘K) -->
         <button
           type="button"
-          class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          class="header-hit hidden items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white md:flex"
           :title="`${t('commandPalette.open')} (${commandShortcut})`"
           :aria-label="t('commandPalette.open')"
           aria-haspopup="dialog"
@@ -35,7 +40,7 @@
           @click="openPalette"
         >
           <Icon name="search" size="sm" />
-          <kbd class="hidden rounded border border-gray-200 px-1.5 text-[11px] font-medium leading-5 dark:border-dark-600 xl:inline">{{ commandShortcut }}</kbd>
+          <kbd class="hidden rounded border border-gray-200 px-1.5 text-xs font-medium leading-5 dark:border-dark-600 xl:inline">{{ commandShortcut }}</kbd>
         </button>
 
         <!-- Announcement Bell -->
@@ -47,29 +52,31 @@
           :href="docUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
+          :title="t('nav.docs')"
+          :aria-label="t('nav.docs')"
+          class="header-hit hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
         >
           <Icon name="book" size="sm" />
-          <span class="hidden sm:inline">{{ t('nav.docs') }}</span>
+          <span class="hidden min-[1440px]:inline">{{ t('nav.docs') }}</span>
         </a>
 
-        <!-- Model Plaza Entry (icon only below sm) -->
+        <!-- Model Plaza Entry (in the user menu below md) -->
         <router-link
           v-if="user && modelPlazaEnabled"
           :to="{ path: '/model-plaza', query: { embedded: '1' } }"
           :title="t('nav.modelPlaza')"
           :aria-label="t('nav.modelPlaza')"
-          class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          class="header-hit hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white md:flex"
         >
           <Icon name="grid" size="sm" />
-          <span class="hidden sm:inline">{{ t('nav.modelPlaza') }}</span>
+          <span class="hidden min-[1440px]:inline">{{ t('nav.modelPlaza') }}</span>
         </router-link>
 
         <!-- Language Switcher -->
         <LocaleSwitcher />
 
         <!-- Subscription Progress (for users with active subscriptions; not mounted at all when the feature is off) -->
-        <SubscriptionProgressMini v-if="user && subscriptionFeatureEnabled" />
+        <SubscriptionProgressMini v-if="user && subscriptionFeatureEnabled" class="hidden md:block" />
 
         <!-- Balance Display -->
         <div
@@ -94,10 +101,12 @@
           </span>
           <span
             v-if="frozenBalance > 0"
-            class="rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
+            class="hidden rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200 min-[1440px]:inline"
           >
             {{ balanceFrozenLabel }}
           </span>
+          <!-- Folded below 1440px: still read out beside the balance. -->
+          <span v-if="frozenBalance > 0" class="sr-only min-[1440px]:hidden">{{ balanceFrozenLabel }}</span>
           <div
             class="pointer-events-none absolute right-0 top-full mt-2 hidden w-56 rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-lg group-hover:block dark:border-dark-700 dark:bg-dark-800"
           >
@@ -121,6 +130,7 @@
         <!-- User Dropdown -->
         <div v-if="user" class="relative" ref="dropdownRef">
           <button
+            ref="userMenuButtonRef"
             @click="toggleDropdown"
             class="flex items-center gap-2 rounded-xl p-1.5 transition-colors hover:bg-gray-100 dark:hover:bg-dark-800"
             :aria-label="t('common.userMenu')"
@@ -134,20 +144,20 @@
               >
               <span v-else>{{ userInitials }}</span>
             </div>
-            <div class="hidden text-left md:block">
-              <div class="text-sm font-medium text-gray-900 dark:text-white">
+            <div class="hidden min-w-0 max-w-[10rem] text-left xl:block">
+              <div class="truncate text-sm font-medium text-gray-900 dark:text-white">
                 {{ displayName }}
               </div>
-              <div class="text-xs text-gray-500 dark:text-dark-400">
+              <div class="truncate text-xs text-gray-500 dark:text-dark-400">
                 {{ t('admin.users.roles.' + user.role) }}
               </div>
             </div>
-            <Icon name="chevronDown" size="sm" class="hidden text-gray-400 md:block" />
+            <Icon name="chevronDown" size="sm" class="hidden text-gray-400 xl:block" />
           </button>
 
           <!-- Dropdown Menu -->
           <transition name="dropdown">
-            <div v-if="dropdownOpen" class="dropdown right-0 mt-2 w-56">
+            <div v-if="dropdownOpen" class="dropdown user-menu right-0 mt-2 w-56" data-test="user-menu">
               <!-- User Info -->
               <div class="border-b border-gray-100 px-4 py-3 dark:border-dark-700">
                 <div class="text-sm font-medium text-gray-900 dark:text-white">
@@ -156,8 +166,9 @@
                 <div class="text-xs text-gray-500 dark:text-dark-400">{{ user.email }}</div>
               </div>
 
-              <!-- Balance (mobile only) -->
-              <div class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 sm:hidden">
+              <!-- Balance: in the menu wherever the header does not show it whole (below 640px no balance, below 1440px no
+                   frozen amount beside it), so a touch screen reaches it with a tap. -->
+              <div class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 min-[1440px]:hidden">
                 <div class="text-xs text-gray-500 dark:text-dark-400">
                   {{ t('common.balance') }}
                 </div>
@@ -169,7 +180,26 @@
                 </div>
               </div>
 
-              <div class="py-1">
+              <div class="user-menu__list py-1">
+                <!-- Below 768px the header has no room for every entry and the page's name with each button its own 40px:
+                     the search, the model plaza and the subscriptions sit here, and the docs below 640px. -->
+                <button type="button" class="dropdown-item w-full md:hidden" data-test="menu-search" @click="openPaletteFromMenu">
+                  <Icon name="search" size="sm" />
+                  {{ t('commandPalette.open') }}
+                </button>
+                <router-link v-if="modelPlazaEnabled" :to="{ path: '/model-plaza', query: { embedded: '1' } }" class="dropdown-item md:hidden" data-test="menu-model-plaza" @click="closeDropdown">
+                  <Icon name="grid" size="sm" />
+                  {{ t('nav.modelPlaza') }}
+                </router-link>
+                <router-link v-if="subscriptionFeatureEnabled && hasActiveSubscriptions" to="/subscriptions" class="dropdown-item md:hidden" data-test="menu-subscriptions" @click="closeDropdown">
+                  <Icon name="creditCard" size="sm" />
+                  {{ t('nav.mySubscriptions') }}
+                </router-link>
+                <a v-if="docUrl" :href="docUrl" target="_blank" rel="noopener noreferrer" class="dropdown-item sm:hidden" data-test="menu-docs" @click="closeDropdown">
+                  <Icon name="book" size="sm" />
+                  {{ t('nav.docs') }}
+                </a>
+
                 <router-link to="/profile" @click="closeDropdown" class="dropdown-item">
                   <Icon name="user" size="sm" />
                   {{ t('nav.profile') }}
@@ -254,7 +284,7 @@
                 </div>
               </div>
 
-              <div v-if="showOnboardingButton" class="border-t border-gray-100 py-1 dark:border-dark-700">
+              <div v-if="showOnboardingButton" class="user-menu__list border-t border-gray-100 py-1 dark:border-dark-700">
                 <button @click="handleReplayGuide" class="dropdown-item w-full">
                   <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
                     <path
@@ -265,7 +295,7 @@
                 </button>
               </div>
 
-              <div class="border-t border-gray-100 py-1 dark:border-dark-700">
+              <div class="user-menu__list border-t border-gray-100 py-1 dark:border-dark-700">
                 <button
                   @click="handleLogout"
                   class="dropdown-item w-full text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
@@ -298,7 +328,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
+import { useAppStore, useAuthStore, useOnboardingStore, useSubscriptionStore } from '@/stores'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
@@ -368,6 +398,9 @@ const displayName = computed(() => {
 
 // 订阅功能关闭时不挂载顶栏订阅徽章（组件 onMounted 会拉取订阅接口）。
 const subscriptionFeatureEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.subscription))
+const subscriptionStore = useSubscriptionStore()
+/** As SubscriptionProgressMini shows itself: only with an active subscription. */
+const hasActiveSubscriptions = computed(() => subscriptionStore.hasActiveSubscriptions)
 
 // /purchase 的标题/描述随站点计费模式切换，与 document.title 共用同一解析。
 const routeMetaKeys = computed(() => resolveRouteMetaKeys(route, {
@@ -410,6 +443,17 @@ function closeDropdown() {
   dropdownOpen.value = false
 }
 
+const userMenuButtonRef = ref<HTMLButtonElement | null>(null)
+/**
+ * The search from the user menu (below 768px): the menu item goes with the menu, so the palette is opened from the
+ * menu's button and gives focus back to it on closing, as it does to the header's search button.
+ */
+function openPaletteFromMenu() {
+  userMenuButtonRef.value?.focus()
+  closeDropdown()
+  openPalette()
+}
+
 async function handleLogout() {
   closeDropdown()
   try {
@@ -447,6 +491,36 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* Touch (pointer: coarse, mobile list plan): the header's controls are 40px to hit and 8px apart (the bell, the
+   language and the subscription badge set their own 40px); a mouse keeps them as they are. */
+@media (pointer: coarse) {
+  .header-tools {
+    gap: 8px;
+  }
+  .header-hit {
+    min-width: 40px;
+    min-height: 40px;
+    justify-content: center;
+  }
+  /* The user menu's items, the ones moved in from the header among them: 40px high and 8px apart. */
+  .user-menu__list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .user-menu__list > .dropdown-item {
+    min-height: 40px;
+  }
+}
+/* The user menu never runs past the visible height (a phone on its side, with the balance in it): it scrolls on its
+   own, the page behind it does not. Its top sits 62-64px down (below the avatar button and the 8px gap, mt-2), so 72px
+   off the height leaves at least 8px free below. dvh follows the browser's address bar, vh is the fallback. */
+.user-menu {
+  max-height: calc(100vh - 72px);
+  max-height: calc(100dvh - 72px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.2s ease;

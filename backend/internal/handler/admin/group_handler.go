@@ -180,10 +180,44 @@ func sanitizeUpdateGroupRequestForSimpleMode(req *UpdateGroupRequest) {
 	if req == nil {
 		return
 	}
-	*req = UpdateGroupRequest{Name: req.Name, Alias: req.Alias, Description: req.Description, SystemPromptConfig: req.SystemPromptConfig}
+	*req = UpdateGroupRequest{Revision: req.Revision, Name: req.Name, Alias: req.Alias, Description: req.Description, SystemPromptConfig: req.SystemPromptConfig}
 }
 
 // CreateGroupRequest represents create group request
+type groupModelPricingRequest service.ChannelModelPricing
+
+func (p *groupModelPricingRequest) UnmarshalJSON(data []byte) error {
+	type pricing groupModelPricingRequest
+	var decoded struct {
+		*pricing
+		UltrafastMultiplier json.RawMessage `json:"ultrafast_multiplier"`
+		FastMultiplier      json.RawMessage `json:"fast_multiplier"`
+	}
+	decoded.pricing = (*pricing)(p)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	p.UltrafastMultiplierSet = decoded.UltrafastMultiplier != nil
+	var err error
+	p.FastMultiplier, p.FastMultiplierExcessPrecision, err = service.DecodeFastMultiplier(decoded.FastMultiplier)
+	if err != nil {
+		return err
+	}
+	p.UltrafastMultiplier, err = service.DecodeUltrafastMultiplier(decoded.UltrafastMultiplier)
+	return err
+}
+
+func groupModelPricingFromRequest(entries []groupModelPricingRequest) []service.ChannelModelPricing {
+	if entries == nil {
+		return nil
+	}
+	pricing := make([]service.ChannelModelPricing, len(entries))
+	for i, entry := range entries {
+		pricing[i] = service.ChannelModelPricing(entry)
+	}
+	return pricing
+}
+
 type CreateGroupRequest struct {
 	Alias                     string                          `json:"alias"`
 	Name                      string                          `json:"name" binding:"required"`
@@ -200,7 +234,7 @@ type CreateGroupRequest struct {
 	LongContextPricingEnabled bool                            `json:"long_context_pricing_enabled"`
 	LongContextPricingScope   string                          `json:"long_context_pricing_scope"`
 	LongContextPricingModels  []string                        `json:"long_context_pricing_models"`
-	ModelPricing              []service.ChannelModelPricing   `json:"model_pricing"`
+	ModelPricing              []groupModelPricingRequest      `json:"model_pricing"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
 	AllowImageGeneration            bool                          `json:"allow_image_generation"`
 	AllowBatchImageGeneration       bool                          `json:"allow_batch_image_generation"`
@@ -243,8 +277,12 @@ type CreateGroupRequest struct {
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
 	AllowMessagesDispatch       bool                                      `json:"allow_messages_dispatch"`
 	AllowLive                   bool                                      `json:"allow_live"`
-	ForceOpenAIFast             bool                                      `json:"force_openai_fast"`
+	ForceOpenAIFast             *bool                                     `json:"force_openai_fast"`
 	FreeOpenAIFast              bool                                      `json:"free_openai_fast"`
+	OpenAIFastMode              *string                                   `json:"openai_fast_mode"`
+	OpenAIUltrafastMode         *string                                   `json:"openai_ultrafast_mode"`
+	OpenAITierPolicyVersion     *int                                      `json:"openai_tier_policy_version"`
+	FreeOpenAIUltrafast         *bool                                     `json:"free_openai_ultrafast"`
 	RequireOAuthOnly            bool                                      `json:"require_oauth_only"`
 	RequirePrivacySet           bool                                      `json:"require_privacy_set"`
 	DefaultMappedModel          string                                    `json:"default_mapped_model"`
@@ -282,7 +320,7 @@ type UpdateGroupRequest struct {
 	LongContextPricingEnabled *bool                            `json:"long_context_pricing_enabled"`
 	LongContextPricingScope   *string                          `json:"long_context_pricing_scope"`
 	LongContextPricingModels  *[]string                        `json:"long_context_pricing_models"`
-	ModelPricing              *[]service.ChannelModelPricing   `json:"model_pricing"`
+	ModelPricing              *[]groupModelPricingRequest      `json:"model_pricing"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
 	AllowImageGeneration            *bool                         `json:"allow_image_generation"`
 	AllowBatchImageGeneration       *bool                         `json:"allow_batch_image_generation"`
@@ -327,6 +365,11 @@ type UpdateGroupRequest struct {
 	AllowLive                   *bool                                      `json:"allow_live"`
 	ForceOpenAIFast             *bool                                      `json:"force_openai_fast"`
 	FreeOpenAIFast              *bool                                      `json:"free_openai_fast"`
+	OpenAIFastMode              *string                                    `json:"openai_fast_mode"`
+	OpenAIUltrafastMode         *string                                    `json:"openai_ultrafast_mode"`
+	OpenAITierPolicyVersion     *int                                       `json:"openai_tier_policy_version"`
+	FreeOpenAIUltrafast         *bool                                      `json:"free_openai_ultrafast"`
+	Revision                    *string                                    `json:"revision"`
 	RequireOAuthOnly            *bool                                      `json:"require_oauth_only"`
 	RequirePrivacySet           *bool                                      `json:"require_privacy_set"`
 	DefaultMappedModel          *string                                    `json:"default_mapped_model"`
@@ -697,7 +740,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		LongContextPricingEnabled:       req.LongContextPricingEnabled,
 		LongContextPricingScope:         req.LongContextPricingScope,
 		LongContextPricingModels:        req.LongContextPricingModels,
-		ModelPricing:                    req.ModelPricing,
+		ModelPricing:                    groupModelPricingFromRequest(req.ModelPricing),
 		AllowImageGeneration:            req.AllowImageGeneration,
 		AllowBatchImageGeneration:       req.AllowBatchImageGeneration,
 		ImageRateIndependent:            req.ImageRateIndependent,
@@ -736,8 +779,12 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		SupportedModelScopes:            req.SupportedModelScopes,
 		AllowMessagesDispatch:           req.AllowMessagesDispatch,
 		AllowLive:                       req.AllowLive,
-		ForceOpenAIFast:                 req.ForceOpenAIFast,
+		LegacyForceOpenAIFast:           req.ForceOpenAIFast,
 		FreeOpenAIFast:                  req.FreeOpenAIFast,
+		OpenAIFastMode:                  req.OpenAIFastMode,
+		OpenAIUltrafastMode:             req.OpenAIUltrafastMode,
+		OpenAITierPolicyVersion:         req.OpenAITierPolicyVersion,
+		FreeOpenAIUltrafast:             req.FreeOpenAIUltrafast,
 		RequireOAuthOnly:                req.RequireOAuthOnly,
 		RequirePrivacySet:               req.RequirePrivacySet,
 		DefaultMappedModel:              req.DefaultMappedModel,
@@ -833,6 +880,11 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		sanitizeUpdateGroupRequestForSimpleMode(&req)
 	}
 
+	var modelPricing *[]service.ChannelModelPricing
+	if req.ModelPricing != nil {
+		entries := groupModelPricingFromRequest(*req.ModelPricing)
+		modelPricing = &entries
+	}
 	group, err := h.adminService.UpdateGroup(c.Request.Context(), groupID, &service.UpdateGroupInput{
 		Name:                            req.Name,
 		Alias:                           req.Alias,
@@ -850,7 +902,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		LongContextPricingEnabled:       req.LongContextPricingEnabled,
 		LongContextPricingScope:         req.LongContextPricingScope,
 		LongContextPricingModels:        req.LongContextPricingModels,
-		ModelPricing:                    req.ModelPricing,
+		ModelPricing:                    modelPricing,
 		AllowImageGeneration:            req.AllowImageGeneration,
 		AllowBatchImageGeneration:       req.AllowBatchImageGeneration,
 		ImageRateIndependent:            req.ImageRateIndependent,
@@ -891,6 +943,11 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		AllowLive:                       req.AllowLive,
 		ForceOpenAIFast:                 req.ForceOpenAIFast,
 		FreeOpenAIFast:                  req.FreeOpenAIFast,
+		OpenAIFastMode:                  req.OpenAIFastMode,
+		OpenAIUltrafastMode:             req.OpenAIUltrafastMode,
+		OpenAITierPolicyVersion:         req.OpenAITierPolicyVersion,
+		FreeOpenAIUltrafast:             req.FreeOpenAIUltrafast,
+		Revision:                        req.Revision,
 		RequireOAuthOnly:                req.RequireOAuthOnly,
 		RequirePrivacySet:               req.RequirePrivacySet,
 		DefaultMappedModel:              req.DefaultMappedModel,

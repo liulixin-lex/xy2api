@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -15,10 +16,15 @@ const openAINativeCompactionV2Key = "openai_native_compaction_v2"
 
 const openAIRemoteCompactionV2Feature = "remote_compaction_v2"
 
+type nativeCompactionContextKey struct{}
+
 // MarkOpenAINativeCompactionV2 由 handler 在识别出原生 v2 压缩请求时调用。
 func MarkOpenAINativeCompactionV2(c *gin.Context) {
 	if c != nil {
 		c.Set(openAINativeCompactionV2Key, true)
+		if c.Request != nil {
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), nativeCompactionContextKey{}, true))
+		}
 	}
 }
 

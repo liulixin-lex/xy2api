@@ -57,7 +57,7 @@ func TestSchedPreviousAttemptsBatchBoundary(t *testing.T) {
 				return sqlmock.NewRows(columns).AddRow(currentID,
 					previousID, start.Add(-time.Second), start, int64(1), int64(1), "model",
 					false, nil, nil, 1, "", nil, nil, "session", "", start,
-					nil, nil, nil, nil, 0, nil, 0, nil)
+					nil, nil, nil, nil, 0, nil, 0, nil, true, false, 3)
 			}
 			query := `(?s)JOIN LATERAL.*s\.capture_version >= 2`
 			mock.ExpectQuery(query).

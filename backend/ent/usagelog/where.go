@@ -1095,6 +1095,16 @@ func PricingSourceNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldPricingSource))
 }
 
+// ServiceTierDetailsIsNil applies the IsNil predicate on the "service_tier_details" field.
+func ServiceTierDetailsIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldServiceTierDetails))
+}
+
+// ServiceTierDetailsNotNil applies the NotNil predicate on the "service_tier_details" field.
+func ServiceTierDetailsNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldServiceTierDetails))
+}
+
 // ProfitBasisIsNil applies the IsNil predicate on the "profit_basis" field.
 func ProfitBasisIsNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldIsNull(FieldProfitBasis))

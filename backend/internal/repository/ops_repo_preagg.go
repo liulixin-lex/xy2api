@@ -35,6 +35,7 @@ WITH usage_base AS (
     ul.group_id AS group_id,
     ul.duration_ms AS duration_ms,
     ul.first_token_ms AS first_token_ms,
+    ul.end_to_end_first_output_ms AS end_to_end_first_output_ms,
     (ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens) AS tokens
   FROM usage_logs ul
   JOIN groups g ON g.id = ul.group_id
@@ -47,6 +48,7 @@ usage_agg AS (
     CASE WHEN GROUPING(group_id) = 1 THEN NULL ELSE group_id END AS group_id,
     COUNT(*) AS success_count,
     COUNT(*) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_sample_count,
+    COUNT(*) FILTER (WHERE end_to_end_first_output_ms IS NOT NULL) AS e2e_first_output_sample_count,
     COALESCE(SUM(tokens), 0) AS token_consumed,
 
     percentile_cont(0.50) WITHIN GROUP (ORDER BY duration_ms) FILTER (WHERE duration_ms IS NOT NULL) AS duration_p50_ms,
@@ -61,7 +63,13 @@ usage_agg AS (
     percentile_cont(0.95) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_p95_ms,
     percentile_cont(0.99) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_p99_ms,
     AVG(first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_avg_ms,
-    MAX(first_token_ms) AS ttft_max_ms
+    MAX(first_token_ms) AS ttft_max_ms,
+    percentile_cont(0.50) WITHIN GROUP (ORDER BY end_to_end_first_output_ms) FILTER (WHERE end_to_end_first_output_ms IS NOT NULL) AS e2e_first_output_p50_ms,
+    percentile_cont(0.90) WITHIN GROUP (ORDER BY end_to_end_first_output_ms) FILTER (WHERE end_to_end_first_output_ms IS NOT NULL) AS e2e_first_output_p90_ms,
+    percentile_cont(0.95) WITHIN GROUP (ORDER BY end_to_end_first_output_ms) FILTER (WHERE end_to_end_first_output_ms IS NOT NULL) AS e2e_first_output_p95_ms,
+    percentile_cont(0.99) WITHIN GROUP (ORDER BY end_to_end_first_output_ms) FILTER (WHERE end_to_end_first_output_ms IS NOT NULL) AS e2e_first_output_p99_ms,
+    AVG(end_to_end_first_output_ms) FILTER (WHERE end_to_end_first_output_ms IS NOT NULL) AS e2e_first_output_avg_ms,
+    MAX(end_to_end_first_output_ms) AS e2e_first_output_max_ms
   FROM usage_base
   GROUP BY GROUPING SETS (
     (bucket_start),
@@ -112,6 +120,7 @@ combined AS (
 
     COALESCE(u.success_count, 0) AS success_count,
     COALESCE(u.ttft_sample_count, 0) AS ttft_sample_count,
+    COALESCE(u.e2e_first_output_sample_count, 0) AS e2e_first_output_sample_count,
     COALESCE(e.error_count_total, 0) AS error_count_total,
     COALESCE(e.business_limited_count, 0) AS business_limited_count,
     COALESCE(e.error_count_sla, 0) AS error_count_sla,
@@ -133,7 +142,13 @@ combined AS (
     u.ttft_p95_ms,
     u.ttft_p99_ms,
     u.ttft_avg_ms,
-    u.ttft_max_ms
+    u.ttft_max_ms,
+    u.e2e_first_output_p50_ms,
+    u.e2e_first_output_p90_ms,
+    u.e2e_first_output_p95_ms,
+    u.e2e_first_output_p99_ms,
+    u.e2e_first_output_avg_ms,
+    u.e2e_first_output_max_ms
   FROM usage_agg u
   FULL OUTER JOIN error_agg e
     ON u.bucket_start = e.bucket_start
@@ -146,6 +161,7 @@ INSERT INTO ops_metrics_hourly (
   group_id,
   success_count,
   ttft_sample_count,
+  e2e_first_output_sample_count,
   error_count_total,
   business_limited_count,
   error_count_sla,
@@ -165,6 +181,12 @@ INSERT INTO ops_metrics_hourly (
   ttft_p99_ms,
   ttft_avg_ms,
   ttft_max_ms,
+  e2e_first_output_p50_ms,
+  e2e_first_output_p90_ms,
+  e2e_first_output_p95_ms,
+  e2e_first_output_p99_ms,
+  e2e_first_output_avg_ms,
+  e2e_first_output_max_ms,
   computed_at
 )
 SELECT
@@ -173,6 +195,7 @@ SELECT
   group_id,
   success_count,
   ttft_sample_count,
+  e2e_first_output_sample_count,
   error_count_total,
   business_limited_count,
   error_count_sla,
@@ -192,6 +215,12 @@ SELECT
   ttft_p99_ms::int,
   ttft_avg_ms,
   ttft_max_ms::int,
+  e2e_first_output_p50_ms::int,
+  e2e_first_output_p90_ms::int,
+  e2e_first_output_p95_ms::int,
+  e2e_first_output_p99_ms::int,
+  e2e_first_output_avg_ms,
+  e2e_first_output_max_ms::int,
   NOW()
 FROM combined
 WHERE bucket_start IS NOT NULL
@@ -199,6 +228,7 @@ WHERE bucket_start IS NOT NULL
 ON CONFLICT (bucket_start, COALESCE(platform, ''), COALESCE(group_id, 0)) DO UPDATE SET
   success_count = EXCLUDED.success_count,
   ttft_sample_count = EXCLUDED.ttft_sample_count,
+  e2e_first_output_sample_count = EXCLUDED.e2e_first_output_sample_count,
   error_count_total = EXCLUDED.error_count_total,
   business_limited_count = EXCLUDED.business_limited_count,
   error_count_sla = EXCLUDED.error_count_sla,
@@ -220,6 +250,12 @@ ON CONFLICT (bucket_start, COALESCE(platform, ''), COALESCE(group_id, 0)) DO UPD
   ttft_p99_ms = EXCLUDED.ttft_p99_ms,
   ttft_avg_ms = EXCLUDED.ttft_avg_ms,
   ttft_max_ms = EXCLUDED.ttft_max_ms,
+  e2e_first_output_p50_ms = EXCLUDED.e2e_first_output_p50_ms,
+  e2e_first_output_p90_ms = EXCLUDED.e2e_first_output_p90_ms,
+  e2e_first_output_p95_ms = EXCLUDED.e2e_first_output_p95_ms,
+  e2e_first_output_p99_ms = EXCLUDED.e2e_first_output_p99_ms,
+  e2e_first_output_avg_ms = EXCLUDED.e2e_first_output_avg_ms,
+  e2e_first_output_max_ms = EXCLUDED.e2e_first_output_max_ms,
 
   computed_at = NOW()
 `
@@ -246,6 +282,7 @@ INSERT INTO ops_metrics_daily (
   group_id,
   success_count,
   ttft_sample_count,
+  e2e_first_output_sample_count,
   error_count_total,
   business_limited_count,
   error_count_sla,
@@ -265,6 +302,12 @@ INSERT INTO ops_metrics_daily (
   ttft_p99_ms,
   ttft_avg_ms,
   ttft_max_ms,
+  e2e_first_output_p50_ms,
+  e2e_first_output_p90_ms,
+  e2e_first_output_p95_ms,
+  e2e_first_output_p99_ms,
+  e2e_first_output_avg_ms,
+  e2e_first_output_max_ms,
   computed_at
 )
 SELECT
@@ -274,6 +317,7 @@ SELECT
 
   COALESCE(SUM(success_count), 0) AS success_count,
   COALESCE(SUM(ttft_sample_count), 0) AS ttft_sample_count,
+  COALESCE(SUM(e2e_first_output_sample_count), 0) AS e2e_first_output_sample_count,
   COALESCE(SUM(error_count_total), 0) AS error_count_total,
   COALESCE(SUM(business_limited_count), 0) AS business_limited_count,
   COALESCE(SUM(error_count_sla), 0) AS error_count_sla,
@@ -304,6 +348,15 @@ SELECT
   SUM(ttft_avg_ms * ttft_sample_count) FILTER (WHERE ttft_avg_ms IS NOT NULL)
     / NULLIF(SUM(ttft_sample_count) FILTER (WHERE ttft_avg_ms IS NOT NULL), 0) AS ttft_avg_ms,
   MAX(ttft_max_ms) AS ttft_max_ms,
+  ROUND(SUM(e2e_first_output_p50_ms::double precision * e2e_first_output_sample_count) FILTER (WHERE e2e_first_output_p50_ms IS NOT NULL)
+    / NULLIF(SUM(e2e_first_output_sample_count) FILTER (WHERE e2e_first_output_p50_ms IS NOT NULL), 0))::int AS e2e_first_output_p50_ms,
+  ROUND(SUM(e2e_first_output_p90_ms::double precision * e2e_first_output_sample_count) FILTER (WHERE e2e_first_output_p90_ms IS NOT NULL)
+    / NULLIF(SUM(e2e_first_output_sample_count) FILTER (WHERE e2e_first_output_p90_ms IS NOT NULL), 0))::int AS e2e_first_output_p90_ms,
+  MAX(e2e_first_output_p95_ms) AS e2e_first_output_p95_ms,
+  MAX(e2e_first_output_p99_ms) AS e2e_first_output_p99_ms,
+  SUM(e2e_first_output_avg_ms * e2e_first_output_sample_count) FILTER (WHERE e2e_first_output_avg_ms IS NOT NULL)
+    / NULLIF(SUM(e2e_first_output_sample_count) FILTER (WHERE e2e_first_output_avg_ms IS NOT NULL), 0) AS e2e_first_output_avg_ms,
+  MAX(e2e_first_output_max_ms) AS e2e_first_output_max_ms,
 
   NOW()
 FROM ops_metrics_hourly
@@ -312,6 +365,7 @@ GROUP BY 1, 2, 3
 ON CONFLICT (bucket_date, COALESCE(platform, ''), COALESCE(group_id, 0)) DO UPDATE SET
   success_count = EXCLUDED.success_count,
   ttft_sample_count = EXCLUDED.ttft_sample_count,
+  e2e_first_output_sample_count = EXCLUDED.e2e_first_output_sample_count,
   error_count_total = EXCLUDED.error_count_total,
   business_limited_count = EXCLUDED.business_limited_count,
   error_count_sla = EXCLUDED.error_count_sla,
@@ -333,6 +387,12 @@ ON CONFLICT (bucket_date, COALESCE(platform, ''), COALESCE(group_id, 0)) DO UPDA
   ttft_p99_ms = EXCLUDED.ttft_p99_ms,
   ttft_avg_ms = EXCLUDED.ttft_avg_ms,
   ttft_max_ms = EXCLUDED.ttft_max_ms,
+  e2e_first_output_p50_ms = EXCLUDED.e2e_first_output_p50_ms,
+  e2e_first_output_p90_ms = EXCLUDED.e2e_first_output_p90_ms,
+  e2e_first_output_p95_ms = EXCLUDED.e2e_first_output_p95_ms,
+  e2e_first_output_p99_ms = EXCLUDED.e2e_first_output_p99_ms,
+  e2e_first_output_avg_ms = EXCLUDED.e2e_first_output_avg_ms,
+  e2e_first_output_max_ms = EXCLUDED.e2e_first_output_max_ms,
 
   computed_at = NOW()
 `

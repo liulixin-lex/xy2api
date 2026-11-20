@@ -13,6 +13,7 @@ import (
 
 // fakeSchedAttemptStore holds visible samples and delays pending inserts until Reveal is called.
 type fakeSchedAttemptStore struct {
+	SchedPerfLedger
 	mu            sync.Mutex
 	Rows, Pending []schedquality.AttemptSample
 	DelayVisible  bool
@@ -171,14 +172,14 @@ func (f *fakeSchedQualityStore) now() time.Time {
 	}
 	return time.Now()
 }
-func (f *fakeSchedQualityStore) RunReset(ctx context.Context, id int64) (time.Time, error) {
+func (f *fakeSchedQualityStore) RunReset(ctx context.Context, id int64) (time.Time, []SchedTrialGroup, error) {
 	ctx, cancel := context.WithTimeout(ctx, schedquality.ResetLockTimeout)
 	defer cancel()
 	for {
 		f.mu.Lock()
 		if err := ctx.Err(); err != nil {
 			f.mu.Unlock()
-			return time.Time{}, err
+			return time.Time{}, nil, err
 		}
 		if f.lock.TryLock() {
 			f.mu.Unlock()
@@ -191,7 +192,7 @@ func (f *fakeSchedQualityStore) RunReset(ctx context.Context, id int64) (time.Ti
 		f.mu.Unlock()
 		select {
 		case <-ctx.Done():
-			return time.Time{}, ctx.Err()
+			return time.Time{}, nil, ctx.Err()
 		case <-released:
 		}
 	}
@@ -204,13 +205,21 @@ func (f *fakeSchedQualityStore) RunReset(ctx context.Context, id int64) (time.Ti
 	}
 	f.Resets[id] = now
 	var rows []schedquality.LineState
+	var deleted []SchedTrialGroup
+	seen := make(map[SchedTrialGroup]bool)
 	for _, r := range f.Rows {
 		if r.AccountID != id {
 			rows = append(rows, r)
+			continue
+		}
+		k := SchedTrialGroup{GroupID: r.GroupID, Model: r.Model}
+		if !seen[k] {
+			seen[k] = true
+			deleted = append(deleted, k)
 		}
 	}
 	f.Rows = rows
-	return now, nil
+	return now, deleted, nil
 }
 func (f *fakeSchedQualityStore) LoadRows(_ context.Context) ([]schedquality.LineState, []SchedOverride, map[int64]time.Time, error) {
 	f.mu.Lock()

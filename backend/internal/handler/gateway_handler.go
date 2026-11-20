@@ -364,7 +364,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqLog.Info("gateway.account_select_aborted_client_disconnected", zap.Error(err))
 					return
 				}
-				if len(fs.FailedAccountIDs) == 0 {
+				if fs.localSelectionExhaustion() {
 					recordSelectionExhausted(c.Request.Context())
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformGemini, err)
 					if !cls.ModelNotFound {
@@ -475,11 +475,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 			admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-			latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+			latest, vetoed, reason := fs.admitGatewaySlot(admissionCtx, h.gatewayService, selection, accountReleaseFunc, nil)
+			if latest == nil {
+				reqLog.Debug("gateway.account_ineligible_after_wait", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+				continue
+			}
 			if vetoed {
-				if accountReleaseFunc != nil {
-					accountReleaseFunc()
-				}
 				reqLog.Debug("gateway.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 				if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
 					reqLog.Warn("gateway.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
@@ -683,6 +684,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
 	defer stopPreOutputKeepalive(c)
+	var accountReleaseFunc func()
+	releaseAccountSlot := func() {
+		if accountReleaseFunc != nil {
+			accountReleaseFunc()
+			accountReleaseFunc = nil
+		}
+	}
+	defer releaseAccountSlot()
 	for {
 		fs := NewFailoverState(h.maxAccountSwitches, hasBoundSession)
 		retryWithFallback := false
@@ -718,7 +727,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusForbidden, "permission_error", err.Error(), streamStarted)
 					return
 				}
-				if len(fs.FailedAccountIDs) == 0 {
+				if fs.localSelectionExhaustion() {
 					recordSelectionExhausted(c.Request.Context())
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, currentAPIKey, reqModel, reqModel, platform, err)
 					if !cls.ModelNotFound {
@@ -757,14 +766,15 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 			}
+			if selection.Acquired {
+				accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), selection.ReleaseFunc)
+			}
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
 			if err := applyAntigravityReasoningEffortPolicyForRequest(c, account, attemptParsedReq); err != nil {
 				sessionSlotAccounts[account.ID] = account // Include an unsent denial in the existing deferred session release.
-				if selection.Acquired && selection.ReleaseFunc != nil {
-					selection.ReleaseFunc()
-				}
+				releaseAccountSlot()
 				if service.IsReasoningEffortPolicyDenied(err) {
 					respondOpenAIReasoningEffortPolicyError(c, err, h.errorResponse)
 				} else {
@@ -787,9 +797,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if account.IsInterceptWarmupEnabled() {
 				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
 				if interceptType != InterceptTypeNone {
-					if selection.Acquired && selection.ReleaseFunc != nil {
-						selection.ReleaseFunc()
-					}
+					releaseAccountSlot()
 					if reqStream {
 						sendMockInterceptStream(c, reqModel, interceptType)
 					} else {
@@ -799,8 +807,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 
-			// 3. 获取账号并发槽位
-			accountReleaseFunc := selection.ReleaseFunc
+			// 3. 等待选号时未取得的账号并发槽位。
 			if !selection.Acquired {
 				if selection.WaitPlan == nil {
 					markOpsRoutingCapacityLimited(c)
@@ -834,7 +841,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					}
 				}
 
-				accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
+				releaseSlot, err := h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
 					c,
 					account.ID,
 					selection.WaitPlan.MaxConcurrency,
@@ -848,26 +855,27 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					h.handleConcurrencyError(c, err, "account", streamStarted)
 					return
 				}
+				accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), releaseSlot)
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
 			}
 			// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 			admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-			latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+			latest, vetoed, reason := fs.admitGatewaySlot(admissionCtx, h.gatewayService, selection, releaseAccountSlot, sessionSlotAccounts)
+			if latest == nil {
+				reqLog.Debug("gateway.account_ineligible_after_wait", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+				continue
+			}
 			if vetoed {
-				if accountReleaseFunc != nil {
-					accountReleaseFunc()
-				}
 				reqLog.Debug("gateway.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+				// Keep the shared session registration until its usual idle expiry.
+				delete(sessionSlotAccounts, account.ID)
 				if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
 					reqLog.Warn("gateway.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
 					markOpsRoutingCapacityLimited(c)
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage, streamStarted)
 					return
 				}
-				// 尝试被否决（从未转发），立即释放该账号的会话注册
-				h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
-				delete(sessionSlotAccounts, account.ID)
 				continue
 			}
 			account = latest
@@ -881,9 +889,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
-			// 账号槽位/等待计数需要在超时或断开时安全回收
-			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
-
 			// ===== 用户消息串行队列 START =====
 			var queueRelease func()
 			umqMode := h.getUserMsgQueueMode(account, attemptParsedReq)
@@ -983,9 +988,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			recordGatewayForwardUsage(c, result)
 			recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, result != nil)
-			if accountReleaseFunc != nil {
-				accountReleaseFunc()
-			}
+			releaseAccountSlot()
 
 			// 提交 usage 记录。成功路径与"流中断但 Forward 已观测到 usage 的部分结果"
 			// 错误路径共用：后者若不入账，上游已计量的请求会完全漏记漏计费（#5148）。

@@ -92,6 +92,7 @@ func (s *RequestState) EnableGatewayRequest(at time.Time, scopes ...GatewayReque
 			at = s.d.started
 		}
 		s.d.mu.Unlock()
+		s.gatewayAdmissionScope = scope
 		s.gatewayRecord = &gatewayRequestTrace{started: at, RequestScope: scope}
 	}
 }
@@ -131,12 +132,17 @@ func (s *RequestState) BeginGatewayTurn(at time.Time) {
 	s.mu.Lock()
 	s.requestID = uuid.NewString()
 	s.stickyChange = nil
+	s.voluntarySwitchVetoLogged = false
 	// A WebSocket turn remains pinned to the account selected for its
 	// connection. Its fallback standing is recalculated by the handler for each
 	// admitted turn; takeover is a one-time binding change and must not leak.
 	s.selectionFlags.takeover = false
 	s.currentAttempt = nil
-	s.gatewayRecord = &gatewayRequestTrace{started: at}
+	s.turnStartSendSeq = s.upstreamSendSeq
+	s.ownerCutoff = OwnerFirstOutputCutoff{}
+	s.ownerAvoidConfirmed = false
+	s.schedSelection.HTTPStreamText = false
+	s.gatewayRecord = &gatewayRequestTrace{started: at, RequestScope: s.gatewayAdmissionScope}
 	s.firstOutput = time.Time{}
 	s.firstOutputNoted.Store(false)
 	s.mu.Unlock()
@@ -150,6 +156,9 @@ func (s *RequestState) noteGatewaySendLocked(accountID int64) {
 	// from the preceding attempt, even when request statistics are disabled.
 	if accountID > 0 {
 		s.upstreamHTTPAccount, s.upstreamHTTPStatus = accountID, 0
+		s.sessionDispatch.requestID = s.requestID
+		s.sessionDispatch.accountID = accountID
+		s.sessionDispatch.at = time.Now()
 	}
 	r := s.gatewayRecord
 	if r == nil || r.final != nil || accountID <= 0 {
@@ -294,9 +303,9 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 	return cloneGatewayRequest(r.final), writeUnbilled
 }
 
-// Roll out waiver audit rows by scope; legacy text billing ownership is unchanged.
+// Text and search transfer ownership only after an explicit undelivered waiver.
 func gatewayRequestWaiverTailEnabled(scope GatewayRequestScope) bool {
-	return scope == GatewayRequestScopeSearch
+	return scope == GatewayRequestScopeSearch || scope == GatewayRequestScopeText
 }
 
 func cloneGatewayRequest(in *GatewayRequestMetadata) *GatewayRequestMetadata {

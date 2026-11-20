@@ -10,20 +10,61 @@
   >
     <template #title>
       <span class="truncate">{{ board.groupName }}</span>
-      <SchedPauseMark v-if="data" :global-enabled="data.global_enabled" :stale="data.stale" />
+      <SchedPauseMark v-if="board.view === 'order' && data" :global-enabled="data.global_enabled" :stale="data.stale" />
+      <SchedPauseMark v-else-if="board.view === 'perf' && perf" :global-enabled="perf.global_enabled" :stale="perf.stale" />
     </template>
     <template #header-actions>
+      <!-- The models with samples, or any model name typed in (one declared only by accounts that are off has no traffic). -->
+      <!-- The 12-hour view: every model, or one of those with traffic in the window. -->
       <Select
-        v-if="modelOptions.length"
-        :model-value="data?.model ?? null"
-        :options="modelOptions"
-        :searchable="false"
+        v-if="board.view === 'perf'"
+        :model-value="board.model === null ? ALL_MODELS : board.model || UNKNOWN_MODEL"
+        :options="perfModelOptions"
+        :search-placeholder="t('admin.schedQuality.board.modelSearch')"
         :aria-label="t('admin.schedQuality.aria.model')"
-        class="sq-select-sm w-[150px]"
-        @update:model-value="(value) => setSchedBoardModel(String(value))"
+        searchable
+        class="sq-select-sm w-[180px]"
+        data-sq-board-model
+        @update:model-value="pickPerfModel"
+      />
+      <Select
+        v-else
+        :model-value="data?.model ?? board.model ?? null"
+        :options="modelOptions"
+        searchable
+        creatable
+        :creatable-prefix="t('admin.schedQuality.board.modelInput')"
+        :search-placeholder="t('admin.schedQuality.board.modelSearch')"
+        :aria-label="t('admin.schedQuality.aria.model')"
+        class="sq-select-sm w-[180px]"
+        data-sq-board-model
+        @update:model-value="pickModel"
       />
     </template>
 
+    <!-- Two views: the selection order now, and the accounts over the last 12 hours (kept while the page lives). -->
+    <div v-roving-tabs role="tablist" :aria-label="t('admin.schedQuality.perf.viewsLabel')" class="mb-4 flex gap-1" data-sq-board-views>
+      <button
+        v-for="view in BOARD_VIEWS"
+        :key="view"
+        type="button"
+        role="tab"
+        :aria-selected="board.view === view"
+        :tabindex="board.view === view ? 0 : -1"
+        :class="[
+          'whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40',
+          board.view === view
+            ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+            : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700'
+        ]"
+        :data-sq-board-view="view"
+        @click="setSchedBoardView(view)"
+      >{{ t(`admin.schedQuality.perf.view.${view}`) }}</button>
+    </div>
+
+    <GroupSchedPerformance v-show="board.view === 'perf'" />
+
+    <template v-if="board.view === 'order'">
     <!-- The group over all its models (H.9): identities of its account × model keys, the users' waits, migration 400s. -->
     <dl v-if="data" class="mb-4 grid gap-1 text-[13px]" data-sq-board-summary>
       <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -36,6 +77,18 @@
         <dd class="sq-num sq-text" data-sq-summary="body">{{ summaryText.body }}</dd>
         <dd class="sq-num sq-text" data-sq-summary="migration">{{ summaryText.migration }}</dd>
       </div>
+      <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <dt v-tip="t('admin.schedQuality.board.rearEntriesTip')" class="sq-text-3" tabindex="0">{{ t('admin.schedQuality.board.rearEntriesTitle') }}</dt>
+        <dd class="sq-num sq-text" data-sq-summary="rear-entries">{{ summaryText.rearEntries }}</dd>
+      </div>
+    </dl>
+    <!-- The picked model's supply in the group: declared, enabled, eligible now on the default entry (free slots not
+         included); unknown when not read. -->
+    <dl v-if="data" class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px]" data-sq-board-supply>
+      <dt v-tip="t('admin.schedQuality.board.supplyTip')" class="sq-text-3" tabindex="0">{{ t('admin.schedQuality.board.supplyTitle', { model: data.model }) }}</dt>
+      <dd class="sq-num sq-text" data-sq-supply="counts">{{ supplyText.counts }}</dd>
+      <dd v-if="supplyText.at" class="sq-num sq-text-3" data-sq-supply="at">{{ supplyText.at }}</dd>
+      <dd v-else class="sq-text-3" data-sq-supply="failed">{{ supplyText.why }}</dd>
     </dl>
     <div v-if="!data && !failed" data-sq-board-loading>
       <span v-for="i in 6" :key="i" :class="['skeleton block h-3.5 w-full', i === 1 ? '' : 'mt-4']" />
@@ -127,6 +180,7 @@
         </tbody>
       </table>
     </div>
+    </template>
   </BaseDialog>
 </template>
 
@@ -137,15 +191,18 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import AccountSwitch from '@/components/admin/account/table/AccountSwitch.vue'
 import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vue'
+import GroupSchedPerformance from './GroupSchedPerformance.vue'
 import { adminAPI } from '@/api/admin'
-import type { BackendIdentity, BackendOrderRow } from '@/api/admin/schedQualityTypes'
+import type { BackendOrderRow } from '@/api/admin/schedQualityTypes'
 import { SCHED_BOARD_TASK, useSchedLayerData } from '@/composables/useSchedLayerData'
 import { useLiveClock } from '@/composables/useLiveClock'
-import { closeSchedBoard, markSchedChanged, openSchedDrawer, qualityOpenerKey, setSchedBoardModel, useSchedLayers } from '@/composables/useSchedLayers'
+import { closeSchedBoard, markSchedChanged, openSchedDrawer, qualityOpenerKey, setSchedBoardModel, setSchedBoardView, useSchedLayers, type BoardView } from '@/composables/useSchedLayers'
 import { useAdminPermission } from '@/composables/useAdminPermission'
-import { DASH, fmtCountdown, rejectName, SCHED_DIMS, schedWord, secondsUntil } from '@/utils/schedQualityFormat'
+import { DASH, fmtCountdown, IDENTITY_SHAPES, rejectName, SCHED_DIMS, schedWord, secondsUntil } from '@/utils/schedQualityFormat'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatRecentSeconds } from '@/components/admin/account/table/accountRecent'
+import { formatShortTime } from '@/components/admin/account/table/accountTime'
+import { vRovingTabs } from '@/utils/rovingTabs'
 import { vTip } from '@/utils/tip'
 
 // Group board (design spec C): the group's accounts in the backend's selection order (GET …/groups/:id/order, never
@@ -157,7 +214,8 @@ import { vTip } from '@/utils/tip'
 const { t, te } = useI18n()
 const word = (table: string, value: string) => schedWord(table, value, t, te)
 const { board } = useSchedLayers()
-const { board: boardData, boardKey, retry } = useSchedLayerData()
+const { board: boardData, boardKey, boardPerf, retry } = useSchedLayerData()
+const BOARD_VIEWS: BoardView[] = ['order', 'perf']
 // The account link needs accounts:view; the name is plain text otherwise.
 const { canView: canViewAccounts } = useAdminPermission('accounts')
 const { canManage: canManageGroups } = useAdminPermission('groups')
@@ -173,7 +231,50 @@ let restoreFocus: (() => void) | null = null
 watch(() => boardData.data, () => { restoreFocus = shellRef.value?.holdFocus() ?? null }, { flush: 'pre' })
 watch(() => boardData.data, () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
 
-const modelOptions = computed(() => (data.value?.models ?? []).map((m) => ({ value: m, label: m })))
+// The models of the group's last answer: kept while another model loads or fails, so a name typed in can be changed.
+const lastModels = ref<{ groupId: number; models: string[] } | null>(null)
+watch(data, (value) => { if (value) lastModels.value = { groupId: value.group_id, models: value.models } })
+const modelOptions = computed(() => {
+  const models = lastModels.value?.groupId === board.groupId ? lastModels.value.models : []
+  return models.map((m) => ({ value: m, label: m }))
+})
+function pickModel(value: unknown) {
+  const model = String(value ?? '').trim()
+  if (model) setSchedBoardModel(model)
+}
+
+// ---- The 12-hour view's model: every model first, then those with traffic in the window, busiest first (and the one
+// asked for, should it have none). The empty model (older switches the backend could not tie to one) is a model of its
+// own, "unknown", not every model. ----
+const ALL_MODELS = '\u0000all'
+const UNKNOWN_MODEL = '\u0000unknown'
+const perf = computed(() => (boardPerf.id !== null && boardPerf.id === board.groupId ? boardPerf.data : null))
+const perfModelOptions = computed(() => {
+  const totals = new Map<string, number>()
+  for (const row of perf.value?.rows ?? []) totals.set(row.model, (totals.get(row.model) ?? 0) + row.requests)
+  if (board.model !== null && !totals.has(board.model)) totals.set(board.model, 0)
+  const models = [...totals.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([model]) => model)
+  return [
+    { value: ALL_MODELS, label: t('admin.schedQuality.perf.allModels') },
+    ...models.map((m) => (m ? { value: m, label: m } : { value: UNKNOWN_MODEL, label: t('admin.schedQuality.perf.unknownModel') }))
+  ]
+})
+function pickPerfModel(value: unknown) {
+  const model = String(value ?? '')
+  setSchedBoardModel(model === UNKNOWN_MODEL ? '' : model === ALL_MODELS || !model ? null : model)
+}
+
+// The picked model's supply now; every count unknown when the backend could not read it, or when the board's latest
+// refresh failed (the snapshot shown before is not now's, review item 3). The next answer brings a new snapshot.
+const supplyText = computed(() => {
+  const supply = failed.value ? null : data.value?.supply ?? null
+  const count = (value: number | undefined) => (value == null ? t('admin.schedQuality.board.supplyUnknown') : String(value))
+  return {
+    counts: t('admin.schedQuality.board.supplyCounts', { declared: count(supply?.declared), enabled: count(supply?.enabled), available: count(supply?.available) }),
+    at: supply ? t('admin.schedQuality.board.supplyAt', { time: formatShortTime(supply.at) }) : '',
+    why: failed.value ? t('admin.schedQuality.board.supplyRefreshFailed') : t('admin.schedQuality.board.supplyFailed')
+  }
+})
 
 // The summary line: a missing summary or field reads "—".
 const summaryText = computed(() => {
@@ -194,16 +295,18 @@ const summaryText = computed(() => {
     // No count, no unit: "—" alone.
     migration: last60?.migration_400 == null
       ? t('admin.schedQuality.board.summaryMigrationNone')
-      : t('admin.schedQuality.board.summaryMigration', { n: last60.migration_400 })
+      : t('admin.schedQuality.board.summaryMigration', { n: last60.migration_400 }),
+    // A 24-hour count that was not read says so: the summary failed (second review item 3) or came without it (review
+    // item 4). A summary still on its way reads "—" like the rest.
+    rearEntries: !summary
+      ? t(boardData.summaryFailedGroup !== null && boardData.summaryFailedGroup === board.groupId
+        ? 'admin.schedQuality.board.rearEntriesFailed'
+        : 'admin.schedQuality.board.rearEntriesNone')
+      : summary.rear_entries_24h
+        ? t('admin.schedQuality.board.rearEntries', { decisions: summary.rear_entries_24h.decisions, account_models: summary.rear_entries_24h.account_models })
+        : t('admin.schedQuality.board.rearEntriesUnknown')
   }
 })
-
-const IDENTITY_SHAPES: Record<BackendIdentity, string> = {
-  pass: 'sq-shape sq-shape--pass',
-  rear: 'sq-shape sq-shape--fail',
-  trial: 'sq-shape sq-shape--trial',
-  unknown: 'sq-text-3'
-}
 
 const stopped = (row: BackendOrderRow) => row.layer === 'stopped'
 /** Takes no part in the group: stopped, or outside the rate range (`excluded` is absent or null otherwise). */

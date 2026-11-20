@@ -22,6 +22,8 @@ export default defineComponent({
     index: { type: Number, required: true },
     columns: { type: Array as PropType<Column[]>, required: true },
     stickyClasses: { type: Array as PropType<string[]>, required: true },
+    /** The built-in check box cell's frozen classes (the table layout), empty otherwise. */
+    selectClass: { type: String, default: '' },
     paddingClass: { type: String, required: true },
     selectable: { type: Boolean, default: false },
     selected: { type: Boolean, default: false },
@@ -52,8 +54,8 @@ export default defineComponent({
       const cells: VNode[] = []
       if (props.selectable) {
         cells.push(
-          h('td', { class: 'w-11 min-w-11 px-3 py-4 text-center' }, [
-            h('input', {
+          h('td', { class: ['dt-select w-11 min-w-11 px-3 py-4 text-center', props.selectClass] }, [
+            h('label', { class: 'dt-check', onClick: (event: Event) => event.stopPropagation() }, [h('input', {
               type: 'checkbox',
               class:
                 'h-4 w-4 rounded border-line-control bg-surface-control text-primary-600 focus:ring-primary-500',
@@ -64,7 +66,7 @@ export default defineComponent({
               onClick: (event: Event) => event.stopPropagation(),
               onChange: (event: Event) =>
                 emit('toggle', props.row, props.index, (event.target as HTMLInputElement).checked)
-            })
+            })])
           ])
         )
       }

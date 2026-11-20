@@ -74,4 +74,25 @@ describe('GroupCategoryFilter', () => {
     expect(wrapper.find('[data-test="group-category-filter"]').exists()).toBe(false)
     expect(api.list).not.toHaveBeenCalled()
   })
+
+  // Astra review 5 (mobile list plan item 15): in a toolbar row the trigger names the field until one is chosen.
+  it('names the field until a category is chosen when given a field label', async () => {
+    api.list.mockResolvedValue([{ id: 1, name: 'Public', sort_order: 0, group_ids: [3] }])
+    const SlotSelect = {
+      props: ['modelValue', 'options', 'ariaLabel'],
+      template: '<div data-test="select" :aria-label="ariaLabel"><slot name="selected" :option="options.find((o) => o.value === modelValue)" /></div>',
+    }
+    const mountWith = (modelValue: string) => mount(GroupCategoryFilter, {
+      props: { modelValue, fieldLabel: 'Category' },
+      global: { stubs: { Select: SlotSelect } },
+    })
+    const empty = mountWith('')
+    await flushPromises()
+    // The filter's own data-test lands on the select's root.
+    expect(empty.get('[data-test="group-category-filter"]').text()).toBe('Category')
+    expect(empty.get('[data-test="group-category-filter"]').attributes('aria-label')).toBe('Category')
+    const chosen = mountWith('1')
+    await flushPromises()
+    expect(chosen.get('[data-test="group-category-filter"]').text()).toBe('Public')
+  })
 })

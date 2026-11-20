@@ -712,6 +712,7 @@ func TestGatewayConvertForwardArmsFirstEventGuard(t *testing.T) {
 				name = endpoint.name + "/opening_then_silence"
 			}
 			t.Run(name, func(t *testing.T) {
+				logs := captureOpenAIObservationLogs(t)
 				svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, tlsFPProfileService: &TLSFingerprintProfileService{}}
 				w := newGWWriter()
 				c := gwContext(endpoint.path, w)
@@ -719,7 +720,7 @@ func TestGatewayConvertForwardArmsFirstEventGuard(t *testing.T) {
 				ctx := resilience.WithRequestState(context.Background(), st)
 				st.SetBudget(resilience.NewBudget(ctx, resilience.Current(), resilience.KindText, time.Now()))
 				c.Request = c.Request.WithContext(ctx)
-				account := &Account{ID: 42, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "k"}}
+				account := &Account{ID: 42, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "k", "model_mapping": map[string]any{"claude-x": "mapped-test-model"}}}
 				done := make(chan gwOutcome, 1)
 				go func() {
 					result, err := endpoint.call(svc, ctx, c, account, []byte(endpoint.body))
@@ -729,6 +730,14 @@ func TestGatewayConvertForwardArmsFirstEventGuard(t *testing.T) {
 				failover := requireGWFailover(t, got.err)
 				require.Contains(t, string(failover.ResponseBody), "first_output_timeout")
 				require.NotContains(t, w.Body(), "msg_A")
+				require.Equal(t, "mapped-test-model", st.AttemptProfile().Model)
+				var models []any
+				for _, row := range schedObsLogRecords(t, logs) {
+					if row["msg"] == "resilience.budget_timeout_plan" {
+						models = append(models, row["model"])
+					}
+				}
+				require.Equal(t, []any{"mapped-test-model"}, models)
 			})
 		}
 	}

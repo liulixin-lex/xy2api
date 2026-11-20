@@ -116,7 +116,7 @@ func isClientCanceledTransportError(ctx context.Context, err error) bool {
 // passthrough tags the Ops error event for the OpenAI passthrough forward path.
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
 	var blocked *UpstreamFailoverError
-	if errors.As(err, &blocked) && blocked.PreDispatchSelectionInvalidated {
+	if errors.As(err, &blocked) && (blocked.PreDispatchSelectionInvalidated || blocked.Reason == openAITierUnavailable) {
 		return err
 	}
 	if isClientCanceledTransportError(ctx, err) {

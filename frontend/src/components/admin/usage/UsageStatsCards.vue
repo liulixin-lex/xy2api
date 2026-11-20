@@ -1,14 +1,14 @@
 <template>
-  <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+  <div :class="['grid grid-cols-2 gap-4', e2eShown ? 'lg:grid-cols-3 2xl:grid-cols-5' : 'lg:grid-cols-4']">
     <div class="card p-4 flex items-center gap-3">
       <div class="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 text-blue-600">
         <Icon name="document" size="md" />
       </div>
-      <div>
+      <div v-bind="adminWrap">
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalRequests') }}</p>
-        <p class="text-xl font-bold">{{ stats?.total_requests?.toLocaleString() || '0' }}</p>
+        <p class="text-xl font-bold tabular-nums">{{ unread ?? (stats?.total_requests?.toLocaleString() || '0') }}</p>
         <!-- 管理端（后端 0.6.5 请求层）带结果拆分；用户端没有这些字段，仍显示范围说明 -->
-        <p v-if="outcomes" class="text-xs text-gray-500" data-testid="usage-request-outcomes">
+        <p v-if="outcomes && !unread" class="text-xs text-gray-500" data-testid="usage-request-outcomes">
           {{ t('admin.usage.requestOutcomes', outcomes) }}
         </p>
         <p v-else class="text-xs text-gray-400">{{ t('usage.inSelectedRange') }}</p>
@@ -16,10 +16,10 @@
     </div>
     <div class="card p-4 flex items-center gap-3">
       <div class="rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30 text-amber-600"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg></div>
-      <div>
+      <div v-bind="adminWrap">
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalTokens') }}</p>
-        <p class="text-xl font-bold">{{ formatTokens(stats?.total_tokens || 0) }}</p>
-        <p class="flex flex-wrap items-center gap-x-1 text-xs text-gray-500">
+        <p class="text-xl font-bold tabular-nums">{{ unread ?? formatTokens(stats?.total_tokens || 0) }}</p>
+        <p v-if="!unread" class="flex flex-wrap items-center gap-x-1 text-xs text-gray-500">
           <span>{{ t('usage.in') }}: {{ formatTokens(stats?.total_input_tokens || 0) }}</span>
           <span>/</span>
           <span>{{ t('usage.out') }}: {{ formatTokens(stats?.total_output_tokens || 0) }}</span>
@@ -66,19 +66,20 @@
       <div class="rounded-lg bg-green-100 p-2 dark:bg-green-900/30 text-green-600">
         <Icon name="dollar" size="md" />
       </div>
-      <div class="min-w-0 flex-1">
+      <div class="min-w-0 flex-1" v-bind="adminWrap">
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalCost') }}</p>
-        <p class="text-xl font-bold text-green-600">
-          ${{ (stats?.total_actual_cost || 0).toFixed(4) }}
+        <p v-if="unread" class="text-xl font-bold tabular-nums text-green-600">{{ unread }}</p>
+        <p v-else class="text-xl font-bold tabular-nums text-green-600">
+          {{ formatUsdTotal(stats?.total_actual_cost) }}
         </p>
-        <p class="text-xs text-gray-400">
+        <p v-if="!unread" class="text-xs text-gray-400">
           <template v-if="showAccountCost && totalAccountCost != null">
-            <span class="text-orange-500">{{ t('usage.accountCost') }} ${{ totalAccountCost.toFixed(4) }}</span>
+            <span class="text-orange-500">{{ t('usage.accountCost') }} {{ formatUsdTotal(totalAccountCost) }}</span>
             <span> · </span>
           </template>
           <span>
             {{ t('usage.standardCost') }}
-            <span :class="{ 'line-through': strikeStandardCost }">${{ (stats?.total_cost || 0).toFixed(4) }}</span>
+            <span :class="{ 'line-through': strikeStandardCost }">{{ formatUsdTotal(stats?.total_cost) }}</span>
           </span>
         </p>
       </div>
@@ -87,7 +88,18 @@
       <div class="rounded-lg bg-purple-100 p-2 dark:bg-purple-900/30 text-purple-600">
         <Icon name="clock" size="md" />
       </div>
-      <div><p class="text-xs font-medium text-gray-500">{{ t('usage.avgDuration') }}</p><p class="text-xl font-bold">{{ formatDuration(stats?.average_duration_ms || 0) }}</p></div>
+      <div v-bind="adminWrap"><p class="text-xs font-medium text-gray-500">{{ t('usage.avgDuration') }}</p><p class="text-xl font-bold tabular-nums">{{ unread ?? formatDuration(stats?.average_duration_ms || 0) }}</p></div>
+    </div>
+    <!-- 管理端：端到端首输出的中位数（用户实际等了多久）和样本数；用户端接口没有这些字段，页面不传 e2eState，不显示 -->
+    <div v-if="e2eShown" class="card p-4 flex items-center gap-3" data-testid="usage-e2e-card" :title="t('usage.e2eFirstOutputHint')">
+      <div class="rounded-lg bg-sky-100 p-2 dark:bg-sky-900/30 text-sky-600">
+        <Icon name="clock" size="md" />
+      </div>
+      <div v-bind="adminWrap">
+        <p class="text-xs font-medium text-gray-500">{{ t('usage.e2eFirstOutputP50') }}</p>
+        <p class="text-xl font-bold tabular-nums" data-testid="usage-e2e-p50">{{ e2e.value }}</p>
+        <p class="text-xs text-gray-400" data-testid="usage-e2e-samples">{{ e2e.note }}</p>
+      </div>
     </div>
   </div>
 </template>
@@ -98,11 +110,19 @@ import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import type { UsageStatsResponse } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
+import { formatUsdTotal } from '@/utils/format'
+import { formatTokenTotal } from './usageRow'
 
 const props = withDefaults(defineProps<{
   stats: (AdminUsageStatsResponse | UsageStatsResponse) | null
   showAccountCost?: boolean
   strikeStandardCost?: boolean
+  /**
+   * Admin page only: whether `stats` answer the current filter (loaded), are still on their way, failed to load, or
+   * were not read because the list failed.
+   * Without it there is no user-wait card (the user page's stats have no end-to-end fields).
+   */
+  e2eState?: 'loading' | 'failed' | 'loaded' | 'blocked'
 }>(), {
   showAccountCost: true,
   strikeStandardCost: false,
@@ -124,18 +144,45 @@ const outcomes = computed(() => {
     failed: (stats.failed ?? 0).toLocaleString()
   }
 })
+// The median user wait (end-to-end first output) of the current filter: its value with the requests it is over, or
+// why there is none (still loading, failed to load, an answer without the figures, no records in the range).
+const e2eShown = computed(() => props.e2eState !== undefined)
+/**
+ * Admin page only: what the four totals show while the current filter's stats are not on the page (the same state as
+ * the user-wait card): "…" while loading, unknown when they or the list failed; never another filter's numbers. The
+ * user page passes no state and always shows its stats.
+ */
+const unread = computed(() => {
+  if (!e2eShown.value || props.e2eState === 'loaded') return null
+  return props.e2eState === 'loading' ? '…' : t('usage.latencyUnknown')
+})
+/**
+ * Admin page only: the five cards take three columns until 2xl (the grid above) and their text may shrink and wrap, so
+ * no amount or count is cut at 1024 or 1440 (browser check #1). The user page binds nothing: its four cards render as
+ * before.
+ */
+const adminWrap = computed(() => (e2eShown.value ? { class: 'min-w-0 [overflow-wrap:anywhere]' } : {}))
+const e2e = computed(() => {
+  const unknown = t('usage.latencyUnknown')
+  if (props.e2eState === 'loading') return { value: '…', note: t('usage.e2eFirstOutputLoading') }
+  if (props.e2eState === 'failed') return { value: unknown, note: t('usage.e2eFirstOutputFailed') }
+  if (props.e2eState === 'blocked') return { value: unknown, note: t('usage.e2eFirstOutputBlocked') }
+  const stats = props.stats as (AdminUsageStatsResponse | null)
+  const samples = stats?.e2e_first_output_samples
+  if (typeof samples !== 'number') return { value: unknown, note: t('usage.e2eFirstOutputMissing') }
+  const p50 = stats?.e2e_first_output_p50_ms
+  if (samples <= 0) return { value: unknown, note: t('usage.e2eFirstOutputNone') }
+  // Samples counted, but no median in the answer: the count stands, the median is unknown.
+  if (p50 == null) return { value: unknown, note: t('usage.e2eFirstOutputP50Missing', { n: samples.toLocaleString() }, samples) }
+  return { value: formatDuration(p50), note: t('usage.e2eFirstOutputSamples', { n: samples.toLocaleString() }, samples) }
+})
 const showAccountCost = computed(() => props.showAccountCost)
 const strikeStandardCost = computed(() => props.strikeStandardCost)
 
 const formatDuration = (ms: number) =>
   ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`
 
-const formatTokens = (value: number) => {
-  if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B'
-  if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M'
-  if (value >= 1e3) return (value / 1e3).toFixed(2) + 'K'
-  return value.toLocaleString()
-}
+const formatTokens = formatTokenTotal
 
 const cacheLabel = () => t('usage.cacheTotal')
 const cacheDetailLabel = () => t('usage.cacheBreakdown')

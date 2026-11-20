@@ -1,24 +1,51 @@
 package service
 
+import "encoding/json"
+
 // Private wire mirrors avoid a service-to-handler import cycle. The handler
 // reflection test verifies every field type and JSON path against the binder.
 type operatorChannelModelPricingRequest struct {
-	Platform                   string                             `json:"platform" binding:"omitempty,max=50"`
-	Models                     []string                           `json:"models" binding:"required,min=1,max=100"`
-	BillingMode                string                             `json:"billing_mode" binding:"omitempty,oneof=token per_request image"`
-	InputPrice                 *float64                           `json:"input_price" binding:"omitempty,min=0"`
-	OutputPrice                *float64                           `json:"output_price" binding:"omitempty,min=0"`
-	CacheWritePrice            *float64                           `json:"cache_write_price" binding:"omitempty,min=0"`
-	CacheWrite1hPrice          *float64                           `json:"cache_write_1h_price" binding:"omitempty,min=0"`
-	CacheReadPrice             *float64                           `json:"cache_read_price" binding:"omitempty,min=0"`
-	FastMultiplier             *float64                           `json:"fast_multiplier" binding:"omitempty,gt=0"`
-	FlexMultiplier             *float64                           `json:"flex_multiplier" binding:"omitempty,gt=0"`
-	ReasoningEffortMultipliers map[string]float64                 `json:"reasoning_effort_multipliers"`
-	ImageInputPrice            *float64                           `json:"image_input_price" binding:"omitempty,min=0"`
-	ImageOutputPrice           *float64                           `json:"image_output_price" binding:"omitempty,min=0"`
-	PerRequestPrice            *float64                           `json:"per_request_price" binding:"omitempty,min=0"`
-	Intervals                  []operatorPricingIntervalRequest   `json:"intervals"`
-	TimePricing                *operatorChannelTimePricingRequest `json:"time_pricing"`
+	ID                            int64                              `json:"id"`
+	UltrafastMultiplier           *float64                           `json:"ultrafast_multiplier"`
+	UltrafastMultiplierSet        bool                               `json:"-"`
+	Platform                      string                             `json:"platform" binding:"omitempty,max=50"`
+	Models                        []string                           `json:"models" binding:"required,min=1,max=100"`
+	BillingMode                   string                             `json:"billing_mode" binding:"omitempty,oneof=token per_request image"`
+	InputPrice                    *float64                           `json:"input_price" binding:"omitempty,min=0"`
+	OutputPrice                   *float64                           `json:"output_price" binding:"omitempty,min=0"`
+	CacheWritePrice               *float64                           `json:"cache_write_price" binding:"omitempty,min=0"`
+	CacheWrite1hPrice             *float64                           `json:"cache_write_1h_price" binding:"omitempty,min=0"`
+	CacheReadPrice                *float64                           `json:"cache_read_price" binding:"omitempty,min=0"`
+	FastMultiplier                *float64                           `json:"fast_multiplier" binding:"omitempty,gt=0"`
+	FastMultiplierExcessPrecision bool                               `json:"-"`
+	FlexMultiplier                *float64                           `json:"flex_multiplier" binding:"omitempty,gt=0"`
+	ReasoningEffortMultipliers    map[string]float64                 `json:"reasoning_effort_multipliers"`
+	ImageInputPrice               *float64                           `json:"image_input_price" binding:"omitempty,min=0"`
+	ImageOutputPrice              *float64                           `json:"image_output_price" binding:"omitempty,min=0"`
+	PerRequestPrice               *float64                           `json:"per_request_price" binding:"omitempty,min=0"`
+	Intervals                     []operatorPricingIntervalRequest   `json:"intervals"`
+	TimePricing                   *operatorChannelTimePricingRequest `json:"time_pricing"`
+}
+
+func (p *operatorChannelModelPricingRequest) UnmarshalJSON(data []byte) error {
+	type pricing operatorChannelModelPricingRequest
+	var decoded struct {
+		*pricing
+		UltrafastMultiplier json.RawMessage `json:"ultrafast_multiplier"`
+		FastMultiplier      json.RawMessage `json:"fast_multiplier"`
+	}
+	decoded.pricing = (*pricing)(p)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	p.UltrafastMultiplierSet = decoded.UltrafastMultiplier != nil
+	var err error
+	p.FastMultiplier, p.FastMultiplierExcessPrecision, err = DecodeFastMultiplier(decoded.FastMultiplier)
+	if err != nil {
+		return err
+	}
+	p.UltrafastMultiplier, err = DecodeUltrafastMultiplier(decoded.UltrafastMultiplier)
+	return err
 }
 
 type operatorChannelTimePricingRequest struct {

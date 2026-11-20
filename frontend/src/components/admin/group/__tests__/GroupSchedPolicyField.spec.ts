@@ -256,4 +256,61 @@ describe('GroupSchedPolicyField', () => {
     expect(await save(w)).toBe(true)
     expect(toast.showInfo).toHaveBeenCalledTimes(1)
   })
+
+  // Round 3 (plan item 9): what the saved error limit takes to judge a line bad, by the backend's numbers.
+  it('explains the saved error limit with the backend\'s examples, not the typed value, until a save answers with new ones', async () => {
+    const w = await mountField()
+    const tripText = (limit: string, examples: { known: number; failed: number }[]) => `admin.schedQuality.policy.errorTrip:${JSON.stringify({
+      limit,
+      examples: examples.map((item) => `admin.schedQuality.policy.errorTripItem:${JSON.stringify(item)}`).join('admin.schedQuality.policy.errorTripJoiner')
+    })}`
+    const note = () => w.get('[data-sq-policy-notes="error"]').text()
+    expect(note()).toBe(tripText('5%', [{ known: 50, failed: 6 }, { known: 100, failed: 10 }]))
+    await error(w).setValue('8')
+    expect(note()).toBe(tripText('5%', [{ known: 50, failed: 6 }, { known: 100, failed: 10 }]))
+    const saved = { ...policy(), version: 64, policy: { ...policy().policy, max_error_rate: 0.08 }, effective_max_error_rate: 0.08,
+      error_trip_examples: [{ known: 50, failed: 8 }, { known: 100, failed: 13 }], relaxed_lines: [], cleared: 0 }
+    api.updateGroupPolicy.mockResolvedValue(saved)
+    expect(await save(w)).toBe(true)
+    await flushPromises()
+    expect(note()).toBe(tripText('8%', [{ known: 50, failed: 8 }, { known: 100, failed: 13 }]))
+  })
+
+  // Review item 8: by the saved floor, like the error examples; it follows a successful save, not the typing.
+  // With a high limit the backend lists only the examples that can trip: one, or none (not judged bad within 100).
+  it.each([
+    ['one example', { effective_max_error_rate: 0.3, error_trip_examples: [{ known: 100, failed: 39 }] },
+      `admin.schedQuality.policy.errorTrip:${JSON.stringify({ limit: '30%', examples: 'admin.schedQuality.policy.errorTripItem:{"known":100,"failed":39}' })}`],
+    ['no example', { effective_max_error_rate: 0.9, error_trip_examples: [] }, 'admin.schedQuality.policy.errorTripNone:{"limit":"90%"}'],
+    ['an older answer without the fields', { effective_max_error_rate: undefined, error_trip_examples: undefined }, null],
+    ['an older answer without the examples', { error_trip_examples: undefined }, null]
+  ])('explains the saved error limit with %s', async (_, patch, expected) => {
+    api.getGroupPolicy.mockResolvedValue({ ...policy(), ...patch })
+    const w = await mountField()
+    const note = w.find('[data-sq-policy-notes="error"]')
+    if (expected === null) expect(note.exists()).toBe(false)
+    else expect(note.text()).toBe(expected)
+  })
+
+  it('warns about a saved cache floor above 85 %, unchanged by typing until a save, and always says a passed trial is not stability', async () => {
+    const w = await mountField()
+    const warned = () => w.find('[data-sq-policy-notes="cache"]').exists()
+    // The fixture's saved floor is 90 %.
+    expect(w.get('[data-sq-policy-notes="cache"]').text()).toBe('admin.schedQuality.policy.cacheHigh')
+    await cache(w).setValue('85')
+    expect(warned()).toBe(true)
+    api.updateGroupPolicy.mockResolvedValue({ ...policy(), version: 64, policy: { ...policy().policy, min_cache_ratio: 0.85 }, relaxed_lines: [], cleared: 0 })
+    expect(await save(w)).toBe(true)
+    await flushPromises()
+    expect(warned()).toBe(false)
+    await cache(w).setValue('95')
+    expect(warned()).toBe(false)
+    expect(w.get('[data-sq-policy-notes="trial"]').text()).toBe('admin.schedQuality.policy.trialStable')
+  })
+
+  it.each([[0.85, false], [0.86, true]])('warns at a saved floor of %s: %s', async (floor, expected) => {
+    api.getGroupPolicy.mockResolvedValue({ ...policy(), policy: { ...policy().policy, min_cache_ratio: floor } })
+    const w = await mountField()
+    expect(w.find('[data-sq-policy-notes="cache"]').exists()).toBe(expected)
+  })
 })

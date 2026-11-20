@@ -553,10 +553,11 @@ func shouldClearStickySession(account *Account, requestedModel string) bool {
 }
 
 type AccountWaitPlan struct {
-	AccountID      int64
-	MaxConcurrency int
-	Timeout        time.Duration
-	MaxWaiting     int
+	gatewayEligibility gatewayWaitEligibility
+	AccountID          int64
+	MaxConcurrency     int
+	Timeout            time.Duration
+	MaxWaiting         int
 }
 
 type AccountSelectionResult struct {
@@ -788,7 +789,7 @@ func (e *UpstreamFailoverError) OpenAIWrappedRequestRejectionCode() string {
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
-	if e != nil && e.PreDispatchSelectionInvalidated {
+	if e != nil && (e.PreDispatchSelectionInvalidated || e.Reason == openAITierUnavailable) {
 		return false
 	}
 	// Forbidden intentionally uses soft cooldown/session streaks without also reporting scheduler-health failure.
@@ -1331,18 +1332,24 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 	}
 
 	platforms := make(map[string]struct{})
+	hasTierRoute := false
 	for _, account := range accounts {
 		platform := strings.TrimSpace(account.Platform)
 		if !isConcreteRequestPlatform(platform) || !explicitModelMappingClaims(account, model) || !anthropicCompatModelSupported(&account, model) {
 			continue
 		}
 		platforms[platform] = struct{}{}
+		if platform == PlatformOpenAI && !hasTierRoute {
+			_, mapped := resolveOpenAIForwardMappedModels(&account, model, false)
+			hasTierRoute = openAITierTextModel(mapped) && resolveUpstreamProtocol(&account, APIProtocolResponses, mapped, nil) != APIProtocolAnthropic
+		}
 	}
 
 	ownership := CompositeModelOwnership{}
 	if len(platforms) == 1 {
 		for platform := range platforms {
 			ownership.TargetPlatform = platform
+			ownership.nonTierRoutesOnly = platform == PlatformOpenAI && !hasTierRoute
 		}
 		ownership.Matched = true
 	} else if len(platforms) > 1 {

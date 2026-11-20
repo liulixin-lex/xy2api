@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
         <TableToolbar>
           <template #search>
@@ -147,11 +147,13 @@
       <template #table>
         <div ref="proxyTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <DataTable
+          :scroll-label="t('admin.proxies.title')"
           :columns="columns"
           :data="proxies"
           :loading="loading"
           row-key="id"
           selectable
+          :sticky-actions-column="desktop"
           :selected-keys="selectedIds"
           :selection-label="proxySelectionLabel"
           :server-side-sort="true"
@@ -161,7 +163,8 @@
           @update:selected-keys="handleSelectedKeysUpdate"
         >
           <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            <!-- The frozen identity column (with the check box): at most 240px, cut with "…" and whole on a tap. -->
+            <div class="max-w-[240px]"><TableIdentityCell :primary="value" /></div>
           </template>
 
           <template #cell-protocol="{ value }">
@@ -171,17 +174,18 @@
             >
               {{ value.toUpperCase() }}
             </span>
-            <span v-else class="text-sm text-gray-400">-</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-address="{ row }">
-            <div class="flex items-center gap-1.5">
+            <div class="flex items-center gap-1.5 [@media(pointer:coarse)]:gap-2">
               <code class="code text-xs">{{ row.host }}:{{ row.port }}</code>
-              <!-- 右键（触屏长按）展开格式选择菜单 -->
+              <!-- 右键（触屏长按）展开格式选择菜单；触屏可点 40px -->
               <button
                 type="button"
-                class="rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+                class="relative [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:-inset-3 [@media(pointer:coarse)]:before:content-[''] rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
                 :title="t('admin.proxies.copyProxyUrl')"
+                :aria-label="t('admin.proxies.copyProxyUrl')"
                 @click.stop="copyProxyUrl(row)"
                 @contextmenu.prevent="toggleCopyMenu(row, $event)"
               >
@@ -201,13 +205,13 @@
               <button
                 v-if="row.password"
                 type="button"
-                class="ml-1 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                class="relative [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:-inset-3 [@media(pointer:coarse)]:before:content-[''] ml-1 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                 @click.stop="visiblePasswordIds.has(row.id) ? visiblePasswordIds.delete(row.id) : visiblePasswordIds.add(row.id)"
               >
                 <Icon :name="visiblePasswordIds.has(row.id) ? 'eyeOff' : 'eye'" size="sm" />
               </button>
             </div>
-            <span v-else class="text-sm text-gray-400">-</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-location="{ row }">
@@ -221,7 +225,7 @@
               <span v-if="formatLocation(row)" class="text-sm text-gray-700 dark:text-gray-200">
                 {{ formatLocation(row) }}
               </span>
-              <span v-else class="text-sm text-gray-400">-</span>
+              <CellEmpty v-else />
             </div>
           </template>
 
@@ -229,7 +233,7 @@
             <button
               v-if="(value || 0) > 0"
               type="button"
-              class="inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-primary-700 hover:bg-gray-200 dark:bg-dark-600 dark:text-primary-300 dark:hover:bg-dark-500"
+              class="relative inline-flex items-center rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-primary-700 hover:bg-gray-200 dark:bg-dark-600 dark:text-primary-300 dark:hover:bg-dark-500 [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:-inset-y-3 [@media(pointer:coarse)]:before:inset-x-0 [@media(pointer:coarse)]:before:content-['']"
               @click="openAccountsModal(row)"
             >
               {{ t('admin.groups.accountsCount', { count: value || 0 }) }}
@@ -257,7 +261,7 @@
               >
                 {{ row.latency_ms }}ms
               </span>
-              <span v-else class="text-sm text-gray-400">-</span>
+              <CellEmpty v-else />
               <div
                 v-if="typeof row.quality_checked === 'number'"
                 class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"
@@ -274,13 +278,13 @@
           <template #cell-expiry="{ row }">
             <span v-if="!row.expires_at" class="text-sm text-gray-400">{{ t('admin.proxies.neverExpires') }}</span>
             <div v-else class="flex flex-col text-xs">
-              <span class="text-gray-700 dark:text-gray-200">{{ formatDateTime(row.expires_at) }}</span>
+              <span class="text-gray-700 dark:text-gray-200">{{ formatListDateTime(row.expires_at) }}</span>
               <span :class="expiryBadgeClass(row)">{{ expiryLabel(row) }}</span>
             </div>
           </template>
 
           <template #cell-created_at="{ row }">
-            <span class="text-xs text-gray-600 dark:text-gray-300">{{ formatDateTime(row.created_at) }}</span>
+            <span class="text-xs text-gray-600 dark:text-gray-300">{{ formatListDateTime(row.created_at) }}</span>
           </template>
 
           <template #cell-status="{ value }">
@@ -295,12 +299,15 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <!-- Touch: 40px buttons 8px apart. Below 1024px the column scrolls with the row (four buttons do not fit a phone's 44px, and on a tablet would take a third of the table). -->
+            <!-- A phone: the buttons wrap within the screen width less the check box, the name and 24px of cell padding, so
+                 with the table scrolled all the way none sits under the frozen columns. -->
+            <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2 max-md:flex-wrap max-md:max-w-[calc(100vw_-_70px_-_var(--table-identity-width))]">
               <button
                 v-if="canManage"
                 @click="handleTestConnection(row)"
                 :disabled="testingProxyIds.has(row.id)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
               >
                 <svg
                   v-if="testingProxyIds.has(row.id)"
@@ -329,7 +336,7 @@
                 v-if="canManage"
                 @click="handleQualityCheck(row)"
                 :disabled="qualityCheckingProxyIds.has(row.id)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
               >
                 <svg
                   v-if="qualityCheckingProxyIds.has(row.id)"
@@ -357,7 +364,7 @@
               <button
                 v-if="canManage"
                 @click="handleEdit(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit') }}</span>
@@ -365,7 +372,7 @@
               <button
                 v-if="canManage"
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
                 <Icon name="trash" size="sm" />
                 <span class="text-xs">{{ t('common.delete') }}</span>
@@ -1045,19 +1052,24 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import CellEmpty from '@/components/common/CellEmpty.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
+import { useTableViewport } from '@/composables/useTableViewport'
 import { vTip } from '@/utils/tip'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { useSwipeSelect } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
-import { formatDateTime } from '@/utils/format'
+import { formatListDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import { operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 
 const { t } = useI18n()
+// The actions freeze from 1024px only: below, frozen, they would take a third of the table or more.
+const { desktop } = useTableViewport()
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 const { canManage, has, isSuperAdmin } = useAdminPermission('proxies')

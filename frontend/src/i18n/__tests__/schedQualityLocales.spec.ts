@@ -21,6 +21,9 @@ const VALUES: Record<string, string[]> = {
   'admin.schedQuality.evidence.ttfo': lineEvidence('ttfo', ttfoEvidence()).map((item) => item.key),
   'admin.schedQuality.evidence.error': lineEvidence('error', errorEvidence()).map((item) => item.key),
   'admin.schedQuality.evidence.cache': lineEvidence('cache', cacheEvidence()).map((item) => item.key),
+  'admin.schedQuality.evidence.samples': ['ttfo', 'error', 'cache'],
+  'admin.schedQuality.evidence.samples.total': ['ttfo', 'error', 'cache'],
+  'admin.schedQuality.decisions.timeout.seats': ['full', 'not_observed', 'unknown'],
   'admin.schedQuality.ttftRule': ['confidence', 'tolerance', 'peer_margin', 'confidenceHint', 'toleranceHint', 'peer_marginHint'],
   'admin.schedQuality.ttftRule.legal': ['confidence', 'tolerance', 'peer_margin'],
   'admin.schedQuality.reject': ['profit_floor'],
@@ -90,4 +93,34 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
     )
     expect(templates.filter(([, text]) => !text.includes('{v}'))).toEqual([])
   })
+
+  // Final review: the panel's not-counted note sits in one line of the figures' width (196px on a phone, 13px text);
+  // the whole explanation is in its tip and covers a gate that was off and an account not in the group yet (a new group,
+  // or one the account joined after the snapshot: the detail, every 5 s, shows it before the snapshot, every minute).
+  it('keeps the panel\'s not-counted note short and its tip complete', () => {
+    const note = String(lookup(messages, 'admin.schedQuality.perf.panel.gateOff'))
+    const width = [...note].reduce((sum, char) => sum + (/[\u3000-\u9fff\uff00-\uffef]/.test(char) ? 13 : 7), 0)
+    expect(width).toBeLessThanOrEqual(196)
+    const tip = String(lookup(messages, 'admin.schedQuality.perf.panel.gateOffTip'))
+    expect(tip.length).toBeGreaterThan(note.length)
+    expect(tip).toMatch(/这个号当时还不在本分组|this account was not in the group yet/)
+  })
+})
+
+// Final review suggestion 5: one apostrophe in the English copy.
+it('uses the straight apostrophe in the English quality copy', () => {
+  const texts: string[] = []
+  const walk = (node: unknown) => {
+    if (typeof node === 'string') texts.push(node)
+    else if (node && typeof node === 'object') Object.values(node).forEach(walk)
+  }
+  walk(lookup(en, 'admin.schedQuality'))
+  expect(texts.filter((text) => /[‘’]/.test(text))).toEqual([])
+})
+
+// Acceptance round 2: durations read as minutes, not points ("分" next to scores); English results start alike.
+it('writes durations in minutes and capitalizes every English result', () => {
+  expect([lookup(zh, 'admin.schedQuality.duration.minutes'), lookup(zh, 'admin.schedQuality.duration.hoursMinutes')]).toEqual(['{m} 分钟', '{h} 小时 {m} 分钟'])
+  const results = [lookup(en, 'admin.schedQuality.perf.detail.resultNone'), ...Object.values(lookup(en, 'admin.schedQuality.decisions.action') as Record<string, string>)]
+  expect(results.map(String).filter((text) => text[0] !== text[0].toUpperCase())).toEqual([])
 })

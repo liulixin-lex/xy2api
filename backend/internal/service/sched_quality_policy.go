@@ -197,7 +197,9 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 			continue
 		}
 		if relax(k) {
-			rows[k] = schedquality.Relaxed(k)
+			relaxed := schedquality.Relaxed(k)
+			relaxed.LastAssessment = rows[k].LastAssessment
+			rows[k] = relaxed
 		}
 	}
 	peerRows := make(map[schedquality.LineKey]schedquality.LineState)

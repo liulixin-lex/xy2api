@@ -1112,6 +1112,69 @@ func (_u *GroupUpdate) SetNillableFreeOpenaiFast(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetOpenaiFastMode sets the "openai_fast_mode" field.
+func (_u *GroupUpdate) SetOpenaiFastMode(v string) *GroupUpdate {
+	_u.mutation.SetOpenaiFastMode(v)
+	return _u
+}
+
+// SetNillableOpenaiFastMode sets the "openai_fast_mode" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableOpenaiFastMode(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetOpenaiFastMode(*v)
+	}
+	return _u
+}
+
+// SetOpenaiUltrafastMode sets the "openai_ultrafast_mode" field.
+func (_u *GroupUpdate) SetOpenaiUltrafastMode(v string) *GroupUpdate {
+	_u.mutation.SetOpenaiUltrafastMode(v)
+	return _u
+}
+
+// SetNillableOpenaiUltrafastMode sets the "openai_ultrafast_mode" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableOpenaiUltrafastMode(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetOpenaiUltrafastMode(*v)
+	}
+	return _u
+}
+
+// SetOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field.
+func (_u *GroupUpdate) SetOpenaiTierPolicyVersion(v int) *GroupUpdate {
+	_u.mutation.ResetOpenaiTierPolicyVersion()
+	_u.mutation.SetOpenaiTierPolicyVersion(v)
+	return _u
+}
+
+// SetNillableOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableOpenaiTierPolicyVersion(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetOpenaiTierPolicyVersion(*v)
+	}
+	return _u
+}
+
+// AddOpenaiTierPolicyVersion adds value to the "openai_tier_policy_version" field.
+func (_u *GroupUpdate) AddOpenaiTierPolicyVersion(v int) *GroupUpdate {
+	_u.mutation.AddOpenaiTierPolicyVersion(v)
+	return _u
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (_u *GroupUpdate) SetFreeOpenaiUltrafast(v bool) *GroupUpdate {
+	_u.mutation.SetFreeOpenaiUltrafast(v)
+	return _u
+}
+
+// SetNillableFreeOpenaiUltrafast sets the "free_openai_ultrafast" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableFreeOpenaiUltrafast(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetFreeOpenaiUltrafast(*v)
+	}
+	return _u
+}
+
 // SetRequireOauthOnly sets the "require_oauth_only" field.
 func (_u *GroupUpdate) SetRequireOauthOnly(v bool) *GroupUpdate {
 	_u.mutation.SetRequireOauthOnly(v)
@@ -2014,6 +2077,21 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.FreeOpenaiFast(); ok {
 		_spec.SetField(group.FieldFreeOpenaiFast, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.OpenaiFastMode(); ok {
+		_spec.SetField(group.FieldOpenaiFastMode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.OpenaiUltrafastMode(); ok {
+		_spec.SetField(group.FieldOpenaiUltrafastMode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.OpenaiTierPolicyVersion(); ok {
+		_spec.SetField(group.FieldOpenaiTierPolicyVersion, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedOpenaiTierPolicyVersion(); ok {
+		_spec.AddField(group.FieldOpenaiTierPolicyVersion, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.FreeOpenaiUltrafast(); ok {
+		_spec.SetField(group.FieldFreeOpenaiUltrafast, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.RequireOauthOnly(); ok {
 		_spec.SetField(group.FieldRequireOauthOnly, field.TypeBool, value)
@@ -3466,6 +3544,69 @@ func (_u *GroupUpdateOne) SetNillableFreeOpenaiFast(v *bool) *GroupUpdateOne {
 	return _u
 }
 
+// SetOpenaiFastMode sets the "openai_fast_mode" field.
+func (_u *GroupUpdateOne) SetOpenaiFastMode(v string) *GroupUpdateOne {
+	_u.mutation.SetOpenaiFastMode(v)
+	return _u
+}
+
+// SetNillableOpenaiFastMode sets the "openai_fast_mode" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableOpenaiFastMode(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetOpenaiFastMode(*v)
+	}
+	return _u
+}
+
+// SetOpenaiUltrafastMode sets the "openai_ultrafast_mode" field.
+func (_u *GroupUpdateOne) SetOpenaiUltrafastMode(v string) *GroupUpdateOne {
+	_u.mutation.SetOpenaiUltrafastMode(v)
+	return _u
+}
+
+// SetNillableOpenaiUltrafastMode sets the "openai_ultrafast_mode" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableOpenaiUltrafastMode(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetOpenaiUltrafastMode(*v)
+	}
+	return _u
+}
+
+// SetOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field.
+func (_u *GroupUpdateOne) SetOpenaiTierPolicyVersion(v int) *GroupUpdateOne {
+	_u.mutation.ResetOpenaiTierPolicyVersion()
+	_u.mutation.SetOpenaiTierPolicyVersion(v)
+	return _u
+}
+
+// SetNillableOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableOpenaiTierPolicyVersion(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetOpenaiTierPolicyVersion(*v)
+	}
+	return _u
+}
+
+// AddOpenaiTierPolicyVersion adds value to the "openai_tier_policy_version" field.
+func (_u *GroupUpdateOne) AddOpenaiTierPolicyVersion(v int) *GroupUpdateOne {
+	_u.mutation.AddOpenaiTierPolicyVersion(v)
+	return _u
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (_u *GroupUpdateOne) SetFreeOpenaiUltrafast(v bool) *GroupUpdateOne {
+	_u.mutation.SetFreeOpenaiUltrafast(v)
+	return _u
+}
+
+// SetNillableFreeOpenaiUltrafast sets the "free_openai_ultrafast" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableFreeOpenaiUltrafast(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetFreeOpenaiUltrafast(*v)
+	}
+	return _u
+}
+
 // SetRequireOauthOnly sets the "require_oauth_only" field.
 func (_u *GroupUpdateOne) SetRequireOauthOnly(v bool) *GroupUpdateOne {
 	_u.mutation.SetRequireOauthOnly(v)
@@ -4398,6 +4539,21 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.FreeOpenaiFast(); ok {
 		_spec.SetField(group.FieldFreeOpenaiFast, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.OpenaiFastMode(); ok {
+		_spec.SetField(group.FieldOpenaiFastMode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.OpenaiUltrafastMode(); ok {
+		_spec.SetField(group.FieldOpenaiUltrafastMode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.OpenaiTierPolicyVersion(); ok {
+		_spec.SetField(group.FieldOpenaiTierPolicyVersion, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedOpenaiTierPolicyVersion(); ok {
+		_spec.AddField(group.FieldOpenaiTierPolicyVersion, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.FreeOpenaiUltrafast(); ok {
+		_spec.SetField(group.FieldFreeOpenaiUltrafast, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.RequireOauthOnly(); ok {
 		_spec.SetField(group.FieldRequireOauthOnly, field.TypeBool, value)

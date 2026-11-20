@@ -11,7 +11,12 @@ const dynamicKeys = [
   ...['balancePause', 'codexRetryAfterCap', 'learnTtl'].flatMap((k) => [`admin.resilience.settings.fields.${k}`, `admin.resilience.settings.fields.${k}Hint`]),
   'admin.resilience.explain.reasons.capability_stream_only',
   'admin.resilience.panel.metrics.pre_created_delta',
-  ...['collab_plaintext', 'collab_call', 'collab_call_action', 'state_rejection'].map((k) => `admin.resilience.panel.metrics.${k}`)
+  ...['collab_plaintext', 'collab_call', 'collab_call_action', 'state_rejection'].map((k) => `admin.resilience.panel.metrics.${k}`),
+  // Round 3: the session_rebind counter is the request's avoidance; its hint says where the committed switch is.
+  'admin.resilience.panel.metricHints.session_rebind',
+  // Round 3 browser check (#9): the request budget counters the backend emits had no copy and showed raw names.
+  ...['budget_snapshot', 'budget_cut_fot', 'ttfo_lower_bound', 'late_attempt_start', 'body_receipt_repeat', 'anthropic_response_stage_timeout']
+    .flatMap((k) => [`admin.resilience.panel.metrics.${k}`, `admin.resilience.panel.metricHints.${k}`])
 ]
 
 function lookup(messages: unknown, key: string): unknown {
@@ -94,3 +99,29 @@ describe('gateway resilience 0.4.4 locale keys', () => {
   })
 })
 
+
+// final-fe reviews (gpt item 1, Astra items 1-4): the budget counter labels say what the backend counts
+// (body_receipt.go, request_timing.go, budget.go, timeout_plan.go, resilience_timeout_observe.go): repeats only,
+// lateness from request arrival, the configured start mode, the attempt's wait lower bound, and would (the budget
+// limited the planned window) apart from applied (the budget-cut attribution took effect).
+describe.each([
+  ['zh', zh, {
+    body_receipt_repeat: ['重复接收次数'], late_attempt_start: ['请求到达时间'], budget_snapshot: ['配置的预算起算模式'],
+    ttfo_lower_bound: ['等待下界'], budget_cut_fot: ['记录到预算限制', '归因']
+  }],
+  ['en', en, {
+    body_receipt_repeat: ['Repeat request-body receipts'], late_attempt_start: ['request arrival'], budget_snapshot: ['configured budget start mode'],
+    ttfo_lower_bound: ['lower bound'], budget_cut_fot: ['budget limit recorded', 'attribution applied']
+  }]
+] as const)('%s budget counter labels', (_, messages, expected) => {
+  it.each(Object.entries(expected))('%s says %j', (name, phrases) => {
+    for (const phrase of phrases) expect(lookup(messages, `admin.resilience.panel.metrics.${name}`)).toContain(phrase)
+  })
+  // final-fe Astra re-review 1: with attribution off both flags read false although the budget may still cut the window.
+  it('says in the budget_cut_fot tip that attribution off leaves both flags false', () => {
+    expect(lookup(messages, 'admin.resilience.panel.metricHints.budget_cut_fot')).toMatch(/归因模式为 off 时两个标记都不计算|With attribution off neither flag is computed/)
+  })
+  it('never reads the repeat count as "only the first counts"', () => {
+    expect(lookup(messages, 'admin.resilience.panel.metrics.body_receipt_repeat')).not.toMatch(/只按第一次计|only the first counts/)
+  })
+})

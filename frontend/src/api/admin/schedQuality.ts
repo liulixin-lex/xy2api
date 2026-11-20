@@ -13,6 +13,7 @@ import type {
   BackendGroupPolicySaved,
   BackendGroupsSummary,
   BackendOrder,
+  BackendPerformance,
   BackendPolicyPreview,
   BackendResetResult,
   BackendTTFTRule,
@@ -98,13 +99,26 @@ export async function groupsSummary(groupIds: number[], options?: RequestOptions
 
 /**
  * The group board: the group's accounts in the backend's selection order for one request model (the group's busiest
- * without one).
+ * without one), with the model's supply. Any model name may be asked for, also one missing from `models` (declared
+ * only by accounts that are off and so without recent traffic).
  */
 export async function groupBoard(groupId: number, model?: string, options?: RequestOptions): Promise<BackendOrder> {
   const { data } = await apiClient.get<BackendOrder>(`${base}/groups/${groupId}/order`, {
     params: model ? { model } : undefined,
     signal: options?.signal
   })
+  return data
+}
+
+/** The group's accounts over the last 12 hours, every model (the board's 12-hour view). */
+export async function groupPerformance(groupId: number, options?: RequestOptions): Promise<BackendPerformance> {
+  const { data } = await apiClient.get<BackendPerformance>(`${base}/groups/${groupId}/performance`, { signal: options?.signal })
+  return data
+}
+
+/** One account over the last 12 hours in each of its OpenAI groups, every model (the panel's 12-hour section). */
+export async function accountPerformance(accountId: number, options?: RequestOptions): Promise<BackendPerformance> {
+  const { data } = await apiClient.get<BackendPerformance>(`${base}/accounts/${accountId}/performance`, { signal: options?.signal })
   return data
 }
 
@@ -132,6 +146,8 @@ export const schedQualityAPI = {
   previewGroupPolicy,
   groupBoard,
   groupsSummary,
+  groupPerformance,
+  accountPerformance,
   getTTFTRule,
   updateTTFTRule
 }

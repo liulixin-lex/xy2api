@@ -34,6 +34,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	ctx, tierAttempt := withOpenAITierAttempt(ctx, body)
+	defer func() {
+		tierAttempt.finish(forwardResult)
+		observer := upstreamResponseModelObserverFromContext(c)
+		observer.finishTierRefusal()
+		observer.attachTierEvidence(forwardResult)
+	}()
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
 	defer func() {
@@ -77,7 +84,17 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
 		return nil, writeOpenCodeUnsupportedModelError(c, true, routingModel)
 	}
-	switch s.resolveUpstreamProtocolFor(ctx, account, APIProtocolAnthropic, routingModel) {
+	protocol := s.resolveUpstreamProtocolFor(ctx, account, APIProtocolAnthropic, routingModel)
+	if account.IsOpenAI() && protocol != APIProtocolAnthropic {
+		mapped := resolveMappedUpstreamModel(account, body, defaultMappedModel)
+		if openAITierTextRoute(account, mapped) {
+			if _, err := ValidateOpenAIServiceTierField(body); err != nil {
+				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+				return nil, err
+			}
+		}
+	}
+	switch protocol {
 	case APIProtocolAnthropic:
 		// 上游为供应商原生 Anthropic 端点：/v1/messages 零转换直通（仅模型名映射 +
 		// 少量 body 清洗），完整保留 thinking / tool_use / cache 语义。
@@ -103,8 +120,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	clientStream := anthropicReq.Stream // client's original stream preference
 
 	// 2. Model mapping
-	billingModel := resolveOpenAIForwardModel(account, normalizedModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	billingModel, upstreamModel := resolveOpenAICompatForwardModels(account, normalizedModel, defaultMappedModel)
 	var projectionErr error
 	body, projectionErr = applyM7FinalReasoning(ctx, c, account, body, upstreamModel, "anthropic", PreOutputProtocolAnthropic)
 	if projectionErr != nil {
@@ -348,7 +364,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// 4c. Apply OpenAI fast policy (may filter service_tier or block the request).
 	// Mirrors the Claude anthropic-beta "fast-mode-2026-02-01" filter, but keyed
 	// on the body-level service_tier field (priority/flex).
-	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
+	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(context.WithValue(ctx, openAITierEndpointKey{}, APIProtocolResponses), account, upstreamModel, responsesBody)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
 		if errors.As(policyErr, &blocked) {
@@ -737,7 +753,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	observer.Observe(finalResponse.Model, true)
-	observer.ObserveServiceTier(finalResponse.ServiceTier, true)
+	observer.observeOpenAITier(finalResponse.ServiceTier, true)
 
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
 		payload := outcome.payload

@@ -94,6 +94,51 @@ var CodexGPT61SolMetadata []byte
 //go:embed codex_gpt61_terra.json
 var CodexGPT61TerraMetadata []byte
 
+// CodexGPT62SolMetadata is the complete official descriptor from openai/codex
+// 6c0cee502d215e5df2dd9a303cf2e252229c9e12, codex-rs/models-manager/models.json.
+//
+//go:embed codex_gpt62_sol.json
+var CodexGPT62SolMetadata []byte
+
+// CodexGPT62AstraMetadata is the complete official descriptor from openai/codex
+// 6c0cee502d215e5df2dd9a303cf2e252229c9e12, codex-rs/models-manager/models.json.
+//
+//go:embed codex_gpt62_astra.json
+var CodexGPT62AstraMetadata []byte
+
+// IsGPT62SolModelSpelling reports the exact gpt-6.2-sol ID after case,
+// separator, and provider-prefix normalization. It is deliberately narrow:
+// effort/compact suffix spellings are not recognized, and it is used only for
+// Codex catalog metadata, not on the request path.
+func IsGPT62SolModelSpelling(model string) bool {
+	return CanonicalizeOpenAIModelAliasSpelling(model) == "gpt-6.2-sol"
+}
+
+// IsGPT62AstraModelSpelling reports the exact gpt-6.2-astra ID after case,
+// separator, and provider-prefix normalization. It is deliberately narrow:
+// effort/compact suffix spellings are not recognized, and it is used only for
+// Codex catalog metadata, not on the request path.
+func IsGPT62AstraModelSpelling(model string) bool {
+	return CanonicalizeOpenAIModelAliasSpelling(model) == "gpt-6.2-astra"
+}
+
+// CodexOfficialModelMetadata returns the embedded official Codex descriptor
+// for models whose catalog entry is taken verbatim from openai/codex, or nil.
+func CodexOfficialModelMetadata(model string) []byte {
+	switch {
+	case IsGPT61TerraModelSpelling(model):
+		return CodexGPT61TerraMetadata
+	case IsGPT61SolModelSpelling(model):
+		return CodexGPT61SolMetadata
+	case IsGPT62SolModelSpelling(model):
+		return CodexGPT62SolMetadata
+	case IsGPT62AstraModelSpelling(model):
+		return CodexGPT62AstraMetadata
+	default:
+		return nil
+	}
+}
+
 // latestCodexInstructions 返回当前已知最新版本的 Codex base instructions，
 // 当前为 GPT-5.5；若 5.5 prompt 意外为空则回退到 DefaultInstructions 保证非空。
 func latestCodexInstructions() string {
@@ -156,6 +201,9 @@ func CanonicalizeOpenAIModelAliasSpelling(model string) string {
 func CodexBaseInstructionsForModel(model string) string {
 	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
 	switch {
+	// GPT-6.2 is intentionally absent: this function feeds request-side default
+	// instructions, and its official template is advertised only through the
+	// Codex models manifest descriptor.
 	case IsGPT61SolModelSpelling(canonical), IsGPT61TerraModelSpelling(canonical):
 		raw := CodexGPT61SolMetadata
 		if IsGPT61TerraModelSpelling(canonical) {

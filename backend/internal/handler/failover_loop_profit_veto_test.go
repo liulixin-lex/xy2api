@@ -2,8 +2,13 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/service"
 
 	"github.com/stretchr/testify/require"
 )
@@ -136,4 +141,185 @@ func TestHandleSelectionExhaustedUnaffectedWithoutProfitVeto(t *testing.T) {
 
 	require.Equal(t, FailoverContinue, fs.HandleSelectionExhausted(context.Background()))
 	require.Empty(t, fs.FailedAccountIDs, "无利润否决时排除列表应被完全清空")
+}
+
+type waitedAccountRepo struct {
+	service.AccountRepository
+	pool    []service.Account
+	fresh   service.Account
+	readErr error
+	reads   int
+}
+
+func (r *waitedAccountRepo) ListSchedulableByGroupIDAndPlatforms(context.Context, int64, []string) ([]service.Account, error) {
+	return r.pool, nil
+}
+func (r *waitedAccountRepo) GetByID(context.Context, int64) (*service.Account, error) {
+	r.reads++
+	return &r.fresh, r.readErr
+}
+
+type waitedSlots struct {
+	service.ConcurrencyCache
+	busy     bool
+	released []int64
+}
+
+func (s *waitedSlots) AcquireAccountSlot(_ context.Context, id int64, _ int, _ string) (bool, error) {
+	return id != 1 || !s.busy, nil
+}
+func (s *waitedSlots) ReleaseAccountSlot(_ context.Context, id int64, _ string) error {
+	s.released = append(s.released, id)
+	return nil
+}
+
+type waitedSessions struct {
+	service.SessionLimitCache
+	added, removed []int64
+	active         map[int64]map[string]bool
+}
+
+func (s *waitedSessions) RegisterSession(_ context.Context, id int64, session string, limit int, _ time.Duration) (bool, error) {
+	if s.active == nil {
+		s.active = make(map[int64]map[string]bool)
+	}
+	if s.active[id] == nil {
+		s.active[id] = make(map[string]bool)
+	}
+	if !s.active[id][session] && len(s.active[id]) >= limit {
+		return false, nil
+	}
+	s.active[id][session] = true
+	s.added = append(s.added, id)
+	return true, nil
+}
+func (s *waitedSessions) UnregisterSession(_ context.Context, id int64, session string) error {
+	delete(s.active[id], session)
+	s.removed = append(s.removed, id)
+	return nil
+}
+
+func TestGatewayWaitRechecksBeforeDispatch(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		wait    bool
+		change  func(*service.Account)
+		readErr error
+		want    int64
+	}{
+		{"disabled", true, func(a *service.Account) { a.Status = service.StatusDisabled }, nil, 2},
+		{"left_group", true, func(a *service.Account) { a.AccountGroups = nil }, nil, 2},
+		{"cooldown", true, func(a *service.Account) { end := time.Now().Add(time.Minute); a.RateLimitResetAt = &end }, nil, 2},
+		{"deleted", true, nil, service.ErrAccountNotFound, 2},
+		{"unchanged", true, nil, nil, 1},
+		{"read_error", true, nil, errors.New("read failed"), 1},
+		{"direct", false, nil, nil, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			group := &service.Group{ID: 9, Hydrated: true, Platform: service.PlatformAnthropic, Status: service.StatusActive}
+			ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+			a := service.Account{ID: 1, Platform: group.Platform, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+				Extra: map[string]any{"max_sessions": 3}, AccountGroups: []service.AccountGroup{{GroupID: group.ID}}}
+			b := a
+			b.ID = 2
+			b.Priority = 5
+			repo := &waitedAccountRepo{pool: []service.Account{a, b}, fresh: a}
+			slots := &waitedSlots{busy: tc.wait}
+			sessions := &waitedSessions{}
+			concurrency := service.NewConcurrencyService(slots)
+			gateway := service.NewGatewayService(repo, nil, nil, nil, nil, nil, nil, nil, &config.Config{}, nil, concurrency, nil, nil, nil, nil, nil, nil, nil, sessions, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			fs := NewFailoverState(2, false)
+			deferred := map[int64]*service.Account{}
+			var dispatched []int64
+			for i := 0; i < 2; i++ {
+				pick, err := gateway.SelectAccountWithLoadAwareness(ctx, &group.ID, "fixture", "", fs.FailedAccountIDs, "", 0)
+				require.NoError(t, err)
+				release := pick.ReleaseFunc
+				if !pick.Acquired {
+					require.NotNil(t, pick.WaitPlan)
+					require.Zero(t, repo.reads)
+					if tc.change != nil {
+						tc.change(&repo.fresh)
+					}
+					repo.readErr = tc.readErr
+					slots.busy = false
+					acquired, err := concurrency.AcquireAccountSlot(ctx, pick.Account.ID, 1)
+					require.NoError(t, err)
+					require.True(t, acquired.Acquired)
+					release = acquired.ReleaseFunc
+					deferred[pick.Account.ID] = pick.Account
+				}
+				latest, veto, _ := fs.admitGatewaySlot(ctx, gateway, pick, release, deferred)
+				require.False(t, veto)
+				if latest == nil {
+					continue
+				}
+				dispatched = append(dispatched, latest.ID)
+				require.Len(t, slots.released, len(fs.invalidAfterWait), "the admitted slot stays held through dispatch")
+				release()
+				break
+			}
+			require.Equal(t, []int64{tc.want}, dispatched)
+			require.Zero(t, fs.SwitchCount)
+			require.Nil(t, fs.LastFailoverErr)
+			require.False(t, fs.ForceCacheBilling)
+			require.Zero(t, fs.ProfitVetoCount())
+			if tc.want == 2 {
+				require.Equal(t, []int64{1, 2}, sessions.added)
+				require.Empty(t, sessions.removed)
+				require.NotContains(t, deferred, int64(1))
+				require.Equal(t, []int64{1, 2}, slots.released)
+			} else {
+				require.Empty(t, sessions.removed)
+				require.Equal(t, []int64{1}, slots.released)
+			}
+			if tc.wait {
+				require.Equal(t, 1, repo.reads)
+			} else {
+				require.Zero(t, repo.reads)
+			}
+		})
+	}
+}
+
+func TestGatewayWaitRejectionPreservesOtherServingRequestSession(t *testing.T) {
+	group := &service.Group{ID: 9, Hydrated: true, Platform: service.PlatformAnthropic, Status: service.StatusActive}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+	a := service.Account{ID: 1, Platform: group.Platform, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 2, Extra: map[string]any{"max_sessions": 1}, AccountGroups: []service.AccountGroup{{GroupID: group.ID}}}
+	repo := &waitedAccountRepo{pool: []service.Account{a}, fresh: a}
+	slots := &waitedSlots{}
+	sessions := &waitedSessions{}
+	concurrency := service.NewConcurrencyService(slots)
+	gateway := service.NewGatewayService(repo, nil, nil, nil, nil, nil, nil, nil, &config.Config{}, nil, concurrency, nil, nil, nil, nil, nil, nil, nil, sessions, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	first, err := gateway.SelectAccountWithLoadAwareness(ctx, &group.ID, "existing", "", nil, "", 0)
+	require.NoError(t, err)
+	require.True(t, first.Acquired)
+	defer first.ReleaseFunc()
+	slots.busy = true
+	second, err := gateway.SelectAccountWithLoadAwareness(ctx, &group.ID, "existing", "", nil, "", 0)
+	require.NoError(t, err)
+	require.NotNil(t, second.WaitPlan)
+	slots.busy = false
+	slot, err := concurrency.AcquireAccountSlot(ctx, a.ID, 2)
+	require.NoError(t, err)
+	require.True(t, slot.Acquired)
+	repo.fresh.Schedulable = false
+	latest, _, _ := NewFailoverState(1, false).admitGatewaySlot(ctx, gateway, second, slot.ReleaseFunc, nil)
+	require.Nil(t, latest)
+	require.Equal(t, []int64{1}, slots.released)
+	require.True(t, sessions.active[a.ID]["existing"])
+	ok, err := sessions.RegisterSession(ctx, a.ID, "other", 1, time.Minute)
+	require.NoError(t, err)
+	require.False(t, ok)
+}
+
+func TestGatewayWaitInvalidAccountRemainsExcludedAfter503Backoff(t *testing.T) {
+	fs := NewFailoverState(2, false)
+	fs.LastFailoverErr = newTestFailoverErr(503, false, false)
+	fs.SwitchCount = 1
+	fs.invalidAfterWait = map[int64]struct{}{2: {}}
+	fs.FailedAccountIDs = map[int64]struct{}{1: {}, 2: {}}
+	require.Equal(t, FailoverContinue, fs.HandleSelectionExhausted(context.Background()))
+	require.NotContains(t, fs.FailedAccountIDs, int64(1))
+	require.Contains(t, fs.FailedAccountIDs, int64(2))
 }

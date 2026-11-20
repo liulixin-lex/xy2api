@@ -21,6 +21,7 @@ type SchedAdminAccountRepository interface {
 	GetByIDs(context.Context, []int64) ([]*Account, error)
 	SchedAdminAccountIDs(context.Context) ([]int64, error)
 	SchedAdminDecisions(context.Context, int64, int, int64) ([]SchedAdminDecision, error)
+	SchedAdminRearEntries24h(context.Context, []int64, time.Time) (map[int64]SchedAdminRearEntries, error)
 	SchedAdminGroupLast60(context.Context, []int64, time.Time) (map[int64]SchedAdminGroupLast60, error)
 	SchedAdminClearError(context.Context, int64, string) (bool, error)
 	SchedAdminClear429(context.Context, int64, *time.Time, *time.Time) (bool, error)
@@ -184,7 +185,18 @@ func (s *SchedAdminService) ClearOverride(ctx context.Context, a, g, op int64) e
 	return nil
 }
 func schedAdminPolicy(r SchedPolicyRecord) SchedAdminPolicy {
-	return SchedAdminPolicy{GroupID: r.GroupID, Version: r.Version, Policy: schedAdminPolicyFields(r.Policy)}
+	limit := schedquality.EffectiveErrorRate(r.Policy.MaxErrorRate)
+	examples := make([]SchedAdminErrorTripExample, 0, 2)
+	for _, known := range []int{50, 100} {
+		for failed := 1; failed <= known; failed++ {
+			if schedquality.WilsonLower(failed, known) > limit {
+				examples = append(examples, SchedAdminErrorTripExample{Known: known, Failed: failed})
+				break
+			}
+		}
+	}
+	return SchedAdminPolicy{GroupID: r.GroupID, Version: r.Version, Policy: schedAdminPolicyFields(r.Policy),
+		EffectiveMaxErrorRate: limit, ErrorTripExamples: examples}
 }
 func schedAdminGroupPolicy(p *SchedQualitySnapshot, group int64) schedquality.Policy {
 	if record, ok := p.Policies[group]; ok {
@@ -309,7 +321,7 @@ func (s *SchedAdminService) Decisions(ctx context.Context, id int64, limit int, 
 	return append([]SchedAdminDecision{}, rows...), err
 }
 func SchedAdminDecisionBasis(b schedquality.Basis) *SchedAdminBasis {
-	out := &SchedAdminBasis{RuleVersion: b.RuleVersion, Line: b.Line, Kind: b.Kind, Cut: schedAdminTime(b.Cut), Threshold: b.Threshold, SourceGroups: append([]int64{}, b.SourceGroups...)}
+	out := &SchedAdminBasis{SampleCounts: b.SampleCounts, TrialSeats: b.TrialSeats, RuleVersion: b.RuleVersion, Line: b.Line, Kind: b.Kind, Cut: schedAdminTime(b.Cut), Threshold: b.Threshold, SourceGroups: append([]int64{}, b.SourceGroups...)}
 	if b.TTFT != nil {
 		e := *b.TTFT
 		e.Causes = append([]schedquality.RuleBUnknownReason{}, e.Causes...)

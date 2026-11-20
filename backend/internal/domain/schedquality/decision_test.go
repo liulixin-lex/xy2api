@@ -19,6 +19,7 @@ func TestBasisEvidenceJSONRoundTrip(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			r := RuleBResult{
+				NLocal:     11.25,
 				Counts:     RuleBCounts{N: 30, K: 7, X: 2, S: 3, D: 2},
 				PeerCounts: RuleBCounts{N: 25, X: 5}, Prior: .12, PeerPrior: .23,
 				AbsoluteProbability: .81, RelativeProbability: &pRel, U: &u, RelativeThreshold: &z,
@@ -52,7 +53,7 @@ func TestBasisEvidenceJSONRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := map[string]any{
-				"limit_s": float64(7), "n": float64(30), "k": float64(7), "x": float64(2),
+				"limit_s": float64(7), "n_local": 11.25, "n": float64(30), "k": float64(7), "x": float64(2),
 				"s": float64(3), "d": float64(2), "prior_mu": .12, "peer_nu": .23, "p_abs": .81,
 				"p_rel": nil, "u": nil, "z": nil,
 				"causes": []any{"peer_known_insufficient", "no_peers"},

@@ -111,9 +111,23 @@ const DataTableStub = {
         <slot name="cell-cost" :row="row" />
         <slot name="cell-request_id" :row="row" />
         <slot name="cell-upstream_request_id" :row="row" />
+        <slot name="cell-created_at" :row="row" :value="row.created_at" />
       </div>
     </div>
   `,
+}
+
+/** Opens a row's request detail with its "Details" button and returns the dialog's body. */
+async function openDetail(wrapper: ReturnType<typeof mount>, scope?: string) {
+  const root = scope ? wrapper.get(scope) : wrapper
+  await root.get('[data-testid="usage-detail-open"]').trigger('click')
+  await nextTick()
+  return wrapper.get('[data-testid="usage-request-detail"]')
+}
+
+async function closeDetail(wrapper: ReturnType<typeof mount>) {
+  await wrapper.get('[role="dialog"] button[aria-label]').trigger('click')
+  await nextTick()
 }
 
 const baseImageRow = {
@@ -178,7 +192,7 @@ describe('admin UsageTable tooltip', () => {
     expect(anchor.nextElementSibling?.firstElementChild).toBe(wrapper.findComponent(DataTableStub).element)
   })
 
-  it('shows enabled average TPS using total duration and excludes media rows', () => {
+  it('shows enabled average TPS using total duration and excludes media rows', async () => {
     const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', output_tokens: 1000, duration_ms: 20_000, first_token_ms: 10_000 }
     const wrapper = mount(UsageTable, {
       props: {
@@ -189,8 +203,16 @@ describe('admin UsageTable tooltip', () => {
       },
       global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
     })
-    expect(wrapper.findAll('[data-testid="usage-token-speed"]').map(cell => cell.text())).toEqual(['50.0 t/s', '—'])
-    expect(wrapper.text()).toContain('Avg TPS')
+    // The one-line latency summary leaves the rate to the request detail.
+    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+    const speeds: (string | null)[] = []
+    for (const id of ['req-admin-image', 'no-duration', 'image']) {
+      const detail = await openDetail(wrapper, `[data-request-id="${id}"]`)
+      speeds.push(detail.find('[data-testid="usage-token-speed"]').exists() ? detail.get('[data-testid="usage-token-speed"]').text() : null)
+      if (id === 'req-admin-image') expect(detail.text()).toContain('Avg TPS')
+      await closeDetail(wrapper)
+    }
+    expect(speeds).toEqual(['50.0 t/s', '—', null])
   })
 
   beforeEach(() => {
@@ -304,9 +326,10 @@ describe('admin UsageTable tooltip', () => {
   })
 
   it.each([
+    // Rates as the list pages write them (formatRate): at least one decimal, trailing zeros dropped.
     [0, '0.0x'],
-    [0.5, '0.50x'],
-    [undefined, '1.00x'],
+    [0.5, '0.5x'],
+    [undefined, '1.0x'],
   ])('shows the stored user rate %s in cost details', async (rate, expected) => {
     const wrapper = mount(UsageTable, {
       props: { data: [{ ...baseImageRow, rate_multiplier: rate }], loading: false, columns: [] },
@@ -316,6 +339,45 @@ describe('admin UsageTable tooltip', () => {
     await triggers[triggers.length - 1].trigger('mouseenter')
     const rateLabel = wrapper.get('.fixed').findAll('span').find(span => span.text() === 'Rate')!
     expect(rateLabel.element.parentElement?.textContent).toContain(expected)
+    wrapper.unmount()
+  })
+
+  it.each([true, false])('opens keyboard-accessible tier evidence, admin fields=%s', async admin => {
+    const details = {
+      version: 1, client_presence: 'null', outbound_tier: 'ultrafast', observed_tier: 'priority', settled_tier: 'priority',
+      price_source: 'channel', price_revision: 'card-12', tier_multiplier: 2.5, free_tier: 'ultrafast',
+      standard_actual_cost: 1234.00000001, actual_cost: 0, cap_reason: 'outbound_quote', origin_group_id: 34, serving_group_id: 56,
+      response_tier_evidence: ['private-observation'],
+    }
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, service_tier_details: details }], columns: [], viewer: admin ? 'admin' : 'user', showFallbackOrigin: !admin },
+      global: { stubs: { DataTable: DataTableStub, Icon: true, Teleport: true,
+        BaseDialog: { template: '<div role="dialog"><slot /></div>' } } },
+    })
+    const button = wrapper.get('[data-testid="usage-tier-details"]')
+    expect(button.element.tagName).toBe('BUTTON')
+    await button.trigger('click')
+    const text = wrapper.get('[role="dialog"]').text()
+    expect(text).toContain('usage.tierDetails.explicitNull')
+    expect(text).toContain('Ultrafast')
+    expect(text).toContain('$1,234.00000001')
+    expect(text.includes('card-12')).toBe(admin)
+    expect(text.includes('private-observation')).toBe(admin)
+    expect(text).toContain('$0.00000000')
+    expect(text.includes('usage.tierDetails.origin_group_id')).toBe(admin)
+    expect(text.includes('usage.tierDetails.serving_group_id')).toBe(admin)
+    wrapper.unmount()
+  })
+
+  it('shows a missing historical tier as unrecorded', async () => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, service_tier: null }], columns: [] },
+      global: { stubs: { DataTable: DataTableStub, Icon: true, Teleport: true,
+        BaseDialog: { template: '<div role="dialog"><slot /></div>' } } },
+    })
+    await wrapper.get('[data-testid="usage-tier-details"]').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('usage.tierDetails.notRecorded')
+    expect(wrapper.get('[role="dialog"]').text()).not.toContain('Standard')
     wrapper.unmount()
   })
 
@@ -359,7 +421,8 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('Service tier')
     expect(text).toContain('Fast')
     expect(text).toContain('Rate')
-    expect(text).toContain('1.00x')
+    expect(text).toContain('1.0x')
+    expect(text).not.toContain('1.00x')
     expect(text).toContain('Account rate')
     expect(text).toContain('User billed')
     expect(text).toContain('Account billed')
@@ -369,20 +432,22 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('$0.069568')
   })
 
-  it.each(['token', 'image', 'per_request'])('keeps eight decimal places in %s cost details', async (billingMode) => {
+  // Review ruling (mobile list plan, typesetting): the breakdown's amounts read as the table's cost, six decimals with
+  // thousands separators (they were eight).
+  it.each(['token', 'image', 'per_request'])('shows six decimals with separators in %s cost details', async (billingMode) => {
     const row = {
       ...baseImageRow,
       billing_mode: billingMode,
       image_count: billingMode === 'image' ? 2 : 0,
-      input_cost: 0.00000001,
-      image_input_cost: 0.00000002,
-      output_cost: 0.00000003,
-      image_output_cost: 0.00000004,
-      cache_creation_cost: 0.00000005,
-      cache_read_cost: 0.00000006,
-      total_cost: 0.00000022,
-      actual_cost: 0.00000042,
-      account_stats_cost: 0.00000012,
+      input_cost: 0.000001,
+      image_input_cost: 0.000002,
+      output_cost: 0.000003,
+      image_output_cost: 0.000004,
+      cache_creation_cost: 0.000005,
+      cache_read_cost: 0.000006,
+      total_cost: 1234.000022,
+      actual_cost: 0.000042,
+      account_stats_cost: 0.000012,
       account_rate_multiplier: 1.5,
     }
     const wrapper = mount(UsageTable, {
@@ -393,14 +458,15 @@ describe('admin UsageTable tooltip', () => {
     await triggers[triggers.length - 1].trigger('mouseenter')
     const amounts = wrapper.get('.fixed').findAll('span').map(span => span.text())
     expect(amounts).toEqual(expect.arrayContaining([
-      '$0.00000001', '$0.00000002', '$0.00000003', '$0.00000004',
-      '$0.00000005', '$0.00000006', '$0.00000022', '$0.00000042', '$0.00000018',
+      '$0.000001', '$0.000002', '$0.000003', '$0.000004',
+      '$0.000005', '$0.000006', '$1,234.000022', '$0.000042', '$0.000018',
     ]))
-    if (billingMode === 'image') expect(amounts).toContain('$0.00000011')
+    expect(amounts.some((text) => /\$\d+\.\d{7,}/.test(text))).toBe(false)
+    if (billingMode === 'image') expect(amounts).toContain('$617.000011')
     wrapper.unmount()
   })
 
-  it('uses eight decimal places for missing cost values', async () => {
+  it('shows six-decimal zeros for missing cost values', async () => {
     const wrapper = mount(UsageTable, {
       props: {
         data: [{ ...baseImageRow, billing_mode: 'per_request', image_count: 0, total_cost: undefined, actual_cost: undefined }],
@@ -412,7 +478,7 @@ describe('admin UsageTable tooltip', () => {
     const triggers = wrapper.findAll('.group.relative')
     await triggers[triggers.length - 1].trigger('mouseenter')
     const amounts = wrapper.get('.fixed').findAll('span').map(span => span.text()).filter(text => text.startsWith('$'))
-    expect(amounts).toEqual(['$0.00000000', '$0.00000000', '$0.00000000', '$0.00000000'])
+    expect(amounts).toEqual(['$0.000000', '$0.000000', '$0.000000', '$0.000000'])
     wrapper.unmount()
   })
 
@@ -438,6 +504,7 @@ describe('admin UsageTable tooltip', () => {
         data: [row],
         loading: false,
         columns: [],
+        viewer: 'admin',
       },
       global: {
         stubs: {
@@ -465,6 +532,7 @@ describe('admin UsageTable tooltip', () => {
         }],
         loading: false,
         columns: [],
+        viewer: 'admin',
       },
       global: {
         stubs: {
@@ -479,7 +547,7 @@ describe('admin UsageTable tooltip', () => {
     const text = wrapper.text()
     expect(text).toContain('Max')
     expect(text).toContain('XHigh')
-    expect(text).toContain('↳')
+    expect(text).toContain('→')
   })
 
   it('shows a single reasoning effort when requested matches forwarded', () => {
@@ -505,7 +573,7 @@ describe('admin UsageTable tooltip', () => {
 
     const text = wrapper.text()
     expect(text).toContain('Max')
-    expect(text).not.toContain('↳')
+    expect(text).not.toContain('→')
   })
 
   it('hides mapped reasoning effort for user rows that only have the requested value', () => {
@@ -531,7 +599,7 @@ describe('admin UsageTable tooltip', () => {
 
     expect(wrapper.text()).toContain('Max')
     expect(wrapper.text()).not.toContain('XHigh')
-    expect(wrapper.text()).not.toContain('↳')
+    expect(wrapper.text()).not.toContain('→')
   })
 
 	it.each([
@@ -558,6 +626,7 @@ describe('admin UsageTable tooltip', () => {
 				}],
 				loading: false,
 				columns: [],
+				viewer: 'admin',
 			},
 			global: {
 				stubs: {
@@ -954,41 +1023,174 @@ describe('admin usage metric visibility', () => {
   const row = { ...baseImageRow, billing_mode: 'token', image_count: 0, input_tokens: 500, cache_read_tokens: 1500, output_tokens: 100, duration_ms: 3000, first_token_ms: 1000 }
   const mountMetrics = (props = {}, data = [row]) => mount(UsageTable, {
     props: { data, columns: [], ...props },
-    global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><slot name="cell-tokens" :row="row"/><slot name="cell-latency" :row="row"/></template></div>' }, Icon: true, Teleport: true } },
+    global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><slot name="cell-tokens" :row="row"/><slot name="cell-latency" :row="row"/><slot name="cell-created_at" :row="row" :value="row.created_at"/></template></div>' }, Icon: true, Teleport: true } },
   })
-  it('hides both metrics by default for shared user rendering', () => {
+  // Both metrics left the one-line cells for the request detail (and the token tip); the settings still decide them.
+  it('hides both metrics by default for shared user rendering', async () => {
     const wrapper = mountMetrics()
-    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+    const detail = await openDetail(wrapper)
+    expect(detail.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
+    expect(detail.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain(' t/s')
     expect(wrapper.text()).not.toContain('Avg TPS')
   })
-  it.each([[true,true],[true,false],[false,true],[false,false]])('obeys independent flags %s / %s', (showCacheHitRate, showTokenSpeed) => {
+  it.each([[true,true],[true,false],[false,true],[false,false]])('obeys independent flags %s / %s', async (showCacheHitRate, showTokenSpeed) => {
     const wrapper = mountMetrics({ showCacheHitRate, showTokenSpeed })
-    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(showCacheHitRate)
-    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(showTokenSpeed)
+    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+    const detail = await openDetail(wrapper)
+    expect(detail.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(showCacheHitRate)
+    expect(detail.find('[data-testid="usage-token-speed"]').exists()).toBe(showTokenSpeed)
     if (showCacheHitRate) {
-      const percent = wrapper.get('[data-testid="usage-cache-hit-rate"]')
+      const percent = detail.get('[data-testid="usage-cache-hit-rate"]')
       expect(percent.text()).toBe('75.0%')
-      expect(percent.element.parentElement?.textContent?.trim()).toBe('75.0%')
+      expect(percent.element.previousElementSibling?.textContent).toBe('usage.cacheHitRate')
     }
-    if (showTokenSpeed) expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 t/s')
+    if (showTokenSpeed) expect(detail.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 t/s')
     else expect(wrapper.text()).not.toContain(' t/s')
+    await closeDetail(wrapper)
+    // The token tip on hover shows the same share under the same setting.
+    await wrapper.get('.group.relative').trigger('mouseenter')
+    expect(wrapper.get('.fixed').find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(showCacheHitRate)
   })
   it('updates reactively after changing settings', async () => {
     const wrapper = mountMetrics({ showCacheHitRate: true, showTokenSpeed: true })
+    const detail = await openDetail(wrapper)
+    expect(detail.find('[data-testid="usage-token-speed"]').exists()).toBe(true)
     await wrapper.setProps({ showCacheHitRate: false, showTokenSpeed: false })
     expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
   })
-  it('uses the same rate and explanation when first-token time is missing', () => {
-    const wrapper = mountMetrics({ showTokenSpeed: true }, [{ ...row, first_token_ms: null } as unknown as typeof row])
-    expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 t/s')
-    expect(wrapper.get('[data-testid="usage-token-speed"]').attributes('title')).toBe('usage.outputTpsHint')
+  it('uses the same rate and explanation when first-token time is missing', async () => {
+    const wrapper = mountMetrics({ showEndToEnd: true, showTokenSpeed: true }, [{ ...row, first_token_ms: null } as unknown as typeof row])
+    const detail = await openDetail(wrapper)
+    const speed = detail.get('[data-testid="usage-token-speed"]')
+    expect(speed.text()).toBe('33.3 t/s')
+    expect(speed.element.previousElementSibling?.getAttribute('title')).toBe('usage.outputTpsHint')
   })
-  it('does not label media requests with token speed or cache rate', () => {
+  it('does not label media requests with token speed or cache rate', async () => {
     const wrapper = mountMetrics({ showCacheHitRate: true, showTokenSpeed: true }, [{ ...row, image_count: 2, billing_mode: 'image' }])
-    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+    const detail = await openDetail(wrapper)
+    expect(detail.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
+    expect(detail.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+  })
+})
+
+describe('admin usage latency: the user wait first', () => {
+  const row = { ...baseImageRow, billing_mode: 'token', image_count: 0, duration_ms: 70_000, first_token_ms: 800, end_to_end_first_output_ms: 51_000 }
+  const mountLatency = (props = {}, data: unknown[] = [row]) => mount(UsageTable, {
+    props: { data: data as never[], columns: [], ...props },
+    global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><div data-test="latency"><slot name="cell-latency" :row="row"/></div><slot name="cell-created_at" :row="row" :value="row.created_at"/></template></div>' }, Icon: true, Teleport: true } },
+  })
+  const cell = (w: ReturnType<typeof mountLatency>) => w.get('[data-test="latency"]')
+  // The summary's pieces in reading order (labels, values, separators).
+  const parts = (w: ReturnType<typeof mountLatency>) => cell(w).findAll('[data-testid="usage-latency-summary"] > span:nth-child(2) > span').map((el) => el.text())
+
+  // One line: "wait X · first token Y"; the wait has no grade of its own, the last attempt's first token keeps its color.
+  it('shows user wait in neutral text and colors the last first token and upper bar by its severity', () => {
+    const wrapper = mountLatency({ showEndToEnd: true })
+    const e2e = wrapper.get('[data-testid="usage-latency-e2e"]')
+    expect(e2e.text()).toBe('51.00s')
+    expect(e2e.classes()).toContain('text-gray-700')
+    expect(e2e.classes().some((c) => /(emerald|amber|orange|red)-/.test(c))).toBe(false)
+    const last = wrapper.get('[data-testid="usage-latency-last-attempt"]')
+    expect(last.text()).toBe('800ms')
+    expect(last.classes()).toContain('text-emerald-600')
+    expect(parts(wrapper)).toEqual(['usage.latencyWaitShort', '51.00s', '·', 'usage.latencyLastAttempt', '800ms'])
+    // The admin page never uses the user page's plain first-token label: its first token is the last attempt's.
+    expect(cell(wrapper).text()).not.toContain('usage.latencyFirstToken')
+    const labels = cell(wrapper).findAll('span.text-xs')
+    expect(labels.map((l) => l.attributes('title'))).toEqual(['usage.latencyEndToEndHint', 'usage.latencyLastAttemptHint'])
+    expect(wrapper.get('span[aria-hidden="true"]').classes()).toEqual(expect.arrayContaining(['from-emerald-500', 'to-amber-400']))
+  })
+
+  it.each([
+    [800, ['from-emerald-500', 'to-gray-400']],
+    [null, ['bg-gray-400']],
+  ] as const)('shows missing duration in neutral colors with first-token value %s', async (firstTokenMs, expectedBar) => {
+    const wrapper = mountLatency({ showEndToEnd: true }, [{ ...row, first_token_ms: firstTokenMs, duration_ms: null }])
+    expect(wrapper.get('span[aria-hidden="true"]').classes()).toEqual(expect.arrayContaining([...expectedBar]))
+    const detail = await openDetail(wrapper)
+    const duration = detail.get('[data-testid="usage-detail-duration"]')
+    expect(duration.element.previousElementSibling?.textContent).toBe('usage.latencyLastAttemptDuration')
+    expect(duration.text()).toBe('—')
+    expect(duration.classes()).toContain('text-gray-400')
+  })
+
+  // Review item 9: each value stands on its own; a missing one is unknown, never filled from the other. The row and the
+  // request detail judge it the same way.
+  it.each([
+    ['no end-to-end value', { end_to_end_first_output_ms: null, first_token_ms: 800 }, { e2e: null, last: '800ms' }],
+    ['no last-attempt value', { end_to_end_first_output_ms: 51_000, first_token_ms: null }, { e2e: '51.00s', last: null }],
+    ['neither', { end_to_end_first_output_ms: null, first_token_ms: null }, { e2e: null, last: null }]
+  ])('shows each value or unknown with why on its own: %s', async (_, patch, expected) => {
+    const wrapper = mountLatency({ showEndToEnd: true }, [{ ...row, ...patch }])
+    const rowCell = cell(wrapper)
+    const detail = await openDetail(wrapper)
+    const pairs = [
+      [rowCell.get('[data-testid="usage-latency-e2e"]'), detail.get('[data-testid="usage-detail-e2e"]'), expected.e2e, 'usage.latencyEndToEndUnknownHint'],
+      [rowCell.get('[data-testid="usage-latency-last-attempt"]'), detail.get('[data-testid="usage-detail-first-token"]'), expected.last, 'usage.latencyLastAttemptUnknownHint'],
+    ] as const
+    for (const [inRow, inDetail, value, hint] of pairs) {
+      for (const el of [inRow, inDetail]) {
+        if (value) {
+          expect(el.text()).toBe(value)
+          expect(el.attributes('title')).toBeUndefined()
+        } else {
+          expect(el.text()).toBe('usage.latencyUnknown')
+          expect(el.attributes('title')).toBe(hint)
+        }
+      }
+    }
+    if (!expected.last) expect(wrapper.get('span[aria-hidden="true"]').classes()).toContain('bg-amber-400')
+    expect(detail.get('[data-testid="usage-detail-duration"]').text()).toBe('1m 10s')
+  })
+
+  // Browser check #5: duration_ms is the last attempt's; on the admin page, under the user wait, it is named so.
+  it('names the duration "last attempt" with why on the admin page, and keeps "total" without a tip on the user page', async () => {
+    const label = (detail: Awaited<ReturnType<typeof openDetail>>) => detail.get('[data-testid="usage-detail-duration"]').element.previousElementSibling as HTMLElement
+    const admin = mountLatency({ showEndToEnd: true })
+    const adminLabel = label(await openDetail(admin))
+    expect(adminLabel.textContent).toBe('usage.latencyLastAttemptDuration')
+    expect(adminLabel.getAttribute('title')).toBe('usage.latencyLastAttemptDurationHint')
+    const user = mountLatency()
+    const userLabel = label(await openDetail(user))
+    expect(userLabel.textContent).toBe('usage.latencyDuration')
+    expect(userLabel.hasAttribute('title')).toBe(false)
+  })
+
+  // Desktop hover on the latency cell: the same lines as the detail dialog's latency (one component), no tips inside.
+  it.each([
+    ['admin', { showEndToEnd: true, showTokenSpeed: true }, ['usage.latencyEndToEnd', '51.00s', 'usage.latencyLastAttempt', '800ms', 'usage.latencyLastAttemptDuration', '1m 10s', 'Avg TPS', '—']],
+    ['user', { showTokenSpeed: true }, ['usage.latencyFirstToken', '800ms', 'usage.latencyDuration', '1m 10s', 'Avg TPS', '—']],
+  ] as const)('shows the %s page\'s latency breakdown on hover, as in the detail', async (_, props, expected) => {
+    const wrapper = mountLatency(props)
+    await wrapper.get('[data-testid="usage-latency-tip"]').trigger('mouseenter')
+    const tip = wrapper.get('.fixed')
+    expect(tip.findAll('dt, dd').map((el) => el.text())).toEqual(expected)
+    expect(tip.find('[title]').exists()).toBe(false)
+    const detail = await openDetail(wrapper)
+    expect(detail.findAll('dt, dd').slice(0, expected.length).map((el) => el.text())).toEqual(expected)
+    await wrapper.get('[data-testid="usage-latency-tip"]').trigger('mouseleave')
+    expect(wrapper.find('.fixed').exists()).toBe(false)
+  })
+
+  // The user page's one line: "first token X · duration Y", each graded, no admin-only figure or tip.
+  it('keeps the first token on the shared user page, whose answer has no end-to-end value', async () => {
+    const wrapper = mountLatency({ showTokenSpeed: true })
+    expect(wrapper.find('[data-testid="usage-latency-e2e"]').exists()).toBe(false)
+    expect(parts(wrapper)).toEqual(['usage.latencyFirstToken', '800ms', '·', 'usage.duration', '1m 10s'])
+    expect(wrapper.get('[data-testid="usage-latency-first-token"]').classes()).toContain('text-emerald-600')
+    expect(wrapper.get('[data-testid="usage-latency-duration"]').classes()).toContain('text-amber-600')
+    expect(cell(wrapper).find('[title]').exists()).toBe(false)
+    const detail = await openDetail(wrapper)
+    expect(detail.find('[data-testid="usage-detail-e2e"]').exists()).toBe(false)
+    expect(detail.text()).toContain('Avg TPS')
+    // No latency hint: the only tip left is the request ID's copy button (the user page shows that ID, not the upstream's).
+    const tipped = detail.findAll('[title]')
+    expect(tipped.length).toBeGreaterThan(0)
+    expect(tipped.every((el) => el.element.closest('[data-testid="usage-detail-request_id"]') != null)).toBe(true)
+    expect(detail.find('[data-testid="usage-detail-upstream_request_id"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('51.00s')
   })
 })

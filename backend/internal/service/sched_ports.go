@@ -42,14 +42,15 @@ type SchedAttemptUsage struct {
 	CacheReadTokensPresent bool
 }
 type SchedAttemptFinish struct {
-	Outcome      schedquality.Outcome
-	Class        schedquality.ErrorClass
-	HTTPStatus   int // Zero means no status was observed.
-	StatusOrigin schedquality.StatusOrigin
-	Detail       string
-	Waited       time.Duration
-	OutputBytes  int
-	Usage        *SchedAttemptUsage
+	Warm, FullTierFirstOutputTimeout bool
+	Outcome                          schedquality.Outcome
+	Class                            schedquality.ErrorClass
+	HTTPStatus                       int // Zero means no status was observed.
+	StatusOrigin                     schedquality.StatusOrigin
+	Detail                           string
+	Waited                           time.Duration
+	OutputBytes                      int
+	Usage                            *SchedAttemptUsage
 }
 
 type SchedOutputKind uint8
@@ -79,6 +80,7 @@ type SchedAttemptCursor struct {
 	AttemptID string
 }
 type SchedAttemptStore interface {
+	SchedPerfLedger
 	InsertBatch(ctx context.Context, rows []schedquality.AttemptSample) error
 	LoadFinishedSince(ctx context.Context, since time.Time) ([]schedquality.AttemptSample, error)
 	LoadFinishedPage(ctx context.Context, since, through time.Time, after SchedAttemptCursor, limit int) ([]schedquality.AttemptSample, error)
@@ -121,6 +123,8 @@ type SchedQualitySnapshot struct {
 	Policies      map[int64]SchedPolicyRecord
 	Overrides     []SchedOverride
 	ResetAt       map[int64]time.Time
+
+	summaryWindowEnd time.Time // Aggregation time, including rebuilds between evaluations.
 }
 type SchedModelCount struct {
 	Model    string
@@ -146,15 +150,17 @@ type SchedPolicyChange struct {
 	Lines     map[schedquality.Dimension]schedquality.Verdict
 }
 type SchedGroupRow struct {
-	GroupID          int64
-	Model            string
-	View             schedquality.StateView
-	TTFT             schedquality.TTFTEvidence
-	TTFTVerdict      schedquality.Verdict
-	TTFTSourceGroups []int64
-	Error            schedquality.ErrorAssessment
-	Cache            schedquality.CacheAssessment
-	SourceGroups     []int64
+	TTFTLastEval, ErrorLastEval, CacheLastEval *SchedAdminLastEval
+	TTFTSamples, ErrorSamples, CacheSamples    schedquality.SampleCounts
+	GroupID                                    int64
+	Model                                      string
+	View                                       schedquality.StateView
+	TTFT                                       schedquality.TTFTEvidence
+	TTFTVerdict                                schedquality.Verdict
+	TTFTSourceGroups                           []int64
+	Error                                      schedquality.ErrorAssessment
+	Cache                                      schedquality.CacheAssessment
+	SourceGroups                               []int64
 }
 type SchedQualityEngine interface {
 	PreviewPolicy(ctx context.Context, groupID int64, p schedquality.Policy) ([]SchedPolicyChange, error)
@@ -162,6 +168,7 @@ type SchedQualityEngine interface {
 	Stop()
 	Observe(sample schedquality.AttemptSample)
 	Snapshot() *SchedQualitySnapshot
+	PerformanceSnapshot() *SchedPerfSnapshot
 	Reset(ctx context.Context, accountID int64) (time.Time, error)
 	OnAccountReset(fn func(accountID int64, at time.Time)) // fired on every instance that sees a newer reset time
 	SetOverride(ctx context.Context, o SchedOverride) error
@@ -174,12 +181,19 @@ type SchedQualityEngine interface {
 	TTFTRule(ctx context.Context) (SchedTTFTRuleRecord, error)
 	UpdateTTFTRule(ctx context.Context, expectedVersion int64, p schedquality.RuleBParams) (SchedTTFTRuleUpdate, error)
 }
+
+// SchedTrialGroup identifies a group/model whose seats share an account's trial quota.
+type SchedTrialGroup struct {
+	GroupID int64
+	Model   string
+}
+
 type SchedQualityStore interface {
 	DeleteDecisionsBefore(ctx context.Context, before time.Time) (int64, error)
 	// RunCycle opens a transaction and tries the advisory lock. locked=false: fn is not called.
 	RunCycle(ctx context.Context, fn func(tx SchedQualityTx) error) (locked bool, err error)
-	// RunReset blocks for the same lock (3s), then sets the reset time to clock_timestamp() (taken after the lock) and deletes the account's rows.
-	RunReset(ctx context.Context, accountID int64) (resetAt time.Time, err error)
+	// RunReset blocks for the same lock (3s), then sets the reset time to clock_timestamp() (taken after the lock) and returns the distinct group/model pairs it deleted after commit.
+	RunReset(ctx context.Context, accountID int64) (resetAt time.Time, deleted []SchedTrialGroup, err error)
 	// LoadRows reads states, overrides and reset times in one read-only repeatable-read transaction.
 	LoadRows(ctx context.Context) (states []schedquality.LineState, overrides []SchedOverride, resetAt map[int64]time.Time, err error)
 	LoadMembers(ctx context.Context) (map[int64][]int64, error) // OpenAI group id -> account ids
@@ -226,7 +240,7 @@ type SchedBoardRow struct {
 }
 type SchedSelectionBoard interface {
 	// Board orders the group's accounts for one assumed request: streaming text, token-billed, no session, HTTP.
-	Board(ctx context.Context, groupID int64, model string) ([]SchedBoardRow, error)
+	Board(ctx context.Context, groupID int64, model string) ([]SchedBoardRow, *SchedAdminSupply, error)
 }
 type SchedLocalPenalty struct {
 	Key, Kind, Scope, Model string
@@ -249,3 +263,9 @@ type SchedAutoState struct { // one row of the account's auto-state list (field 
 }
 
 // The admin service also provides ClearLocal(accountID int64, at time.Time), registered by WP0 on engine.OnAccountReset.
+
+// SchedTrialRoundReader reads current placement and trial line deadlines directly from
+// storage for the one group/account/model whose binding just committed.
+type SchedTrialRoundReader interface {
+	ReadTrialRound(ctx context.Context, accountID int64, model string, groupID int64) (schedquality.StateView, error)
+}

@@ -33,6 +33,13 @@ func (o Outcome) String() string {
 	return ""
 }
 
+const (
+	// CurrentCaptureVersion is written to new samples by the recorder and the ledger.
+	CurrentCaptureVersion = 3
+	// FullTierTimeoutCaptureVersion is the earliest version with per-dispatch timeout evidence.
+	FullTierTimeoutCaptureVersion = 3
+)
+
 type AttemptSample struct {
 	AttemptID                        string
 	StartedAt, FinishedAt            time.Time `json:",omitzero"`
@@ -41,6 +48,8 @@ type AttemptSample struct {
 	Stream                           bool
 	ClientCanceled, Continuation     bool
 	Switched                         bool
+	Warm, FullTierFirstOutputTimeout bool
+	CaptureVersion                   int
 	TTFOMs, CensoredMs               *int
 	FirstEventMs, FirstAnswerMs      *int
 	Outcome                          Outcome

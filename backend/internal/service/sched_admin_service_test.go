@@ -21,6 +21,7 @@ import (
 
 type schedAdminEngine struct {
 	SchedQualityEngine
+	perf         *SchedPerfSnapshot
 	snapshot     *SchedQualitySnapshot
 	reads        int
 	resetAt      time.Time
@@ -34,7 +35,8 @@ type schedAdminEngine struct {
 	previewCalls []schedquality.Policy
 }
 
-func (e *schedAdminEngine) Snapshot() *SchedQualitySnapshot { e.reads++; return e.snapshot }
+func (e *schedAdminEngine) PerformanceSnapshot() *SchedPerfSnapshot { return e.perf }
+func (e *schedAdminEngine) Snapshot() *SchedQualitySnapshot         { e.reads++; return e.snapshot }
 func (e *schedAdminEngine) Reset(_ context.Context, id int64) (time.Time, error) {
 	if e.resetErr != nil {
 		return time.Time{}, e.resetErr
@@ -166,13 +168,15 @@ func (g schedAdminGroups) GetByID(_ context.Context, id int64) (*Group, error) {
 }
 
 type schedAdminBoard struct {
-	rows  []SchedBoardRow
-	model string
+	supply *SchedAdminSupply
+	err    error
+	rows   []SchedBoardRow
+	model  string
 }
 
-func (b *schedAdminBoard) Board(_ context.Context, _ int64, m string) ([]SchedBoardRow, error) {
+func (b *schedAdminBoard) Board(_ context.Context, _ int64, m string) ([]SchedBoardRow, *SchedAdminSupply, error) {
 	b.model = m
-	return b.rows, nil
+	return b.rows, b.supply, b.err
 }
 
 type schedAdminTransient struct{ entries map[string]bool }

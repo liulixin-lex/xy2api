@@ -51,3 +51,20 @@ export function policyShort(policy: { ttft_seconds: number; max_error_rate: numb
     cache: String(Math.round(policy.min_cache_ratio * 100))
   })
 }
+
+/** Identity shapes of the group board (no number): filled circle pass, filled square rear, ring trial, a dash unknown. */
+export const IDENTITY_SHAPES: Record<'pass' | 'rear' | 'trial' | 'unknown', string> = {
+  pass: 'sq-shape sq-shape--pass',
+  rear: 'sq-shape sq-shape--fail',
+  trial: 'sq-shape sq-shape--trial',
+  unknown: 'sq-text-3'
+}
+
+/** How long something has lasted, in whole minutes: "2 小时 50 分", "35 分" (at least 1 minute). */
+export function fmtDuration(ms: number, t: Translate): string {
+  const minutes = Math.max(1, Math.floor(ms / 60_000))
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h === 0) return t('admin.schedQuality.duration.minutes', { m })
+  return m === 0 ? t('admin.schedQuality.duration.hours', { h }) : t('admin.schedQuality.duration.hoursMinutes', { h, m })
+}

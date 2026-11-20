@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatMultiplier } from '../formatters'
+import { formatMultiplier, formatRate } from '../formatters'
 
 describe('formatMultiplier', () => {
   it('keeps significant decimals instead of rounding to 2 places', () => {
@@ -23,5 +23,17 @@ describe('formatMultiplier', () => {
 
   it('falls back to 2 significant digits below 0.0001', () => {
     expect(formatMultiplier(0.00005)).toBe('0.000050')
+  })
+})
+
+describe('formatRate', () => {
+  it('writes a rate with at least one decimal and "x": 1.0x, never 1x or 1.00x (mobile list plan)', () => {
+    expect(formatRate(1)).toBe('1.0x')
+    expect(formatRate(10)).toBe('10.0x')
+    expect(formatRate(1.5)).toBe('1.5x')
+    expect(formatRate(1.25)).toBe('1.25x')
+    expect(formatRate(0.035)).toBe('0.035x')
+    expect(formatRate(9.9999)).toBe('9.9999x')
+    expect(formatRate(0.00005)).toBe('0.000050x')
   })
 })

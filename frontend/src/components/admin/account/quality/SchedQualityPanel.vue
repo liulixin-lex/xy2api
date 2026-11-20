@@ -116,6 +116,8 @@
               />
             </section>
 
+            <SchedPanelPerformance :detail="detail" :model="tab" :target-group-id="targetGroupId" :group-info="groupInfo" />
+
             <SchedDecisions :account-id="detail.account.id" :group-name="groupName" />
 
             <section class="qp-section" data-qp-section="auto">
@@ -150,12 +152,12 @@
             <section class="qp-section" data-qp-section="recent">
               <h3 class="qp-h">
                 <span>{{ ratio ? t('admin.schedQuality.panel.recentRatioTitle') : t('admin.schedQuality.panel.recentTitle') }}</span>
-                <span class="qp-h-note">{{ t('admin.schedQuality.panel.recentNote') }}</span>
+                <span class="qp-h-note" data-qp-recent-window>{{ recentWindow }}</span>
               </h3>
               <div class="rlist">
                 <div v-for="line in recentLines" :key="line.key" class="rrow" :data-qp-recent="line.key">
                   <span class="rrow__k">{{ line.label }}</span>
-                  <span class="rrow__v" :class="line.cls">{{ line.text }}</span>
+                  <span class="rrow__v" :class="{ 'rrow__v--na': line.muted }">{{ line.text }}</span>
                   <span class="rrow__g">{{ line.note }}</span>
                 </div>
                 <div v-if="ratio" class="rrow" data-qp-recent="ratio">
@@ -164,7 +166,6 @@
                   <span class="rrow__g">{{ ratio.note }}</span>
                 </div>
               </div>
-              <p class="qp-note" data-test="qp-threshold-note">{{ t('admin.schedQuality.panel.thresholdNote') }}</p>
             </section>
           </template>
         </div>
@@ -224,6 +225,7 @@ import SchedPauseMark from './SchedPauseMark.vue'
 import SchedPanelGroups from './SchedPanelGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
 import SchedDecisions from './SchedDecisions.vue'
+import SchedPanelPerformance from './SchedPanelPerformance.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { BackendAutoState, SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
 import { SCHED_PANEL_TASK, useSchedLayerData, type SchedPanelRow } from '@/composables/useSchedLayerData'
@@ -235,7 +237,7 @@ import { useAdminPermission } from '@/composables/useAdminPermission'
 import { isReducedMotion } from '@/composables/useMotionPreference'
 import { motionDuration, motionEase } from '@/utils/motionTokens'
 import { probeFailureText, upstreamRateView } from '@/components/account/upstreamBillingRate'
-import { RECENT_DIMS, formatThreshold, recentExtras, recentValue, strictestThresholds } from '@/components/admin/account/table/accountRecent'
+import { recentRows, recentTitle } from '@/components/admin/account/table/accountRecent'
 import { accountTypeLabel } from '@/components/admin/account/table/accountLabels'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { platformLabel } from '@/utils/platformColors'
@@ -539,48 +541,11 @@ watch(canManage, (allowed) => {
   proxyItem.value = null
 })
 
-// ---- Thresholds, recent values and the upstream ratio (also readable on touch) ----
-// The values are the whole account's over the last hour; the threshold beside each is the strictest of the groups'
-// policies, which judge per group and model (the groups' rows above): no comparison of the two, no "over the line"
-// here (7k-1). First token and cache show what the lines judge (first useful output, continuation turns) with the
-// other view under it (first event and the gap, every successful request).
-const recentLines = computed(() => {
-  const thresholds = strictestThresholds(detail.value?.groups.map((group) => group.policy) ?? [])
-  const quality = summary.value
-  const extras = quality ? recentExtras(quality) : null
-  const muted = (text: string | null | undefined, short = false) => (!text || short ? 'rrow__v--na' : '')
-  return RECENT_DIMS.flatMap((dim) => {
-    const recent = quality ? recentValue(quality, dim) : null
-    const main = {
-      key: dim,
-      label: t(`admin.schedQuality.panel.recentLines.${dim}`),
-      text: recent?.text ?? '—',
-      cls: muted(recent?.text, recent?.short),
-      note: t('admin.schedQuality.panel.threshold', { value: formatThreshold(dim, thresholds[dim]) })
-    }
-    if (dim === 'ttfo') {
-      const gap = extras?.gap
-      return [main, {
-        key: 'ttfo_event',
-        label: t('admin.schedQuality.panel.recentLines.firstEvent'),
-        text: extras?.firstEvent ?? '—',
-        cls: muted(extras?.firstEvent),
-        note: gap ? t('admin.schedQuality.panel.gap', { value: gap }) : ''
-      }]
-    }
-    if (dim === 'cache') {
-      const n = extras?.cacheAllRequests ?? 0
-      return [main, {
-        key: 'cache_all',
-        label: t('admin.schedQuality.panel.recentLines.cacheAll'),
-        text: extras?.cacheAll ?? '—',
-        cls: muted(extras?.cacheAll),
-        note: t('admin.schedQuality.panel.allRequests', { n }, n)
-      }]
-    }
-    return [main]
-  })
-})
+// ---- Recent values and the upstream ratio (also readable on touch) ----
+// The recent cell's tip card: its window as the note by the heading, then its four rows with their samples. Nothing is
+// compared with a threshold here (7k-1); the groups' rows above judge per group and model.
+const recentWindow = computed(() => recentTitle(summary.value ?? null, t))
+const recentLines = computed(() => recentRows(summary.value ?? null, t))
 
 const ratio = computed(() => {
   const account = shownRow.value
@@ -942,7 +907,7 @@ onScopeDispose(() => running?.kill())
   display: none;
 }
 
-/* Thresholds, recent values and the upstream ratio */
+/* Recent values and the upstream ratio */
 .rrow {
   display: grid;
   grid-template-columns: 88px auto minmax(0, 1fr);

@@ -122,3 +122,60 @@ describe('OpsErrorLogTable i18n keys exist in the errorLog namespace', () => {
     })
   }
 })
+
+// Re-review item 1: the user is the frozen first column on tablets and phones; a long email must not cover the table.
+describe('OpsErrorLogTable user cell width', () => {
+  it('caps the user cell at 240px, cutting the email with its whole text in the tip and the balance entry kept', async () => {
+    const email = `${'very-long-mailbox-'.repeat(4)}@example.com`
+    const wrapper = mount(OpsErrorLogTable, {
+      props: { rows: [{ id: 1, created_at: '2026-06-05T23:59:50Z', user_id: 12, user_email: email } as OpsErrorLog], total: 1, loading: false, page: 1, pageSize: 20, userClickable: true },
+      global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub } },
+    })
+    const cell = wrapper.get('[data-testid="error-user-cell"]')
+    expect(cell.classes()).toContain('max-w-[240px]')
+    const button = cell.get('button')
+    expect(button.get('span').classes()).toContain('truncate')
+    expect(button.attributes('title')).toContain(email)
+    await button.trigger('click')
+    expect(wrapper.emitted('userClick')).toEqual([[12, email]])
+  })
+})
+
+// Browser acceptance (step 1), items 2 and 5: the details column is 44px with an icon header named for screen readers,
+// its button 40×40, its block giving back the extra height.
+describe('OpsErrorLogTable details column', () => {
+  const mountWith = () => mount(OpsErrorLogTable, {
+    props: { rows: [{ id: 9, created_at: '2026-06-05T23:59:50Z' } as OpsErrorLog], total: 1, loading: false, page: 1, pageSize: 20 },
+    global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub, Icon: true } },
+  })
+
+  it('is a 44px column whose header is an icon, its button 40px and named with the time', async () => {
+    const wrapper = mountWith()
+    const th = wrapper.findAll('th').at(-1)!
+    expect(th.classes()).toEqual(expect.arrayContaining(['w-11', 'min-w-11', '!px-0']))
+    const header = th.get('[data-testid="error-detail-header"]')
+    expect(header.attributes('role')).toBe('img')
+    expect(header.attributes('aria-label')).toBe('admin.ops.errorLog.details')
+    expect(header.text()).toBe('')
+    const button = wrapper.get('[data-testid="error-detail-open"]')
+    expect(button.classes()).toEqual(expect.arrayContaining(['h-10', 'w-10']))
+    expect(button.attributes('aria-label')).toBe('usage.errors.detail.open')
+    expect(button.element.parentElement!.classList.contains('-my-2.5')).toBe(true)
+    await button.trigger('click')
+    expect(wrapper.emitted('openErrorDetail')).toEqual([[9]])
+  })
+})
+
+// Acceptance recheck: the status column is a phone default now, so its priority badge is on the first screen: 12px.
+describe('OpsErrorLogTable badges', () => {
+  it('draws the priority and the deleted key at 12px', () => {
+    const wrapper = mount(OpsErrorLogTable, {
+      props: { rows: [{ id: 1, created_at: '2026-06-05T23:59:50Z', severity: 'P1', status_code: 502, api_key_id: 3, api_key_deleted: true } as OpsErrorLog], total: 1, loading: false, page: 1, pageSize: 20 },
+      global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub, Icon: true } },
+    })
+    const badge = wrapper.findAll('span').find((el) => el.text() === 'P1')!
+    expect(badge.classes()).toContain('text-xs')
+    const deleted = wrapper.findAll('span').find((el) => el.text() === 'admin.ops.errorLog.keyDeletedBadge')!
+    expect(deleted.classes()).toContain('text-xs')
+  })
+})

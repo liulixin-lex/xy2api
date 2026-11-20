@@ -97,6 +97,7 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/utils/format', () => ({
   formatReasoningEffort: (value: string | null | undefined) => value ?? '-',
+  formatUsdTotal: (value: number | null | undefined) => `$${value ?? 0}`,
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -133,7 +134,7 @@ const UsageFiltersStub = defineComponent({
     })
     return { userKeyword, accountKeyword }
   },
-  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><span data-test="account-filter-label">{{ accountKeyword }}</span><slot name="status" /><slot name="after-reset" /></div>',
+  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><span data-test="account-filter-label">{{ accountKeyword }}</span><slot name="status" /><slot name="after-reset" /><div data-test="phone-tools"><slot name="phone-tools" /></div><div data-test="info"><slot name="info" /></div></div>',
 })
 const UsageTableStub = {
   props: ['columns'],
@@ -217,6 +218,13 @@ describe('admin UsageView route filters', () => {
     const wrapper = mountRouteFilteredUsageView()
     await flushPromises()
     expect(wrapper.findComponent({ name: 'UsageTable' }).props('showFallbackOrigin')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('tells the usage table it is on the admin page (the mapping, the user, the account and the upstream ID)', async () => {
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'UsageTable' }).props('viewer')).toBe('admin')
     wrapper.unmount()
   })
 
@@ -308,6 +316,336 @@ describe('admin UsageView route filters', () => {
   })
 })
 
+// Mobile list plan: below 1024px the cards and charts start collapsed, and the date range, still on the page, keeps
+// filtering the list.
+describe('admin UsageView below 1024px', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: false, media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    list.mockReset().mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStats.mockReset().mockResolvedValue({ total_requests: 0, total_input_tokens: 0, total_output_tokens: 0, total_cache_tokens: 0, total_tokens: 0, total_cost: 0, total_actual_cost: 0, average_duration_ms: 0 })
+    getSnapshotV2.mockReset().mockResolvedValue({ trend: [], models: [], groups: [] })
+    getModelStats.mockReset().mockResolvedValue({ models: [] })
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  it('mounts no cards or charts until expanded, and the date range still reloads the list', async () => {
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'UsageStatsCards' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'TokenUsageTrend' }).exists()).toBe(false)
+
+    list.mockClear()
+    wrapper.findComponent({ name: 'DateRangePicker' }).vm.$emit('change', { startDate: '2026-11-01', endDate: '2026-11-02', preset: null })
+    await flushPromises()
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ start_date: '2026-11-01', end_date: '2026-11-02' }), expect.anything())
+
+    await wrapper.get('[data-testid="usage-overview-toggle"]').trigger('click')
+    expect(wrapper.findComponent({ name: 'UsageStatsCards' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).props('startDate')).toBe('2026-11-01')
+    wrapper.unmount()
+  })
+})
+
+// Mobile list plan (B): the usage columns are remembered twice, below 768px (phone defaults) and from 768px (the page's
+// existing key and its version chain); the errors tab keeps its own keys the same way.
+describe('admin UsageView columns per width', () => {
+  const setPhone = (phone: boolean) => vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+    matches: query.includes('min-width') ? !phone : true, media: query, onchange: null,
+    addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+  }) as unknown as MediaQueryList)
+  const mountView = () => mount(UsageView, {
+    global: { stubs: {
+      AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub, UsageTable: true,
+      UsageExportProgress: true, UsageCleanupDialog: true, UserBalanceHistoryModal: true, Pagination: true, Select: true,
+      DateRangePicker: true, Icon: true, TokenUsageTrend: true, ModelDistributionChart: true, GroupDistributionChart: true,
+      EndpointDistributionChart: true, UserTokenRanking: true, Teleport: true, OpsErrorLogTable: true,
+    } },
+  })
+  const keys = (w: ReturnType<typeof mountView>) => w.findComponent({ name: 'UsageTable' }).props('columns').map((c: { key: string }) => c.key)
+
+  // This file stubs localStorage with mocks; back them with a map here.
+  const store = new Map<string, string>()
+  beforeEach(() => {
+    vi.useFakeTimers()
+    store.clear()
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) => store.get(key) ?? null)
+    vi.mocked(localStorage.setItem).mockImplementation((key: string, value: string) => { store.set(key, String(value)) })
+    vi.mocked(localStorage.removeItem).mockImplementation((key: string) => { store.delete(key) })
+    list.mockReset().mockResolvedValue({ items: [], total: 1234, pages: 62 })
+    getStats.mockReset().mockResolvedValue({ total_requests: 0, total_input_tokens: 0, total_output_tokens: 0, total_cache_tokens: 0, total_tokens: 0, total_cost: 0, total_actual_cost: 0, average_duration_ms: 0 })
+    getSnapshotV2.mockReset().mockResolvedValue({ trend: [], models: [], groups: [] })
+    getModelStats.mockReset().mockResolvedValue({ models: [] })
+  })
+  afterEach(() => {
+    vi.mocked(window.matchMedia).mockRestore?.()
+    vi.mocked(localStorage.getItem).mockReset().mockReturnValue(null)
+    vi.mocked(localStorage.setItem).mockReset()
+    vi.mocked(localStorage.removeItem).mockReset()
+    vi.useRealTimers()
+  })
+
+  it('shows the phone defaults below 768px and keeps a change there in the phone memory only', async () => {
+    setPhone(true)
+    list.mockResolvedValue({ items: [], total: 0, pages: 1 })
+    const w = mountView()
+    await flushPromises()
+    expect(keys(w)).toEqual(['user', 'account', 'model', 'tokens', 'cost', 'latency', 'created_at'])
+    expect(w.get('[data-test="info"]').text()).toBe('common.table.count')
+    const phoneTools = w.get('[data-test="phone-tools"]')
+    await phoneTools.get('[data-testid="usage-column-settings"]').trigger('click')
+    await phoneTools.get('[data-testid="usage-column-toggle-group"]').trigger('change')
+    expect(keys(w)).toContain('group')
+    expect(JSON.parse(localStorage.getItem('usage-hidden-columns-narrow')!)).not.toContain('group')
+    expect(localStorage.getItem('usage-hidden-columns')).toBeNull()
+    await phoneTools.get('[data-testid="usage-column-reset"]').trigger('click')
+    expect(keys(w)).not.toContain('group')
+    expect(localStorage.getItem('usage-hidden-columns-narrow')).toBeNull()
+    w.unmount()
+  })
+
+  // Browser acceptance (step 1), item 1: without a user, key or account filter the list's total is "this page's end + 1"
+  // while more rows follow: the phone info line shows no count then; a narrowed list or the last page shows it.
+  it('shows the usage count only when it is exact', async () => {
+    setPhone(true)
+    const rows = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, source: 'usage', created_at: '2026-11-20T00:00:00Z' }))
+    list.mockResolvedValue({ items: rows, total: 21, pages: 2 })
+    const w = mountView()
+    await flushPromises()
+    expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
+    // The pagination says "1–20", not "of 21", and keeps its next page.
+    expect(w.findComponent({ name: 'Pagination' }).props('totalExact')).toBe(false)
+    list.mockResolvedValue({ items: rows.slice(0, 7), total: 7, pages: 1 })
+    ;(w.vm as any).filters = { ...(w.vm as any).filters, model: 'gpt-6.1' }
+    ;(w.vm as any).applyFilters()
+    await flushPromises()
+    expect(w.get('[data-testid="usage-count"]').text()).toBe('common.table.count')
+    expect(w.findComponent({ name: 'Pagination' }).props('totalExact')).toBe(true)
+    list.mockResolvedValue({ items: rows, total: 1234, pages: 62 })
+    ;(w.vm as any).filters = { ...(w.vm as any).filters, user_id: 7 }
+    ;(w.vm as any).applyFilters()
+    await flushPromises()
+    expect(w.get('[data-testid="usage-count"]').exists()).toBe(true)
+    // The errors list always counts.
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 21 })
+    ;(w.vm as any).filters = { ...(w.vm as any).filters, user_id: undefined }
+    ;(w.vm as any).switchTab('errors')
+    await flushPromises()
+    expect(w.get('[data-testid="usage-count"]').exists()).toBe(true)
+    w.unmount()
+  })
+
+  // Review after acceptance, items 1 and 2: the count and its exactness come from the answer for the query on screen.
+  // While a page or filter is on its way, or after it failed, no count (an earlier total says nothing about it); an
+  // empty page past the first goes back to the last page its answer allows and asks again.
+  describe('the count follows the answer for the query on screen', () => {
+    const rows = (n: number, from = 1) => Array.from({ length: n }, (_, i) => ({ id: from + i, source: 'usage', created_at: '2026-11-20T00:00:00Z' }))
+    const pager = (w: ReturnType<typeof mountView>) => w.findComponent({ name: 'Pagination' })
+    const later = () => { let resolve!: (v: unknown) => void; let reject!: (e: unknown) => void; const promise = new Promise((res, rej) => { resolve = res; reject = rej }); return { promise, resolve, reject } }
+
+    it('hides the count while the next page is on its way, then shows the exact one', async () => {
+      setPhone(true)
+      list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 })
+      const w = mountView()
+      await flushPromises()
+      expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
+      const next = later()
+      list.mockReturnValueOnce(next.promise)
+      ;(w.vm as any).handlePageChange(2)
+      await flushPromises()
+      expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
+      expect(pager(w).props('totalExact')).toBe(false)
+      // The page asked for, no further: page 2 is the last one an answer showed.
+      expect(pager(w).props('total')).toBe(40)
+      next.resolve({ items: rows(7, 21), total: 27, pages: 2 })
+      await flushPromises()
+      expect(w.get('[data-testid="usage-count"]').exists()).toBe(true)
+      expect(pager(w).props('totalExact')).toBe(true)
+      expect(pager(w).props('total')).toBe(27)
+      w.unmount()
+    })
+
+    it('hides the old count while a narrowed list is on its way and after it failed', async () => {
+      setPhone(true)
+      list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 }).mockResolvedValueOnce({ items: rows(7), total: 7, pages: 1 })
+      const w = mountView()
+      await flushPromises()
+      ;(w.vm as any).applyFilters()
+      await flushPromises()
+      expect(w.find('[data-testid="usage-count"]').exists()).toBe(true)
+      const narrowed = later()
+      list.mockReturnValueOnce(narrowed.promise)
+      ;(w.vm as any).filters = { ...(w.vm as any).filters, user_id: 7 }
+      ;(w.vm as any).applyFilters()
+      await flushPromises()
+      expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
+      narrowed.reject(new Error('down'))
+      await flushPromises()
+      expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
+      expect(pager(w).props('totalExact')).toBe(false)
+      w.unmount()
+    })
+
+    // Review after acceptance (second round), item 1: while a page is slow or failed, "next" goes no further than the
+    // pages an answer showed (the open range let it go on to pages 3 and 4); previous stays. Real Pagination.
+    describe('with the real pagination', () => {
+      const mountWithPager = () => mount(UsageView, {
+        global: { stubs: {
+          AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub, UsageTable: true,
+          UsageExportProgress: true, UsageCleanupDialog: true, UserBalanceHistoryModal: true, Select: true,
+          DateRangePicker: true, Icon: true, TokenUsageTrend: true, ModelDistributionChart: true, GroupDistributionChart: true,
+          EndpointDistributionChart: true, UserTokenRanking: true, Teleport: true, OpsErrorLogTable: true,
+        } },
+      })
+      const button = (w: ReturnType<typeof mountWithPager>, name: 'next' | 'previous') =>
+        w.get(`[data-test="pagination-compact"] button[aria-label="pagination.${name}"]`)
+      const pagesAsked = () => list.mock.calls.map(([params]) => (params as { page: number }).page)
+
+      it('does not go past a page still on its way, however often "next" is pressed', async () => {
+        setPhone(true)
+        list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 })
+        const w = mountWithPager()
+        await flushPromises()
+        const slow = later()
+        list.mockReturnValueOnce(slow.promise)
+        list.mockClear()
+        await button(w, 'next').trigger('click')
+        await flushPromises()
+        // 750 ms of pressing "next" while page 2 is on its way.
+        for (let i = 0; i < 3; i++) {
+          vi.advanceTimersByTime(250)
+          await button(w, 'next').trigger('click')
+          await flushPromises()
+        }
+        expect(pagesAsked()).toEqual([2])
+        expect(button(w, 'next').attributes('disabled')).toBeDefined()
+        expect(button(w, 'previous').attributes('disabled')).toBeUndefined()
+        slow.resolve({ items: rows(20, 21), total: 41, pages: 3 })
+        await flushPromises()
+        expect(button(w, 'next').attributes('disabled')).toBeUndefined()
+        w.unmount()
+      })
+
+      it('does not go on after a failed page, but goes back', async () => {
+        setPhone(true)
+        list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 }).mockRejectedValueOnce(new Error('down'))
+        const w = mountWithPager()
+        await flushPromises()
+        await button(w, 'next').trigger('click')
+        await flushPromises()
+        expect((w.vm as any).pagination.page).toBe(2)
+        expect(button(w, 'next').attributes('disabled')).toBeDefined()
+        list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 })
+        list.mockClear()
+        await button(w, 'previous').trigger('click')
+        await flushPromises()
+        expect(pagesAsked()).toEqual([1])
+        expect(button(w, 'next').attributes('disabled')).toBeUndefined()
+        w.unmount()
+      })
+    })
+
+    it('goes back from an empty page past the end to the last page with rows', async () => {
+      setPhone(true)
+      list.mockResolvedValueOnce({ items: rows(20), total: 21, pages: 2 })
+      const w = mountView()
+      await flushPromises()
+      // 47 rows became 6 before page 3 was opened: page 3 and then page 2 come back empty with their offsets.
+      list.mockResolvedValueOnce({ items: [], total: 40, pages: 2 })
+        .mockResolvedValueOnce({ items: [], total: 20, pages: 1 })
+        .mockResolvedValueOnce({ items: rows(6), total: 6, pages: 1 })
+      list.mockClear()
+      ;(w.vm as any).handlePageChange(3)
+      await flushPromises()
+      expect(list.mock.calls.map(([params]) => (params as { page: number }).page)).toEqual([3, 2, 1])
+      expect((w.vm as any).pagination.page).toBe(1)
+      expect(w.get('[data-testid="usage-count"]').exists()).toBe(true)
+      expect(pager(w).props('total')).toBe(6)
+      expect(pager(w).props('totalExact')).toBe(true)
+      w.unmount()
+    })
+  })
+
+  // Browser acceptance (step 1), item 6: the errors tab's phone defaults: user, category, status, time and details.
+  it('shows the errors tab\'s phone defaults below 768px', async () => {
+    setPhone(true)
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 0 })
+    const w = mountView()
+    await flushPromises()
+    ;(w.vm as any).switchTab('errors')
+    await flushPromises()
+    expect(w.findComponent({ name: 'OpsErrorLogTable' }).props('visibleColumnKeys')).toEqual(['user', 'category', 'status', 'created_at', 'actions'])
+    w.unmount()
+    setPhone(false)
+    const wide = mountView()
+    await flushPromises()
+    ;(wide.vm as any).switchTab('errors')
+    await flushPromises()
+    expect(wide.findComponent({ name: 'OpsErrorLogTable' }).props('visibleColumnKeys')).toHaveLength(14)
+    wide.unmount()
+  })
+
+  // Review item 7: each tab's headers follow the sort the page requests with; hiding its column names it in the toolbar.
+  it('passes each tab\'s own sort to its table and names it while its column is hidden', async () => {
+    setPhone(false)
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 0 })
+    const w = mountView()
+    await flushPromises()
+    const usage = w.findComponent({ name: 'UsageTable' })
+    usage.vm.$emit('sort', 'model', 'asc')
+    await flushPromises()
+    expect(usage.props('sort')).toEqual({ key: 'model', order: 'asc' })
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ sort_by: 'model', sort_order: 'asc' }), expect.anything())
+    expect(w.find('[data-test="table-sort-hint"]').exists()).toBe(false)
+    ;(w.vm as any).toggleCurrentColumn('model')
+    await flushPromises()
+    expect(w.get('[data-test="info"]').find('[data-test="table-sort-hint"]').exists()).toBe(true)
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ sort_by: 'model', sort_order: 'asc' }), expect.anything())
+
+    ;(w.vm as any).switchTab('errors')
+    await flushPromises()
+    expect(w.find('[data-test="table-sort-hint"]').exists()).toBe(false)
+    const errors = w.findComponent({ name: 'OpsErrorLogTable' })
+    errors.vm.$emit('sort', 'model', 'asc')
+    await flushPromises()
+    expect([errors.props('sortBy'), errors.props('sortOrder')]).toEqual(['model', 'asc'])
+    expect(listErrorLogs).toHaveBeenLastCalledWith(expect.objectContaining({ sort_by: 'model', sort_order: 'asc' }))
+    ;(w.vm as any).toggleCurrentColumn('model')
+    await flushPromises()
+    expect(w.get('[data-test="info"]').find('[data-test="table-sort-hint"]').exists()).toBe(true)
+    w.unmount()
+  })
+
+  it('reads the existing key from 768px, its version chain included, and leaves it alone on a phone', async () => {
+    localStorage.setItem('usage-hidden-columns', JSON.stringify(['endpoint']))
+    localStorage.setItem('usage-hidden-columns-version', 'request-id-hidden-by-default')
+    setPhone(false)
+    const wide = mountView()
+    await flushPromises()
+    // A saved set is the whole hidden set: only endpoint and, from the chain, the upstream ID are hidden.
+    expect(keys(wide)).toEqual(['user', 'api_key', 'account', 'model', 'reasoning_effort', 'group', 'stream', 'billing_mode', 'tokens', 'cost', 'latency', 'created_at', 'request_id', 'user_agent', 'ip_address'])
+    // The chain hid the column added since (upstream ID) and wrote it back once.
+    expect(JSON.parse(localStorage.getItem('usage-hidden-columns')!)).toEqual(['endpoint', 'upstream_request_id'])
+    wide.unmount()
+    vi.mocked(window.matchMedia).mockRestore()
+
+    setPhone(true)
+    const narrow = mountView()
+    await flushPromises()
+    expect(keys(narrow)).toEqual(['user', 'account', 'model', 'tokens', 'cost', 'latency', 'created_at'])
+    expect(JSON.parse(localStorage.getItem('usage-hidden-columns')!)).toEqual(['endpoint', 'upstream_request_id'])
+    narrow.unmount()
+  })
+})
+
 describe('admin UsageView native compaction filter', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -328,6 +666,202 @@ describe('admin UsageView native compaction filter', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  // Review item 2: the user-wait card follows the current filter's stats, never the previous filter's.
+  it('marks the stats as the current filter\'s only after they load for it, and as failed when they do not', async () => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    expect(cards().props('e2eState')).toBe('loaded')
+    expect(cards().props('stats')).toMatchObject({ e2e_first_output_samples: 12 })
+
+    getStats.mockRejectedValueOnce(new Error('down'))
+    ;(wrapper.vm as any).filters.group_id = 54
+    await wrapper.vm.$nextTick()
+    expect(cards().props('e2eState')).toBe('loading')
+    ;(wrapper.vm as any).applyFilters()
+    await flushPromises()
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 54 }))
+    expect(cards().props('e2eState')).toBe('failed')
+
+    getStats.mockResolvedValueOnce({ total_requests: 3, e2e_first_output_p50_ms: 9_000, e2e_first_output_samples: 3 })
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('loaded')
+    expect(cards().props('stats')).toMatchObject({ e2e_first_output_samples: 3 })
+    wrapper.unmount()
+  })
+
+  // Second review item 2: the list keeps failing for a new filter, so its stats are never read: the card says so.
+  it('says the stats were not read while the current filter\'s list fails, and loads them once the list does', async () => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    expect(cards().props('e2eState')).toBe('loaded')
+
+    list.mockRejectedValue(new Error('down'))
+    getStats.mockClear().mockResolvedValue({ total_requests: 56, e2e_first_output_p50_ms: 4_000, e2e_first_output_samples: 56 })
+    ;(wrapper.vm as any).filters.group_id = 56
+    ;(wrapper.vm as any).applyFilters()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(cards().props('e2eState')).toBe('blocked')
+
+    list.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 56 }))
+    expect(cards().props('e2eState')).toBe('loaded')
+    expect(cards().props('stats')).toMatchObject({ e2e_first_output_samples: 56 })
+    wrapper.unmount()
+  })
+
+  // Second review item 2: going back to a filter whose stats failed, the new request reads as loading, not failed.
+  it('shows loading, not the earlier failure, while a filter\'s stats are asked again', async () => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    const setGroup = async (id: number) => {
+      ;(wrapper.vm as any).filters.group_id = id
+      ;(wrapper.vm as any).applyFilters()
+      await flushPromises()
+    }
+    getStats.mockRejectedValueOnce(new Error('down'))
+    await setGroup(54)
+    expect(cards().props('e2eState')).toBe('failed')
+    // The engine's own retry of the failed stats is a new request too: loading while it is out.
+    let retried!: (value: unknown) => void
+    getStats.mockReturnValueOnce(new Promise((_, reject) => { retried = reject }))
+    const asked = getStats.mock.calls.length
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(getStats.mock.calls.length).toBe(asked + 1)
+    expect(cards().props('e2eState')).toBe('loading')
+    retried(new Error('down again'))
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('failed')
+    getStats.mockResolvedValueOnce({ total_requests: 55, e2e_first_output_p50_ms: 5_000, e2e_first_output_samples: 55 })
+    await setGroup(55)
+    expect(cards().props('e2eState')).toBe('loaded')
+
+    let answer!: (value: unknown) => void
+    getStats.mockReturnValueOnce(new Promise((resolve) => { answer = resolve }))
+    await setGroup(54)
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 54 }))
+    expect(cards().props('e2eState')).toBe('loading')
+    answer({ total_requests: 54, e2e_first_output_p50_ms: 6_000, e2e_first_output_samples: 54 })
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('loaded')
+    expect(cards().props('stats')).toMatchObject({ e2e_first_output_samples: 54 })
+    wrapper.unmount()
+  })
+
+  // Third review item 1: on the same filter, a retry from a failure reads loading, never the answer shown before it.
+  it('never shows a filter\'s earlier answer again after its refresh failed, until a new answer comes', async () => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    const refresh = async () => { (wrapper.vm as any).refreshData(); await flushPromises() }
+    expect(cards().props('e2eState')).toBe('loaded')
+
+    getStats.mockRejectedValueOnce(new Error('down'))
+    await refresh()
+    expect(cards().props('e2eState')).toBe('failed')
+
+    let fail!: (error: unknown) => void
+    getStats.mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    await refresh()
+    expect(cards().props('e2eState')).toBe('loading')
+    fail(new Error('down again'))
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('failed')
+
+    list.mockRejectedValue(new Error('list down'))
+    await refresh()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(cards().props('e2eState')).toBe('blocked')
+
+    list.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStats.mockResolvedValue({ total_requests: 20, e2e_first_output_p50_ms: 8_000, e2e_first_output_samples: 20 })
+    await refresh()
+    expect(cards().props('e2eState')).toBe('loaded')
+    expect(cards().props('stats')).toMatchObject({ e2e_first_output_samples: 20 })
+    wrapper.unmount()
+  })
+
+  // Third review item 2: a cancelled list request of the same filter, ending late, changes nothing.
+  it.each([
+    ['a late success after a newer failure', 'resolve', false, 'blocked'],
+    ['a late failure after a newer success', 'reject', true, 'loaded']
+  ] as const)('keeps the state of the newer list request on %s', async (_, late, newerSucceeds, expected) => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    getStats.mockRejectedValueOnce(new Error('down'))
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('failed')
+
+    let settleOld!: { resolve: (value: unknown) => void; reject: (error: unknown) => void }
+    list.mockReturnValueOnce(new Promise((resolve, reject) => { settleOld = { resolve, reject } }))
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    if (newerSucceeds) list.mockResolvedValueOnce({ items: [], total: 0, pages: 0 })
+    else list.mockRejectedValueOnce(new Error('list down'))
+    ;(wrapper.vm as any).refreshData()
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe(expected)
+    const statsCalls = getStats.mock.calls.length
+
+    if (late === 'resolve') settleOld.resolve({ items: [], total: 0, pages: 0 })
+    else settleOld.reject(new Error('old list down'))
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe(expected)
+    expect(getStats.mock.calls.length).toBe(statsCalls)
+    wrapper.unmount()
+  })
+
+  // Fourth review: the 5 s membership check shares the list request but starts no stats; its failure is no block.
+  it('keeps loading, then the stats failure, when the background membership check fails meanwhile', async () => {
+    getStats.mockResolvedValue({ total_requests: 12, e2e_first_output_p50_ms: 51_000, e2e_first_output_samples: 12 })
+    const wrapper = mountRouteFilteredUsageView()
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    const cards = () => wrapper.findComponent({ name: 'UsageStatsCards' })
+    let fail!: (error: unknown) => void
+    getStats.mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    ;(wrapper.vm as any).filters.group_id = 54
+    ;(wrapper.vm as any).applyFilters()
+    await flushPromises()
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 54 }))
+    expect(cards().props('e2eState')).toBe('loading')
+    const statsCalls = getStats.mock.calls.length
+
+    list.mockRejectedValue(new Error('membership down'))
+    const listCalls = list.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(list.mock.calls.length).toBeGreaterThan(listCalls)
+    expect(cards().props('e2eState')).toBe('loading')
+
+    fail(new Error('stats down'))
+    await flushPromises()
+    expect(cards().props('e2eState')).toBe('failed')
+    const afterFailure = list.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(list.mock.calls.length).toBeGreaterThan(afterFailure)
+    expect(cards().props('e2eState')).toBe('failed')
+    expect(getStats.mock.calls.length).toBe(statsCalls)
+    wrapper.unmount()
   })
 
   it('propagates the filter to list/stats/model/snapshot requests and clears it on reset', async () => {

@@ -50,14 +50,14 @@ func (a *captureAttempt) MarkOutput(kind service.SchedOutputKind, _ time.Time) {
 		a.sample.TTFOMs = &n
 	}
 }
-func (a *captureAttempt) finish(o schedquality.Outcome, d string, u *service.SchedAttemptUsage) {
+func (a *captureAttempt) Finish(in service.SchedAttemptFinish) {
 	if a.done {
 		panic("attempt finished twice")
 	}
 	a.done = true
-	a.sample.Outcome = o
-	a.sample.Detail = d
-	if u != nil {
+	a.sample.Outcome, a.sample.Detail = in.Outcome, in.Detail
+	a.sample.Warm, a.sample.FullTierFirstOutputTimeout = in.Warm, in.FullTierFirstOutputTimeout
+	if u := in.Usage; u != nil {
 		a.sample.PromptTokens = &u.PromptTokens
 		a.sample.CacheReadTokens = &u.CacheReadTokens
 	}
@@ -67,9 +67,6 @@ func (a *captureAttempt) finish(o schedquality.Outcome, d string, u *service.Sch
 	if a.owner.finished != nil {
 		a.owner.finished <- a.sample
 	}
-}
-func (a *captureAttempt) Finish(in service.SchedAttemptFinish) {
-	a.finish(in.Outcome, in.Detail, in.Usage)
 }
 
 type captureUpstream struct {
@@ -448,12 +445,14 @@ func TestSchedCaptureA15BorrowedRepairStaysCold(t *testing.T) {
 		return captureResponse(200, captureSSE(), true), nil
 	}}
 	_, rec, router := captureFixture(t, service.Account{}, up, captureOptions{repo: openAIImagesFailoverAccountRepo{accounts: accounts}, cache: cache, slots: slots})
-	response := captureRequest(router, "/v1/chat/completions", `{"model":"gpt-5.1","top_p":0.7,"prompt_cache_key":"borrowed-session","messages":[{"role":"user","content":"hello"}]}`)
+	response := captureRequest(router, "/v1/chat/completions", `{"model":"gpt-5.1","stream":true,"top_p":0.7,"prompt_cache_key":"borrowed-session","messages":[{"role":"user","content":"hello"}]}`)
 	require.Equal(t, 200, response.Code, response.Body.String())
 	require.Equal(t, 2, up.calls)
 	require.Len(t, rec.samples, 2)
 	for _, row := range rec.samples {
 		require.Equal(t, int64(2), row.AccountID)
+		require.False(t, row.Warm)
+		require.False(t, row.FullTierFirstOutputTimeout)
 	}
 	require.Equal(t, schedquality.OutcomeAccountFault, rec.samples[0].Outcome)
 	require.Equal(t, schedquality.OutcomeOK, rec.samples[1].Outcome)

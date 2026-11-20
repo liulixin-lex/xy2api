@@ -336,9 +336,10 @@ const filteredOptions = computed(() => {
       if (opt.description && String(opt.description).toLowerCase().includes(query)) return true
       return false
     })
-    // In creatable mode, always prepend a fuzzy search option
-    if (props.creatable && searchQuery.value.trim()) {
-      const trimmed = searchQuery.value.trim()
+    // In creatable mode, prepend a fuzzy search option, unless an option already has exactly that value (picking
+    // either gives the same value, so the list would show it twice)
+    const trimmed = searchQuery.value.trim()
+    if (props.creatable && trimmed && !opts.some((opt) => getOptionValue(opt) === trimmed)) {
       const prefix = props.creatablePrefix || t('common.search')
       opts = [{ [props.valueKey]: trimmed, [props.labelKey]: `${prefix} "${trimmed}"`, _creatable: true }, ...opts]
     }
@@ -640,6 +641,12 @@ onUnmounted(() => {
     height: 40px;
   }
 }
+/* Touch at any width (mobile list plan, item 17): the sm trigger is 40px high, as on a narrow screen. */
+@media (pointer: coarse) {
+  .select-trigger.select-trigger--sm {
+    height: 40px;
+  }
+}
 </style>
 
 <style>
@@ -738,6 +745,17 @@ onUnmounted(() => {
    dark placeholder rule. md keeps its own. */
 .select-dropdown-portal.select-dropdown-portal--sm .select-search-input::placeholder {
   color: var(--color-text-muted);
+}
+
+/* Touch (mobile list plan, item 17): the search box at 16px, so the browser does not zoom the page in when it takes
+   focus (iPhone Safari zooms text fields under 16px); sm options reach 40px. Last, so they win over the sizes above. */
+@media (pointer: coarse) {
+  .select-dropdown-portal .select-search-input {
+    font-size: 16px;
+  }
+  .select-dropdown-portal--sm .select-option {
+    min-height: 40px;
+  }
 }
 
 .select-dropdown-enter-active,

@@ -23,15 +23,19 @@
         <input :id="ids.error" v-model="form.errorPct" type="number" step="0.1" :min="MIN_ERROR_PCT" max="100" :aria-invalid="!valid.error" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.error }]" @input="edited.error = true" />
         <span class="sq-text-3">{{ t('admin.schedQuality.policy.percent') }}</span>
       </span>
+      <!-- What the saved limit takes to judge the line bad (the backend's own numbers, by the rule's function). -->
+      <p v-if="errorTrip" class="col-start-2 -mt-2 max-w-[520px] text-xs text-gray-500 dark:text-gray-400" data-sq-policy-notes="error">{{ errorTrip }}</p>
 
       <label :for="ids.cache" class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.policy.cache') }}</label>
       <span class="inline-flex items-center gap-2">
         <input :id="ids.cache" v-model="form.cachePct" type="number" step="1" min="0" max="100" :aria-invalid="!valid.cache" :class="['input w-24 py-1.5 text-right sq-num', { 'input-error': !valid.cache }]" @input="edited.cache = true" />
         <span class="sq-text-3">{{ t('admin.schedQuality.policy.percent') }}</span>
       </span>
+      <p v-if="cacheHigh" class="col-start-2 -mt-2 max-w-[520px] text-xs text-amber-700 dark:text-amber-400" data-sq-policy-notes="cache">{{ t('admin.schedQuality.policy.cacheHigh') }}</p>
 
       <span class="text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.policy.takeover') }}</span>
       <Select v-model="form.takeover" :options="takeoverOptions" :searchable="false" :aria-label="t('admin.schedQuality.policy.takeover')" class="w-40" />
+      <p class="col-start-2 max-w-[520px] text-xs text-gray-500 dark:text-gray-400" data-sq-policy-notes="trial">{{ t('admin.schedQuality.policy.trialStable') }}</p>
 
       <template v-if="previewShown">
         <span class="self-start pt-0.5 text-gray-700 dark:text-gray-300">{{ t('admin.schedQuality.policy.trial') }}</span>
@@ -123,6 +127,29 @@ async function reload() {
   }
 }
 watch(() => props.groupId, reload, { immediate: true })
+
+// The saved limit in force and what it takes to judge the error line bad once (50 and 100 clear outcomes): the
+// backend's numbers, never worked out here. The backend lists only the examples that can trip; with a high limit there
+// may be one or none, and none says the line is not judged bad within 100. Older answers without the fields show nothing.
+const errorTrip = computed(() => {
+  const saved = record.value
+  const examples = saved?.error_trip_examples
+  if (!saved || typeof saved.effective_max_error_rate !== 'number' || !Array.isArray(examples)) return ''
+  const limit = `${pct(saved.effective_max_error_rate)}%`
+  if (!examples.length) return t('admin.schedQuality.policy.errorTripNone', { limit })
+  return t('admin.schedQuality.policy.errorTrip', {
+    limit,
+    examples: examples
+      .map((item) => t('admin.schedQuality.policy.errorTripItem', { known: item.known, failed: item.failed }))
+      .join(t('admin.schedQuality.policy.errorTripJoiner'))
+  })
+})
+/**
+ * A saved cache floor above 85 %: accounts go in and out around the line more (an observed relation). By the saved
+ * policy like the error examples (review item 8): it follows a successful save or a reload, not the typing.
+ */
+const CACHE_HIGH = 0.85
+const cacheHigh = computed(() => (record.value?.policy.min_cache_ratio ?? 0) > CACHE_HIGH)
 
 const takeoverOptions = computed(() => TAKEOVER_VALUES.map((value) => ({
   value,
@@ -248,7 +275,7 @@ async function save(): Promise<boolean> {
   try {
     const saved = record.value
     const result = await schedQualityAPI.updateGroupPolicy(props.groupId, { expected_version: saved.version, policy: current.value })
-    // Merged: an answer without some field keeps what was there.
+    // Merged: an answer without some field keeps what was there. The answer carries the saved limit's examples.
     record.value = { ...saved, ...result, policy: { ...saved.policy, ...result?.policy } }
     conflict.value = false
     const relaxed = result?.relaxed_lines ?? []

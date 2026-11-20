@@ -28,6 +28,37 @@
 
 需要恢复提交时机时，可在**系统设置 → 网关服务 → 网关韧性**的流式开场设置或“高级（完整 JSON）”中关闭对应开关并保存，无需重新发版：`stream.prelude_staging` 管 Chat Completions、Messages 的兼容转换，以及 Anthropic 上游的直通与协议转换；`stream.native_prelude_whitelist` 管原生 Responses（含透传）。关闭开关只恢复对应路径原有的提交方式；WebSocket 直通保持原有守卫。细节见 [流式开场与终止](../guides/gateway-resilience.md#流式开场与终止-stream)与[设置参考](../guides/gateway-resilience-settings.md#流式开场与终止-stream)。
 
+## OpenAI 档位策略蓝绿发布
+
+迁移 322 增加分组的档位配置、渠道的 Ultrafast 倍率及用量档位证据列。迁移 323 让数据库只将带档位证据的计费意图交给支持它的恢复进程。已有 OpenAI 与组合分组回填为策略版本 1，保留旧强制 Fast 与原赠免。渠道和组卡的 Fast 倍率原样保留。新增 Ultra 倍率初始为空。迁移完成后可比较升级前后的 Fast 价卡统计。[分组管理接口](../guides/groups.md#旧套餐与管理接口)
+
+1. **离线影子验证。** 在隔离环境创建两套实例与各自的 PostgreSQL、Redis，连接同一个可记录出站请求的模拟上游。基线实例运行旧版本，候选实例运行新版本。将同一份脱敏的 HTTP 请求、WebSocket 轮次和模拟终态各重放一遍，比较策略版本 1 的实际上游档位、拒绝状态、账单原额与实扣。候选实例再创建显式策略测试组，验证强开、强关、赠免、降档回报、价格快照和用量证据。影子验证使用隔离测试账本，不把生产请求同时转发给两个计费实例。
+2. **蓝绿交叠。** 升级时先保持生产组为策略版本 1。暂停写入版本 2 和 Ultra 倍率，包括 OpenAI 分组模型价卡及渠道整表更新。新实例通过 `/ready` 后再接流量，保持旧进程的在途请求可完成。记录当前 Fast 价卡和待处理账单数量。
+3. **启用。** 停止旧实例接入并排空 HTTP、WebSocket 和后台任务。确认旧网关和管理端已排空，再为少量组显式启用版本 2 或设置 Ultra 倍率。数据库会跳过旧恢复进程尝试领取的档位计费意图；完成退役前仍应停止旧进程，以免旧网关或后台接口读取不完整的档位配置。用新请求核对出站、终态和使用记录中的 `service_tier_details` 后逐批启用。
+
+本地冒烟用新构建的二进制启动临时 PG、Redis 与 HTTP 模拟上游，通过实际管理接口保存两项赠免和 Fast/Ultrafast 价卡，验证上游收到 Ultrafast、账单原额与实扣及已结算的计费意图。
+
+```sh
+(cd backend && go build -o /tmp/xy2api-tier-smoke ./cmd/server)
+python3 tools/openai_tier_smoke.py /tmp/xy2api-tier-smoke
+```
+
+提供 `--legacy-server /path/to/previous/server` 可继续验证同库回滚。脚本先停止候选进程，再启动旧进程，用同一 API Key 请求并检查 priority 出站及旧版实扣。
+
+迁移后的数据库可用现有只读连接运行检查。输出只有计数，无密钥、用户记录或请求正文。 [只读检查 SQL](../../tools/billing-integrity/openai-tier-preflight.sql)
+
+```sh
+psql "$AUDIT_DATABASE_URL" -X -f tools/billing-integrity/openai-tier-preflight.sql
+```
+
+### 回滚
+
+如果尚未启用版本 2、未设置 Ultra 倍率且没有新版本的在途结算，旧程序可使用 322、323 迁移后的表结构，数据库保留新增列。启用过显式策略后，优先回滚到仍懂新版策略的构建。原版本无法执行显式强关、强开 Ultra 或赠免 Ultra，也无法完整恢复新档位证据。必须回到原版本时按顺序处理：
+
+1. 停止受影响的组接收新请求，排空 HTTP、WebSocket、导出和待结算账单。保持新版恢复进程工作直到相关快照都结算。仍由新版管理接口保存现有配置的备份，并用最新 revision 将渠道和分组价卡的显式 `ultrafast_multiplier` 清除为 `null`。
+2. 使用新版管理 API 将各组切换回兼容执行器。先读取组的最新 revision，再在一个 `PUT /api/v1/admin/groups/{id}` 请求中明确提交 `openai_tier_policy_version: 1`、`openai_fast_mode: "inherit"` 或 `"force_on"`、`openai_ultrafast_mode: "inherit"`、`free_openai_ultrafast: false`。按原套餐需要决定是否同时更新 `free_openai_fast`。读取新的组配置并用只读 SQL 检查版本 2、显式倍率和待结算情况，再以旧程序接流量。组 ID、订阅和已经结算的记录继续保留。
+
+
 ## Docker Compose
 
 生产环境建议在 Compose 文件里固定版本号，而不是使用 `latest`：
@@ -100,7 +131,9 @@ SELECT filename, applied_at FROM schema_migrations ORDER BY filename DESC LIMIT 
 
 ### 本版回退与再次升级
 
-本次验收已用升级后的数据库实测 **v0.6.8 基线程序（代码 `54d380fc9`）**：旧程序能启动、转发、计费和写采样，随后也能直接再升级。推荐回退前先备份当前库，**保留升级后的数据库，只切回已验证的旧程序与配套前端**，不删除迁移记录。
+从 **v0.6.11 回退到 v0.6.10** 时，迁移 321 新增的 `sched_line_states.last_assessment` 留在库中，旧程序不读取或清理此列，会话绑定的归属和代数两个 Redis 键的类型及取值格式不变，新会话按表现选号与接管、质量迁移提交时的首输出避让复验随回退停止。
+
+此前从 v0.6.9 回退时，已用升级后的数据库实测 **v0.6.8 基线程序（代码 `54d380fc9`）**：旧程序能启动、转发、计费和写采样，随后也能直接再升级。推荐回退前先备份当前库，**保留升级后的数据库，只切回已验证的旧程序与配套前端**，不删除迁移记录。
 
 | 回退期间 | 实际行为 |
 |---|---|
@@ -108,7 +141,7 @@ SELECT filename, applied_at FROM schema_migrations ORDER BY filename DESC LIMIT 
 | 倍率与固定 | 最低上游倍率和固定号不生效；旧程序复制分组成员时先删后插，会把被重建成员的固定标记清为关闭 |
 | 采样与再次升级 | 回退期间写入的采样保留，但不被重新升级后的新规则当作证据；可以直接再升级，再核对倍率与固定设置 |
 
-本次回退路径不建议恢复升级前的整库备份：那会丢失备份之后、包括升级后新增的用量、余额变动等业务数据。只有确需连数据状态一起回退并接受这些影响时，才选择整库恢复。
+回退到 v0.6.8 的路径不建议恢复升级前的整库备份：那会丢失备份之后、包括升级后新增的用量、余额变动等业务数据。只有确需连数据状态一起回退并接受这些影响时，才选择整库恢复。
 
 ## 备份与恢复
 

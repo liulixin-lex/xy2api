@@ -11,8 +11,7 @@
       >
         <Icon name="chevronRight" size="xs" :stroke-width="2.5" />
         <span>{{ t('admin.schedQuality.decisions.title') }}</span>
-      </button>
-      <span class="qp-h-note">{{ t('admin.schedQuality.decisions.note') }}</span>
+      </button>{{ ' ' }}<span class="qp-h-note" data-qp-decisions-note>{{ t('admin.schedQuality.decisions.note') }}</span>
     </h3>
     <div v-if="open" :id="listId" class="dec" :aria-busy="state === 'loading'">
       <div v-if="state === 'failed' && !items.length" class="dec__failed" data-qp-decisions-failed>
@@ -26,28 +25,33 @@
       <template v-else>
         <ol class="dlist">
           <li v-for="item in items" :key="item.id" class="drow" :data-qp-decision="item.id">
-            <div class="drow__main">
-              <span class="drow__time">{{ formatShortTime(item.at) }}</span>
-              <span class="drow__what" :class="`drow__what--${tone(item)}`">{{ actionWord(item) }}</span>
-              <span class="drow__where">{{ where(item) }}</span>
-              <button
-                v-if="item.basis"
-                type="button"
-                class="qp-text-btn drow__ev"
-                :aria-expanded="shown.has(item.id)"
-                :data-qp-decision-evidence="item.id"
-                @click="toggleEvidence(item.id)"
-              >{{ t('admin.schedQuality.decisions.evidence') }}</button>
+            <span class="drow__time">{{ formatShortTime(item.at) }}</span>
+            <!-- Everything after the time, so the lines under the action start where it starts (design 6.5). -->
+            <div class="drow__body">
+              <div class="drow__main">
+                <span class="drow__what" :class="`drow__what--${tone(item)}`">{{ actionWord(item) }}</span>
+                <span class="drow__where">{{ where(item) }}</span>
+                <button
+                  v-if="item.basis"
+                  type="button"
+                  class="qp-text-btn drow__ev"
+                  :aria-expanded="shown.has(item.id)"
+                  :data-qp-decision-evidence="item.id"
+                  @click="toggleEvidence(item.id)"
+                >{{ t('admin.schedQuality.decisions.evidence') }}</button>
+              </div>
+              <p v-if="detailLine(item)" class="drow__sub">{{ detailLine(item) }}</p>
+              <p v-if="item.line && item.action === 'trial_timeout'" class="drow__sub" :data-qp-trial-timeout="item.id">{{ timeoutReason(item) }}</p>
+              <SchedEvidence
+                v-if="item.basis && shown.has(item.id)"
+                class="drow__basis"
+                :dim="item.basis.line"
+                :evidence="basisEvidence(item.basis)"
+                :samples="item.basis"
+                :source-groups="item.basis.source_groups"
+                :group-name="groupName"
+              />
             </div>
-            <p v-if="detailLine(item)" class="drow__sub">{{ detailLine(item) }}</p>
-            <SchedEvidence
-              v-if="item.basis && shown.has(item.id)"
-              class="drow__basis"
-              :dim="item.basis.line"
-              :evidence="basisEvidence(item.basis)"
-              :source-groups="item.basis.source_groups"
-              :group-name="groupName"
-            />
           </li>
         </ol>
         <div v-if="more || state === 'failed'" class="dec__more">
@@ -77,6 +81,7 @@ import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import { schedWord } from '@/utils/schedQualityFormat'
 import SchedEvidence from './SchedEvidence.vue'
+import { evidenceCauses } from './qualityPanel'
 
 const PAGE = 50
 /** Rear stay of each level, minutes. */
@@ -180,9 +185,57 @@ function detailLine(item: BackendDecision): string {
 }
 
 const basisEvidence = (basis: BackendBasis) => basis.ttft ?? basis.error ?? basis.cache ?? null
+
+/**
+ * Why a trial ended without a verdict, from the basis as it is (the backend gives no reason code): no traffic of this
+ * group during the trial, or not enough evidence (the first-output line adds rule B's reasons); then, on its own, what
+ * was seen of the trial seats. Each part is read on its own: one the record does not have says so without hiding the
+ * other, and a record with neither is an older decision. Nothing is worked out.
+ */
+function timeoutReason(item: BackendDecision): string {
+  const basis = item.basis
+  const local = basis?.samples_local
+  const seats = basis?.trial_seats
+  if (!basis || (local == null && seats == null)) {
+    return t('admin.schedQuality.decisions.timeout.line', { reasons: t('admin.schedQuality.decisions.timeout.legacy') })
+  }
+  const parts: string[] = []
+  if (local == null) parts.push(t('admin.schedQuality.decisions.timeout.trafficLegacy'))
+  else if (local === 0) parts.push(t('admin.schedQuality.decisions.timeout.noTraffic'))
+  else {
+    const causes = evidenceCauses(basis.line, basis.ttft).map((cause) => {
+      const key = `admin.schedQuality.evidence.causes.${cause}`
+      return te(key) ? t(key) : t('admin.schedQuality.unknown')
+    })
+    parts.push(causes.length
+      ? t('admin.schedQuality.decisions.timeout.evidenceWhy', { reasons: causes.join(t('admin.schedQuality.evidence.joiner')) })
+      : t('admin.schedQuality.decisions.timeout.evidence'))
+  }
+  parts.push(seats == null ? t('admin.schedQuality.decisions.timeout.seatsLegacy') : t(`admin.schedQuality.decisions.timeout.seats.${seats}`))
+  return t('admin.schedQuality.decisions.timeout.line', { reasons: parts.join(t('admin.schedQuality.decisions.timeout.joiner')) })
+}
 </script>
 
 <style scoped>
+/* The panel's heading rule is scoped to the panel and does not reach this component's heading: a heading layout here,
+   so the title and the note stand apart (they ran together in English: "DecisionsOne record …"). The note is never
+   cut: it wraps, and on a narrow drawer (390 or 320 px) it moves under the title. */
+.qp-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 8px;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-body);
+}
+.qp-h-note {
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-regular);
+}
 .dec-toggle {
   display: inline-flex;
   align-items: center;
@@ -225,17 +278,28 @@ const basisEvidence = (basis: BackendBasis) => basis.ttft ?? basis.error ?? basi
   align-items: center;
   gap: 10px;
 }
+/* The list is the container the rows lay out by: the drawer's width is not the viewport's. */
 .dlist {
+  container: sched-decisions / inline-size;
   display: grid;
   margin: 0;
   padding: 0;
   list-style: none;
 }
+/* The time, then the rest of the record beside it: the action's line, and under the action its detail lines and opened
+   evidence. */
 .drow {
   display: grid;
-  gap: 4px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 8px;
   padding: 8px 0;
   border-top: 1px solid var(--color-line-row);
+}
+.drow__body {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
 }
 .drow:first-child {
   border-top: 0;
@@ -247,13 +311,16 @@ const basisEvidence = (basis: BackendBasis) => basis.ttft ?? basis.error ?? basi
   gap: 8px;
 }
 .drow__time {
-  flex: none;
   color: var(--color-text-secondary);
   font-size: var(--font-size-small);
   font-variant-numeric: tabular-nums;
 }
+/* The action gives way last (after the group text) and wraps when even then the line is too short: a classic vertical
+   scrollbar makes the list 8–15px narrower than measured, and an older record's English action is the longest text. */
 .drow__what {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-weight: var(--font-weight-medium);
 }
 .drow__what--rear {
@@ -279,6 +346,39 @@ const basisEvidence = (basis: BackendBasis) => basis.ttft ?? basis.error ?? basi
 }
 .drow__ev {
   flex: none;
+}
+/* A narrow list: one line cannot hold the time, the longest action and Evidence, and nothing in it gave way, so
+   Evidence ended up out of view. Here the action (wrapping, long words too) and Evidence share the first line beside
+   the time, Evidence keeping its whole width; the group, model and line go under the action. 454px is the widest list
+   measured to need it (English, a record of another day: "11-18 06:55 Not enough evidence at the review, trial
+   started", Evidence); the 500px drawer from 1280px (a 459px list) keeps the one-line row. */
+@container sched-decisions (max-width: 454px) {
+  .drow__main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    grid-template-areas:
+      'what ev'
+      'where where';
+    row-gap: 2px;
+  }
+  .drow__what {
+    grid-area: what;
+    overflow-wrap: anywhere;
+  }
+  .drow__where {
+    grid-area: where;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .drow__ev {
+    grid-area: ev;
+  }
+}
+/* An opened evidence wraps anywhere: one long word in it (a source group's name) would otherwise widen the list's
+   column and take every row's Evidence out of view. */
+.drow__basis {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .drow__sub {
   color: var(--color-text-secondary);

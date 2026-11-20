@@ -119,6 +119,8 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 		verdict, basis := s.assessLine(d, r, q.EventRegular, d.now, resets)
 		switch key.Line {
 		case q.DimensionTTFO:
+			row.TTFTLastEval = SchedAdminLastEvalFromState(r)
+			row.TTFTSamples = basis.SampleCounts
 			row.View.TTFO = lv
 			row.TTFTVerdict = verdict
 			row.TTFTSourceGroups = append([]int64(nil), basis.SourceGroups...)
@@ -126,11 +128,15 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 				row.TTFT = *basis.TTFT
 			}
 		case q.DimensionError:
+			row.ErrorLastEval = SchedAdminLastEvalFromState(r)
+			row.ErrorSamples = basis.SampleCounts
 			row.View.Error = lv
 			if basis.Error != nil {
 				row.Error = *basis.Error
 			}
 		case q.DimensionCache:
+			row.CacheLastEval = SchedAdminLastEvalFromState(r)
+			row.CacheSamples = basis.SampleCounts
 			row.View.Cache = lv
 			if basis.Cache != nil {
 				row.Cache = *basis.Cache
@@ -232,7 +238,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 			return a.Requests > b.Requests
 		})
 	}
-	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: evaluatedAt, GlobalEnabled: enabled, View: view, Accounts: accounts, GroupModels: models, GroupRows: groupRows, Members: members, Policies: cloneSchedPolicies(s.policies), Overrides: copied, ResetAt: cloneResetTimes(resets)})
+	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: evaluatedAt, summaryWindowEnd: d.now, GlobalEnabled: enabled, View: view, Accounts: accounts, GroupModels: models, GroupRows: groupRows, Members: members, Policies: cloneSchedPolicies(s.policies), Overrides: copied, ResetAt: cloneResetTimes(resets)})
 	newer := make(map[int64]time.Time)
 	for id, at := range resets {
 		if at.After(s.seenResets[id]) {
