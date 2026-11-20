@@ -1251,9 +1251,10 @@ const pageOwnsSort = computed(() => props.sort !== undefined)
 /** The header click a page that owns the sort has not answered yet: stored when the page's sort becomes it. */
 let requestedSort: PersistedSortState | null = null
 // Watched by value (key and order): a page that renders again with an equal new object neither changes the headers
-// nor drops a click still waiting for its answer (Astra second re-review #2).
+// nor drops a click still waiting for its answer (Astra second re-review #2). No `sort` (the table's own) and `null`
+// (the page's, with no order) are two values, so a page taking over with no order clears the arrow (third re-review).
 watch(
-  () => (props.sort ? `${props.sort.key}\u0000${props.sort.order}` : ''),
+  () => (props.sort === undefined ? '\u0001' : props.sort ? `${props.sort.key}\u0000${props.sort.order}` : ''),
   () => {
     if (!pageOwnsSort.value) return
     const sort = props.sort
