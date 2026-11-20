@@ -1250,16 +1250,19 @@ const stickyColumnClasses = computed(() => props.columns.map((column, index) => 
 const pageOwnsSort = computed(() => props.sort !== undefined)
 /** The header click a page that owns the sort has not answered yet: stored when the page's sort becomes it. */
 let requestedSort: PersistedSortState | null = null
+// Watched by value (key and order): a page that renders again with an equal new object neither changes the headers
+// nor drops a click still waiting for its answer (Astra second re-review #2).
 watch(
-  () => props.sort,
-  (sort) => {
+  () => (props.sort ? `${props.sort.key}\u0000${props.sort.order}` : ''),
+  () => {
     if (!pageOwnsSort.value) return
+    const sort = props.sort
     sortKey.value = sort?.key ?? ''
     sortOrder.value = sort?.order ?? 'asc'
     if (requestedSort && sort?.key === requestedSort.key && sort.order === requestedSort.order) writePersistedSortState(requestedSort)
     requestedSort = null
   },
-  { immediate: true, deep: true }
+  { immediate: true }
 )
 
 onMounted(() => {

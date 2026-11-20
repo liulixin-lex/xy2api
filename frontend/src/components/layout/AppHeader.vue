@@ -52,6 +52,8 @@
           :href="docUrl"
           target="_blank"
           rel="noopener noreferrer"
+          :title="t('nav.docs')"
+          :aria-label="t('nav.docs')"
           class="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
         >
           <Icon name="book" size="sm" />
@@ -103,6 +105,8 @@
           >
             {{ balanceFrozenLabel }}
           </span>
+          <!-- Folded below 1440px: still read out beside the balance. -->
+          <span v-if="frozenBalance > 0" class="sr-only min-[1440px]:hidden">{{ balanceFrozenLabel }}</span>
           <div
             class="pointer-events-none absolute right-0 top-full mt-2 hidden w-56 rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-lg group-hover:block dark:border-dark-700 dark:bg-dark-800"
           >
@@ -161,8 +165,9 @@
                 <div class="text-xs text-gray-500 dark:text-dark-400">{{ user.email }}</div>
               </div>
 
-              <!-- Balance (mobile only) -->
-              <div class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 sm:hidden">
+              <!-- Balance: in the menu wherever the header does not show it whole (below 640px no balance, below 1440px no
+                   frozen amount beside it), so a touch screen reaches it with a tap. -->
+              <div class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 min-[1440px]:hidden">
                 <div class="text-xs text-gray-500 dark:text-dark-400">
                   {{ t('common.balance') }}
                 </div>
