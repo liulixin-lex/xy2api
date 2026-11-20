@@ -1,6 +1,5 @@
 import { computed, reactive, watch, type Ref } from 'vue'
-import { useMediaQuery } from '@vueuse/core'
-import { PHONE_QUERY } from './useTableViewport'
+import { usePhoneViewport } from './useTableViewport'
 
 /** One width's memory of the hidden columns: where it is kept and what it hides until the user changes it. */
 export interface ColumnVisibilityTier {
@@ -60,7 +59,7 @@ const writeHidden = (tier: ColumnVisibilityTier, hidden: ReadonlySet<string>) =>
  * that come and go (attributes, modes) keep their setting.
  */
 export function useColumnVisibility(options: UseColumnVisibilityOptions) {
-  const phone = useMediaQuery(PHONE_QUERY)
+  const phone = usePhoneViewport()
   const tier = computed<Tier>(() => (phone.value ? 'narrow' : 'wide'))
   const sets = reactive<Partial<Record<Tier, Set<string>>>>({})
   /** A memory is read when its width is first in use; never inside a computed, so reading it changes nothing there. */

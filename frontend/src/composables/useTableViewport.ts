@@ -6,6 +6,12 @@ import { useMediaQuery } from '@vueuse/core'
  * desktop from 1024. Touch sizes follow the primary pointer (`pointer: coarse`, an iPad in landscape included), never
  * the width; a hybrid device with a touch screen besides its mouse matches `any-pointer: coarse` in CSS for its buttons.
  */
+/** From 768px: a tablet or wider. A phone is "not this" (so a test environment that matches every query is wide). */
+export const TABLET_UP_QUERY = '(min-width: 768px)'
+/**
+ * Below 768px, as a query string. In code use usePhoneViewport() (or useTableViewport().phone), which asks for "not
+ * from 768px": the unit tests' matchMedia mock matches every query, and would make every test a phone with this one.
+ */
 export const PHONE_QUERY = '(max-width: 767px)'
 export const DESKTOP_QUERY = '(min-width: 1024px)'
 export const COARSE_QUERY = '(pointer: coarse)'
@@ -32,8 +38,14 @@ export function useShortViewport() {
   return computed(() => height.value < SHORT_VIEWPORT_PX)
 }
 
+/** Below 768px. */
+export function usePhoneViewport() {
+  const tabletUp = useMediaQuery(TABLET_UP_QUERY)
+  return computed(() => !tabletUp.value)
+}
+
 export function useTableViewport() {
-  const phone = useMediaQuery(PHONE_QUERY)
+  const phone = usePhoneViewport()
   const desktop = useMediaQuery(DESKTOP_QUERY)
   const coarse = useMediaQuery(COARSE_QUERY)
   return { phone, desktop, coarse }

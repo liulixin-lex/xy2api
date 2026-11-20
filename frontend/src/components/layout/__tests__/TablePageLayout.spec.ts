@@ -2,7 +2,12 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { defineComponent, h, inject } from 'vue'
+
+import TablePageLayout from '../TablePageLayout.vue'
+import { TABLE_REGION_KEY } from '../tableRegion'
 
 const componentPath = resolve(dirname(fileURLToPath(import.meta.url)), '../TablePageLayout.vue')
 const componentSource = readFileSync(componentPath, 'utf8')
@@ -35,5 +40,51 @@ describe('TablePageLayout responsive table scrolling', () => {
     expect(mobileBlocks.every(([, , declarations]) => !declarations.includes('overflow-visible'))).toBe(
       true
     )
+  })
+})
+
+// Mobile list plan: below 1024px the table layout fills the visible height and only its table region scrolls; under
+// 500px of visible height (a phone on its side), or when the page asks for it, the whole page scrolls instead.
+describe('TablePageLayout table layout below 1024px', () => {
+  const regions: boolean[] = []
+  const Probe = defineComponent({
+    setup() {
+      const region = inject(TABLE_REGION_KEY)!
+      return () => { regions.push(region.value); return h('div') }
+    }
+  })
+  const height = window.innerHeight
+  beforeEach(() => {
+    regions.length = 0
+    window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia
+  })
+  afterEach(() => {
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: height })
+  })
+  const mountLayout = (props: Record<string, unknown>) => mount(TablePageLayout, { props, slots: { table: () => h(Probe) } })
+
+  it('bounds the table region on a tall screen and tells the table so', () => {
+    const wrapper = mountLayout({ tableLayout: true })
+    expect(wrapper.classes()).toEqual(expect.arrayContaining(['table-page-layout--table', 'table-page-layout--region']))
+    expect(wrapper.classes()).not.toContain('mobile-mode')
+    expect(regions.at(-1)).toBe(true)
+  })
+
+  it('lets the whole page scroll under 500px of visible height, or when the page asks', () => {
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 420 })
+    const short = mountLayout({ tableLayout: true })
+    expect(short.classes()).toContain('table-page-layout--table')
+    expect(short.classes()).not.toContain('table-page-layout--region')
+    expect(regions.at(-1)).toBe(false)
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
+    const asked = mountLayout({ tableLayout: true, pageScroll: true })
+    expect(asked.classes()).not.toContain('table-page-layout--region')
+    expect(regions.at(-1)).toBe(false)
+  })
+
+  it('keeps the old narrow layout for card pages', () => {
+    const wrapper = mountLayout({})
+    expect(wrapper.classes()).toContain('mobile-mode')
+    expect(regions.at(-1)).toBe(false)
   })
 })
