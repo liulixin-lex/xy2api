@@ -27,6 +27,11 @@ export interface TipCard {
   head?: string[]
   /** Rows of data, each with the same number of columns. */
   rows?: (string | TipCell)[][]
+  /**
+   * With three columns or more: the note column wraps in what is left, so the label and value columns keep their
+   * width on a narrow screen (by default the note keeps its width and they give way with an ellipsis).
+   */
+  wrapEnd?: boolean
 }
 export type TipContent = string | TipCard
 
@@ -127,10 +132,14 @@ function render(el: HTMLElement, content: TipContent) {
     // The first column is the label; with three columns or more the last one is a note, at the right.
     const column = (base: string, index: number) =>
       index === 0 ? `${base} sq-tip__first` : cols >= 3 && index === cols - 1 ? `${base} sq-tip__end` : base
-    const grid = node('div', 'sq-tip__grid')
+    const wrapEnd = !!content.wrapEnd && cols >= 3
+    const grid = node('div', wrapEnd ? 'sq-tip__grid sq-tip__grid--wrap' : 'sq-tip__grid')
     // Columns as wide as their text, a long one cut with an ellipsis when the card is at its widest; the note column
-    // keeps its text and takes what is left over, so it sits against the right edge.
-    grid.style.gridTemplateColumns = cols >= 3 ? `repeat(${cols - 1}, minmax(0, max-content)) minmax(max-content, 1fr)` : `repeat(${cols}, minmax(0, max-content))`
+    // keeps its text and takes what is left over, so it sits against the right edge. With wrapEnd the note column
+    // gives way instead, on two lines if it must.
+    grid.style.gridTemplateColumns = wrapEnd
+      ? `repeat(${cols - 1}, max-content) minmax(0, 1fr)`
+      : cols >= 3 ? `repeat(${cols - 1}, minmax(0, max-content)) minmax(max-content, 1fr)` : `repeat(${cols}, minmax(0, max-content))`
     content.head?.forEach((text, index) => grid.appendChild(node('span', column('sq-tip__h', index), text)))
     for (const row of rows) row.forEach((value, index) => grid.appendChild(cell(column('sq-tip__c', index), value)))
     parts.push(grid)

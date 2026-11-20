@@ -2,13 +2,12 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount, type DOMWrapper } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
 import AccountRecentCell from '../AccountRecentCell.vue'
-import { formatShortTime } from '../accountTime'
 import type { RecentQuality } from '../accountRecent'
 import type { TipCard, TipContent } from '@/utils/tip'
 
@@ -33,10 +32,21 @@ const quality = (patch: Partial<Quality> = {}): Quality => ({
 enableAutoUnmount(afterEach)
 afterEach(() => {
   i18nMode.real = false
+  vi.useRealTimers()
 })
+/** Local time frozen at `now` (Date alone): the window's title is local HH:MM. */
+const atLocal = (now: Date) => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(now)
+}
 const mountCell = (q: Quality | null, card = false) => mount(AccountRecentCell, { attachTo: document.body, props: { quality: q, card } })
+/** What a value shows, and what a screen reader reads instead when it differs (the table's "T/O"). */
+const shown = (el: DOMWrapper<Element>) => {
+  const visible = el.find('[aria-hidden="true"]')
+  return visible.exists() ? { text: visible.text(), spoken: el.get('.sr-only').text() } : { text: el.text() }
+}
 const cells = (q: Quality | null, card = false) =>
-  mountCell(q, card).findAll('.recent__v').map((el) => ({ dim: el.attributes('data-dim'), text: el.text(), cls: el.classes().filter((cls) => cls !== 'recent__v') }))
+  mountCell(q, card).findAll('.recent__v').map((el) => ({ dim: el.attributes('data-dim'), ...shown(el), cls: el.classes().filter((cls) => cls !== 'recent__v') }))
 const tipOf = (q: Quality | null): TipContent => (mountCell(q).element as HTMLElement & { __tipText?: () => TipContent }).__tipText!()
 const rowsOf = (q: Quality) => (tipOf(q) as TipCard).rows!
 const json = (key: string, params: Record<string, unknown>) => `admin.accounts.table.tip.${key}:${JSON.stringify(params)}`
@@ -57,9 +67,15 @@ describe('AccountRecentCell', () => {
     const ttfo = (first_output: Quality['first_output'], card = false) => cells(quality({ first_output }), card)[0]
     expect(ttfo({ n: 20, timeouts: 10, p50_ms: 7000 })).toEqual({ dim: 'ttfo', text: '7.0s', cls: [] })
     expect(ttfo({ n: 19, timeouts: 0, p50_ms: 7000 })).toEqual({ dim: 'ttfo', text: '7.0s', cls: ['recent__v--na'] })
-    expect(ttfo({ n: 21, timeouts: 11, p50_ms: null })).toEqual({ dim: 'ttfo', text: 'admin.accounts.table.recent.timeoutShort', cls: [] })
-    expect(ttfo({ n: 21, timeouts: 11, p50_ms: null }, true).text).toBe('admin.accounts.table.recent.timeout')
+    // The table's short word is hidden from screen readers, which read the full one; the card has room for it.
+    expect(ttfo({ n: 21, timeouts: 11, p50_ms: null }))
+      .toEqual({ dim: 'ttfo', text: 'admin.accounts.table.recent.timeoutShort', spoken: 'admin.accounts.table.recent.timeout', cls: [] })
+    expect(ttfo({ n: 21, timeouts: 11, p50_ms: null }, true)).toEqual({ dim: 'ttfo', text: 'admin.accounts.table.recent.timeout', cls: [] })
     expect(ttfo({ n: 0, timeouts: 0, p50_ms: null })).toEqual({ dim: 'ttfo', text: '—', cls: ['recent__v--na'] })
+    // A median of 0 ms is a time, not a timeout.
+    const instant = quality({ first_output: { n: 30, timeouts: 0, p50_ms: 0 } })
+    expect(cells(instant)[0]).toEqual({ dim: 'ttfo', text: '0.00s', cls: [] })
+    expect(rowsOf(instant)[0]).toEqual(['admin.accounts.table.recent.firstOutput', '0.00s', json('count', { n: 30 })])
     expect(rowsOf(quality({ first_output: { n: 3, timeouts: 3, p50_ms: null } }))[0])
       .toEqual(['admin.accounts.table.recent.firstOutput', muted('admin.accounts.table.recent.timeout'), tooFew(json('count', { n: 3 }))])
   })
@@ -74,9 +90,11 @@ describe('AccountRecentCell', () => {
     vi.useRealTimers()
     const tip = document.getElementById('sq-tip')!
     expect(tip.querySelector('.sq-tip__title')!.textContent).toBe('admin.accounts.table.tip.recentTitle')
+    // On a narrow screen the samples wrap; the label and value columns keep their width (utils/tip.ts wrapEnd).
+    expect(tip.querySelector('.sq-tip__grid')!.classList.contains('sq-tip__grid--wrap')).toBe(true)
     expect(Array.from(tip.querySelectorAll('.sq-tip__c'), (el) => el.textContent)).toEqual([
       'admin.accounts.table.recent.firstOutput', '7.0s', json('count', { n: 33 }),
-      'admin.accounts.table.recent.slow', '24%', json('slowTimeouts', { n: 8, timeouts: 2 }),
+      'admin.accounts.table.recent.slow', '24%', json('slowTimeouts', { slow: 8, n: 2 }),
       'admin.accounts.table.dims.error', '4.0%', json('failed', { failed: 2, n: 50 }),
       'admin.accounts.table.recent.cacheTurns', '20%', tooFew(json('turns', { n: 3 }))
     ])
@@ -87,7 +105,7 @@ describe('AccountRecentCell', () => {
   it('writes the share over 10 s in whole percent, "<1%" and ">99%" at the ends, the timeouts only when there are some', () => {
     const slow = (slow_10s: Quality['slow_10s']) => rowsOf(quality({ slow_10s }))[1].slice(1)
     expect(slow({ n: 250, slow: 1, timeouts: 0 })).toEqual(['<1%', json('slow', { n: 1 })])
-    expect(slow({ n: 250, slow: 249, timeouts: 3 })).toEqual(['>99%', json('slowTimeouts', { n: 249, timeouts: 3 })])
+    expect(slow({ n: 250, slow: 249, timeouts: 3 })).toEqual(['>99%', json('slowTimeouts', { slow: 249, n: 3 })])
     expect(slow({ n: 20, slow: 0, timeouts: 0 })).toEqual(['0%', json('slow', { n: 0 })])
     expect(slow({ n: 20, slow: 20, timeouts: 0 })).toEqual(['100%', json('slow', { n: 20 })])
     expect(slow({ n: 19, slow: 5, timeouts: 0 })).toEqual([muted('26%'), tooFew(json('slow', { n: 5 }))])
@@ -105,17 +123,35 @@ describe('AccountRecentCell', () => {
     expect(cells(null).map((cell) => [cell.text, cell.cls])).toEqual([['—', ['recent__v--na']], ['—', ['recent__v--na']], ['—', ['recent__v--na']]])
   })
 
-  // The backend says when a reset shortened the window; the browser's clock no longer decides.
-  it('titles the card with the backend\'s recent_since, else the last hour; no card without quality data', () => {
+  // The backend says when a reset shortened the window; the browser's clock no longer decides. Local HH:MM only, even
+  // across midnight: the window is an hour at most.
+  it('titles the card with the backend\'s recent_since in local HH:MM, else the last hour; no card without quality data', () => {
     const title = (q: Quality | null) => {
       const value = tipOf(q)
       return typeof value === 'string' ? value : value.title
     }
-    const since = new Date(Date.now() - 3 * 3_600_000).toISOString()
-    expect(title(quality({ recent_since: since }))).toBe(json('recentSince', { time: formatShortTime(since) }))
-    const resetJustNow = { ...quality(), reset_at: new Date(Date.now() - 60_000).toISOString() } as Quality
+    atLocal(new Date(2026, 10, 20, 0, 5))
+    expect(title(quality({ recent_since: new Date(2026, 10, 19, 23, 55).toISOString() }))).toBe(json('recentSince', { time: '23:55' }))
+    expect(title(quality({ recent_since: new Date(2026, 10, 19, 21, 7).toISOString() }))).toBe(json('recentSince', { time: '21:07' }))
+    const resetJustNow = { ...quality(), reset_at: new Date(2026, 10, 20, 0, 4).toISOString() } as Quality
     expect(title(resetJustNow)).toBe('admin.accounts.table.tip.recentTitle')
     expect(title(null)).toBe('')
+  })
+
+  // The tip opens from the keyboard too: the cell takes focus when it has a tip, and the tip describes it (v-tip).
+  it('takes keyboard focus when it has a tip, shows the card and is described by it; nothing to focus without quality data', () => {
+    const cell = mountCell(quality())
+    expect(cell.attributes('tabindex')).toBe('0')
+    expect(cell.classes()).toContain('sq-focus')
+    ;(cell.element as HTMLElement).focus()
+    const tip = document.getElementById('sq-tip')!
+    expect(tip.hidden).toBe(false)
+    expect(tip.querySelectorAll('.sq-tip__c')).toHaveLength(12)
+    expect(cell.attributes('aria-describedby')).toBe('sq-tip')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(tip.hidden).toBe(true)
+    expect(cell.attributes('aria-describedby')).toBeUndefined()
+    expect(mountCell(null).attributes('tabindex')).toBeUndefined()
   })
 
   it('reads as the contract writes it with the real messages, in Chinese and English', () => {
@@ -124,7 +160,7 @@ describe('AccountRecentCell', () => {
       const i18n = createI18n({ legacy: false, locale, messages: { en, zh } as never })
       const wrapper = mount(AccountRecentCell, { attachTo: document.body, props: { quality: q, card }, global: { plugins: [i18n] } })
       const tip = (wrapper.element as HTMLElement & { __tipText?: () => TipCard }).__tipText!()
-      return { cell: wrapper.findAll('.recent__k, .recent__v').map((el) => el.text()), title: tip.title, rows: tip.rows }
+      return { cell: wrapper.findAll('.recent__k, .recent__v').map((el) => shown(el).text), title: tip.title, rows: tip.rows }
     }
     expect(read('zh', quality())).toEqual({
       cell: ['首字', '7.0s', '报错', '4.0%', '缓存', '70%'],
@@ -136,11 +172,12 @@ describe('AccountRecentCell', () => {
       slow_10s: { n: 1, slow: 1, timeouts: 0 },
       error: { n: 1, short: true, red: false, rate: 0, failed: 0 },
       cache: { ratio: null, turns: 0 },
-      recent_since: '2026-11-20T01:02:00Z'
+      recent_since: new Date(2026, 10, 19, 23, 55).toISOString()
     })
+    atLocal(new Date(2026, 10, 20, 0, 5))
     expect(read('zh', thin)).toEqual({
       cell: ['首字', '超时', '报错', '0%', '缓存', '—'],
-      title: `${formatShortTime('2026-11-20T01:02:00Z')} 起`,
+      title: '23:55 起',
       rows: [
         ['首字中位', muted('超时'), '12 次 · 样本不足'],
         ['超过 10 秒', muted('100%'), '1 次 · 样本不足'],
@@ -149,16 +186,21 @@ describe('AccountRecentCell', () => {
       ]
     })
     expect(read('en', quality()).rows).toEqual([
-      ['TTFT median', '7.0s', '33 samples'], ['Over 10 s', '24%', '8 slow, incl. 2 timed out'], ['Errors', '4.0%', '2/50 requests'], ['Cache · turns', '70%', '29 turns']
+      ['TTFT median', '7.0s', '33 samples'], ['Over 10s', '24%', '8 slow (2 timeouts)'], ['Errors', '4.0%', '2/50 requests'], ['Cache · turns', '70%', '29 turns']
     ])
+    expect(read('en', thin).title).toBe('Since 23:55')
+    expect(read('en', quality({ slow_10s: { n: 33, slow: 8, timeouts: 1 } })).rows[1][2]).toBe('8 slow (1 timeout)')
     expect(read('en', thin).rows.map((row) => row[2])).toEqual(['12 samples · too few', '1 slow · too few', '0/1 request · too few', '0 turns · too few'])
     expect(read('en', thin).cell.slice(0, 2)).toEqual(['First', 'T/O'])
+    expect(mount(AccountRecentCell, { props: { quality: thin }, global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en, zh } as never })] } })
+      .get('[data-dim="ttfo"] .sr-only').text()).toBe('Timeout')
     expect(read('en', thin, true).cell.slice(0, 2)).toEqual(['TTFT', 'Timeout'])
   })
 
-  // N1: the cell is 72px (label 24 + gap 8 + value ≤ 40): "100ms" (~42px) does not fit, so the cell writes a time under
-  // a second in hundredths; the tip card keeps "100ms". The widest values the cell can show stay "0.99s", "59.9s", "100%".
-  it('writes first token compactly in the 72px cell and in full in its card', () => {
+  // N1: the cell is 72px (label 24 + gap 8 + value ≤ 40): "100ms" (~42px) does not fit, so first token is written in
+  // seconds, hundredths under a second, and the tip card and the panel write it the same way. The widest values the
+  // cell can show stay "0.99s", "59.9s", "100%".
+  it('writes first token in seconds, the same in the 72px cell and its card', () => {
     // A variable, not a literal: Vite rewrites new URL('<literal>', import.meta.url) into an asset URL.
     const file = '../AccountRecentCell.vue'
     const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8')
@@ -168,7 +210,7 @@ describe('AccountRecentCell', () => {
     expect(source).toMatch(/\.recent__k \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/)
     const fast = quality({ first_output: { n: 30, timeouts: 0, p50_ms: 100 } })
     expect(cells(fast)[0].text).toBe('0.10s')
-    expect(rowsOf(fast)[0][1]).toBe('100ms')
+    expect(rowsOf(fast)[0][1]).toBe('0.10s')
     const ttfo = (ms: number) => cells(quality({ first_output: { n: 30, timeouts: 0, p50_ms: ms } }))[0].text
     expect([50, 994, 996, 1000, 59_940, 99_960, 123_400].map(ttfo)).toEqual(['0.05s', '0.99s', '1.0s', '1.0s', '59.9s', '100s', '123s'])
   })

@@ -29,7 +29,7 @@ export default {
         dimReasons: { ttfo: 'slow first token', error: 'error rate too high', cache: 'cache too low' },
         recent: {
           firstOutput: 'TTFT median',
-          slow: 'Over 10 s',
+          slow: 'Over 10s',
           cacheTurns: 'Cache · turns',
           timeout: 'Timeout',
           timeoutShort: 'T/O'
@@ -55,7 +55,7 @@ export default {
           trialUntil: 'trial until {time}',
           count: '{n} sample | {n} samples',
           slow: '{n} slow',
-          slowTimeouts: '{n} slow, incl. {timeouts} timed out',
+          slowTimeouts: '{slow} slow ({n} timeout) | {slow} slow ({n} timeouts)',
           failed: '{failed}/{n} request | {failed}/{n} requests',
           turns: '{n} turn | {n} turns',
           tooFew: '{note} · too few',

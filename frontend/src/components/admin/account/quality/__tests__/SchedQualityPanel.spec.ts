@@ -13,7 +13,6 @@ import SchedEvidence from '../SchedEvidence.vue'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
-import { formatShortTime } from '@/components/admin/account/table/accountTime'
 
 const { api, backendSummary } = vi.hoisted(() => ({
   api: { accountDetail: vi.fn(), accountDecisions: vi.fn(), accountPerformance: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() },
@@ -442,7 +441,7 @@ describe('SchedQualityPanel', () => {
     backendSummary.mockClear()
     const quality = {
       account_id: 7, reset_at: null, stop: null, rear: [], exemptions: [], recent_since: null,
-      first_output: { n: 40, timeouts: 3, p50_ms: 12_300 },
+      first_output: { n: 40, timeouts: 3, p50_ms: 980 },
       slow_10s: { n: 38, slow: 21, timeouts: 1 },
       error: { n: 40, short: true, red: false, rate: 0.025, failed: 1 },
       cache: { ratio: 0.4, turns: 2 }
@@ -458,19 +457,18 @@ describe('SchedQualityPanel', () => {
     ])
     const tooFew = (note: string) => `admin.accounts.table.tip.tooFew:${JSON.stringify({ note })}`
     expect(rows).toEqual([
-      ['ttfo', 'admin.accounts.table.recent.firstOutput', '12.3s', 'admin.accounts.table.tip.count:{"n":40}'],
-      ['slow', 'admin.accounts.table.recent.slow', '55%', 'admin.accounts.table.tip.slowTimeouts:{"n":21,"timeouts":1}'],
+      ['ttfo', 'admin.accounts.table.recent.firstOutput', '0.98s', 'admin.accounts.table.tip.count:{"n":40}'],
+      ['slow', 'admin.accounts.table.recent.slow', '55%', 'admin.accounts.table.tip.slowTimeouts:{"slow":21,"n":1}'],
       ['error', 'admin.accounts.table.dims.error', '2.5% (muted)', tooFew('admin.accounts.table.tip.failed:{"failed":1,"n":40}')],
       ['cache', 'admin.accounts.table.recent.cacheTurns', '40% (muted)', tooFew('admin.accounts.table.tip.turns:{"n":2}')]
     ])
     expect(document.querySelector('[data-test="qp-threshold-note"]')).toBeNull()
-    // The note by the heading is the tip card's title: the last hour, or since the backend's recent_since.
+    // The note by the heading is the tip card's title: the last hour, or since the backend's recent_since (local HH:MM).
     const windowNote = () => document.querySelector('[data-qp-section="recent"] [data-qp-recent-window]')!.textContent
     expect(windowNote()).toBe('admin.accounts.table.tip.recentTitle')
-    const since = '2026-11-20T01:02:00Z'
-    row.value = { ...row.value, quality: { ...quality, recent_since: since } }
+    row.value = { ...row.value, quality: { ...quality, recent_since: new Date(2026, 10, 19, 23, 55).toISOString() } }
     await flushPromises()
-    expect(windowNote()).toBe(`admin.accounts.table.tip.recentSince:${JSON.stringify({ time: formatShortTime(since) })}`)
+    expect(windowNote()).toBe('admin.accounts.table.tip.recentSince:{"time":"23:55"}')
   })
 
   it('shows each line\'s identity: unknown in grey with 证据不够, trial with its time left, rear with its stay and end', async () => {

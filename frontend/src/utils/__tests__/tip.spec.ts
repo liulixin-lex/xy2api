@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, ref, withDirectives } from 'vue'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
@@ -43,6 +46,27 @@ describe('v-tip cards', () => {
     expect(texts('.sq-tip__first')).toEqual(['模型', 'Astra', '<b>x</b>'])
     expect(texts('.sq-tip__end')).toEqual(['恢复', '15m 后恢复', ''])
     expect(tip().querySelectorAll('.sq-tip__c.sq-tip__tone--back')).toHaveLength(1)
+  })
+
+  // The recent status's card (wrapEnd) wraps its notes on a narrow screen; every other card keeps the note whole and
+  // lets the label and value give way, as before.
+  it('keeps the note column whole by default, and wraps it in what is left only when the card asks (wrapEnd)', () => {
+    const grid = (card: TipContent) => {
+      content.value = card
+      hover(mount(Host, { attachTo: document.body }).element)
+      const el = tip().querySelector<HTMLElement>('.sq-tip__grid')!
+      // jsdom writes 0 as 0px.
+      return [el.className, el.style.gridTemplateColumns.replaceAll('0px', '0')]
+    }
+    const rows = [['首字中位', '7.0s', '8 次，含超时 2 次 · 样本不足']]
+    expect(grid({ title: 'g', rows })).toEqual(['sq-tip__grid', 'repeat(2, minmax(0, max-content)) minmax(max-content, 1fr)'])
+    expect(grid({ title: 'g', rows, wrapEnd: true })).toEqual(['sq-tip__grid sq-tip__grid--wrap', 'repeat(2, max-content) minmax(0, 1fr)'])
+    // Two columns have no note to wrap.
+    expect(grid({ title: 'g', rows: [['豁免至', '长期']], wrapEnd: true })).toEqual(['sq-tip__grid', 'repeat(2, minmax(0, max-content))'])
+    // A variable, not a literal: Vite rewrites new URL('<literal>', import.meta.url) into an asset URL.
+    const file = '../../styles/schedQuality.css'
+    const css = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8')
+    expect(css).toMatch(/\.sq-tip__grid--wrap \.sq-tip__end \{ white-space: normal; overflow-wrap: anywhere; \}/)
   })
 
   it('has no note column with two columns, and no data area without rows', () => {
