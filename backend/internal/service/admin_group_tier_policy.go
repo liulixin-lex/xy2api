@@ -76,21 +76,31 @@ func applyGroupOpenAITierPolicy(group *Group, input *UpdateGroupInput, creating 
 	if input.OpenAIFastMode != nil && input.ForceOpenAIFast != nil && (*input.OpenAIFastMode == OpenAITierModeForceOn) != *input.ForceOpenAIFast {
 		return infraerrors.BadRequest("OPENAI_TIER_LEGACY_CONFLICT", "force_openai_fast conflicts with openai_fast_mode")
 	}
+	version := group.OpenAITierPolicyVersion
+	if input.OpenAITierPolicyVersion != nil {
+		version = *input.OpenAITierPolicyVersion
+	}
+	rollback := group.OpenAITierPolicyVersion == OpenAITierPolicyExplicit && version == OpenAITierPolicyLegacy
+	if rollback {
+		if input.Revision == nil {
+			return ErrConfigurationRevision
+		}
+		if input.OpenAIFastMode == nil || *input.OpenAIFastMode == OpenAITierModeForceOff ||
+			input.OpenAIUltrafastMode == nil || *input.OpenAIUltrafastMode != OpenAITierModeInherit ||
+			input.FreeOpenAIUltrafast == nil || *input.FreeOpenAIUltrafast {
+			return infraerrors.BadRequest("OPENAI_TIER_LEGACY_ROLLBACK_INVALID", "to restore the legacy policy, explicitly set a compatible Fast mode, Ultrafast inherit, and free_openai_ultrafast=false")
+		}
+	}
 	if !groupSupportsOpenAIFast(group.Platform) {
 		if (input.OpenAIFastMode != nil && *input.OpenAIFastMode != OpenAITierModeInherit) ||
 			(input.OpenAIUltrafastMode != nil && *input.OpenAIUltrafastMode != OpenAITierModeInherit) ||
 			(input.FreeOpenAIUltrafast != nil && *input.FreeOpenAIUltrafast) {
 			return infraerrors.BadRequest("OPENAI_TIER_PLATFORM_UNSUPPORTED", "OpenAI tier policy requires an OpenAI or Composite group")
 		}
+		if rollback {
+			group.OpenAITierPolicyVersion = version
+		}
 		return nil
-	}
-
-	version := group.OpenAITierPolicyVersion
-	if input.OpenAITierPolicyVersion != nil {
-		version = *input.OpenAITierPolicyVersion
-	}
-	if group.OpenAITierPolicyVersion == OpenAITierPolicyExplicit && version == OpenAITierPolicyLegacy {
-		return infraerrors.BadRequest("OPENAI_TIER_POLICY_VERSION_DOWNGRADE", "an explicit OpenAI tier policy cannot be downgraded")
 	}
 
 	fast, ultra, freeUltra := group.OpenAIFastMode, group.OpenAIUltrafastMode, group.FreeOpenAIUltrafast
@@ -114,7 +124,7 @@ func applyGroupOpenAITierPolicy(group *Group, input *UpdateGroupInput, creating 
 
 	modesChanged := (input.OpenAIFastMode != nil && fast != group.OpenAIFastMode) ||
 		ultra != group.OpenAIUltrafastMode || freeUltra != group.FreeOpenAIUltrafast
-	if version == OpenAITierPolicyLegacy && modesChanged {
+	if version == OpenAITierPolicyLegacy && modesChanged && !rollback {
 		return infraerrors.BadRequest("OPENAI_TIER_POLICY_CONFIRMATION_REQUIRED", "set openai_tier_policy_version to 2 to activate the explicit tier policy")
 	}
 	if !creating && (modesChanged || version != group.OpenAITierPolicyVersion) && input.Revision == nil {

@@ -117,3 +117,49 @@ func TestFastMultiplierPrecisionForOpenAITokenCards(t *testing.T) {
 	card.Platform, card.BillingMode = PlatformOpenAI, BillingModePerRequest
 	require.NoError(t, ValidateOpenAITierMultipliers(card))
 }
+
+func TestGroupTierPolicyRollbackRequiresExplicitLegacyConfiguration(t *testing.T) {
+	explicit := Group{
+		ID: 21, Platform: PlatformOpenAI, OpenAITierPolicyVersion: OpenAITierPolicyExplicit,
+		OpenAIFastMode: OpenAITierModeForceOff, OpenAIUltrafastMode: OpenAITierModeForceOn,
+		FreeOpenAIFast: true, FreeOpenAIUltrafast: true,
+	}
+	legacy, revision := OpenAITierPolicyLegacy, "checked"
+	on, off, inherit := OpenAITierModeForceOn, OpenAITierModeForceOff, OpenAITierModeInherit
+	yes, no := true, false
+	valid := UpdateGroupInput{
+		Revision: &revision, OpenAITierPolicyVersion: &legacy, OpenAIFastMode: &on,
+		OpenAIUltrafastMode: &inherit, FreeOpenAIUltrafast: &no,
+	}
+	for _, tc := range []struct {
+		name   string
+		field  func(*UpdateGroupInput)
+		reason string
+	}{
+		{"missing revision", func(in *UpdateGroupInput) { in.Revision = nil }, "CONFIGURATION_REVISION_CONFLICT"},
+		{"missing Fast", func(in *UpdateGroupInput) { in.OpenAIFastMode = nil }, "OPENAI_TIER_LEGACY_ROLLBACK_INVALID"},
+		{"missing Ultrafast", func(in *UpdateGroupInput) { in.OpenAIUltrafastMode = nil }, "OPENAI_TIER_LEGACY_ROLLBACK_INVALID"},
+		{"missing free Ultrafast", func(in *UpdateGroupInput) { in.FreeOpenAIUltrafast = nil }, "OPENAI_TIER_LEGACY_ROLLBACK_INVALID"},
+		{"Fast forced off", func(in *UpdateGroupInput) { in.OpenAIFastMode = &off }, "OPENAI_TIER_LEGACY_ROLLBACK_INVALID"},
+		{"Ultrafast forced on", func(in *UpdateGroupInput) { in.OpenAIUltrafastMode = &on }, "OPENAI_TIER_LEGACY_ROLLBACK_INVALID"},
+		{"free Ultrafast enabled", func(in *UpdateGroupInput) { in.FreeOpenAIUltrafast = &yes }, "OPENAI_TIER_LEGACY_ROLLBACK_INVALID"},
+		{"contradictory old Fast", func(in *UpdateGroupInput) { in.ForceOpenAIFast = &no }, "OPENAI_TIER_LEGACY_CONFLICT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			group, input := explicit, valid
+			tc.field(&input)
+			require.Equal(t, tc.reason, infraerrors.Reason(applyGroupOpenAITierPolicy(&group, &input, false)))
+			require.Equal(t, explicit, group)
+		})
+	}
+
+	group := explicit
+	require.NoError(t, applyGroupOpenAITierPolicy(&group, &valid, false))
+	require.Equal(t, explicit.ID, group.ID)
+	require.Equal(t, OpenAITierPolicyLegacy, group.OpenAITierPolicyVersion)
+	require.Equal(t, OpenAITierModeForceOn, group.OpenAIFastMode)
+	require.Equal(t, OpenAITierModeInherit, group.OpenAIUltrafastMode)
+	require.True(t, group.ForceOpenAIFast)
+	require.True(t, group.FreeOpenAIFast)
+	require.False(t, group.FreeOpenAIUltrafast)
+}

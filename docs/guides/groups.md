@@ -227,7 +227,7 @@ OpenAI 分组和组合分组可以分别设置 Fast（出站 `priority`）和 Ul
 ```
 
 - `revision` 使用 GET 返回的原字符串。过期保存返回 409，重新读取后再编辑。两档同时强开返回 400 `OPENAI_TIER_FORCE_CONFLICT`，整次修改不写入。
-- 更新时字段省略即保留，明确的 `false` 关闭对应赠免。已有组必须明确发送 `openai_tier_policy_version: 2` 才能切换到新版契约，启用后管理 API 禁止降回版本 1。
+- 更新时字段省略即保留，明确的 `false` 关闭对应赠免。已有组必须明确发送 `openai_tier_policy_version: 2` 才能切换到新版契约。需要回到旧契约时，使用当前 revision 同时提交版本 1、可由旧客户端表示的 Fast 模式、跟随 Ultra 和关闭免费 Ultra。
 - 旧端可重复保存同一 `force_openai_fast` 值。对版本 2 的组，旧布尔值的实质改档返回 409，使用新模式字段并带新 revision。请求同时提交新旧 Fast 字段且含义冲突时返回 400。
 - 切到不支持的分组平台时，档位模式恢复为跟随，赠免清除。复制分组会复制策略版本、档位模式、赠免和价卡。
 

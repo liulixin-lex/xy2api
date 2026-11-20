@@ -43,13 +43,21 @@
 python3 tools/openai_tier_smoke.py /tmp/xy2api-tier-smoke
 ```
 
+提供 `--legacy-server /path/to/previous/server` 可继续验证同库回滚。脚本先停止候选进程，再启动旧进程，用同一 API Key 请求并检查 priority 出站及旧版实扣。
+
 迁移后的数据库可用现有只读连接运行检查。输出只有计数，无密钥、用户记录或请求正文。 [只读检查 SQL](../../tools/billing-integrity/openai-tier-preflight.sql)
 
 ```sh
 psql "$AUDIT_DATABASE_URL" -X -f tools/billing-integrity/openai-tier-preflight.sql
 ```
 
-**回滚。** 如果尚未启用版本 2、未设置 Ultra 倍率且没有新版本的在途结算，旧程序可以使用 322 迁移后的扩展表结构，数据库保留新增列。启用过显式策略后，优先回滚到仍懂新版策略的构建；原版本不能执行显式强关、强开 Ultra 或赠免 Ultra，也不能完整恢复新档位证据。必须使用旧程序时，先隔离相关流量并用新程序排空待结算账单，核对这些组和价卡已经恢复为可由旧程序表达的配置。管理 API 禁止将已启用版本 2 的组就地降为版本 1；通过重新绑定到兼容分组，或按经过测试的备份恢复方案回退。启用后产生的账单保留已结算金额与证据。
+### 回滚
+
+如果尚未启用版本 2、未设置 Ultra 倍率且没有新版本的在途结算，旧程序可使用 322 迁移后的扩展表结构，数据库保留新增列。启用过显式策略后，优先回滚到仍懂新版策略的构建。原版本无法执行显式强关、强开 Ultra 或赠免 Ultra，也无法完整恢复新档位证据。必须回到原版本时按顺序处理：
+
+1. 停止受影响的组接收新请求，排空 HTTP、WebSocket、导出和待结算账单。保持新版恢复进程工作直到相关快照都结算。仍由新版管理接口保存现有配置的备份，并用最新 revision 将渠道和分组价卡的显式 `ultrafast_multiplier` 清除为 `null`。
+2. 使用新版管理 API 将各组切换回兼容执行器。先读取组的最新 revision，再在一个 `PUT /api/v1/admin/groups/{id}` 请求中明确提交 `openai_tier_policy_version: 1`、`openai_fast_mode: "inherit"` 或 `"force_on"`、`openai_ultrafast_mode: "inherit"`、`free_openai_ultrafast: false`。按原套餐需要决定是否同时更新 `free_openai_fast`。读取新的组配置并用只读 SQL 检查版本 2、显式倍率和待结算情况，再以旧程序接流量。组 ID、订阅和已经结算的记录继续保留。
+
 
 ## Docker Compose
 
