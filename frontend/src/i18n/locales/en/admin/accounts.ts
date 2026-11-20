@@ -28,6 +28,7 @@ export default {
         dimsShort: { ttfo: 'First', error: 'Err', cache: 'Hit' },
         dimReasons: { ttfo: 'slow first token', error: 'error rate too high', cache: 'cache too low' },
         recent: {
+          openaiOnly: 'Counted for OpenAI accounts only',
           firstOutput: 'TTFT median',
           slow: 'Over 10s',
           cacheTurns: 'Cache · turns',
@@ -83,7 +84,8 @@ export default {
         todayTokens: 'Tokens',
         todayCost: 'Account cost',
         todayUserCost: 'User charge',
-        searchPlaceholder: 'Search name, notes, ID',
+        createShort: 'Add',
+        searchPlaceholder: 'Name, notes or ID',
         filterLabels: { platform: 'Platform', status: 'Status', group: 'Group', quality: 'Quality', type: 'Type', privacy: 'Privacy', iq: 'IQ', category: 'Category' },
         any: 'All',
         quality: { normal: 'Normal', rear: 'Rear', trial: 'Trial', unknown: 'Unknown', exempt: 'Exempt' },

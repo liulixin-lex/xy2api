@@ -142,9 +142,9 @@ const tip = () => {
   border-radius: var(--radius-xs);
   background: var(--color-bg-pill);
   color: var(--color-text-secondary);
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-small);
   font-weight: var(--font-weight-medium);
-  line-height: var(--line-height-micro);
+  line-height: var(--line-height-small);
 }
 .account-status__detail {
   grid-column: 2;
