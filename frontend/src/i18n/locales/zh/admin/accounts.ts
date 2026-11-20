@@ -83,7 +83,7 @@ export default {
         todayUserCost: '用户扣费',
         createShort: '添加',
         searchPlaceholder: '名称、备注或 ID',
-        filterLabels: { platform: '平台', status: '状态', group: '分组', quality: '质量状态', type: '类型', privacy: 'Privacy', iq: 'IQ', category: '分类' },
+        filterLabels: { platform: '平台', status: '状态', group: '分组', quality: '质量状态', type: '类型', privacy: '隐私模式', iq: 'IQ', category: '分类' },
         any: '全部',
         quality: { normal: '正常', rear: '后排', trial: '试用', unknown: '未知', exempt: '豁免' },
         moreFilters: '更多筛选',
