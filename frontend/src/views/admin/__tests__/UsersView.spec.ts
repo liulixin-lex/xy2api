@@ -850,5 +850,40 @@ describe('admin UsersView', () => {
       window.matchMedia = matchMedia
     }
   })
+
+  // Astra review: the page's own usage sort, on while its column is hidden (a phone), still fetches and orders.
+  it('fetches usage and orders by it while the usage sort is on and its column hidden', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    localStorage.setItem('admin-users-usage-sort', JSON.stringify({ key: 'usage', metric: 'today', order: 'desc' }))
+    try {
+      listUsers.mockResolvedValue({
+        items: [1, 2, 3].map((id) => createAdminUser({ id, email: `u${id}@example.test` })),
+        total: 3,
+        page: 1,
+        page_size: 20,
+        pages: 1
+      })
+      getBatchUsersUsage.mockResolvedValue({
+        stats: Object.fromEntries([1, 2, 3].map((id) => [id, { user_id: id, today_actual_cost: id, total_actual_cost: id, by_platform: [] }]))
+      })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      expect(wrapper.get('[data-test="columns"]').text()).not.toContain('usage')
+      expect(getBatchUsersUsage).toHaveBeenCalled()
+      expect(wrapper.get('[data-test="row-order"]').text()).toBe('u3@example.test,u2@example.test,u1@example.test')
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+      localStorage.removeItem('admin-users-usage-sort')
+    }
+  })
 })
 

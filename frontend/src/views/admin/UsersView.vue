@@ -1611,7 +1611,9 @@ const liveUsers = useLiveTable<LiveUser>({
       name: 'usage',
       intervalMs: 30_000,
       fetch: async (ids) => {
-        if (!hasVisibleUsageColumn.value) return []
+        // Needed while a usage column shows, or while the page's own usage sort orders the rows (its column may be
+        // hidden, as on a phone).
+        if (!hasVisibleUsageColumn.value && !usageSort.value) return []
         const userIds = ids.map(Number)
         const { stats } = await adminAPI.dashboard.getBatchUsersUsage(userIds)
         return userIds.map((id) => [id, { usage_stats: userUsageOrDefault(id, stats?.[id]) }] as const)
