@@ -10,8 +10,8 @@
         :loading="loading"
         clickable-rows
         server-side-sort
-        default-sort-key="created_at"
-        default-sort-order="desc"
+        :default-sort-key="headerSortKey"
+        :default-sort-order="sortOrder ?? 'desc'"
         @sort="onSort"
         @rowClick="(row) => openDetail(row.id)"
       >
@@ -149,7 +149,13 @@ const props = defineProps<{
   pageSize: number
   /** 列设置:仅显示这些 key 的列;不传则全显(key 须与 allColumns 一致) */
   visibleColumnKeys?: string[]
+  /** The page's sort as it requests it (API keys): the headers follow it, also while its column is hidden. */
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
 }>()
+
+/** The header key of the page's sort (the API's status_code is the status column); time, newest first, by default. */
+const headerSortKey = computed(() => (props.sortBy === 'status_code' ? 'status' : props.sortBy || 'created_at'))
 
 const emit = defineEmits<{
   (e: 'update:page', v: number): void

@@ -360,7 +360,7 @@ describe('admin UsageView columns per width', () => {
       AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub, UsageTable: true,
       UsageExportProgress: true, UsageCleanupDialog: true, UserBalanceHistoryModal: true, Pagination: true, Select: true,
       DateRangePicker: true, Icon: true, TokenUsageTrend: true, ModelDistributionChart: true, GroupDistributionChart: true,
-      EndpointDistributionChart: true, UserTokenRanking: true, Teleport: true,
+      EndpointDistributionChart: true, UserTokenRanking: true, Teleport: true, OpsErrorLogTable: true,
     } },
   })
   const keys = (w: ReturnType<typeof mountView>) => w.findComponent({ name: 'UsageTable' }).props('columns').map((c: { key: string }) => c.key)
@@ -401,6 +401,37 @@ describe('admin UsageView columns per width', () => {
     await phoneTools.get('[data-testid="usage-column-reset"]').trigger('click')
     expect(keys(w)).not.toContain('group')
     expect(localStorage.getItem('usage-hidden-columns-narrow')).toBeNull()
+    w.unmount()
+  })
+
+  // Review item 7: each tab's headers follow the sort the page requests with; hiding its column names it in the toolbar.
+  it('passes each tab\'s own sort to its table and names it while its column is hidden', async () => {
+    setPhone(false)
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 0 })
+    const w = mountView()
+    await flushPromises()
+    const usage = w.findComponent({ name: 'UsageTable' })
+    usage.vm.$emit('sort', 'model', 'asc')
+    await flushPromises()
+    expect([usage.props('defaultSortKey'), usage.props('defaultSortOrder')]).toEqual(['model', 'asc'])
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ sort_by: 'model', sort_order: 'asc' }), expect.anything())
+    expect(w.find('[data-test="table-sort-hint"]').exists()).toBe(false)
+    ;(w.vm as any).toggleCurrentColumn('model')
+    await flushPromises()
+    expect(w.get('[data-test="info"]').find('[data-test="table-sort-hint"]').exists()).toBe(true)
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ sort_by: 'model', sort_order: 'asc' }), expect.anything())
+
+    ;(w.vm as any).switchTab('errors')
+    await flushPromises()
+    expect(w.find('[data-test="table-sort-hint"]').exists()).toBe(false)
+    const errors = w.findComponent({ name: 'OpsErrorLogTable' })
+    errors.vm.$emit('sort', 'model', 'asc')
+    await flushPromises()
+    expect([errors.props('sortBy'), errors.props('sortOrder')]).toEqual(['model', 'asc'])
+    expect(listErrorLogs).toHaveBeenLastCalledWith(expect.objectContaining({ sort_by: 'model', sort_order: 'asc' }))
+    ;(w.vm as any).toggleCurrentColumn('model')
+    await flushPromises()
+    expect(w.get('[data-test="info"]').find('[data-test="table-sort-hint"]').exists()).toBe(true)
     w.unmount()
   })
 

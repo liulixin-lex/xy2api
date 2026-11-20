@@ -138,7 +138,7 @@
           </template>
           <template #info>
             <span data-testid="usage-count">{{ t('common.table.count', { n: (activeTab === 'errors' ? errorTotal : pagination.total).toLocaleString() }) }}</span>
-            <template v-if="activeTab === 'usage' && hiddenSort">
+            <template v-if="hiddenSort">
               <span class="table-toolbar__sep" aria-hidden="true">·</span>
               <TableSortHint :label="hiddenSort.label" :order="hiddenSort.order" />
             </template>
@@ -189,6 +189,7 @@
           </div>
 
           <div class="flex w-full flex-wrap items-center justify-end gap-3 sm:ml-auto sm:w-auto">
+            <TableSortHint v-if="hiddenSort" :label="hiddenSort.label" :order="hiddenSort.order" />
             <button type="button" @click="refreshData" :disabled="activeTab === 'errors' ? errorLoading : loading" class="btn btn-secondary">
               {{ t('common.refresh') }}
             </button>
@@ -230,8 +231,8 @@
           :show-upstream-endpoint="false"
           :show-cache-hit-rate="appStore.cachedPublicSettings?.user_usage_cache_hit_rate_enabled === true"
           :show-token-speed="appStore.cachedPublicSettings?.user_usage_token_speed_enabled === true"
-          default-sort-key="created_at"
-          default-sort-order="desc"
+          :default-sort-key="sortState.sort_by"
+          :default-sort-order="sortState.sort_order"
           @sort="handleSort"
           @ipGeoBatchFailed="handleIpGeoBatchFailed"
         />
@@ -254,6 +255,8 @@
         :page="errorPage"
         :page-size="errorPageSize"
         :visible-column-keys="errVisibleColumnKeys"
+        :sort-by="errorSortBy"
+        :sort-order="errorSortOrder"
         @sort="onErrorSort"
         @update:page="onErrorPage"
         @update:pageSize="onErrorPageSize"
@@ -743,11 +746,18 @@ const isCurrentColumnVisible = (key: string) => currentColumns.value.isVisible(k
 const toggleCurrentColumn = (key: string) => currentColumns.value.toggle(key)
 const resetCurrentColumns = () => currentColumns.value.reset()
 const currentColumnsAtDefault = computed(() => currentColumns.value.atDefault.value)
-/** The list's sort when its column is hidden (only the model column can be): named in the phone toolbar. */
+/**
+ * The tab's sort while its column is hidden (only the model column can be), named in the toolbar: the request keeps the
+ * sort, so the headers show no arrow (the usage tab's sort, or the errors tab's in API keys, status_code = status).
+ */
 const hiddenSort = computed(() => {
-  const column = allColumns.value.find((col) => col.key === sortState.sort_by)
-  if (!column || visibleColumns.value.some((col) => col.key === column.key)) return null
-  return { label: column.label, order: sortState.sort_order as 'asc' | 'desc' }
+  const errors = activeTab.value === 'errors'
+  const key = errors ? (errorSortBy.value === 'status_code' ? 'status' : errorSortBy.value) : sortState.sort_by
+  const columns: { key: string; label: string }[] = errors ? errAllColumns.value : allColumns.value
+  const column = columns.find((col) => col.key === key)
+  const shown = errors ? errVisibleColumnKeys.value.includes(key) : visibleColumns.value.some((col) => col.key === key)
+  if (!column || shown) return null
+  return { label: column.label, order: (errors ? errorSortOrder.value : sortState.sort_order) as 'asc' | 'desc' }
 })
 
 // ---- Phone toolbar (mobile list plan): the fields in a bottom sheet, the chosen ones as tags ----

@@ -10,8 +10,8 @@
         :loading="loading"
         clickable-rows
         server-side-sort
-        default-sort-key="created_at"
-        default-sort-order="desc"
+        :default-sort-key="headerSortKey"
+        :default-sort-order="sortOrder ?? 'desc'"
         @sort="onSort"
         @rowClick="(row) => emit('openErrorDetail', row.id)"
       >
@@ -302,6 +302,9 @@ interface Props {
   flat?: boolean
   /** DataTable's layout: the usage page's errors tab uses the table at every width (mobile list plan, step 1). */
   layout?: 'cards' | 'table'
+  /** The page's sort as it requests it (API keys): the headers follow it, also while its column is hidden. */
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
 }
 
 interface Emits {
@@ -315,6 +318,9 @@ interface Emits {
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
+
+/** The header key of the page's sort (the API's status_code is the status column); time, newest first, by default. */
+const headerSortKey = computed(() => (props.sortBy === 'status_code' ? 'status' : props.sortBy || 'created_at'))
 
 function onSort(key: string, order: 'asc' | 'desc') {
   emit('sort', mapErrorSortKey(key), order)
