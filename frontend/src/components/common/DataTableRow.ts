@@ -54,7 +54,7 @@ export default defineComponent({
       const cells: VNode[] = []
       if (props.selectable) {
         cells.push(
-          h('td', { class: ['w-11 min-w-11 px-3 py-4 text-center', props.selectClass] }, [
+          h('td', { class: ['dt-select w-11 min-w-11 px-3 py-4 text-center', props.selectClass] }, [
             h('label', { class: 'dt-check', onClick: (event: Event) => event.stopPropagation() }, [h('input', {
               type: 'checkbox',
               class:

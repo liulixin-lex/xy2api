@@ -169,7 +169,7 @@
             v-if="selectable && rowIndex === 0"
             scope="col"
             :rowspan="headerRows.length"
-            :class="['sticky-header-cell w-11 min-w-11 px-3 py-3 text-center', builtinSelectStickyClass]"
+            :class="['dt-select sticky-header-cell w-11 min-w-11 px-3 py-3 text-center', builtinSelectStickyClass]"
           >
             <label class="dt-check">
               <input
@@ -257,7 +257,7 @@
       <tbody class="table-body bg-surface">
         <!-- Loading skeleton: only while there is nothing to show yet -->
         <tr v-if="showSkeleton" v-for="i in 5" :key="i" class="table-row-border">
-          <td v-if="selectable" :class="['w-11 min-w-11 px-3 py-4', builtinSelectStickyClass]">
+          <td v-if="selectable" :class="['dt-select w-11 min-w-11 px-3 py-4', builtinSelectStickyClass]">
             <div class="mx-auto h-4 w-4 animate-pulse rounded bg-surface-pill"></div>
           </td>
           <td v-for="column in columns" :key="column.key" :class="['whitespace-nowrap py-4', getAdaptivePaddingClass()]">
@@ -1393,9 +1393,26 @@ defineExpose({
   box-shadow: inset 1px 0 0 var(--color-line-strong);
 }
 /* ---- The table layout (mobile list plan) ---- */
-/* The built-in check box column is 44px (w-11): the first column freezes right after it. */
+/* The built-in check box column is exactly 44px, its border box whatever padding the page gives cells (TablePageLayout
+   has 20px): the first column freezes right after it, at --select-col-width, the two meeting without overlap. The
+   check box sits in a label as big as the cell. */
 .table-wrapper.dt-builtin-select {
   --select-col-width: 44px;
+}
+.table-wrapper.dt-builtin-select :deep(.dt-select) {
+  box-sizing: border-box;
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  padding: 0;
+}
+.table-wrapper.dt-builtin-select :deep(.dt-check) {
+  display: flex;
+  width: 44px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 /* A sortable header is one button across its cell: the button keeps the header's look, its ::after takes the whole
    cell (the th is sticky, so positioned), and keyboard focus rings the cell. */
@@ -1461,19 +1478,9 @@ defineExpose({
   .dt-layout-table .sticky-header-cell {
     height: 40px;
   }
-  /* The built-in check boxes sit in a label as big as their cell (44 x 48 in the body, 44 x 40 in the header). */
-  .dt-layout-table :deep(.dt-check) {
-    display: inline-flex;
-    width: 44px;
-    height: 48px;
-    margin: -16px -12px;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-  }
-  .dt-layout-table thead :deep(.dt-check) {
-    height: 40px;
-    margin: -12px;
+  /* The built-in check boxes' labels: 48px high in the body, 40px in the header. */
+  .table-wrapper.dt-builtin-select :deep(tbody .dt-check) {
+    min-height: 48px;
   }
 }
 /* Reload progress: a 2px bar on the top edge of the table or card list in the primary colour. It never takes layout

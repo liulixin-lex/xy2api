@@ -271,7 +271,10 @@ describe('touch and phone sizes', () => {
     const coarse = table.slice(table.indexOf('@media (pointer: coarse) {\n  .dt-layout-table'))
     expect(coarse).toMatch(/\.dt-layout-table :deep\(tbody td\) \{\s*height: 48px;/)
     expect(coarse).toMatch(/\.dt-layout-table \.sticky-header-cell \{\s*height: 40px;/)
-    expect(coarse).toMatch(/\.dt-layout-table :deep\(\.dt-check\) \{[^}]*width: 44px;[^}]*height: 48px;/)
+    expect(coarse).toMatch(/\.table-wrapper\.dt-builtin-select :deep\(tbody \.dt-check\) \{\s*min-height: 48px;/)
+    // The built-in check box column is exactly 44px whatever padding the page gives cells (Astra review #7).
+    expect(table).toMatch(/\.table-wrapper\.dt-builtin-select :deep\(\.dt-select\) \{\s*box-sizing: border-box;\s*width: 44px;\s*min-width: 44px;\s*max-width: 44px;\s*padding: 0;/)
+    expect(table).toMatch(/\.table-wrapper\.dt-builtin-select \{\s*--select-col-width: 44px;/)
     const phone = table.slice(table.indexOf('@media (max-width: 767px) {\n  .dt-layout-table'))
     expect(phone).toMatch(/--table-identity-width: clamp\(120px, 36vw, 160px\);/)
     expect(phone).toMatch(/:deep\(\.sticky-col-right\) \{\s*width: 44px;/)
