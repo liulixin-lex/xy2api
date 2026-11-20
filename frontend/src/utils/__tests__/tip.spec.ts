@@ -128,8 +128,9 @@ describe('v-tip cards', () => {
   })
 })
 
-// A scroll hides any tip (spec E). Keyboard focus on an element below the fold would have the browser scroll it in
-// smoothly (html has scroll-behavior: smooth), so v-tip scrolls it in at once itself and shows the tip two frames later.
+// A scroll hides any tip (spec E). Tab to an element below the fold would have the browser scroll it in smoothly (html
+// has scroll-behavior: smooth), so v-tip scrolls it in at once itself and shows the tip two frames later. A focus from
+// anywhere else (a script giving it back with preventScroll) leaves the page where it is.
 describe('v-tip on keyboard focus and scroll', () => {
   const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
   const scroll = () => document.dispatchEvent(new Event('scroll'))
@@ -138,6 +139,12 @@ describe('v-tip on keyboard focus and scroll', () => {
     const el = mount(Host, { attachTo: document.body }).element as HTMLElement
     el.focus()
     return el
+  }
+  /** Tab's own focus: the key goes down, the browser moves the focus, the key comes up. */
+  const tabTo = (el: HTMLElement) => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
+    el.focus()
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Tab' }))
   }
   /** A target at `top` (the viewport is 768px high) whose scrollIntoView brings it to 700 and records smoothness. */
   const offScreen = (top: number) => {
@@ -160,7 +167,7 @@ describe('v-tip on keyboard focus and scroll', () => {
     content.value = 'tip text'
     document.documentElement.style.scrollBehavior = 'smooth'
     const { el, jumps } = offScreen(900)
-    el.focus()
+    tabTo(el)
     expect(jumps).toEqual([[{ block: 'nearest', inline: 'nearest' }, 'auto']])
     expect(document.documentElement.style.scrollBehavior).toBe('smooth')
     // The jump's scroll event comes with the next frame, before the tip shows.
@@ -177,7 +184,7 @@ describe('v-tip on keyboard focus and scroll', () => {
   it('shows the tip however the scroll events come while it waits (滚、滚、静、滚、静、静); none for a target in view', async () => {
     content.value = 'tip text'
     const { el, jumps } = offScreen(-200)
-    el.focus()
+    tabTo(el)
     scroll()
     scroll()
     await frame()
@@ -200,10 +207,71 @@ describe('v-tip on keyboard focus and scroll', () => {
     content.value = 'tip text'
     document.documentElement.dataset.motion = 'reduced'
     const { el, jumps } = offScreen(900)
-    el.focus()
+    tabTo(el)
     await frame()
     await frame()
     expect([jumps.length, shown(), document.documentElement.style.scrollBehavior]).toEqual([1, true, ''])
+  })
+
+  // A closing panel gives the focus back to its opener with preventScroll: the page must stay where the user left it.
+  it('scrolls nothing for a focus that is not Tab\'s, and still shows the tip; Tab state does not outlive its key', async () => {
+    content.value = 'tip text'
+    const { el, jumps } = offScreen(900)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    el.focus({ preventScroll: true })
+    await frame()
+    await frame()
+    expect([jumps.length, shown(), el.getAttribute('aria-describedby')]).toEqual([0, true, 'sq-tip'])
+    el.blur()
+    // A Tab that has come up, or a press after it, no longer counts for a later focus.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Tab' }))
+    el.focus()
+    el.blur()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
+    window.dispatchEvent(new Event('pointerdown'))
+    el.focus()
+    expect(jumps.length).toBe(0)
+  })
+
+  // The Tab mark belongs to the focus that Tab lands on, with a v-tip or not: a script's focus elsewhere while the key
+  // is still down (here onto an off-screen recent cell) is not Tab's and scrolls nothing.
+  it('lets only the element Tab lands on scroll: not one a script focuses while Tab is still down', async () => {
+    content.value = 'tip text'
+    const plain = document.createElement('button')
+    document.body.appendChild(plain)
+    const { el, jumps } = offScreen(1500)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
+    plain.focus()
+    el.focus({ preventScroll: true })
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Tab' }))
+    await frame()
+    await frame()
+    expect([jumps.length, shown()]).toEqual([0, true])
+    el.blur()
+    // Tab straight onto it: the jump, then the tip.
+    tabTo(el)
+    await frame()
+    await frame()
+    expect([jumps.length, shown(), el.getAttribute('aria-describedby')]).toEqual([1, true, 'sq-tip'])
+  })
+
+  // The root's own declaration goes back with its priority: smooth !important stays important.
+  it('puts the root\'s scroll-behavior back with its priority, or removes it when there was none', () => {
+    content.value = 'tip text'
+    const style = document.documentElement.style
+    style.setProperty('scroll-behavior', 'smooth', 'important')
+    const seen: string[] = []
+    const { el } = offScreen(900)
+    el.scrollIntoView = vi.fn(() => {
+      seen.push(`${style.getPropertyValue('scroll-behavior')} ${style.getPropertyPriority('scroll-behavior')}`)
+    })
+    tabTo(el)
+    expect([seen, style.getPropertyValue('scroll-behavior'), style.getPropertyPriority('scroll-behavior')]).toEqual([['auto important'], 'smooth', 'important'])
+    el.blur()
+    style.removeProperty('scroll-behavior')
+    tabTo(el)
+    expect([seen.length, style.cssText]).toEqual([2, ''])
   })
 
   it('cancels a tip waiting to show on Escape (kept from the page with no layer open) and on blur', async () => {

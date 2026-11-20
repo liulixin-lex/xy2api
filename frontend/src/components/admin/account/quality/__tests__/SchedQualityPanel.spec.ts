@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
-import { shallowRef } from 'vue'
+import { defineComponent, h, shallowRef, withDirectives } from 'vue'
 
 import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
 import { basis, errorEvidence, groupModel, legacyBasis, legacyLine, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
@@ -13,6 +13,7 @@ import SchedEvidence from '../SchedEvidence.vue'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
+import { vTip } from '@/utils/tip'
 
 const { api, backendSummary } = vi.hoisted(() => ({
   api: { accountDetail: vi.fn(), accountDecisions: vi.fn(), accountPerformance: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() },
@@ -359,6 +360,31 @@ describe('SchedQualityPanel', () => {
     await flushPromises()
     expect(panel()).toBeNull()
     expect(document.activeElement).toBe(dot)
+  })
+
+  // The dot carries a v-tip: keyboard focus on it may scroll the page only when Tab brought it there, never when the
+  // closing panel gives it back (preventScroll), so the table stays where the user scrolled it.
+  it('gives focus back to an off-screen dot without scrolling the page, and its tip still shows', async () => {
+    mount(Panel, { attachTo: document.body })
+    const dot = mount(defineComponent({
+      setup: () => () => withDirectives(h('button', { type: 'button', 'data-quality-opener': '7:53' }, 'dot'), [[vTip, 'dot tip']])
+    }), { attachTo: document.body }).element as HTMLElement
+    vi.spyOn(dot, 'getBoundingClientRect').mockReturnValue({ top: -400, bottom: -380, left: 100, right: 124, width: 24, height: 20 } as DOMRect)
+    dot.scrollIntoView = vi.fn()
+    await openOn(7, { groupId: 53 })
+    tab('gpt-a').focus()
+    // The tip's two frames, driven here rather than left to jsdom's frame clock.
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] })
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect([panel(), document.activeElement]).toEqual([null, dot])
+    vi.advanceTimersToNextFrame()
+    vi.advanceTimersToNextFrame()
+    expect(dot.scrollIntoView).not.toHaveBeenCalled()
+    expect(dot.getAttribute('aria-describedby')).toBe('sq-tip')
   })
 
   it('lists every model\'s own recheck time in the automatic states', async () => {
