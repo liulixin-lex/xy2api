@@ -154,3 +154,33 @@ describe('OpsErrorLogTable user cell width', () => {
     expect(wrapper.emitted('userClick')).toEqual([[12, email]])
   })
 })
+
+// Browser acceptance (step 1), items 2 and 5: the details column is 44px with an icon header named for screen readers,
+// its button 40×40; in the table layout the button's block gives back the extra height, in cards it does not.
+describe('OpsErrorLogTable details column', () => {
+  const mountWith = (layout: 'table' | 'cards') => mount(OpsErrorLogTable, {
+    props: { rows: [{ id: 9, created_at: '2026-06-05T23:59:50Z' } as OpsErrorLog], total: 1, loading: false, page: 1, pageSize: 20, layout },
+    global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub, Icon: true } },
+  })
+
+  it('is a 44px column whose header is an icon, its button 40px and named with the time', async () => {
+    const wrapper = mountWith('table')
+    const th = wrapper.findAll('th').at(-1)!
+    expect(th.classes()).toEqual(expect.arrayContaining(['w-11', 'min-w-11', '!px-0']))
+    const header = th.get('[data-testid="error-detail-header"]')
+    expect(header.attributes('role')).toBe('img')
+    expect(header.attributes('aria-label')).toBe('admin.ops.errorLog.details')
+    expect(header.text()).toBe('')
+    const button = wrapper.get('[data-testid="error-detail-open"]')
+    expect(button.classes()).toEqual(expect.arrayContaining(['h-10', 'w-10']))
+    expect(button.attributes('aria-label')).toBe('usage.errors.detail.open')
+    expect(button.element.parentElement!.classList.contains('-my-2.5')).toBe(true)
+    await button.trigger('click')
+    expect(wrapper.emitted('openErrorDetail')).toEqual([[9]])
+  })
+
+  it('keeps the cards\' spacing (no negative margin there)', () => {
+    const button = mountWith('cards').get('[data-testid="error-detail-open"]')
+    expect(button.element.parentElement!.classList.contains('-my-2.5')).toBe(false)
+  })
+})

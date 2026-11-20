@@ -440,6 +440,25 @@ describe('admin UsageView columns per width', () => {
     w.unmount()
   })
 
+  // Browser acceptance (step 1), item 6: the errors tab's phone defaults: user, category, status, time and details.
+  it('shows the errors tab\'s phone defaults below 768px', async () => {
+    setPhone(true)
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 0 })
+    const w = mountView()
+    await flushPromises()
+    ;(w.vm as any).switchTab('errors')
+    await flushPromises()
+    expect(w.findComponent({ name: 'OpsErrorLogTable' }).props('visibleColumnKeys')).toEqual(['user', 'category', 'status', 'created_at', 'actions'])
+    w.unmount()
+    setPhone(false)
+    const wide = mountView()
+    await flushPromises()
+    ;(wide.vm as any).switchTab('errors')
+    await flushPromises()
+    expect(wide.findComponent({ name: 'OpsErrorLogTable' }).props('visibleColumnKeys')).toHaveLength(14)
+    wide.unmount()
+  })
+
   // Review item 7: each tab's headers follow the sort the page requests with; hiding its column names it in the toolbar.
   it('passes each tab\'s own sort to its table and names it while its column is hidden', async () => {
     setPhone(false)

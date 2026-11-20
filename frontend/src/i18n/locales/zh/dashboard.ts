@@ -571,6 +571,8 @@ export default {
         upstream: '上游错误', internal: '平台错误', other: '其他', cyber: '安全策略',
       },
       detail: {
+        button: '详情',
+        open: '查看 {time} 的错误详情',
         title: '错误请求详情',
         responseBody: '上游响应内容',
         upstreamStatus: '上游状态码',

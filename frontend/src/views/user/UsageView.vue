@@ -713,6 +713,8 @@ const visibleColumns = computed(() =>
 const ERR_ALWAYS_VISIBLE_WIDE = ['status', 'created_at']
 const errAlwaysVisible = computed(() => (phone.value ? ['key_name', ...ERR_ALWAYS_VISIBLE_WIDE] : ERR_ALWAYS_VISIBLE_WIDE))
 const ERR_DEFAULT_HIDDEN_COLUMNS = ['user_agent']
+// Below 768px: key name (frozen), category, status and time, then the details button; the rest in the settings.
+const ERR_NARROW_DEFAULT_HIDDEN_COLUMNS = ['model', 'endpoint', 'client_ip', 'group', 'type', 'platform', 'message', 'user_agent']
 const ERR_HIDDEN_COLUMNS_KEY = 'user-usage-error-hidden-columns'
 
 // key 须与 UserErrorRequestsTable 的 allColumns 一致
@@ -734,11 +736,11 @@ const errAllColumns = computed<Column[]>(() => [
 const errToggleableColumns = computed(() =>
   errAllColumns.value.filter((col) => !errAlwaysVisible.value.includes(col.key))
 )
-// The errors tab keeps its own key and its columns on phones too (it switches to the table as it is).
+// The errors tab keeps its own two memories; phones start from their own defaults.
 const errorColumns = useColumnVisibility({
   keys: computed(() => errToggleableColumns.value.map((col) => col.key)),
   wide: { storageKey: ERR_HIDDEN_COLUMNS_KEY, defaultHidden: ERR_DEFAULT_HIDDEN_COLUMNS },
-  narrow: { storageKey: `${ERR_HIDDEN_COLUMNS_KEY}-narrow`, defaultHidden: ERR_DEFAULT_HIDDEN_COLUMNS },
+  narrow: { storageKey: `${ERR_HIDDEN_COLUMNS_KEY}-narrow`, defaultHidden: ERR_NARROW_DEFAULT_HIDDEN_COLUMNS },
 })
 const errVisibleColumnKeys = computed(() =>
   errAllColumns.value

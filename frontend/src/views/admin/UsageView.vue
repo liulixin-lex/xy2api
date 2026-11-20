@@ -751,6 +751,8 @@ const visibleColumns = computed(() =>
 // ---- 错误请求 tab 列设置(与用量明细同机制,独立存储) ----
 const ERR_ALWAYS_VISIBLE = ['user', 'status', 'created_at', 'actions']
 const ERR_DEFAULT_HIDDEN_COLUMNS = ['user_agent']
+// Below 768px: user (frozen), category, status and time, then the details button; the rest in the settings.
+const ERR_NARROW_DEFAULT_HIDDEN_COLUMNS = ['api_key', 'account', 'platform', 'model', 'endpoint', 'group', 'type', 'message', 'user_agent', 'client_ip']
 const ERR_HIDDEN_COLUMNS_KEY = 'usage-error-hidden-columns'
 
 // key 集合须与 OpsErrorLogTable 内部 allColumns 一致
@@ -776,11 +778,11 @@ const errToggleableColumns = computed(() =>
   errAllColumns.value.filter(col => !ERR_ALWAYS_VISIBLE.includes(col.key))
 )
 
-// The errors tab keeps its own key and its columns on phones too (it switches to the table as it is).
+// The errors tab keeps its own two memories; phones start from their own defaults.
 const errorColumns = useColumnVisibility({
   keys: computed(() => errToggleableColumns.value.map(col => col.key)),
   wide: { storageKey: ERR_HIDDEN_COLUMNS_KEY, defaultHidden: ERR_DEFAULT_HIDDEN_COLUMNS },
-  narrow: { storageKey: `${ERR_HIDDEN_COLUMNS_KEY}-narrow`, defaultHidden: ERR_DEFAULT_HIDDEN_COLUMNS },
+  narrow: { storageKey: `${ERR_HIDDEN_COLUMNS_KEY}-narrow`, defaultHidden: ERR_NARROW_DEFAULT_HIDDEN_COLUMNS },
 })
 
 const errVisibleColumnKeys = computed(() =>

@@ -56,4 +56,28 @@ describe('UserErrorRequestsTable layout', () => {
     expect(document.querySelector('[data-testid="error-detail-key"] p')?.textContent?.trim()).toBe(name)
     wrapper.unmount()
   })
+
+  // Browser acceptance (step 1), items 5 and 6: a details column frozen on the right, whatever columns are chosen; its
+  // header an icon named for screen readers, its 40px button opening the row's detail.
+  it('adds a 44px details column after the chosen ones, its button opening the detail', async () => {
+    getDetail.mockResolvedValueOnce({ id: 3, created_at: '2026-06-05T23:59:50Z', key_name: 'k', key_deleted: false, status_code: 500, category: 'upstream' })
+    const wrapper = mount(UserErrorRequestsTable, {
+      props: { rows: [{ id: 3, created_at: '2026-06-05T23:59:50Z', key_name: 'k', key_deleted: false } as never], total: 1, loading: false, page: 1, pageSize: 20, visibleColumnKeys: ['key_name', 'status'] },
+      global: { stubs: { Pagination: true, Teleport: true, Icon: true } },
+      attachTo: document.body,
+    })
+    const ths = wrapper.findAll('th')
+    expect(ths).toHaveLength(3)
+    expect(ths[2].classes()).toEqual(expect.arrayContaining(['w-11', 'min-w-11', '!px-0']))
+    const header = ths[2].get('[data-testid="error-detail-header"]')
+    expect(header.attributes('role')).toBe('img')
+    expect(header.attributes('aria-label')).toBe('usage.errors.detail.button')
+    const button = wrapper.get('[data-testid="error-detail-open"]')
+    expect(button.classes()).toEqual(expect.arrayContaining(['h-10', 'w-10']))
+    expect(button.attributes('aria-label')).toBe('usage.errors.detail.open')
+    await button.trigger('click')
+    await flushPromises()
+    expect(getDetail).toHaveBeenLastCalledWith(3)
+    wrapper.unmount()
+  })
 })

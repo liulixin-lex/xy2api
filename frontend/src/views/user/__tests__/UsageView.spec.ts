@@ -308,6 +308,23 @@ describe('user UsageView', () => {
     }
   })
 
+  // Browser acceptance (step 1), item 6: the errors tab's phone defaults: key name, category, status and time.
+  it('shows the errors tab\'s phone defaults below 768px', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => ({
+      matches: q.includes('min-width') ? false : true, media: q, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    localStorage.removeItem('user-usage-error-hidden-columns-narrow')
+    try {
+      const wrapper = mountUsageView({ Teleport: true })
+      await flushPromises()
+      expect((wrapper.vm as any).errVisibleColumnKeys).toEqual(['key_name', 'category', 'status', 'created_at'])
+      wrapper.unmount()
+    } finally {
+      media.mockRestore()
+    }
+  })
+
   it('keeps usage metrics hidden from users until an admin makes them public', async () => {
     const wrapper = mountUsageView()
     await flushPromises()

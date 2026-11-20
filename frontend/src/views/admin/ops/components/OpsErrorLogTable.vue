@@ -156,15 +156,27 @@
           </div>
         </template>
 
+        <!-- The details column is 44px at every width: its header the buttons' icon, named by aria-label. -->
+        <template #header-actions>
+          <span role="img" class="inline-flex w-full justify-center text-gray-400 dark:text-gray-500" :aria-label="t('admin.ops.errorLog.details')" data-testid="error-detail-header">
+            <Icon name="document" size="sm" aria-hidden="true" />
+          </span>
+        </template>
         <template #cell-actions="{ row }">
-          <button
-            type="button"
-            class="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-600 dark:hover:text-primary-400"
-            :title="t('admin.ops.errorLog.details')"
-            @click.stop="emit('openErrorDetail', row.id)"
-          >
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-          </button>
+          <!-- A 40px button; in the table its block's negative margins give back 20px, so the row keeps its height. -->
+          <div class="flex justify-center" :class="{ '-my-2.5': layout === 'table' }">
+            <button
+              type="button"
+              class="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-600 dark:hover:text-primary-400"
+              :title="t('admin.ops.errorLog.details')"
+              :aria-label="t('usage.errors.detail.open', { time: formatDateTime(row.created_at) })"
+              aria-haspopup="dialog"
+              data-testid="error-detail-open"
+              @click.stop="emit('openErrorDetail', row.id)"
+            >
+              <Icon name="document" size="sm" />
+            </button>
+          </div>
         </template>
 
         <template #empty><EmptyState :message="t('admin.ops.errorLog.noErrors')" /></template>
@@ -188,6 +200,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DataTable from '@/components/common/DataTable.vue'
+import Icon from '@/components/icons/Icon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
@@ -217,7 +230,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'created_at', label: t('admin.ops.errorLog.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent') },
   { key: 'client_ip', label: t('admin.ops.errorLog.ip') },
-  { key: 'actions', label: t('admin.ops.errorLog.action') },
+  { key: 'actions', label: t('admin.ops.errorLog.details'), class: 'w-11 min-w-11 !px-0 text-center' },
 ])
 
 // 传入 visibleColumnKeys 时按其过滤(列设置);未传则全量(Ops 弹窗等使用方)

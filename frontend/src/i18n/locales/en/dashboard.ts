@@ -566,6 +566,8 @@ export default {
         upstream: 'Upstream error', internal: 'Platform error', other: 'Other', cyber: 'Cyber policy',
       },
       detail: {
+        button: 'Details',
+        open: 'Details of the error at {time}',
         title: 'Error Request Detail',
         responseBody: 'Response Body',
         upstreamStatus: 'Upstream Status',

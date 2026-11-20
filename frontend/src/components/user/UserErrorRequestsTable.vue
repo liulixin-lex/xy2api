@@ -106,6 +106,30 @@
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
+        <!-- The details column, frozen on the right, 44px at every width: a row is one tap from its detail without
+             scrolling (a click anywhere on the row still opens it). Its header is the buttons' icon, named by aria-label. -->
+        <template #header-actions>
+          <span role="img" class="inline-flex w-full justify-center text-gray-400 dark:text-gray-500" :aria-label="t('usage.errors.detail.button')" data-testid="error-detail-header">
+            <Icon name="document" size="sm" aria-hidden="true" />
+          </span>
+        </template>
+        <template #cell-actions="{ row }">
+          <!-- A 40px button in a block whose negative margins give back 20px: the row keeps its height. -->
+          <div class="-my-2.5 flex justify-center">
+            <button
+              type="button"
+              class="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+              :title="t('usage.errors.detail.button')"
+              :aria-label="t('usage.errors.detail.open', { time: formatDateTime(row.created_at) })"
+              aria-haspopup="dialog"
+              data-testid="error-detail-open"
+              @click.stop="openDetail(row.id)"
+            >
+              <Icon name="document" size="sm" />
+            </button>
+          </div>
+        </template>
+
         <template #empty><EmptyState :message="t('usage.errors.empty')" /></template>
       </DataTable>
     </div>
@@ -129,6 +153,7 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DataTable from '@/components/common/DataTable.vue'
+import Icon from '@/components/icons/Icon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import UserErrorDetailModal from '@/components/user/UserErrorDetailModal.vue'
@@ -198,11 +223,13 @@ const allColumns = computed<Column[]>(() => [
   { key: 'user_agent', label: t('usage.userAgent') },
 ])
 
-const columns = computed<Column[]>(() =>
-  props.visibleColumnKeys
+/** The chosen columns, then the details column (always shown, not in the column settings). */
+const columns = computed<Column[]>(() => [
+  ...(props.visibleColumnKeys
     ? allColumns.value.filter((c) => props.visibleColumnKeys!.includes(c.key))
-    : allColumns.value
-)
+    : allColumns.value),
+  { key: 'actions', label: t('usage.errors.detail.button'), class: 'w-11 min-w-11 !px-0 text-center' },
+])
 
 function requestTypeBadge(row: UserErrorRequest): { label: string; className: string } | null {
   const kind = numericRequestTypeKind(row.request_type, row.stream)
