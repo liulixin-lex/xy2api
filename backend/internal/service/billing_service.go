@@ -1434,7 +1434,7 @@ func (s *BillingService) modelPricingWithChannelSource(model string, channelPric
 	if err != nil {
 		return nil, nil, err
 	}
-	channelPricing = openAITierPriceCard(nil, model, channelPricing)
+	channelPricing = openAITierPriceCard(context.Background(), model, channelPricing)
 	if channelPricing == nil {
 		return pricing, provenance, nil
 	}

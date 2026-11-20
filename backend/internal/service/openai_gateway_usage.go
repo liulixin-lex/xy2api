@@ -190,9 +190,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
-	billingAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
-	if err != nil {
-		return err
+	var billingAccount *Account
+	var err error
+	if prices != nil && prices.credential != nil {
+		billingAccount = prices.credential
+	} else {
+		billingAccount, err = resolveCredentialAccount(ctx, s.accountRepo, account)
+		if err != nil {
+			return err
+		}
 	}
 	if prices == nil {
 		ctx = context.WithValue(ctx, openAITierTextPricingKey{}, openAITierTextRoute(billingAccount, firstNonEmpty(result.UpstreamModel, result.Model)))

@@ -451,7 +451,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// follow-up response.create frames may omit it and then reuse
 		// ingressSessionOriginalModel. We always write a concrete upstream model
 		// before evaluating policy, so whitelist / filter behavior remains stable.
-		turnCtx, tier := openAIWSTierTurnContext(ctx, hooks, turn, trimmed)
+		turnCtx, tier := openAIWSTierTurnContext(ctx, hooks, turn, trimmed, originalModel)
 		policyApplied, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(turnCtx, account, upstreamModel, normalized)
 		if policyErr != nil {
 			if failure, ok := policyErr.(*UpstreamFailoverError); ok {
@@ -1016,6 +1016,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}()
 		postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, turnHasEncryptedContent)
 		responseModelObserver := s.qualityObserver(ctx, account, gjson.GetBytes(payload, "model").String())
+		s.bindOpenAITierRefusal(ctx, responseModelObserver, account, gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "service_tier").String(), APIProtocolResponses)
+		defer responseModelObserver.finishTierRefusal()
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
 		}

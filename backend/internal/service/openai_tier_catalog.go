@@ -89,7 +89,7 @@ func restrictCodexTierCatalog(ctx context.Context, repo AccountRepository, body 
 				return nil, err
 			}
 		}
-		opts := make([]map[string]json.RawMessage, 0, len(advertised)+2)
+		opts := make([]map[string]json.RawMessage, 0, len(advertised))
 		present := map[string]bool{}
 		for _, option := range advertised {
 			var id string

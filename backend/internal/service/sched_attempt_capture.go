@@ -655,12 +655,9 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 		tier := normalizedOpenAIServiceTierValue(gjson.GetBytes(body, "service_tier").String())
 		if tier == OpenAIFastTierPriority || tier == OpenAIFastTierUltrafast || tier == "default" {
 			model := gjson.GetBytes(body, "model").String()
-			protocol := resilience.CapabilityProtocolResponses
-			if strings.HasSuffix(req.URL.Path, "/chat/completions") {
-				protocol = resilience.CapabilityProtocolChat
-			}
-			if strings.HasSuffix(req.URL.Path, "/responses/compact") {
-				protocol = "compact"
+			protocol := openAITierHTTPProtocol(req.URL.Path)
+			if protocol == "" {
+				return resp, err
 			}
 			refusal := s.readUpstreamErrorBody(resp)
 			if resp.Body != nil {

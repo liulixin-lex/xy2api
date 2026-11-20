@@ -72,7 +72,7 @@ func openAITierGroups(ctx context.Context) (origin, serving *Group) {
 	if key != nil && IsGroupContextValid(key.Group) {
 		origin = key.Group
 	}
-	return
+	return freezeOpenAITierGroup(ctx, origin), freezeOpenAITierGroup(ctx, serving)
 }
 
 func openAITierTextRoute(account *Account, model string) bool {
@@ -365,10 +365,10 @@ func OpenAITierCompositeFallback(ctx context.Context, resolver *CompositeRouteRe
 	if err != nil {
 		return ctx, err
 	}
-	if !from.Matched || from.TargetPlatform != PlatformOpenAI || (!openAITierTextModel(from.UpstreamModel) && from.Source != CompositeRouteSourceAccount) {
-		return ctx, nil
+	if !from.Matched || from.TargetPlatform != PlatformOpenAI || from.nonTierRoutesOnly || (!openAITierTextModel(from.UpstreamModel) && from.Source != CompositeRouteSourceAccount) {
+		return context.WithValue(ctx, openAITierOriginRouteKey{}, false), nil
 	}
-	if !serving.Matched || serving.TargetPlatform != PlatformOpenAI {
+	if !serving.Matched || serving.TargetPlatform != PlatformOpenAI || serving.nonTierRoutesOnly {
 		return ctx, openAITierUnavailableError(openAITierRouteConflict)
 	}
 	return context.WithValue(ctx, openAITierOriginRouteKey{}, true), nil
@@ -379,8 +379,8 @@ func openAITierFallbackNeedsGPTRoute(ctx context.Context, account *Account, mode
 	if origin == nil || serving == nil || origin.ID == serving.ID || !openAITierGroupHasHardLimit(origin) {
 		return false
 	}
-	if marked, _ := ctx.Value(openAITierOriginRouteKey{}).(bool); marked {
-		return true
+	if marked, ok := ctx.Value(openAITierOriginRouteKey{}).(bool); ok {
+		return marked
 	}
 	in, _ := ctx.Value(openAITierInputKey{}).(openAITierInput)
 	requested := in.requestedModel
@@ -537,12 +537,17 @@ func writeOpenAITier(body []byte, d *OpenAITierDecision) ([]byte, error) {
 	return sjson.SetBytes(body, "service_tier", d.OutboundTier)
 }
 
-func openAIWSTierTurnContext(ctx context.Context, hooks *OpenAIWSIngressHooks, turn int, raw []byte) (context.Context, *openAITierAttempt) {
+func openAIWSTierTurnContext(ctx context.Context, hooks *OpenAIWSIngressHooks, turn int, raw []byte, requestedModel string) (context.Context, *openAITierAttempt) {
 	if hooks != nil && hooks.PolicyContext != nil {
 		groupCtx := hooks.PolicyContext(ctx, turn)
 		// Preserve the connection-lifetime global-rule snapshot even when BeforeTurn
 		// initialized billing from the outer handshake context first.
 		ctx = withOpenAIFastPolicyContext(groupCtx, openAIFastPolicySettingsFromContext(ctx))
+	}
+	// The turn's public model may be inherited or already channel-mapped on
+	// entry. Selection, settlement and the final quote use its public identity.
+	if requestedModel != "" && gjson.GetBytes(raw, "model").String() != requestedModel {
+		raw, _ = sjson.SetBytes(raw, "model", requestedModel)
 	}
 	return withOpenAITierAttempt(WithOpenAITierInput(ctx, raw, APIProtocolResponses, ""), raw)
 }
@@ -565,16 +570,14 @@ func isOpenAITierRefusal(status int, payload []byte, tier string) bool {
 	if status != 400 && status != 422 {
 		return false
 	}
-	value := gjson.GetBytes(payload, "error")
-	if !value.Exists() {
-		value = gjson.GetBytes(payload, "response.error")
-	}
+	value := schedErrorFields(payload)
 	param := strings.ToLower(value.Get("param").String())
 	message := strings.ToLower(value.Get("message").String())
 	if param != "service_tier" && !strings.Contains(message, "service_tier") {
 		return false
 	}
-	if !strings.Contains(message, tier) && !strings.Contains(message, "unsupported parameter") {
+	unsupportedParameter := param == "service_tier" && value.Get("code").String() == "unsupported_parameter"
+	if tier != "" && !strings.Contains(message, tier) && !strings.Contains(message, "unsupported parameter") && !unsupportedParameter {
 		return false
 	}
 	switch value.Get("code").String() {
@@ -598,4 +601,39 @@ func (s *OpenAIGatewayService) learnOpenAITierRefusal(ctx context.Context, accou
 		}
 	}
 	return true
+}
+
+func openAITierHTTPProtocol(path string) string {
+	switch {
+	case strings.HasSuffix(path, "/responses/compact"):
+		return "compact"
+	case strings.HasSuffix(path, "/responses"):
+		return resilience.CapabilityProtocolResponses
+	case strings.HasSuffix(path, "/chat/completions"):
+		return resilience.CapabilityProtocolChat
+	}
+	return ""
+}
+
+// Bind the outbound tuple before any frames arrive. A bare error can be
+// superseded by a successful completion, so commit evidence at turn exit.
+func (s *OpenAIGatewayService) bindOpenAITierRefusal(ctx context.Context, o *upstreamResponseModelObserver, account *Account, model, tier, protocol string) {
+	if o == nil || s == nil || s.accountRepo == nil || !openAITierTextRoute(account, model) || protocol == "" {
+		return
+	}
+	switch tier {
+	case "default", OpenAIFastTierPriority, OpenAIFastTierUltrafast:
+	default:
+		return
+	}
+	o.learnTierRefusal = func(payload []byte) {
+		s.learnOpenAITierRefusal(ctx, account, model, tier, protocol, UpstreamErrorEventStatus(payload), payload)
+	}
+}
+
+func (o *upstreamResponseModelObserver) finishTierRefusal() {
+	if o != nil && o.learnTierRefusal != nil && len(o.pendingTierRefusal) > 0 {
+		o.learnTierRefusal(o.pendingTierRefusal)
+		o.pendingTierRefusal = nil
+	}
 }

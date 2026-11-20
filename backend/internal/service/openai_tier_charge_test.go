@@ -111,8 +111,8 @@ func TestOpenAITierPriceCardScopeAndPrecedence(t *testing.T) {
 			require.InDelta(t, tc.wantMultiplier, cost.TotalCost, 1e-9)
 		})
 	}
-	require.Nil(t, openAITierPriceCard(nil, "gpt-image-1", &card).UltrafastMultiplier)
-	require.Nil(t, openAITierPriceCard(nil, "deepseek-v4", &card).UltrafastMultiplier)
+	require.Nil(t, openAITierPriceCard(context.Background(), "gpt-image-1", &card).UltrafastMultiplier)
+	require.Nil(t, openAITierPriceCard(context.Background(), "deepseek-v4", &card).UltrafastMultiplier)
 	ctx := WithResolvedTargetPlatform(context.Background(), PlatformAnthropic)
 	require.Nil(t, openAITierPriceCard(ctx, model, &card).UltrafastMultiplier)
 	ctx = context.WithValue(context.Background(), openAITierPricesKey{}, &openAITierPrices{})
@@ -147,4 +147,53 @@ func TestOpenAITierGroupUpdateTakesEffectNextTurn(t *testing.T) {
 	require.Equal(t, "default", updated.OutboundTier)
 	require.False(t, updated.FreeUltrafast)
 	require.Same(t, &newGroup, updated.prices.group)
+}
+
+func TestOpenAITierLongContextAndSearchSurcharge(t *testing.T) {
+	const model = "gpt-6-astra"
+	gid := int64(7)
+	g := &Group{ID: gid, Platform: PlatformOpenAI, Hydrated: true, Status: StatusActive, RateMultiplier: .5,
+		LongContextPricingEnabled: true, OpenAITierPolicyVersion: 2, FreeOpenAIUltrafast: true, SearchPricePer1k: float64Ptr(50),
+		ModelPricing: []ChannelModelPricing{{Platform: PlatformOpenAI, Models: []string{model}, BillingMode: BillingModeToken,
+			InputPrice: float64Ptr(2e-6), CacheReadPrice: float64Ptr(2e-6), OutputPrice: float64Ptr(.01), UltrafastMultiplier: float64Ptr(3)}}}
+	for _, tc := range []struct {
+		name          string
+		calls         int
+		gross, actual float64
+	}{
+		{"token only", 0, 5.4, .90},
+		{"two separately billed searches", 2, 5.5, .95},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &openAIRecordUsageLogRepoStub{inserted: true}
+			svc := newOpenAIRecordUsageServiceForTest(repo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+			svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+			result := &OpenAIForwardResult{RequestID: "long-tier", Model: model, ServiceTier: stringPtr("ultrafast"), SearchCount: tc.calls,
+				Usage: OpenAIUsage{InputTokens: 300_000, CacheReadInputTokens: 100_000, OutputTokens: 40}}
+			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{Result: result, APIKey: &APIKey{ID: 2, GroupID: &gid, Group: g},
+				User: &User{ID: 23}, Account: &Account{ID: 88, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}})
+			require.NoError(t, err)
+			require.InDelta(t, tc.gross, repo.lastLog.TotalCost, 1e-9)
+			require.InDelta(t, tc.actual, repo.lastLog.ActualCost, 1e-9)
+		})
+	}
+}
+
+func TestOpenAITierDelayedShadowSettlementUsesDispatchCredential(t *testing.T) {
+	repo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newOpenAIRecordUsageServiceForTest(repo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	group := explicitTierGroup(OpenAITierModeInherit, OpenAITierModeForceOn)
+	group.RateMultiplier = 1
+	gid := group.ID
+	parent := &Account{ID: 91, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	shadow := &Account{ID: 90, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parent.ID}
+	result := &OpenAIForwardResult{RequestID: "delayed-shadow", Model: "gpt-6-astra",
+		TierDecision: &OpenAITierDecision{OutboundTier: "ultrafast", PolicyVersion: OpenAITierPolicyExplicit,
+			prices: &openAITierPrices{billing: svc.billingService, at: time.Now(), group: group, credential: parent}},
+		Usage: OpenAIUsage{InputTokens: 100}, UpstreamResponseServiceTier: "default"}
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{Result: result, APIKey: &APIKey{ID: 2, GroupID: &gid, Group: group},
+		User: &User{ID: 23}, Account: shadow})
+	require.NoError(t, err)
+	require.Equal(t, "ultrafast", *repo.lastLog.ServiceTier)
+	require.Equal(t, shadow.ID, repo.lastLog.AccountID)
 }

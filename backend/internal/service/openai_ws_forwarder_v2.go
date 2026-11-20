@@ -378,7 +378,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s.cfg != nil && s.cfg.Gateway.OpenAICache.DiagnosticsEnabled {
 		s.captureCacheDiagnostic(c, payloadAsJSONBytes(wirePayload))
 	}
-	learnCapability = &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(wirePayload))}
+	wireBody := payloadAsJSONBytes(wirePayload)
+	s.bindOpenAITierRefusal(ctx, responseModelObserver, account, gjson.GetBytes(wireBody, "model").String(), gjson.GetBytes(wireBody, "service_tier").String(), APIProtocolResponses)
+	defer responseModelObserver.finishTierRefusal()
+	learnCapability = &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, wireBody)}
 	// This boundary belongs to every real application send, even when quality
 	// recording is disabled. A failed first send must precede the next send.
 	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)

@@ -877,7 +877,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstClientMessage = accountScopedFirst
 	}
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
-	firstCtx, firstTier := openAIWSTierTurnContext(ctx, hooks, 1, originalFirstClientMessage)
+	firstCtx, firstTier := openAIWSTierTurnContext(ctx, hooks, 1, originalFirstClientMessage, initialRequestModel)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(firstCtx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
 		return fmt.Errorf("apply openai fast policy on first ws frame: %w", policyErr)
@@ -907,7 +907,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		qualityFirstBody := firstClientMessage
 		qualityTurnBody.Store(&qualityFirstBody)
 	}
-	qualityObserver.Store(s.qualityObserver(ctx, account, gjson.GetBytes(firstClientMessage, "model").String()))
+	storeResponseObserver := func(wire []byte) {
+		model := gjson.GetBytes(wire, "model").String()
+		obs := s.qualityObserver(ctx, account, model)
+		s.bindOpenAITierRefusal(ctx, obs, account, model, gjson.GetBytes(wire, "service_tier").String(), APIProtocolResponses)
+		qualityObserver.Store(obs)
+	}
+	storeResponseObserver(firstClientMessage)
 	firstClientMessage = qualityRotateBody(firstClientMessage, s.qualityRotation(ctx, account), true)
 	firstClientMessage, policyErr = ApplyGroupSystemPrompt(WithGroupSystemPromptModel(ctx, initialRequestModel), firstClientMessage, GroupPromptResponses)
 	if policyErr != nil {
@@ -1051,7 +1057,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
 	}
 	route := &openAIWSTierRoute{conn: upstreamFrameConn}
-	defer route.Close()
+	defer func() { _ = route.Close() }()
 	upstreamFrameConn = route
 	activeRoutingHint := headers.Get(openAICodexRoutingHintHeader)
 	rebindRoute := func(turnCtx context.Context, next []byte, required bool) error {
@@ -1289,7 +1295,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			policyCtx := ctx
 			var turnTier *openAITierAttempt
 			if isResponseCreate {
-				policyCtx, turnTier = openAIWSTierTurnContext(ctx, hooks, turnNo, originalPayload)
+				policyCtx, turnTier = openAIWSTierTurnContext(ctx, hooks, turnNo, originalPayload, requestModelForThisFrame)
 			}
 			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(policyCtx, account, model, payload)
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）
@@ -1317,7 +1323,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				usageMeta.tierDecision.Store(turnTier.decision)
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
-				qualityObserver.Store(s.qualityObserver(ctx, account, gjson.GetBytes(out, "model").String()))
+				storeResponseObserver(out)
 				if qualityRequest(ctx) != nil {
 					qualityNextBody := out
 					qualityTurnBody.Store(&qualityNextBody)
@@ -1468,6 +1474,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					Duration:                      turn.Duration,
 					FirstTokenMs:                  turn.FirstTokenMs,
 				}
+				observer := qualityObserver.Load()
+				observer.finishTierRefusal()
+				observer.attachTierEvidence(turnResult)
 				if d := usageMeta.cacheDiagnostic.Load(); d != nil {
 					copy := *d
 					copy.Model = openAICacheModelLabel(turnUpstreamModel)
@@ -1572,7 +1581,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 				if observer := qualityObserver.Load(); observer != nil {
-					observer.inspectQualityDeclaration(payload, "response.model", "model")
+					observer.ObserveOpenAI(payload, eventType)
 				}
 				if qualityRequest(ctx) != nil && (eventType == "response.completed" || eventType == "response.done") {
 					if body := qualityTurnBody.Load(); body != nil {
@@ -1692,6 +1701,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		FirstTokenMs:                  relayResult.FirstTokenMs,
 	}
 
+	observer := qualityObserver.Load()
+	observer.finishTierRefusal()
+	observer.attachTierEvidence(result)
 	turnCount := int(completedTurns.Load())
 	if relayExit == nil {
 		logOpenAIWSV2Passthrough(

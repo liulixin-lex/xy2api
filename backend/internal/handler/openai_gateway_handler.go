@@ -2431,7 +2431,7 @@ func (k *openAIWSTurnBillingAPIKeys) begin(ctx context.Context, apiKeyService *s
 	if turn > 1 && apiKeyService != nil {
 		turnKey = refreshOpenAIWSTurnBillingAPIKey(ctx, apiKeyService, turnKey)
 	}
-	pricingKey := conn
+	pricingKey := service.ServingPricingKey(ctx, conn)
 	if turn > 1 {
 		if service.BillingAPIKey(ctx, conn) != conn {
 			// Fallback keeps the refreshed origin snapshot for authorization but
@@ -3116,8 +3116,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// ctx）。连接内不重选号，但每个 turn 开始经 BeforeTurn 重新冻结 pricingAt
 	// 并按最新门复核当前账号（准入与计费同源），峰前建连保活不能让后续 turn
 	// 继续按建连时刻的谷价计费。生图意图只影响能力路由与图片计费，不关门。
-	// 建连时刻只用于选号/准入，不作为任何 turn 的计费定价时刻。
-	wsPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
+	// 首帧选号、出站与结算共用该轮的时间和价卡。
+	wsPricingCtx, wsPricingAt := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
 	ctx = wsPricingCtx
 
 	beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, true, h.gatewayService, openAIResponsesRequestScope(imageIntent))
@@ -3320,10 +3320,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		var policyTurn int
 		var policyTurnCtx context.Context
 		var policyTurnAt time.Time
-		turnContext := func(base context.Context, turn int) context.Context {
+		turnContext := func(_ context.Context, turn int) context.Context {
 			if policyTurn != turn {
-				turnKeyCtx := turnBillingAPIKeys.begin(base, h.apiKeyService, turn, apiKey)
-				policyTurnCtx, policyTurnAt = h.gatewayService.WithOpenAITurnPricingContext(turnKeyCtx, apiKey.GroupID)
+				turnKeyCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
+				if turn == 1 {
+					policyTurnCtx, policyTurnAt = turnKeyCtx, wsPricingAt
+				} else {
+					policyTurnCtx, policyTurnAt = h.gatewayService.WithOpenAITurnPricingContext(turnKeyCtx, apiKey.GroupID)
+				}
+				turnPricing.freeze(policyTurnAt)
 				policyTurn = turn
 			}
 			return policyTurnCtx
@@ -3424,9 +3429,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 当前账号，越线即要求客户端重连重选（连接绑定单一上游账号，
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
 				turnCtx := turnContext(ctx, turn)
-				turnAt := policyTurnAt
 				turnAdmissionCtx := service.WithOpenAIQualityTurnExemption(turnCtx, turn == 1 || qualityTurnPinned.Load())
-				turnPricing.freeze(turnAt)
 				if turn == 1 {
 					return nil
 				}
@@ -3669,6 +3672,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if !ensureUserSlotHeld() {
 					return
 				}
+				if policyTurnCtx != nil {
+					ctx, wsPricingAt = policyTurnCtx, policyTurnAt
+				}
 				wsAttemptMessage = qualityReroute.Payload
 				reqModel = qualityReroute.Model
 				channelMappingWS, _ = h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, reqModel)
@@ -3693,6 +3699,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				wsAttemptMessage = nextAttemptMessage
 				if retryCurrentTurn {
+					if policyTurnCtx != nil {
+						ctx, wsPricingAt = policyTurnCtx, policyTurnAt
+					}
 					previousResponseID = ""
 					reqLog.Warn("openai.websocket_current_turn_failover_retry",
 						zap.Int64("account_id", account.ID),

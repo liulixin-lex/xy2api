@@ -63,7 +63,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	ctx, tierAttempt := withOpenAITierAttempt(ctx, body)
 	defer func() {
 		tierAttempt.finish(result)
-		upstreamResponseModelObserverFromContext(c).attachTierEvidence(result)
+		observer := upstreamResponseModelObserverFromContext(c)
+		observer.finishTierRefusal()
+		observer.attachTierEvidence(result)
 	}()
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()
 	if c != nil {

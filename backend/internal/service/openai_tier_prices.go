@@ -11,11 +11,12 @@ import (
 // Price catalogs and channel indexes are published by replacement. Retaining their
 // immutable maps fixes the price of a turn, including a model named only in its response.
 type openAITierPrices struct {
-	at       time.Time
-	billing  *BillingService
-	channels *channelCache
-	group    *Group
-	rate     *float64
+	at         time.Time
+	billing    *BillingService
+	channels   *channelCache
+	credential *Account // dispatch-time snapshot, never serialized into billing evidence
+	group      *Group
+	rate       *float64
 }
 
 // The same public billing alias can route to a GPT text model or a different
@@ -159,6 +160,13 @@ func (s *OpenAIGatewayService) prepareOpenAITierDispatch(ctx context.Context, ac
 		return nil
 	}
 	p := *prices
+	if account.IsShadow() && s.accountRepo == nil {
+		return openAITierUnavailableError(openAITierUnavailable)
+	}
+	p.credential, err = resolveCredentialAccount(ctx, s.accountRepo, account)
+	if err != nil {
+		return openAITierUnavailableError(openAITierUnavailable)
+	}
 	_, p.group = openAITierGroups(ctx)
 	p.rate = s.tierGroupRate(ctx, p.group)
 	decision.prices = &p

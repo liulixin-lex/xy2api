@@ -50,7 +50,7 @@ func settleOpenAITierCharge(result *OpenAIForwardResult, account *Account, key *
 		return nil, nil
 	}
 	d := result.TierDecision
-	eligible := openAITierTextRoute(account, firstNonEmpty(result.UpstreamModel, result.Model))
+	eligible := (d != nil && d.prices != nil) || openAITierTextRoute(account, firstNonEmpty(result.UpstreamModel, result.Model))
 	groupExplicit := key != nil && key.Group != nil && groupSupportsOpenAIFast(key.Group.Platform) && key.Group.OpenAITierPolicyVersion >= OpenAITierPolicyExplicit
 	if d == nil && groupExplicit && eligible {
 		g := key.Group

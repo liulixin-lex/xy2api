@@ -29,10 +29,12 @@ const (
 // separate from the final outbound request tier until usage recording resolves
 // the billable tier for the selected credential protocol.
 type upstreamResponseModelObserver struct {
-	quality  func(string)
-	first    string
-	terminal string
-	conflict bool
+	learnTierRefusal   func([]byte)
+	pendingTierRefusal []byte
+	quality            func(string)
+	first              string
+	terminal           string
+	conflict           bool
 
 	// firstTier holds the first non-terminal tier declaration; it is discarded
 	// when later non-terminal declarations disagree. terminalTier comes from a
@@ -79,11 +81,18 @@ func (o *upstreamResponseModelObserver) ObserveOpenAI(payload []byte, eventType 
 	if model != "" {
 		o.inspectQualityDeclaration(payload, "response.model", "model")
 	}
-	terminal := isUpstreamResponseModelTerminalEvent(eventType)
-	o.Observe(model, terminal)
 	if eventType == "" {
 		eventType = gjson.GetBytes(payload, "type").String()
-		terminal = isUpstreamResponseModelTerminalEvent(eventType)
+	}
+	terminal := isUpstreamResponseModelTerminalEvent(eventType)
+	o.Observe(model, terminal)
+	if o.learnTierRefusal != nil && (eventType == "error" || terminal) {
+		end := ClassifyOpenAIResponsesTerminal(eventType, payload)
+		if end.Valid && end.Success {
+			o.pendingTierRefusal = nil
+		} else if end.QualityFailure() && isOpenAITierRefusal(UpstreamErrorEventStatus(payload), payload, "") {
+			o.pendingTierRefusal = append(o.pendingTierRefusal[:0], payload...)
+		}
 	}
 	if !terminal && strings.TrimSpace(eventType) != "" {
 		return

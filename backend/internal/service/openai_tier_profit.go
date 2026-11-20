@@ -88,9 +88,10 @@ func (s *OpenAIGatewayService) openAITierCandidateProfitReason(ctx context.Conte
 	if d.OutboundTier == OpenAIFastTierPriority && (d.PolicyVersion < OpenAITierPolicyExplicit || (!d.FreeFast && d.Source != "group")) {
 		return clearQuote()
 	}
-	prices, err := s.tierPriceSnapshot(ctx)
-	if d.prices != nil {
-		prices, err = d.prices, nil
+	prices := d.prices
+	var err error
+	if prices == nil {
+		prices, err = s.tierPriceSnapshot(ctx)
 	}
 	quote := openAITierProfitQuote{source: "tier_quote_unavailable"}
 	if prices != nil && err == nil {
@@ -140,8 +141,11 @@ func (s *OpenAIGatewayService) openAITierCandidateProfitReason(ctx context.Conte
 		if d.PolicyVersion < OpenAITierPolicyExplicit && (d.OutboundTier != OpenAIFastTierUltrafast || resolved.channelPricing == nil || resolved.channelPricing.UltrafastMultiplier == nil) {
 			return clearQuote()
 		}
-		credential, err := resolveCredentialAccount(ctx, s.accountRepo, account)
-		if err == nil {
+		credential := prices.credential
+		if credential == nil && (!account.IsShadow() || s.accountRepo != nil) {
+			credential, err = resolveCredentialAccount(ctx, s.accountRepo, account)
+		}
+		if credential != nil && err == nil {
 			sell := CostInput{Ctx: ctx, Model: billingModel, Group: group, GroupID: &group.ID, RateMultiplier: 1, PricingAt: prices.at, Resolver: resolver, Resolved: resolved, ServiceTier: d.OutboundTier, ReasoningEffort: effort, LongContextBillingEnabled: openAILongContextBillingGate(credential)}
 			purchase := openAITierCatalogPurchase(ctx, prices.billing, credential, model, d.OutboundTier, prices.at, accountStatsLongContextPricingEnabled(sell.LongContextBillingEnabled))
 			purchase.ReasoningEffort = effort

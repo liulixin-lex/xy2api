@@ -1,3 +1,5 @@
+//go:build unit
+
 package service
 
 import (
@@ -203,7 +205,7 @@ func TestOpenAITierWSRouteChangesPerTurn(t *testing.T) {
 			})
 			defer server.Close()
 			client := dialPassthroughLifecycleClientWithPayload(t, server, `{"type":"response.create","model":"gpt-6.2-sol","input":"hello"}`)
-			defer client.CloseNow()
+			defer func() { _ = client.CloseNow() }()
 			for i, upstream := range []*stagedPassthroughConn{first, second} {
 				if i == 1 {
 					err := client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","previous_response_id":"resp_tier_0","input":"next"}`))
@@ -221,7 +223,15 @@ func TestOpenAITierWSRouteChangesPerTurn(t *testing.T) {
 				require.Equal(t, tier, gjson.GetBytes(wire, "service_tier").String())
 				require.Equal(t, []string{"model=gpt-6.2-sol;tier=ultrafast", "model=gpt-6.2-sol"}[i], <-dialer.hints)
 				if i == 1 {
-					require.Equal(t, "resp_tier_0", gjson.GetBytes(wire, "previous_response_id").String())
+					if mode == OpenAIWSIngressModeCtxPool {
+						// With store=false the existing pool replays complete input when
+						// a change of request settings starts a fresh upstream chain.
+						require.False(t, gjson.GetBytes(wire, "previous_response_id").Exists())
+						require.Contains(t, gjson.GetBytes(wire, "input").Raw, "hello")
+						require.Contains(t, gjson.GetBytes(wire, "input").Raw, "next")
+					} else {
+						require.Equal(t, "resp_tier_0", gjson.GetBytes(wire, "previous_response_id").String())
+					}
 					require.Empty(t, first.writes)
 				}
 				upstream.Send(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_tier_%d","model":"gpt-6.2-sol","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`, i))
@@ -239,5 +249,58 @@ func TestOpenAITierWSRouteChangesPerTurn(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOpenAITierTerminalRefusalOnlyMarksSentTier(t *testing.T) {
+	ctx := context.Background()
+	account := capabilityTestAccount(1)
+	repo := &capabilityRepo{accounts: map[int64]*Account{1: account}}
+	s := &OpenAIGatewayService{accountRepo: repo}
+	wire := []byte(`{"model":"gpt-6.2-sol","service_tier":"ultrafast","stream":true}`)
+	observe := func(events ...string) {
+		o := beginUpstreamResponseModelObservation(nil)
+		s.bindOpenAITierRefusal(ctx, o, account, "gpt-6.2-sol", "ultrafast", APIProtocolResponses)
+		for _, event := range events {
+			o.ObserveOpenAI([]byte(event), "")
+		}
+		o.finishTierRefusal()
+	}
+	const refusal = `{"type":"response.failed","response":{"status":"failed","id":"resp_1","error":{"code":"model_unsupported","param":"service_tier","message":"service_tier ultrafast is not supported"}}}`
+	const success = `{"type":"response.completed","response":{"status":"completed","id":"resp_1"}}`
+	observe(refusal, success)
+	observe(`{"type":"error","status":429,"error":{"code":"rate_limit_exceeded","param":"service_tier","message":"service_tier ultrafast unsupported"}}`)
+	observed, err := repo.GetByID(ctx, 1)
+	require.NoError(t, err)
+	require.Nil(t, observed.CapabilityMarked("gpt-6.2-sol", "responses", "tier:ultrafast", time.Now()))
+	observe(refusal)
+	learn := s.capabilityFailureLearner(ctx, account, wire, "responses")
+	require.NotNil(t, learn)
+	learn(400, []byte(refusal))
+	observed, err = repo.GetByID(ctx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, observed.CapabilityMarked("gpt-6.2-sol", "responses", "tier:ultrafast", time.Now()))
+	for _, shape := range []string{"tier:priority", "tier:default", "stream", "*"} {
+		require.Nil(t, observed.CapabilityMarked("gpt-6.2-sol", "responses", shape, time.Now()))
+	}
+	require.Nil(t, observed.CapabilityMarked("gpt-6.2-sol", "chat", "tier:ultrafast", time.Now()))
+}
+
+func TestOpenAITierMessagesRejectsInvalidFieldBeforeDispatch(t *testing.T) {
+	for _, rawChat := range []bool{false, true} {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		ctx := context.WithValue(context.Background(), ctxkey.Group, explicitTierGroup("inherit", "force_on"))
+		raw := []byte(`{"model":"gpt-6.2-sol","messages":[{"role":"user","content":"hi"}],"service_tier":false}`)
+
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(raw)).WithContext(ctx)
+		acct := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test"}, Extra: map[string]any{"openai_responses_supported": !rawChat}}
+		up := &httpUpstreamRecorder{}
+		gw := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: up}
+		_, err := gw.ForwardAsAnthropic(ctx, c, acct, raw, "", "")
+		require.Error(t, err)
+		require.Equal(t, 400, rec.Code)
+		require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
+		require.Empty(t, up.lastBody)
 	}
 }

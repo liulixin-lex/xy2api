@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
 
@@ -126,4 +127,59 @@ func TestOpenAITierProcurementHonorsZeroContractAndPreWaiverMirror(t *testing.T)
 		require.NotNil(t, log.AccountStatsCost)
 		require.Equal(t, tt.want, *log.AccountStatsCost)
 	}
+}
+
+func TestOpenAITierProfitGateAndDispatchFreezeTheSameServingRate(t *testing.T) {
+	bs := NewBillingService(nil, nil)
+	svc := &OpenAIGatewayService{billingService: bs}
+	group := profitControlTestGroup(13, 0, 0)
+	group.RateMultiplier = 0.2
+	ctx := context.WithValue(profitControlTestCtx(group), ctxkey.UserID, int64(19))
+	ctx, _ = svc.WithOpenAIRequestPricingContext(ctx, &group.ID)
+	gate, ok := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)
+	require.True(t, ok)
+	require.InDelta(t, 0.2, gate.threshold, 1e-10)
+	// A newly published auth/group snapshot must affect the next turn only.
+	next := *group
+	next.RateMultiplier = 1.3
+	ctx = context.WithValue(ctx, ctxkey.Group, &next)
+	d := &OpenAITierDecision{PolicyVersion: 2, OutboundTier: "default"}
+	require.NoError(t, svc.prepareOpenAITierDispatch(ctx, &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, "gpt-6-astra", d))
+	require.Same(t, group, d.prices.group)
+	require.Equal(t, gate.sell, *d.prices.rate)
+	newTurn, _ := svc.WithOpenAITurnPricingContext(ctx, &group.ID)
+	d = &OpenAITierDecision{PolicyVersion: 2, OutboundTier: "default"}
+	require.NoError(t, svc.prepareOpenAITierDispatch(newTurn, &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, "gpt-6-astra", d))
+	require.Same(t, &next, d.prices.group)
+	require.Equal(t, 1.3, *d.prices.rate)
+}
+
+func TestOpenAITierProfitPreviousResponseUsesEffectiveCeiling(t *testing.T) {
+	const model = "gpt-6-astra"
+	const responseID = "resp-tier-price"
+	group := profitControlTestGroup(23, 0.5, 0)
+	mult := 12.0
+	group.OpenAITierPolicyVersion = OpenAITierPolicyExplicit
+	group.ModelPricing = []ChannelModelPricing{{Models: []string{model}, Platform: PlatformOpenAI, BillingMode: BillingModeToken, UltrafastMultiplier: &mult}}
+	account := profitControlWSAccount(31, 0.8, time.Now())
+	cache := &stubGatewayCache{}
+	store := NewOpenAIWSStateStore(cache)
+	svc := &OpenAIGatewayService{accountRepo: stubOpenAIAccountRepo{accounts: []Account{account}}, cache: cache,
+		cfg: newOpenAIWSV2TestConfig(), billingService: NewBillingService(nil, nil), concurrencyService: NewConcurrencyService(stubConcurrencyCache{}), openaiWSStateStore: store}
+	ctx := WithOpenAITierInput(profitControlTestCtx(group), []byte(`{"model":"gpt-6-astra","service_tier":"ultrafast"}`), APIProtocolResponses, "")
+	require.NoError(t, store.BindResponseAccount(ctx, group.ID, responseID, account.ID, time.Hour))
+	selected, err := svc.SelectAccountByPreviousResponseID(ctx, &group.ID, responseID, model, nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, selected, "retail 12× vs procurement 6× permits a 0.8 account with a 50% margin")
+	if selected.ReleaseFunc != nil {
+		selected.ReleaseFunc()
+	}
+	group.FreeOpenAIUltrafast = true
+	newCtx := WithOpenAITierInput(profitControlTestCtx(group), []byte(`{"model":"gpt-6-astra","service_tier":"ultrafast"}`), APIProtocolResponses, "")
+	selected, err = svc.SelectAccountByPreviousResponseID(newCtx, &group.ID, responseID, model, nil, false)
+	require.NoError(t, err)
+	require.Nil(t, selected)
+	bound, err := store.GetResponseAccount(newCtx, group.ID, responseID)
+	require.NoError(t, err)
+	require.Equal(t, account.ID, bound)
 }

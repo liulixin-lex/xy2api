@@ -24,7 +24,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	ctx, tierAttempt := withOpenAITierAttempt(ctx, body)
 	defer func() {
 		tierAttempt.finish(result)
-		upstreamResponseModelObserverFromContext(c).attachTierEvidence(result)
+		observer := upstreamResponseModelObserverFromContext(c)
+		observer.finishTierRefusal()
+		observer.attachTierEvidence(result)
 	}()
 	var schedCapture *schedAttemptCapture
 	defer func() {

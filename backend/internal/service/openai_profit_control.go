@@ -268,9 +268,10 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 	if billingGroup == nil {
 		billingGroup = group
 	}
+	billingGroup = freezeOpenAITierGroup(ctx, billingGroup)
 	downstream := billingGroup.RateMultiplier
-	if userID, _ := ctx.Value(ctxkey.UserID).(int64); userID > 0 {
-		downstream = s.ResolveUserGroupRateMultiplier(ctx, userID, billingGroup.ID, billingGroup.RateMultiplier)
+	if rate := s.tierGroupRate(ctx, billingGroup); rate != nil {
+		downstream = *rate
 	}
 	downstream *= billingGroup.PeakMultiplierAt(pricingAt)
 

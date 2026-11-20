@@ -1332,18 +1332,24 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 	}
 
 	platforms := make(map[string]struct{})
+	hasTierRoute := false
 	for _, account := range accounts {
 		platform := strings.TrimSpace(account.Platform)
 		if !isConcreteRequestPlatform(platform) || !explicitModelMappingClaims(account, model) || !anthropicCompatModelSupported(&account, model) {
 			continue
 		}
 		platforms[platform] = struct{}{}
+		if platform == PlatformOpenAI && !hasTierRoute {
+			_, mapped := resolveOpenAIForwardMappedModels(&account, model, false)
+			hasTierRoute = openAITierTextModel(mapped) && resolveUpstreamProtocol(&account, APIProtocolResponses, mapped, nil) != APIProtocolAnthropic
+		}
 	}
 
 	ownership := CompositeModelOwnership{}
 	if len(platforms) == 1 {
 		for platform := range platforms {
 			ownership.TargetPlatform = platform
+			ownership.nonTierRoutesOnly = platform == PlatformOpenAI && !hasTierRoute
 		}
 		ownership.Matched = true
 	} else if len(platforms) > 1 {

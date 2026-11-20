@@ -1889,18 +1889,6 @@ func (s *OpenAIGatewayService) evaluateOpenAIFastPolicy(ctx context.Context, acc
 	return evaluateOpenAIFastPolicyWithSettings(settings, openAIFastPolicyUserID(ctx), account, model, tier)
 }
 
-// shouldForceOpenAIFastPriorityForMissingTier reports whether a request that
-// omitted service_tier should be upgraded to priority. This is opt-in through
-// the dedicated "missing" tier matcher; legacy "all" rules continue to apply
-// only to requests that explicitly selected a recognized tier.
-func (s *OpenAIGatewayService) shouldForceOpenAIFastPriorityForMissingTier(ctx context.Context, account *Account, model string) bool {
-	if account == nil || account.Platform != PlatformOpenAI {
-		return false
-	}
-	action, _ := s.evaluateOpenAIFastPolicy(ctx, account, model, OpenAIFastTierMissing)
-	return action == OpenAIFastPolicyActionForcePriority
-}
-
 // evaluateOpenAIFastPolicyWithSettings is the pure-function core extracted so
 // long-lived sessions (e.g. WS) can prefetch settings once and avoid hitting
 // the settingService on every frame. See WSSession entry and

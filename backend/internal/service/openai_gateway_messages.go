@@ -37,7 +37,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	ctx, tierAttempt := withOpenAITierAttempt(ctx, body)
 	defer func() {
 		tierAttempt.finish(forwardResult)
-		upstreamResponseModelObserverFromContext(c).attachTierEvidence(forwardResult)
+		observer := upstreamResponseModelObserverFromContext(c)
+		observer.finishTierRefusal()
+		observer.attachTierEvidence(forwardResult)
 	}()
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
@@ -82,7 +84,17 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
 		return nil, writeOpenCodeUnsupportedModelError(c, true, routingModel)
 	}
-	switch s.resolveUpstreamProtocolFor(ctx, account, APIProtocolAnthropic, routingModel) {
+	protocol := s.resolveUpstreamProtocolFor(ctx, account, APIProtocolAnthropic, routingModel)
+	if account.IsOpenAI() && protocol != APIProtocolAnthropic {
+		mapped := resolveMappedUpstreamModel(account, body, defaultMappedModel)
+		if openAITierTextRoute(account, mapped) {
+			if _, err := ValidateOpenAIServiceTierField(body); err != nil {
+				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+				return nil, err
+			}
+		}
+	}
+	switch protocol {
 	case APIProtocolAnthropic:
 		// 上游为供应商原生 Anthropic 端点：/v1/messages 零转换直通（仅模型名映射 +
 		// 少量 body 清洗），完整保留 thinking / tool_use / cache 语义。
