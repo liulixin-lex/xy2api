@@ -235,8 +235,9 @@
             </span>
             <button
               type="button"
-              class="group relative inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100 hover:bg-blue-100 focus-visible:ring-2 dark:bg-gray-700 [@media(any-pointer:coarse)]:h-10 [@media(any-pointer:coarse)]:w-10"
+              class="group relative inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100 hover:bg-blue-100 focus-visible:ring-2 dark:bg-gray-700 [@media(any-pointer:coarse)]:-my-2.5 [@media(any-pointer:coarse)]:h-10 [@media(any-pointer:coarse)]:w-10"
               :aria-label="t('usage.tierDetails.title')"
+              aria-haspopup="dialog"
               data-testid="usage-tier-details"
               @mouseenter="showTooltip($event, row)"
               @mouseleave="hideTooltip"
@@ -390,7 +391,7 @@
     </div>
   </div>
 
-  <UsageTierDetailsDialog v-if="tierDetailRow" :row="tierDetailRow" :admin="showFallbackOrigin" @close="tierDetailRow = null" />
+  <UsageTierDetailsDialog v-if="tierDetailRow" :row="tierDetailRow" :admin="isAdmin" @close="tierDetailRow = null" />
 
   <!-- Token Tooltip Portal -->
   <Teleport to="body">
@@ -449,6 +450,7 @@
     :show-upstream-endpoint="showUpstreamEndpoint"
     :show-fallback-origin="props.showFallbackOrigin"
     :show-admin-fields="isAdmin"
+    @open-tier-details="tierDetailRow = $event"
     @close="detailRow = null"
     @copy="(kind, value) => (kind === 'request_id' ? copyRequestId(value) : copyUpstreamRequestId(value))"
   />

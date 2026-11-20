@@ -30,6 +30,12 @@
         <template v-else>
           <p v-if="row.long_context_billing_applied" class="mb-2 text-xs text-amber-700 dark:text-amber-300">{{ t('admin.usage.longContextPricingTooltip') }}</p>
           <UsageCostBreakdown :row="row" variant="panel" :show-account-billing="showAccountBilling" />
+          <button
+            type="button"
+            class="mt-2 inline-flex min-h-10 items-center rounded px-2 text-sm font-medium text-primary-600 hover:bg-primary-50 focus-visible:ring-2 dark:text-primary-400 dark:hover:bg-primary-900/30"
+            aria-haspopup="dialog"
+            @click="emit('openTierDetails', row)"
+          >{{ t('usage.tierDetails.title') }}</button>
         </template>
       </section>
 
@@ -181,7 +187,7 @@ const props = defineProps<{
    */
   showAdminFields?: boolean
 }>()
-const emit = defineEmits<{ close: []; copy: [kind: 'request_id' | 'upstream_request_id', value: string] }>()
+const emit = defineEmits<{ close: []; openTierDetails: [row: AdminUsageLog]; copy: [kind: 'request_id' | 'upstream_request_id', value: string] }>()
 
 const { t } = useI18n()
 const uid = useId()

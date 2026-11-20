@@ -15,6 +15,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { UsageLog } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import { formatUsd } from '@/utils/format'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 
 const props = defineProps<{ row: UsageLog; admin?: boolean }>()
@@ -42,15 +43,15 @@ const fields = computed(() => {
   if (d) {
     add('billing_model', d.billing_model)
     add('price_source', sourceLabel(d.price_source))
-    add('price_revision', d.price_revision)
     add('multiplier_source', sourceLabel(d.multiplier_source))
     if (d.tier_multiplier != null) add('tier_multiplier', String(d.tier_multiplier) + '×')
     if (d.free_tier) add('free_tier', tier(d.free_tier))
     for (const key of ['standard_actual_cost', 'outbound_actual_cost', 'actual_cost'] as const) {
-      if (d[key] != null) add(key, '$' + d[key].toFixed(8))
+      if (d[key] != null) add(key, formatUsd(d[key], 8))
     }
     add('cap_reason', sourceLabel(d.cap_reason))
     if (props.admin) {
+      add('price_revision', d.price_revision)
       if (d.response_tier_evidence?.length) add('response_tier_evidence', d.response_tier_evidence.join(', '))
       if (d.response_tier_conflict) add('response_tier_conflict', t('usage.tierDetails.conflict'))
       for (const key of ['source', 'reason', 'policy_version', 'origin_group_id', 'serving_group_id'] as const) {

@@ -173,6 +173,7 @@ describe('UsageTable request detail', () => {
     await cell(wrapper, 'created_at').get('button').trigger('click')
     const detail = wrapper.get('[data-testid="usage-request-detail"]')
     expect(detail.get('[data-testid="usage-detail-unbilled"]').text().replace(/\s+/g, ' ')).toBe('— usage.requestDetail.unbilled · admin.usage.resultFailed')
+    expect(detail.text()).not.toContain('usage.tierDetails.title')
     expect(detail.text()).not.toContain('usage.userBilled')
     expect(detail.text()).not.toContain('admin.usage.inputTokens')
   })
@@ -208,6 +209,29 @@ describe('UsageTable on the shared table layout (B)', () => {
     const user = wrapper.get('[data-testid="usage-detail-user"]')
     expect(user.get('dt').text()).toBe('admin.usage.user')
     expect(user.findAll('dd > span').map((el) => el.text())).toEqual(['alice@example.com', '#12', '· admin.usage.userDeletedBadge'])
+  })
+
+  it('opens tier details from the frozen row action with the cost column hidden, and returns to the row detail', async () => {
+    setPhone(true)
+    const wrapper = mountTable({ ...USER, columns: [{ key: 'api_key', label: 'Key' }] }, [{
+      ...row, service_tier_details: { version: 1, settled_tier: 'ultrafast', price_revision: 'private-card' }
+    }])
+    await cell(wrapper, 'actions').get('button').trigger('click')
+    const trigger = wrapper.get<HTMLButtonElement>('[data-testid="usage-request-detail"] section button')
+    expect(trigger.text()).toBe('usage.tierDetails.title')
+    trigger.element.focus()
+    await trigger.trigger('click')
+    const dialogs = wrapper.findAll('[role="dialog"]')
+    expect(dialogs).toHaveLength(2)
+    const tierDialog = dialogs.find(dialog => dialog.get('h3').text() === 'usage.tierDetails.title')!
+    expect(tierDialog.text()).toContain('usage.serviceTierUltrafast')
+    expect(tierDialog.text()).not.toContain('private-card')
+    // Escape is a separate input after the opening click has finished.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(wrapper.findAll('[role="dialog"]')).toHaveLength(1)
+    expect(document.activeElement).toBe(trigger.element)
   })
 
   it('names no user in the user page\'s detail', async () => {

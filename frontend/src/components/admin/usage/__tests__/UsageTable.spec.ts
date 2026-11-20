@@ -346,10 +346,11 @@ describe('admin UsageTable tooltip', () => {
     const details = {
       version: 1, client_presence: 'null', outbound_tier: 'ultrafast', observed_tier: 'priority', settled_tier: 'priority',
       price_source: 'channel', price_revision: 'card-12', tier_multiplier: 2.5, free_tier: 'ultrafast',
-      standard_actual_cost: 0.2, actual_cost: 0, cap_reason: 'outbound_quote', origin_group_id: 34, serving_group_id: 56,
+      standard_actual_cost: 1234.00000001, actual_cost: 0, cap_reason: 'outbound_quote', origin_group_id: 34, serving_group_id: 56,
+      response_tier_evidence: ['private-observation'],
     }
     const wrapper = mount(UsageTable, {
-      props: { data: [{ ...baseImageRow, service_tier_details: details }], columns: [], showFallbackOrigin: admin },
+      props: { data: [{ ...baseImageRow, service_tier_details: details }], columns: [], viewer: admin ? 'admin' : 'user', showFallbackOrigin: !admin },
       global: { stubs: { DataTable: DataTableStub, Icon: true, Teleport: true,
         BaseDialog: { template: '<div role="dialog"><slot /></div>' } } },
     })
@@ -359,7 +360,9 @@ describe('admin UsageTable tooltip', () => {
     const text = wrapper.get('[role="dialog"]').text()
     expect(text).toContain('usage.tierDetails.explicitNull')
     expect(text).toContain('Ultrafast')
-    expect(text).toContain('card-12')
+    expect(text).toContain('$1,234.00000001')
+    expect(text.includes('card-12')).toBe(admin)
+    expect(text.includes('private-observation')).toBe(admin)
     expect(text).toContain('$0.00000000')
     expect(text.includes('usage.tierDetails.origin_group_id')).toBe(admin)
     expect(text.includes('usage.tierDetails.serving_group_id')).toBe(admin)
