@@ -508,6 +508,9 @@ export default {
     // Users Management
     users: {
       bulkActions: '批量操作',
+      moreActions: '更多操作',
+      bulkSelected: '批量操作 · 已选 {count} 个',
+      bulkNoneSelected: '勾选用户后可批量操作',
       title: '用户管理',
       description: '管理用户账户和权限',
       liveDetail: '余额与并发 10 秒、用量 30 秒',

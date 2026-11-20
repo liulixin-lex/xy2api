@@ -508,6 +508,9 @@ export default {
     // Users
     users: {
       bulkActions: 'Bulk actions',
+      moreActions: 'More actions',
+      bulkSelected: 'Bulk actions · {count} selected',
+      bulkNoneSelected: 'Select users for bulk actions',
       title: 'User Management',
       description: 'Manage users and their permissions',
       liveDetail: 'balance and concurrency every 10 s, usage every 30 s',
