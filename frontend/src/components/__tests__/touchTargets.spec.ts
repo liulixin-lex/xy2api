@@ -165,9 +165,12 @@ describe('touch targets', () => {
       const buttons = source.match(/class="rounded-md px-2\.5 py-1 text-xs font-medium transition-colors[^"]*"/g) ?? []
       expect(buttons.length, name).toBeGreaterThan(0)
       for (const button of buttons) expect(button, name).toContain('[@media(pointer:coarse)]:min-h-10')
-      const groups = source.match(/class="inline-flex rounded-lg [^"]*"/g) ?? []
+      const groups = source.match(/class="(?:ml-auto )?inline-flex rounded-lg [^"]*"/g) ?? []
       expect(groups.length, name).toBeGreaterThan(0)
       for (const group of groups) expect(group, name).toContain('[@media(pointer:coarse)]:gap-2')
+      // Follow-ups review (Astra): at 360 and 320 the English 40px buttons ran off the screen beside the title; the
+      // header wraps, the buttons going under the title when they do not fit beside it.
+      expect(source, name).toContain('<div class="mb-4 flex flex-wrap items-center justify-between gap-3">')
     }
   })
 })
