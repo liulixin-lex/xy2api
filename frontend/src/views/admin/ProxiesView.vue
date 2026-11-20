@@ -300,7 +300,9 @@
 
           <template #cell-actions="{ row }">
             <!-- Touch: 40px buttons 8px apart. Below 1024px the column scrolls with the row (four buttons do not fit a phone's 44px, and on a tablet would take a third of the table). -->
-            <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2">
+            <!-- A phone: the buttons wrap within the screen width less the check box, the name and 24px of cell padding, so
+                 with the table scrolled all the way none sits under the frozen columns. -->
+            <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2 max-md:flex-wrap max-md:max-w-[calc(100vw_-_70px_-_var(--table-identity-width))]">
               <button
                 v-if="canManage"
                 @click="handleTestConnection(row)"

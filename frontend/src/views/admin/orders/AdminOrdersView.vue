@@ -21,7 +21,9 @@
       <!-- Table -->
       <OrderTable :orders="orders" :loading="ordersLoading" show-user show-checkout-mode :scroll-label="t('nav.orderManagement')">
         <template #actions="{ row }">
-          <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2">
+          <!-- A phone: the buttons wrap within the screen width less the ID, the page's 16px margins and 24px of cell padding, so
+               with the table scrolled all the way none sits under the frozen columns. -->
+          <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2 max-md:flex-wrap max-md:max-w-[calc(100vw_-_58px_-_var(--table-identity-width))]">
             <button @click="showOrderDetail(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium [@media(pointer:coarse)]:min-h-10 text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-dark-600">
               <Icon name="eye" size="sm" />
               {{ t('common.view') }}

@@ -1,6 +1,8 @@
 <template>
   <!-- Touch: 40px buttons 8px apart, the block's negative margins keeping the row's height. -->
-  <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2">
+  <!-- A phone: the buttons wrap within the screen width less the name and 24px of cell padding, so
+       with the table scrolled all the way none sits under the frozen columns. -->
+  <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2 max-md:flex-wrap max-md:max-w-[calc(100vw_-_26px_-_var(--table-identity-width))]">
     <button
       @click="$emit('run', row)"
       :disabled="running"
