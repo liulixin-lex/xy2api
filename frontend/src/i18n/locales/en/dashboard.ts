@@ -1095,12 +1095,14 @@ export default {
   // Pagination
   pagination: {
     range: '{from}–{to} of {total}',
+    rangeOpen: '{from}–{to}',
     showing: 'Showing',
     to: 'to',
     of: 'of',
     results: 'results',
     page: 'Page',
     pageOf: 'Page {page} of {total}',
+    pageOnly: 'Page {page}',
     previous: 'Previous',
     next: 'Next',
     perPage: 'Per page',

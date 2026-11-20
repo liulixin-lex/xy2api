@@ -3,7 +3,7 @@
     <!-- Mini Progress Display -->
     <button
       @click="toggleTooltip"
-      class="flex cursor-pointer items-center gap-2 rounded-xl bg-purple-50 px-3 py-1.5 transition-colors hover:bg-purple-100 dark:bg-purple-900/20 dark:hover:bg-purple-900/30"
+      class="sub-mini-btn flex cursor-pointer items-center gap-2 rounded-xl bg-purple-50 px-3 py-1.5 transition-colors hover:bg-purple-100 dark:bg-purple-900/20 dark:hover:bg-purple-900/30"
       :title="t('subscriptionProgress.viewDetails')"
     >
       <Icon name="creditCard" size="sm" class="text-purple-600 dark:text-purple-400" />
@@ -313,6 +313,12 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* Touch (pointer: coarse, mobile list plan): 40px to hit; a mouse keeps the 32px badge. */
+@media (pointer: coarse) {
+  .sub-mini-btn {
+    min-height: 40px;
+  }
+}
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.2s ease;

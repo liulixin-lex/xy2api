@@ -22,8 +22,8 @@
         >
           <Icon name="chevronLeft" size="md" />
         </button>
-        <span class="whitespace-nowrap px-1 text-sm text-gray-700 dark:text-gray-300">
-          {{ t('pagination.pageOf', { page, total: totalPages }) }}
+        <span class="whitespace-nowrap px-1 text-sm text-gray-700 dark:text-gray-300" data-test="pagination-page">
+          {{ totalExact ? t('pagination.pageOf', { page, total: totalPages }) : t('pagination.pageOnly', { page }) }}
         </span>
         <button
           type="button"
@@ -37,12 +37,16 @@
       </div>
     </div>
 
-    <div class="hidden lg:flex lg:flex-1 lg:items-center lg:justify-between">
+    <div class="pager-wide hidden lg:flex lg:flex-1 lg:items-center lg:justify-between">
       <!-- Desktop pagination info -->
       <div class="flex items-center space-x-3">
-        <!-- "第 1–20 条，共 74 条 · 每页 [20]" (mobile list plan, copy) -->
+        <!-- "第 1–20 条，共 74 条 · 每页 [20]" (mobile list plan, copy); "第 1–20 条" when the total is not exact -->
         <p class="text-sm tabular-nums text-gray-700 dark:text-gray-300" data-test="pagination-range">
-          {{ t('pagination.range', { from: formatCount(fromItem), to: formatCount(toItem), total: formatCount(total) }) }}
+          {{
+            totalExact
+              ? t('pagination.range', { from: formatCount(fromItem), to: formatCount(toItem), total: formatCount(total) })
+              : t('pagination.rangeOpen', { from: formatCount(fromItem), to: formatCount(toItem) })
+          }}
         </p>
 
         <!-- Page size selector -->
@@ -66,11 +70,11 @@
             type="number"
             min="1"
             :max="totalPages"
-            class="input w-20 text-sm"
+            class="pager-jump input w-20 text-sm"
             :placeholder="t('pagination.jumpPlaceholder')"
             @keyup.enter="submitJump"
           />
-          <button type="button" class="btn btn-ghost btn-sm" @click="submitJump">
+          <button type="button" class="pager-jump btn btn-ghost btn-sm" @click="submitJump">
             {{ t('pagination.jumpAction') }}
           </button>
         </div>
@@ -78,14 +82,14 @@
 
       <!-- Desktop pagination buttons -->
       <nav
-        class="relative z-0 inline-flex -space-x-px rounded-md shadow-sm"
+        class="pager-nav relative z-0 inline-flex -space-x-px rounded-md shadow-sm"
         aria-label="Pagination"
       >
         <!-- Previous button -->
         <button
           @click="goToPage(page - 1)"
           :disabled="page === 1"
-          class="relative inline-flex items-center rounded-l-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
+          class="pager-btn relative inline-flex items-center rounded-l-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
           :aria-label="t('pagination.previous')"
         >
           <Icon name="chevronLeft" size="md" />
@@ -98,7 +102,7 @@
           @click="typeof pageNum === 'number' && goToPage(pageNum)"
           :disabled="typeof pageNum !== 'number'"
           :class="[
-            'relative inline-flex items-center border px-4 py-2 text-sm font-medium',
+            'pager-btn relative inline-flex items-center border px-4 py-2 text-sm font-medium',
             pageNum === page
               ? 'z-10 border-primary-500 bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
               : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600',
@@ -116,7 +120,7 @@
         <button
           @click="goToPage(page + 1)"
           :disabled="page === totalPages"
-          class="relative inline-flex items-center rounded-r-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
+          class="pager-btn relative inline-flex items-center rounded-r-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
           :aria-label="t('pagination.next')"
         >
           <Icon name="chevronRight" size="md" />
@@ -146,6 +150,12 @@ interface Props {
   pageSizeOptions?: number[]
   showPageSizeSelector?: boolean
   showJump?: boolean
+  /**
+   * Whether `total` is the exact count (default). False for a list that counts only as far as it needs: its total is
+   * "the end of this page, plus one" when there is a next page. Then the range reads "第 1–20 条" / "1–20" and the
+   * narrow line "第 2 页" / "Page 2", with no total; the page buttons and "next" still go by `total`.
+   */
+  totalExact?: boolean
 }
 
 interface Emits {
@@ -156,7 +166,8 @@ interface Emits {
 const props = withDefaults(defineProps<Props>(), {
   pageSizeOptions: () => getConfiguredTablePageSizeOptions(),
   showPageSizeSelector: true,
-  showJump: false
+  showJump: false,
+  totalExact: true
 })
 
 const emit = defineEmits<Emits>()
@@ -255,5 +266,38 @@ const submitJump = () => {
 <style scoped>
 .page-size-select :deep(.select-trigger) {
   @apply px-3 py-1.5 text-sm;
+}
+/* Touch (pointer: coarse, mobile list plan): every control 40px to hit and 8px apart, so the page buttons part from
+   their joined group; the jump field takes 16px type (no zoom on focus). Where a long run of pages does not fit beside
+   the range (an iPad at 1024px), the buttons take a line of their own, on the right. A mouse keeps the joined 38px
+   buttons on one line. */
+@media (pointer: coarse) {
+  .pager-wide {
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+  .pager-wide > .pager-nav {
+    margin-left: auto;
+  }
+  .page-size-select :deep(.select-trigger) {
+    min-height: 40px;
+  }
+  .pager-nav {
+    gap: 8px;
+    box-shadow: none;
+  }
+  .pager-nav > .pager-btn:not([hidden]) {
+    min-width: 40px;
+    min-height: 40px;
+    justify-content: center;
+    margin: 0;
+    border-radius: var(--radius-md);
+  }
+  .pager-jump {
+    min-height: 40px;
+  }
+  input.pager-jump {
+    font-size: 16px;
+  }
 }
 </style>

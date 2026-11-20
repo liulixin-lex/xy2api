@@ -1,18 +1,10 @@
 <template>
-  <!-- filterSheet below 768px: the phone toolbar (mobile list plan, item 15). -->
+  <!-- filterSheet below 768px (`sheetBelow` 'tablet') or 1024px ('desktop'): the phone toolbar (mobile list plan,
+       item 15). Without #search and #create it has no first row: "Filters" leads the info row's actions. -->
   <div v-if="phoneSheet" class="table-toolbar table-toolbar--compact table-toolbar--phone" data-test="table-toolbar-phone">
-    <div class="table-toolbar__row">
+    <div v-if="$slots.search || $slots.create" class="table-toolbar__row" data-test="toolbar-first-row">
       <div v-if="$slots.search" class="table-toolbar__search"><slot name="search" /></div>
-      <button
-        v-if="$slots.sheet"
-        type="button"
-        class="table-toolbar__btn table-toolbar__btn--secondary table-toolbar__sheet-btn"
-        aria-haspopup="dialog"
-        :aria-expanded="sheetOpen ? 'true' : 'false'"
-        :aria-label="filterCount ? t('common.table.filtersActive', { n: filterCount }) : t('common.table.filters')"
-        data-test="toolbar-filter-button"
-        @click="sheetOpen = true"
-      >
+      <button v-if="$slots.sheet" v-bind="sheetButton" @click="sheetOpen = true">
         <Icon name="filter" size="sm" />
         <span aria-hidden="true">{{ t('common.table.filters') }}</span>
         <span v-if="filterCount" class="table-toolbar__count" aria-hidden="true" data-test="toolbar-filter-count">{{ filterCount }}</span>
@@ -26,7 +18,14 @@
         <span v-if="filled($slots.info) && $slots.status" class="table-toolbar__sep" aria-hidden="true">·</span>
         <slot name="status" />
       </div>
-      <div class="table-toolbar__actions"><slot name="actions" /></div>
+      <div class="table-toolbar__actions">
+        <button v-if="!($slots.search || $slots.create) && $slots.sheet" v-bind="sheetButton" @click="sheetOpen = true">
+          <Icon name="filter" size="sm" />
+          <span aria-hidden="true">{{ t('common.table.filters') }}</span>
+          <span v-if="filterCount" class="table-toolbar__count" aria-hidden="true" data-test="toolbar-filter-count">{{ filterCount }}</span>
+        </button>
+        <slot name="actions" />
+      </div>
     </div>
     <BottomSheet :show="sheetOpen" :title="t('common.table.filters')" test-id="filter-sheet" @close="sheetOpen = false">
       <slot name="sheet" />
@@ -94,19 +93,34 @@ import { useTableViewport } from '@/composables/useTableViewport'
  * info row with #info ("N items"), #status and #actions (refresh, columns, the page's own "⋯"). "Filters" opens a
  * bottom sheet holding #sheet, the page's fields, which apply at once; its footer clears them (`clear-filters`) and
  * closes it. #create also sits at the end of the actions from 768px.
+ * - `sheetBelow="desktop"` keeps the phone toolbar up to 1024px (a page whose filters are a long form, as usage
+ *   records), so 768-1023px has no row layout; the row layout then starts at 1024px. Default 'tablet' (768px).
+ * - Without #search and #create the phone toolbar has no first row: "Filters n" leads the info row's actions, 40px
+ *   high like them, with the same count and name.
  */
 const props = defineProps<{
   compact?: boolean
   filterSheet?: boolean
   /** The number of chosen filters, on the phone's "Filters" button. */
   filterCount?: number
+  /** With `filterSheet`: below which width the phone toolbar is used, 768px ('tablet', default) or 1024px ('desktop'). */
+  sheetBelow?: 'tablet' | 'desktop'
 }>()
 const emit = defineEmits<{ 'clear-filters': [] }>()
 const { t } = useI18n()
-const { phone } = useTableViewport()
-const phoneSheet = computed(() => !!props.filterSheet && phone.value)
+const { phone, desktop } = useTableViewport()
+const phoneSheet = computed(() => !!props.filterSheet && (props.sheetBelow === 'desktop' ? !desktop.value : phone.value))
 const sheetOpen = ref(false)
-// The sheet belongs to the phone toolbar: crossing 768px closes it.
+/** The phone's "Filters" button, on the first row beside the search and #create, or leading the info row's actions. */
+const sheetButton = computed(() => ({
+  type: 'button' as const,
+  class: 'table-toolbar__btn table-toolbar__btn--secondary table-toolbar__sheet-btn',
+  'aria-haspopup': 'dialog' as const,
+  'aria-expanded': sheetOpen.value ? ('true' as const) : ('false' as const),
+  'aria-label': props.filterCount ? t('common.table.filtersActive', { n: props.filterCount }) : t('common.table.filters'),
+  'data-test': 'toolbar-filter-button'
+}))
+// The sheet belongs to the phone toolbar: leaving it (crossing 768px, or 1024px with 'desktop') closes it.
 watch(phoneSheet, (on) => { if (!on) sheetOpen.value = false })
 defineExpose({ openSheet: () => { sheetOpen.value = true }, closeSheet: () => { sheetOpen.value = false } })
 

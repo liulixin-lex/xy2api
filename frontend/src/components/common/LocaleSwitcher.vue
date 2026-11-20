@@ -3,7 +3,7 @@
     <button
       @click="toggleDropdown"
       :disabled="switching"
-      class="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+      class="locale-btn flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
       :title="currentLocale?.name"
     >
       <span class="text-base">{{ currentLocale?.flag }}</span>
@@ -90,6 +90,15 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* Touch (pointer: coarse, mobile list plan): 40px to hit; a mouse keeps the 36px button. */
+@media (pointer: coarse) {
+  .locale-btn {
+    min-width: 40px;
+    min-height: 40px;
+    justify-content: center;
+  }
+}
+
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.15s ease;
