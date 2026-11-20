@@ -1,13 +1,20 @@
 /**
- * Recent status values (first token, errors, cache) from an account's quality summary, formatted the same way in the
- * accounts table and the quality panel: the whole account's values over the last hour. First token is the first
- * useful output (what the first-output line judges; the usage records' first token is the first event), cache the
- * hit ratio of continuation turns (what the cache line judges), each with its other view beside it. Nothing here
- * compares a value with a threshold; the backend judges each group and model on its own (7k).
+ * Recent status from an account's quality summary, as the backend counts it: the whole account over the last hour
+ * (from a reset within it), every model and group together, by upstream attempt. The accounts table shows three lines
+ * (first token, errors, cache) and a tip card of four rows; the quality panel's recent section shows the same four.
+ * Nothing here compares a value with a threshold or colours it; the group dots judge each group and model (7k).
  */
-import type { BackendAccountSummary, BackendDim, BackendPolicy } from '@/api/admin/schedQualityTypes'
+import type { BackendAccountSummary, BackendDim } from '@/api/admin/schedQualityTypes'
+import { formatShortTime } from './accountTime'
 
+export type RecentQuality = Pick<BackendAccountSummary, 'first_output' | 'slow_10s' | 'error' | 'cache' | 'recent_since'>
+type Translate = (key: string, params?: Record<string, unknown>, plural?: number) => string
+
+/** The cell's three lines. */
 export const RECENT_DIMS: BackendDim[] = ['ttfo', 'error', 'cache']
+
+/** First token, the share over 10 s and cache read muted under this many samples; errors take the backend's `short`. */
+export const RECENT_MIN_SAMPLES = 20
 
 /** 50ms under a second (0.1s would hide 50 against 100); 3.2s; whole seconds from 100s up. */
 export function formatRecentSeconds(ms: number): string {
@@ -34,65 +41,90 @@ export function formatRecentPercent(ratio: number): string {
   return pct < 10 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`
 }
 
-/** The cache line judges at least this many continuation turns (5.4); fewer read as too few samples. */
-export const CACHE_MIN_TURNS = 20
-
-export interface RecentValue {
-  /** null without a value. */
-  text: string | null
-  /** Too few samples (or none). */
-  short: boolean
-  /** Samples behind the value: requests with a first output, requests, continuation turns. */
-  n: number
+/** Whole percent of `part` in `n`; "<1%" and ">99%" where rounding would read none or all. null for n = 0. */
+export function formatSharePercent(part: number, n: number): string | null {
+  if (n <= 0) return null
+  const pct = Math.round((part / n) * 100)
+  if (part > 0 && pct === 0) return '<1%'
+  if (part < n && pct === 100) return '>99%'
+  return `${pct}%`
 }
 
-const seconds = (ms: number | null) => (ms == null ? null : formatRecentSeconds(ms))
-const percent = (ratio: number | null) => (ratio == null ? null : `${Math.round(ratio * 100)}%`)
+/** The median first token in ms; 'timeout' when the median falls on a timeout; null without samples. */
+export function firstOutputMedian({ first_output: first }: Pick<RecentQuality, 'first_output'>): number | 'timeout' | null {
+  if (first.n <= 0) return null
+  return first.p50_ms ?? 'timeout'
+}
+
+export type RecentKey = BackendDim | 'slow'
+
+export interface RecentRow {
+  key: RecentKey
+  label: string
+  /** "—" without data. */
+  text: string
+  /** No data or too few samples: the value reads muted. */
+  muted: boolean
+  /** The samples behind the value ("33 次"), ending in "样本不足" when too few; empty without a summary. */
+  note: string
+}
+
+const ROW_KEYS: RecentKey[] = ['ttfo', 'slow', 'error', 'cache']
 
 /**
- * One line of the summary as the quality lines judge it: first token is the first useful output, cache the
- * continuation turns.
+ * The window, for the tip card's title and the panel's recent heading: "近 1 小时", or "HH:MM 起" when a reset within
+ * the hour shortened it (the backend's recent_since).
  */
-export function recentValue(quality: Pick<BackendAccountSummary, 'ttfo' | 'error' | 'cache'>, dim: BackendDim): RecentValue {
-  if (dim === 'ttfo') {
-    const text = seconds(quality.ttfo.first_output_p50_ms)
-    return { text, short: text === null, n: quality.ttfo.n }
-  }
-  if (dim === 'error') {
-    return { text: quality.error.rate == null ? null : formatRecentPercent(quality.error.rate), short: quality.error.short, n: quality.error.n }
-  }
-  const text = percent(quality.cache.ratio)
-  return { text, short: text === null || quality.cache.turns < CACHE_MIN_TURNS, n: quality.cache.turns }
+export function recentTitle(quality: Pick<RecentQuality, 'recent_since'> | null, t: Translate): string {
+  return quality?.recent_since
+    ? t('admin.accounts.table.tip.recentSince', { time: formatShortTime(quality.recent_since) })
+    : t('admin.accounts.table.tip.recentTitle')
 }
 
-/** The other views of first token and cache: the first event and its gap to the first useful output, every successful request. */
-export function recentExtras(quality: Pick<BackendAccountSummary, 'ttfo' | 'cache'>) {
-  return {
-    firstEvent: seconds(quality.ttfo.first_event_p50_ms),
-    gap: seconds(quality.ttfo.gap_p50_ms),
-    cacheAll: percent(quality.cache.all_ratio),
-    cacheAllRequests: quality.cache.all_requests
+/** The four rows of the tip card and the panel: first token median, over 10 s, errors, cache over continuation turns. */
+export function recentRows(quality: RecentQuality | null, t: Translate): RecentRow[] {
+  const labels: Record<RecentKey, string> = {
+    ttfo: t('admin.accounts.table.recent.firstOutput'),
+    slow: t('admin.accounts.table.recent.slow'),
+    error: t('admin.accounts.table.dims.error'),
+    cache: t('admin.accounts.table.recent.cacheTurns')
   }
-}
-
-/**
- * The strictest threshold of each dimension among the groups that judge quality (policy enabled): the lowest first
- * token limit and error rate, the highest cache ratio. null when no group judges it. Shown as information only.
- */
-export function strictestThresholds(policies: BackendPolicy[]): Record<BackendDim, number | null> {
-  const enabled = policies.filter((policy) => policy.enabled)
-  const pick = (values: number[], best: (...v: number[]) => number) => (values.length ? best(...values) : null)
-  return {
-    ttfo: pick(enabled.map((policy) => policy.ttft_seconds), Math.min),
-    error: pick(enabled.map((policy) => policy.max_error_rate), Math.min),
-    cache: pick(enabled.map((policy) => policy.min_cache_ratio).filter((value) => value > 0), Math.max)
-  }
-}
-
-/** ≤ 10.0s, ≤ 5.0%, ≥ 90%. */
-export function formatThreshold(dim: BackendDim, value: number | null): string {
-  if (value == null) return '—'
-  if (dim === 'ttfo') return `≤ ${value.toFixed(1)}s`
-  if (dim === 'error') return `≤ ${(value * 100).toFixed(1)}%`
-  return `≥ ${Math.round(value * 100)}%`
+  if (!quality) return ROW_KEYS.map((key) => ({ key, label: labels[key], text: '—', muted: true, note: '' }))
+  const row = (key: RecentKey, text: string | null, short: boolean, note: string): RecentRow => ({
+    key,
+    label: labels[key],
+    text: text ?? '—',
+    muted: short || text === null,
+    note: short ? t('admin.accounts.table.tip.tooFew', { note }) : note
+  })
+  const { first_output: first, slow_10s: slow, error, cache } = quality
+  const median = firstOutputMedian(quality)
+  return [
+    row(
+      'ttfo',
+      median === null ? null : median === 'timeout' ? t('admin.accounts.table.recent.timeout') : formatRecentSeconds(median),
+      first.n < RECENT_MIN_SAMPLES,
+      t('admin.accounts.table.tip.count', { n: first.n }, first.n)
+    ),
+    row(
+      'slow',
+      formatSharePercent(slow.slow, slow.n),
+      slow.n < RECENT_MIN_SAMPLES,
+      slow.timeouts > 0
+        ? t('admin.accounts.table.tip.slowTimeouts', { n: slow.slow, timeouts: slow.timeouts })
+        : t('admin.accounts.table.tip.slow', { n: slow.slow })
+    ),
+    row(
+      'error',
+      error.rate == null ? null : formatRecentPercent(error.rate),
+      error.short,
+      t('admin.accounts.table.tip.failed', { failed: error.failed, n: error.n }, error.n)
+    ),
+    row(
+      'cache',
+      cache.ratio == null ? null : `${Math.round(cache.ratio * 100)}%`,
+      cache.turns < RECENT_MIN_SAMPLES,
+      t('admin.accounts.table.tip.turns', { n: cache.turns }, cache.turns)
+    )
+  ]
 }

@@ -82,11 +82,23 @@ export interface BackendAccountSummary {
   reset_at: string | null
   /** The whole account takes no part in scheduling (manual off, error, rate limit …). */
   stop: { source: string; reason: string; until: string | null } | null
-  /** First token: the first event and the first useful output (what the line judges), and the gap between them. */
-  ttfo: { first_event_p50_ms: number | null; first_output_p50_ms: number | null; gap_p50_ms: number | null; n: number }
-  error: BackendMark & { rate: number | null }
-  /** Cache hit ratio over continuation turns (what the line judges) and over every successful request. */
-  cache: { ratio: number | null; turns: number; all_ratio: number | null; all_requests: number }
+  /**
+   * The recent status (accounts table, quality panel), the whole account over the recent window by upstream attempt.
+   * First token, from finished streamed attempts: those with a useful output plus those that timed out waiting for
+   * it, timeouts sorted last. `p50_ms` is null when the median falls on a timeout (more than half timed out) or n = 0.
+   */
+  first_output: { n: number; timeouts: number; p50_ms: number | null }
+  /**
+   * First tokens over 10 s: `slow` of `n`, both counting the timeouts that waited the full 10 s (`timeouts`); shorter
+   * timeouts are left out. Exactly 10 s is not slow.
+   */
+  slow_10s: { n: number; slow: number; timeouts: number }
+  /** `failed` of `n` requests this account answers for. */
+  error: BackendMark & { rate: number | null; failed: number }
+  /** Cache hit ratio over continuation turns (what the line judges). */
+  cache: { ratio: number | null; turns: number }
+  /** The recent window's start when a reset within the last hour shortened it (RFC3339, as reset_at); else null. */
+  recent_since: string | null
   rear: BackendRear[]
   trial: BackendTrial[]
   exemptions: BackendExemption[]
