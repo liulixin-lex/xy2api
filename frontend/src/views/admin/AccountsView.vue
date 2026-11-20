@@ -194,7 +194,7 @@
                 </div>
                 <CellEmpty v-else />
                 <div v-if="row.proxy && row.proxy.expires_at" class="flex items-center gap-2 text-xs">
-                  <span class="text-fg-secondary">{{ formatDateTime(row.proxy.expires_at) }}</span>
+                  <span class="acc-num text-fg-secondary">{{ formatListDateTime(row.proxy.expires_at) }}</span>
                   <span :class="proxyExpiryBadgeClass(row.proxy.expires_at, row.proxy.status)">{{ proxyExpiryText(row.proxy) }}</span>
                 </div>
                 <div v-if="row.proxy_fallback_origin_id" class="flex items-center gap-1">
@@ -219,11 +219,15 @@
               <div class="acell"><span class="text-sm text-fg-secondary">{{ formatRelativeTime(value) }}</span></div>
             </template>
             <template #cell-created_at="{ value }">
-              <div class="acell"><span class="text-sm text-fg-secondary">{{ formatDateTime(value) }}</span></div>
+              <div class="acell">
+                <span v-if="formatListDateTime(value)" class="acc-num text-fg-secondary">{{ formatListDateTime(value) }}</span>
+                <CellEmpty v-else />
+              </div>
             </template>
             <template #cell-expires_at="{ row, value }">
               <div class="acell">
-                <span class="text-sm text-fg-secondary">{{ formatExpiresAt(value) }}</span>
+                <span v-if="value" class="acc-num text-fg-secondary">{{ formatExpiresAt(value) }}</span>
+                <CellEmpty v-else />
                 <div v-if="isExpired(value) || (row.auto_pause_on_expired && value)" class="flex items-center gap-1">
                   <span v-if="isExpired(value)" class="inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{{ t('admin.accounts.expired') }}</span>
                   <span v-if="row.auto_pause_on_expired && value" class="inline-flex items-center rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">{{ t('admin.accounts.autoPauseOnExpired') }}</span>
@@ -402,7 +406,7 @@ import type { Account, AccountListItem, AccountPlatform, AccountType, AccountUsa
 import type { SelectOption } from '@/components/common/Select.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { extractApiErrorMessage } from '@/utils/apiError'
-import { formatDateTime, formatRelativeTime } from '@/utils/format'
+import { formatListDateTime, formatRelativeTime } from '@/utils/format'
 import { formatRate } from '@/utils/formatters'
 import { accountColumnLayout } from '@/components/admin/account/table/accountColumns'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
@@ -1350,8 +1354,8 @@ const proxyExpiryText = (proxy: AccountProxy) => {
   const { key, params } = proxyExpiryLabelKey(proxy.expires_at, proxy.status)
   return params ? t(key, params) : t(key)
 }
-const formatExpiresAt = (value: number | null) =>
-  value ? formatDateTime(new Date(value * 1000), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, 'sv-SE') : '-'
+/** An expiry to the minute, the year left out within this one ("12-31 23:59"). */
+const formatExpiresAt = (value: number | null) => (value ? formatListDateTime(value * 1000, { seconds: false }) : '')
 // An expiry already past is read without following the clock (7g-1); one still ahead follows it to the second.
 const isExpired = (value: number | null) => !!value && (value * 1000 <= currentTime() || value * 1000 <= now.value)
 
