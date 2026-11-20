@@ -1716,9 +1716,10 @@ const bulkMenuLayer = useOverlayLayer(bulkMenuOpen, {
   },
   onCovered: () => { bulkMenuOpen.value = false }
 })
-watch(selectedCount, (count) => {
-  // The phone's "⋯" menu holds the attributes config too and stays open; its bulk items turn disabled.
-  if (count === 0 && !phone.value) bulkMenuOpen.value = false
+// The phone's "⋯" menu holds the attributes config too and stays open with nothing ticked, its bulk items disabled.
+// Wider, or on leaving the phone layout, nothing ticked closes it: the wide bulk button is disabled then and could not.
+watch([selectedCount, phone], ([count, isPhone]) => {
+  if (count === 0 && !isPhone) bulkMenuOpen.value = false
 })
 const userRowClass = (row: LiveUser) =>
   liveUsers.transitioning.value || liveUsers.isDimmed(row.id) ? 'opacity-60' : undefined

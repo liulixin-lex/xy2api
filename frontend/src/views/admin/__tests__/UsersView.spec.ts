@@ -908,6 +908,41 @@ describe('admin UsersView', () => {
     }
   })
 
+  // Follow-ups review (Astra): "⋯" opened at 390 with nothing ticked, then the window widened to 834 — the wide bulk
+  // button is disabled there, so the menu has to close itself.
+  it('closes the phone "⋯" menu on leaving the phone layout with nothing ticked', async () => {
+    const matchMedia = window.matchMedia
+    let wide = false
+    const listeners = new Set<(event: { matches: boolean }) => void>()
+    window.matchMedia = ((query: string) => {
+      const tablet = query === '(min-width: 768px)'
+      return {
+        get matches() { return tablet ? wide : query !== '(min-width: 1024px)' },
+        media: query,
+        addEventListener: (_: string, listener: (event: { matches: boolean }) => void) => { if (tablet) listeners.add(listener) },
+        removeEventListener: (_: string, listener: (event: { matches: boolean }) => void) => { listeners.delete(listener) },
+        addListener: () => {},
+        removeListener: () => {}
+      }
+    }) as unknown as typeof window.matchMedia
+    try {
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      await wrapper.get('[data-test="users-tools"]').trigger('click')
+      expect(wrapper.find('[data-test="bulk-menu"]').exists()).toBe(true)
+
+      wide = true
+      for (const listener of listeners) listener({ matches: true })
+      await flushPromises()
+      expect(wrapper.get('[data-test="bulk-actions"]').attributes('disabled')).toBeDefined()
+      expect(wrapper.find('[data-test="bulk-menu"]').exists()).toBe(false)
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+    }
+  })
+
   // Astra review: the page's own usage sort, on while its column is hidden (a phone), still fetches and orders.
   it('fetches usage and orders by it while the usage sort is on and its column hidden', async () => {
     const matchMedia = window.matchMedia
