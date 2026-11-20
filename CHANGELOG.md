@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-11-20
+
 ### OpenAI 服务档位
 
 - OpenAI 与组合分组分别配置 Fast、Ultrafast 的跟随、强制打开、强制关闭和赠免。旧分组保留旧套餐语义，管理员可以显式启用新版策略。管理接口支持 revision 并发检查，渠道及分组 Token 价卡可单独设置 Ultrafast 倍率。
@@ -23,6 +25,10 @@
 - 触屏下可点区域不小于 40px、相邻间距不小于 8px，列表文字不小于 12px，空值统一为浅色“—”，今年的时间省略年份，金额和数量加千分位。文案：“智商检测”改为“IQ 检测”，“费率倍数”改为“倍率”，“最后活跃时间 / 最后使用时间”改为“最近活跃 / 最近使用”，使用记录“账户”改为“账号”。
 - 手机上随行横滑的多按钮操作列在可视宽度内换行，横滑到底时每个按钮都能点到（代理、API 密钥、订阅、旧渠道监控、订单）。用户页手机信息行只留刷新、列设置和“⋯”，属性配置与批量操作收进“⋯”；用户页搜索框提示改为“邮箱、用户名、备注或 Key”。日期范围选择、侧栏子菜单和使用记录图表切换在触屏下可点区域不小于 40px，日期下拉在窄屏不再超出屏幕。
 - 用户仪表盘的统计卡在手机上不再撑出横向滚动；运维监控从链接直接打开错误列表时会加载数据。
+
+### 前端构建
+
+- 前端构建升级至 Vite 8.3.8 和 Tailwind CSS 4.3.5。组件样式与全局样式共用同一套主题配置，继续支持深浅色切换与响应式布局。
 
 ## [0.6.11] - 2026-11-19
 
@@ -2481,7 +2487,8 @@ XY2API 首个独立版本：基于 Sub2API 0.1.184 的代码建立独立的仓�
 - 切换前备份数据库和 Redis；不要让新旧实例长时间同时运行迁移或后台写任务。
 - 切换步骤与兼容边界见 [品牌与迁移兼容边界](https://github.com/liulixin-lex/xy2api/blob/v0.0.1/docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md)。
 
-[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.11...HEAD
+[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.12...HEAD
+[0.6.12]: https://github.com/liulixin-lex/xy2api/compare/v0.6.11...v0.6.12
 [0.6.11]: https://github.com/liulixin-lex/xy2api/compare/v0.6.10...v0.6.11
 [0.6.10]: https://github.com/liulixin-lex/xy2api/compare/v0.6.9...v0.6.10
 [0.6.9]: https://github.com/liulixin-lex/xy2api/compare/v0.6.8...v0.6.9
