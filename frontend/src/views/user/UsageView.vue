@@ -669,7 +669,11 @@ const exportToCSV = async () => {
   await exportPanel.value?.create({ ...buildUsageListParams(1, 100) })
 }
 
-const ALWAYS_VISIBLE = ['created_at']
+// Below 768px the first column is frozen as the row's identity: the API key (and the errors tab's key name) cannot be
+// hidden there; from 768px they follow the saved preference as before.
+const phone = usePhoneViewport()
+const ALWAYS_VISIBLE_WIDE = ['created_at']
+const alwaysVisible = computed(() => (phone.value ? ['api_key', ...ALWAYS_VISIBLE_WIDE] : ALWAYS_VISIBLE_WIDE))
 const DEFAULT_HIDDEN_COLUMNS = ['user_agent']
 // Below 768px (mobile list plan): API key (frozen), model, tokens, cost, latency and time; the rest in the settings.
 const NARROW_DEFAULT_HIDDEN_COLUMNS = ['reasoning_effort', 'endpoint', 'ip_address', 'group', 'stream', 'billing_mode', 'user_agent']
@@ -691,18 +695,19 @@ const allColumns = computed<Column[]>(() => [
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
 ])
 
-const toggleableColumns = computed(() => allColumns.value.filter((col) => !ALWAYS_VISIBLE.includes(col.key)))
+const toggleableColumns = computed(() => allColumns.value.filter((col) => !alwaysVisible.value.includes(col.key)))
 const usageColumns = useColumnVisibility({
   keys: computed(() => toggleableColumns.value.map((col) => col.key)),
   wide: { storageKey: HIDDEN_COLUMNS_KEY, defaultHidden: DEFAULT_HIDDEN_COLUMNS },
   narrow: { storageKey: `${HIDDEN_COLUMNS_KEY}-narrow`, defaultHidden: NARROW_DEFAULT_HIDDEN_COLUMNS },
 })
 const visibleColumns = computed(() =>
-  allColumns.value.filter((col) => ALWAYS_VISIBLE.includes(col.key) || usageColumns.isVisible(col.key))
+  allColumns.value.filter((col) => alwaysVisible.value.includes(col.key) || usageColumns.isVisible(col.key))
 )
 
 // 错误请求 tab 独立列设置(机制同用量列设置,存储互不影响)
-const ERR_ALWAYS_VISIBLE = ['status', 'created_at']
+const ERR_ALWAYS_VISIBLE_WIDE = ['status', 'created_at']
+const errAlwaysVisible = computed(() => (phone.value ? ['key_name', ...ERR_ALWAYS_VISIBLE_WIDE] : ERR_ALWAYS_VISIBLE_WIDE))
 const ERR_DEFAULT_HIDDEN_COLUMNS = ['user_agent']
 const ERR_HIDDEN_COLUMNS_KEY = 'user-usage-error-hidden-columns'
 
@@ -723,7 +728,7 @@ const errAllColumns = computed<Column[]>(() => [
 ])
 
 const errToggleableColumns = computed(() =>
-  errAllColumns.value.filter((col) => !ERR_ALWAYS_VISIBLE.includes(col.key))
+  errAllColumns.value.filter((col) => !errAlwaysVisible.value.includes(col.key))
 )
 // The errors tab keeps its own key and its columns on phones too (it switches to the table as it is).
 const errorColumns = useColumnVisibility({
@@ -733,7 +738,7 @@ const errorColumns = useColumnVisibility({
 })
 const errVisibleColumnKeys = computed(() =>
   errAllColumns.value
-    .filter((col) => ERR_ALWAYS_VISIBLE.includes(col.key) || errorColumns.isVisible(col.key))
+    .filter((col) => errAlwaysVisible.value.includes(col.key) || errorColumns.isVisible(col.key))
     .map((col) => col.key)
 )
 
@@ -762,7 +767,6 @@ const hiddenSort = computed(() => {
 
 // ---- Phone toolbar (mobile list plan): the fields in a bottom sheet, the chosen ones as tags ----
 const [DefineFields, ReuseFields] = createReusableTemplate()
-const phone = usePhoneViewport()
 const moreOpen = ref(false)
 watch(phone, (on) => { if (!on) moreOpen.value = false })
 

@@ -274,7 +274,15 @@ describe('user UsageView', () => {
       expect(query).toHaveBeenCalledWith(expect.objectContaining({ model: undefined }), expect.anything())
       expect(wrapper.find('[data-testid="usage-filter-tag"]').exists()).toBe(false)
       expect(JSON.parse(localStorage.getItem('user-usage-hidden-columns')!)).toEqual(['model'])
+      // Review item 9: the frozen API key cannot be hidden on a phone (no toggle; a saved hide is ignored there).
+      localStorage.setItem('user-usage-hidden-columns-narrow', JSON.stringify(['api_key', 'reasoning_effort', 'endpoint', 'ip_address', 'group', 'stream', 'billing_mode', 'user_agent']))
       wrapper.unmount()
+      const again = mountUsageView({ Teleport: true })
+      await flushPromises()
+      expect(again.findComponent(UsageTable).props('columns').map((c: { key: string }) => c.key)[0]).toBe('api_key')
+      expect((again.vm as any).currentToggleableColumns.map((c: { key: string }) => c.key)).not.toContain('api_key')
+      again.unmount()
+      localStorage.removeItem('user-usage-hidden-columns-narrow')
     } finally {
       media.mockRestore()
       localStorage.removeItem('user-usage-hidden-columns')
