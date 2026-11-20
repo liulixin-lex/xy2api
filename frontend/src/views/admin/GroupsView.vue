@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
         <!-- The compact toolbar (12.9): live, refresh and column settings, a rule, then sort, categories and create. -->
         <TableToolbar compact>
@@ -135,20 +135,22 @@
         <DataTable
           ref="groupsTableRef"
           class="dense-cells"
+          layout="table"
+          :scroll-label="t('admin.groups.title')"
           :columns="columns"
           :data="groups"
           :loading="loading"
           :row-class="groupRowClass"
           :server-side-sort="true"
-          default-sort-key="sort_order"
-          default-sort-order="asc"
+          :sort="tableSort"
           @sort="handleSort"
         >
+          <!-- The frozen identity column: the alias pill, then the name cut with "…", whole in its tip or on a tap. -->
           <template #cell-name="{ row, value }">
-            <span class="inline-flex items-center gap-2">
+            <div class="flex min-w-0 items-center gap-2">
               <GroupAliasPill :group="row" />
-              <span class="font-medium text-fg-primary">{{ value }}</span>
-            </span>
+              <TableIdentityCell class="min-w-0 flex-1" :primary="value" />
+            </div>
           </template>
 
           <template #cell-id="{ value }">
@@ -351,7 +353,24 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <!-- Below 1024px only "⋯" (a 40px button), its menu the row's actions in the same order (mobile list plan). -->
+            <div v-if="!desktop" class="flex justify-center">
+              <button
+                v-if="hasRowActions(rowActions(row))"
+                type="button"
+                class="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                :aria-label="`${t('common.more')} ${row.name}`"
+                aria-haspopup="menu"
+                :aria-expanded="rowMenu.group?.id === row.id ? 'true' : 'false'"
+                :data-sq-trigger="`group-board:${row.id}`"
+                data-test="group-row-more"
+                @click="openRowMenu(row, $event)"
+              >
+                <Icon name="more" size="sm" />
+              </button>
+            </div>
+            <!-- From 1024px the buttons; on touch 8px apart. -->
+            <div v-else class="flex items-center gap-1 [@media(pointer:coarse)]:gap-2">
               <button
                 v-if="!authStore.isSimpleMode && row.platform === 'openai'"
                 type="button"
@@ -4409,6 +4428,16 @@
       @close="showRPMOverridesModal = false"
       @success="reloadGroups"
     />
+    <GroupActionMenu
+      :show="!!rowMenu.group"
+      :group="rowMenu.group"
+      :anchor-rect="rowMenu.anchorRect"
+      :actions="rowMenu.group ? rowActions(rowMenu.group) : NO_ROW_ACTIONS"
+      :duplicating="!!rowMenu.group && duplicatingGroupIds.has(rowMenu.group.id)"
+      @action="onRowAction"
+      @close="closeRowMenu"
+    />
+
     <SchedQualityLayers />
   </AppLayout>
 </template>
@@ -4444,6 +4473,10 @@ import LiveStatusIndicator from "@/components/common/LiveStatusIndicator.vue";
 import PendingChangesPill from "@/components/common/PendingChangesPill.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
 import GroupAliasPill from "@/components/common/GroupAliasPill.vue";
+import TableIdentityCell from "@/components/common/TableIdentityCell.vue";
+import GroupActionMenu from "@/components/admin/group/GroupActionMenu.vue";
+import { groupRowActions, hasRowActions, type GroupRowAction, type GroupRowActions } from "@/components/admin/group/groupRowActions";
+import { useTableViewport } from "@/composables/useTableViewport";
 import GroupAliasField from "@/components/admin/group/GroupAliasField.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import Toggle from "@/components/common/Toggle.vue";
@@ -6053,6 +6086,36 @@ const handlePageSizeChange = (pageSize: number) => {
   pagination.page_size = pageSize;
   pagination.page = 1;
   void reloadGroups();
+};
+
+/** The page's own sort for the headers (the default, sort_order, is no column: no arrow until a header is chosen). */
+const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }));
+
+// ---- Row actions below 1024px: "⋯" and its menu ----
+const { desktop } = useTableViewport();
+const NO_ROW_ACTIONS: GroupRowActions = { board: false, edit: false, duplicate: false, composite: false, rate: false, rpm: false, delete: false };
+const rowActions = (group: { platform: string }) =>
+  groupRowActions(group, { simpleMode: authStore.isSimpleMode, manage: canManage.value, adjustBalance: canAdjustBalance.value });
+const rowMenu = reactive<{ group: LiveGroup | null; anchorRect: DOMRect | null }>({ group: null, anchorRect: null });
+const openRowMenu = (group: LiveGroup, event: MouseEvent) => {
+  rowMenu.group = group;
+  rowMenu.anchorRect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+};
+const closeRowMenu = () => {
+  rowMenu.group = null;
+  rowMenu.anchorRect = null;
+};
+watch(desktop, (on) => { if (on) closeRowMenu(); });
+const onRowAction = (action: GroupRowAction) => {
+  const group = rowMenu.group;
+  if (!group) return;
+  if (action === "board") openSchedBoard({ id: group.id, name: group.name });
+  else if (action === "edit") void handleEdit(group);
+  else if (action === "duplicate") void handleDuplicate(group);
+  else if (action === "composite") void handleCompositeRoutes(group);
+  else if (action === "rate") handleRateMultipliers(group);
+  else if (action === "rpm") handleRPMOverrides(group);
+  else handleDelete(group);
 };
 
 const handleSort = (key: string, order: 'asc' | 'desc') => {
