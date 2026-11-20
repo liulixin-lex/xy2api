@@ -23,21 +23,14 @@ type SchedAdminMark struct {
 	Short bool `json:"short"`
 	Red   bool `json:"red"`
 }
-type SchedAdminAccountSummaryTTFO struct {
-	FirstEventP50Ms  *int `json:"first_event_p50_ms"`
-	FirstOutputP50Ms *int `json:"first_output_p50_ms"`
-	GapP50Ms         *int `json:"gap_p50_ms"`
-	N                int  `json:"n"`
-}
 type SchedAdminAccountSummaryError struct {
 	SchedAdminMark
-	Rate *float64 `json:"rate"`
+	Failed int      `json:"failed"`
+	Rate   *float64 `json:"rate"`
 }
 type SchedAdminAccountSummaryCache struct {
-	Ratio       *float64 `json:"ratio"`
-	Turns       int      `json:"turns"`
-	AllRatio    *float64 `json:"all_ratio"`
-	AllRequests int      `json:"all_requests"`
+	Ratio *float64 `json:"ratio"`
+	Turns int      `json:"turns"`
 }
 type SchedAdminRear struct {
 	GroupID   int64                    `json:"group_id"`
@@ -53,16 +46,18 @@ type SchedAdminTrial struct {
 	Until   string `json:"until"`
 }
 type SchedAdminAccountSummary struct {
-	AccountID   int64                         `json:"account_id"`
-	GroupStatus map[string]string             `json:"group_status"`
-	ResetAt     *string                       `json:"reset_at"`
-	Stop        *SchedAdminStop               `json:"stop"`
-	TTFO        SchedAdminAccountSummaryTTFO  `json:"ttfo"`
-	Error       SchedAdminAccountSummaryError `json:"error"`
-	Cache       SchedAdminAccountSummaryCache `json:"cache"`
-	Rear        []SchedAdminRear              `json:"rear"`
-	Trial       []SchedAdminTrial             `json:"trial"`
-	Exemptions  []SchedAdminExemption         `json:"exemptions"`
+	AccountID   int64                           `json:"account_id"`
+	GroupStatus map[string]string               `json:"group_status"`
+	ResetAt     *string                         `json:"reset_at"`
+	Stop        *SchedAdminStop                 `json:"stop"`
+	RecentSince *string                         `json:"recent_since"`
+	FirstOutput schedquality.FirstOutputSummary `json:"first_output"`
+	Slow10s     schedquality.Slow10sSummary     `json:"slow_10s"`
+	Error       SchedAdminAccountSummaryError   `json:"error"`
+	Cache       SchedAdminAccountSummaryCache   `json:"cache"`
+	Rear        []SchedAdminRear                `json:"rear"`
+	Trial       []SchedAdminTrial               `json:"trial"`
+	Exemptions  []SchedAdminExemption           `json:"exemptions"`
 }
 type SchedAdminAccountDetail struct {
 	Account       SchedAdminAccountDetailAccount      `json:"account"`
