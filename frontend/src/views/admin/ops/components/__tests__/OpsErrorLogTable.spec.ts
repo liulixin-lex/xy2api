@@ -122,3 +122,17 @@ describe('OpsErrorLogTable i18n keys exist in the errorLog namespace', () => {
     })
   }
 })
+
+// Mobile list plan (step 1): the usage page's errors tab switches to the table at every width; the ops modal keeps its
+// layout until step 2.
+describe('OpsErrorLogTable layout', () => {
+  const DataTableStub = { name: 'DataTable', props: ['layout'], template: '<div />' }
+  const mountWith = (layout?: 'table') => mount(OpsErrorLogTable, {
+    props: { rows: [], total: 0, loading: false, page: 1, pageSize: 20, ...(layout ? { layout } : {}) },
+    global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub, DataTable: DataTableStub } },
+  })
+  it('passes the layout the page asks for, and none otherwise', () => {
+    expect(mountWith('table').findComponent(DataTableStub).props('layout')).toBe('table')
+    expect(mountWith().findComponent(DataTableStub).props('layout')).toBeUndefined()
+  })
+})

@@ -18,6 +18,7 @@ const createdAt = new Date(thisYear, 10, 20, 6, 54, 11).toISOString()
 
 const row = {
   id: 9, source: 'usage', result: 1, switches: 0, request_id: 'r-1', created_at: createdAt,
+  user_id: 12, user: { id: 12, email: 'alice@example.com', deleted_at: '2026-01-01T00:00:00Z' }, api_key: { id: 3, name: 'prod-key' },
   model: 'gpt-6.1-sol', upstream_model: 'gpt-6.1', account: { id: 1, name: 'acc-1' },
   input_tokens: 12345, output_tokens: 678, cache_read_tokens: 1500, cache_creation_tokens: 40,
   cache_creation_5m_tokens: 0, cache_creation_1h_tokens: 0, cache_ttl_overridden: false,
@@ -28,9 +29,9 @@ const row = {
   group_id: 8, group: { id: 8, name: 'Backup' }, origin_group_id: 3, origin_group_name: 'Main',
 }
 
-const CELLS = ['account', 'model', 'endpoint', 'group', 'tokens', 'cost', 'latency', 'created_at']
+const CELLS = ['user', 'api_key', 'account', 'model', 'endpoint', 'group', 'tokens', 'cost', 'latency', 'created_at']
 const DataTableStub = {
-  props: ['data'],
+  props: ['data', 'layout'],
   template: `<div><div v-for="row in data" :key="row.id" :data-row="row.id">
     ${CELLS.map((key) => `<div data-cell="${key}"><slot name="cell-${key}" :row="row" :value="row.${key}" /></div>`).join('')}
   </div></div>`
@@ -96,11 +97,11 @@ describe('UsageTable one-line summaries', () => {
     expect(time.get('button').text()).toBe('usage.requestDetail.button')
   })
 
-  it('shows a light dash for an empty account, endpoint and group', () => {
+  // The shared empty cell (mobile list plan, copy): one light "—".
+  it('shows the shared light dash for an empty account, endpoint and group', () => {
     const wrapper = mountTable(USER, [{ ...row, account: null, inbound_endpoint: '', group: null, group_id: null, origin_group_id: null }])
     for (const key of ['account', 'endpoint', 'group']) {
-      const dash = cell(wrapper, key).findAll('span').filter((s) => s.text() === '—').at(-1)
-      expect(dash?.classes()).toContain('text-gray-400')
+      expect(cell(wrapper, key).get('[data-test="cell-empty"]').text()).toBe('—')
     }
   })
 })
@@ -171,5 +172,40 @@ describe('UsageTable request detail', () => {
     expect(detail.get('[data-testid="usage-detail-unbilled"]').text().replace(/\s+/g, ' ')).toBe('— usage.requestDetail.unbilled · admin.usage.resultFailed')
     expect(detail.text()).not.toContain('usage.userBilled')
     expect(detail.text()).not.toContain('admin.usage.inputTokens')
+  })
+})
+
+describe('UsageTable on the shared table layout (B)', () => {
+  const setPhone = (phone: boolean) => vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+    matches: query.includes('min-width') ? !phone : true, media: query, onchange: null,
+    addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+  }) as unknown as MediaQueryList)
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('asks for the table at every width', () => {
+    expect(mountTable(ADMIN).findComponent(DataTableStub).props('layout')).toBe('table')
+  })
+
+  it('makes the admin page\'s first column the two-line identity cell on a phone, the email still opening the balance', async () => {
+    setPhone(true)
+    const wrapper = mountTable({ ...ADMIN, columns: [{ key: 'user', label: 'User' }, { key: 'account', label: 'Account' }] })
+    const identity = cell(wrapper, 'user').get('[data-test="table-identity"]')
+    expect(identity.get('.table-identity__primary').text()).toBe('alice@example.com')
+    expect(identity.get('.table-identity__secondary').text()).toBe('#12 · admin.usage.userDeletedBadge')
+    await identity.get('button').trigger('click')
+    expect(wrapper.emitted('userClick')).toEqual([[12, 'alice@example.com']])
+    // Only the frozen first column: the API key is a plain cell here.
+    expect(cell(wrapper, 'api_key').find('[data-test="table-identity"]').exists()).toBe(false)
+  })
+
+  it('makes the user page\'s API key the identity cell on a phone, and keeps the one-line cells from 768px', () => {
+    setPhone(true)
+    const phone = mountTable({ ...USER, columns: [{ key: 'api_key', label: 'Key' }, { key: 'model', label: 'Model' }] })
+    expect(cell(phone, 'api_key').get('[data-test="table-identity"]').text()).toBe('prod-key')
+    vi.restoreAllMocks()
+    setPhone(false)
+    const wide = mountTable({ ...ADMIN, columns: [{ key: 'user', label: 'User' }] })
+    expect(cell(wide, 'user').find('[data-test="table-identity"]').exists()).toBe(false)
+    expect(cell(wide, 'user').text()).toContain('alice@example.com')
   })
 })

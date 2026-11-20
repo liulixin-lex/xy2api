@@ -21,6 +21,7 @@
     <div class="overflow-auto">
       <DataTable
         ref="tableRef"
+        layout="table"
         :columns="columns"
         :data="data"
         :row-key="rowKey"
@@ -31,8 +32,21 @@
         :default-sort-order="defaultSortOrder"
         @sort="(key, order) => $emit('sort', key, order)"
       >
+        <!-- 手机上第一列冻结为身份列：两行（邮箱 / #编号），超长省略；点邮箱照旧看充值记录 -->
         <template #cell-user="{ row }">
-          <div class="text-sm">
+          <TableIdentityCell v-if="identityKey === 'user'">
+            <template #primary>
+              <button
+                v-if="row.user?.email"
+                type="button"
+                class="block max-w-full truncate text-left text-primary-600 underline decoration-dashed underline-offset-2 dark:text-primary-400"
+                @click.stop="$emit('userClick', row.user_id, row.user?.email)"
+              >{{ row.user.email }}</button>
+              <CellEmpty v-else />
+            </template>
+            <template #secondary>#{{ row.user_id }}<template v-if="row.user?.deleted_at"> · {{ t('admin.usage.userDeletedBadge') }}</template></template>
+          </TableIdentityCell>
+          <div v-else class="text-sm">
             <button
               v-if="row.user?.email"
               class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
@@ -41,7 +55,7 @@
             >
               {{ row.user.email }}
             </button>
-            <span v-else class="text-gray-400 dark:text-gray-500">—</span>
+            <CellEmpty v-else />
             <span v-if="row.user?.deleted_at" class="ml-1 inline-flex items-center rounded px-1 py-px text-xs font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30">
               {{ t('admin.usage.userDeletedBadge') }}
             </span>
@@ -50,12 +64,14 @@
         </template>
 
         <template #cell-api_key="{ row }">
-          <span v-if="row.api_key?.name" class="text-sm text-gray-900 dark:text-white">{{ row.api_key.name }}</span>
-          <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
+          <TableIdentityCell v-if="identityKey === 'api_key' && row.api_key?.name" :primary="row.api_key.name" />
+          <span v-else-if="row.api_key?.name" class="text-sm text-gray-900 dark:text-white">{{ row.api_key.name }}</span>
+          <CellEmpty v-else />
         </template>
 
         <template #cell-account="{ row }">
-          <span class="text-sm" :class="row.account?.name ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'">{{ row.account?.name || '—' }}</span>
+          <span v-if="row.account?.name" class="text-sm text-gray-900 dark:text-white">{{ row.account.name }}</span>
+          <CellEmpty v-else />
           <!-- 后端 0.6.5 请求层：换号后成功的请求标"已救回"，换过号的标次数；与账号同一行 -->
           <span v-if="row.result === 2 || (row.switches ?? 0) > 0" class="ml-1.5 inline-flex gap-x-1.5 text-xs" data-testid="usage-request-marks">
             <span v-if="row.result === 2" class="text-amber-600 dark:text-amber-400">{{ t('admin.usage.resultRescued') }}</span>
@@ -104,7 +120,8 @@
         <!-- 入站端点；管理端上游端点不同时同一行“入站 → 上游”，两者带名称的完整值在悬停和明细里 -->
         <template #cell-endpoint="{ row }">
           <span class="text-xs" :title="endpointTitle(row)" data-testid="usage-endpoint">
-            <span :class="endpointPair(row, showUpstreamEndpoint).inbound ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'">{{ endpointPair(row, showUpstreamEndpoint).inbound || '—' }}</span>
+            <span v-if="endpointPair(row, showUpstreamEndpoint).inbound" class="text-gray-700 dark:text-gray-300">{{ endpointPair(row, showUpstreamEndpoint).inbound }}</span>
+            <CellEmpty v-else />
             <template v-if="upstreamDiffers(row)">
               <span class="mx-1 text-gray-400 dark:text-gray-500" aria-hidden="true">→</span>
               <span class="text-gray-500 dark:text-gray-400">{{ endpointPair(row, showUpstreamEndpoint).upstream }}</span>
@@ -117,7 +134,7 @@
             <span v-if="groupLabel(row, showFallbackOrigin)" class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
               {{ groupLabel(row, showFallbackOrigin) }}
             </span>
-            <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
+            <CellEmpty v-else />
             <span
               v-if="crossGroup(row, showFallbackOrigin)"
               data-testid="usage-fallback-marker"
@@ -153,7 +170,7 @@
         <!-- 一行输入 / 输出；缓存、缓存读取占比、媒体 Token 在悬停和明细里 -->
         <template #cell-tokens="{ row }">
           <!-- 无账单请求未观测到用量：不编造 0 -->
-          <span v-if="isUnbilled(row) && row.input_tokens == null && row.output_tokens == null" class="text-sm text-gray-400 dark:text-gray-500">—</span>
+          <CellEmpty v-if="isUnbilled(row) && row.input_tokens == null && row.output_tokens == null" />
           <!-- 图片生成请求（仅按次计费时显示图片格式） -->
           <div v-else-if="isImageUsage(row)" class="flex items-center justify-end gap-1.5 whitespace-nowrap text-sm">
             <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -290,7 +307,7 @@
               <Icon :name="copiedRequestId === row.request_id ? 'check' : 'copy'" size="sm" class="h-3.5 w-3.5" />
             </button>
           </div>
-          <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
+          <CellEmpty v-else />
         </template>
 
         <template #cell-upstream_request_id="{ row }">
@@ -308,12 +325,12 @@
               <Icon :name="copiedRequestId === row.upstream_request_id ? 'check' : 'copy'" size="sm" class="h-3.5 w-3.5" />
             </button>
           </div>
-          <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
+          <CellEmpty v-else />
         </template>
 
         <template #cell-user_agent="{ row }">
           <span v-if="row.user_agent" class="text-sm text-gray-600 dark:text-gray-400 block max-w-[320px] truncate" :title="row.user_agent">{{ row.user_agent }}</span>
-          <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
+          <CellEmpty v-else />
         </template>
 
         <!-- IP 和归属地查询同一行 -->
@@ -322,7 +339,7 @@
             <span class="text-sm font-mono text-gray-600 dark:text-gray-400">{{ row.ip_address }}</span>
             <IpGeoCell :ip="row.ip_address" class="!mt-0" />
           </div>
-          <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
+          <CellEmpty v-else />
         </template>
 
         <template #empty><EmptyState :message="t('usage.noRecords')" /></template>
@@ -417,6 +434,9 @@ import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
+import CellEmpty from '@/components/common/CellEmpty.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
+import { useTableViewport } from '@/composables/useTableViewport'
 import Icon from '@/components/icons/Icon.vue'
 import UsageLatencyBreakdown from './UsageLatencyBreakdown.vue'
 import UsageTokenBreakdown from './UsageTokenBreakdown.vue'
@@ -505,6 +525,13 @@ defineExpose({ isAtTop, scrollToTop })
 const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
+
+/**
+ * Below 768px the table's first column is frozen as the identity column (the shared table layout): the admin page's
+ * user, the user page's API key. Its cell becomes the two-line identity cell; from 768px the cells stay as they are.
+ */
+const { phone } = useTableViewport()
+const identityKey = computed(() => (phone.value ? props.columns[0]?.key ?? null : null))
 
 /** The upstream endpoint is shown on this page, known and not the inbound one. */
 const upstreamDiffers = (row: AdminUsageLog) => {

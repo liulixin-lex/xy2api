@@ -4,6 +4,7 @@
       <IpGeoBatchToolbar :ips="rows.map((r) => r.client_ip)" @failed="emit('ipGeoBatchFailed')" />
 
       <DataTable
+        :layout="layout"
         :columns="columns"
         :data="rows"
         :loading="loading"
@@ -299,6 +300,8 @@ interface Props {
   summaryFirst?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
+  /** DataTable's layout: the usage page's errors tab uses the table at every width (mobile list plan, step 1). */
+  layout?: 'cards' | 'table'
 }
 
 interface Emits {

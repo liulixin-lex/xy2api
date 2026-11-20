@@ -163,6 +163,7 @@
         <div v-show="activeTab === 'errors'" class="overflow-hidden rounded-b-2xl">
           <OpsErrorLogTable
             flat
+            layout="table"
             :rows="errRows" :total="errTotal" :loading="errLoading"
             :page="errPage" :page-size="errPageSize"
             :visible-column-keys="errVisibleColumnKeys"
