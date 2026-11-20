@@ -28,8 +28,8 @@
         :row-class="rowClass"
         :loading="loading"
         :server-side-sort="serverSideSort"
-        :default-sort-key="defaultSortKey"
-        :default-sort-order="defaultSortOrder"
+        :sort="sort"
+        :scroll-label="scrollLabel"
         @sort="(key, order) => $emit('sort', key, order)"
       >
         <!--
@@ -288,13 +288,13 @@
         -->
         <template #cell-created_at="{ row, value }">
           <div class="flex items-center gap-3 whitespace-nowrap">
-            <span class="text-sm tabular-nums text-gray-600 dark:text-gray-400">{{ formatLogTime(value) }}</span>
+            <span class="text-sm tabular-nums text-gray-600 dark:text-gray-400">{{ formatListDateTime(value) }}</span>
             <button
               v-if="desktop"
               type="button"
               data-testid="usage-detail-open"
               class="relative rounded text-xs font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors before:absolute before:-inset-x-2 before:-inset-y-3 before:content-[''] hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
-              :aria-label="t('usage.requestDetail.open', { time: formatLogTime(value) })"
+              :aria-label="t('usage.requestDetail.open', { time: formatListDateTime(value) })"
               aria-haspopup="dialog"
               @click="detailRow = row"
             >{{ t('usage.requestDetail.button') }}</button>
@@ -308,7 +308,7 @@
               type="button"
               data-testid="usage-detail-open"
               class="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-primary-400"
-              :aria-label="t('usage.requestDetail.open', { time: formatLogTime(row.created_at) })"
+              :aria-label="t('usage.requestDetail.open', { time: formatListDateTime(row.created_at) })"
               :title="t('usage.requestDetail.button')"
               aria-haspopup="dialog"
               @click="detailRow = row"
@@ -439,7 +439,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { formatLogTime, formatReasoningEffort, formatUsd } from '@/utils/format'
+import { formatListDateTime, formatReasoningEffort, formatUsd } from '@/utils/format'
 import {
   LATENCY_BAR_CLASSES,
   LATENCY_BAR_FROM_CLASSES,
@@ -491,8 +491,10 @@ interface Props {
   loading?: boolean
   columns: Column[]
   serverSideSort?: boolean
-  defaultSortKey?: string
-  defaultSortOrder?: 'asc' | 'desc'
+  /** The sort the page requests the list with (server-side): the headers follow it, also while its column is hidden. */
+  sort?: { key: string; order: 'asc' | 'desc' } | null
+  /** Names the table's scroll area (a region that takes keyboard focus while it scrolls sideways). */
+  scrollLabel?: string
   showCacheHitRate?: boolean
   showTokenSpeed?: boolean
   showAccountBilling?: boolean
@@ -510,8 +512,8 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
   serverSideSort: false,
-  defaultSortKey: '',
-  defaultSortOrder: 'asc',
+  sort: undefined,
+  scrollLabel: undefined,
   showCacheHitRate: false,
   showTokenSpeed: false,
   showAccountBilling: true,

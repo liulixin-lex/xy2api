@@ -231,8 +231,8 @@
           :show-upstream-endpoint="false"
           :show-cache-hit-rate="appStore.cachedPublicSettings?.user_usage_cache_hit_rate_enabled === true"
           :show-token-speed="appStore.cachedPublicSettings?.user_usage_token_speed_enabled === true"
-          :default-sort-key="sortState.sort_by"
-          :default-sort-order="sortState.sort_order"
+          :sort="tableSort"
+          :scroll-label="t('usage.tabs.usage')"
           @sort="handleSort"
           @ipGeoBatchFailed="handleIpGeoBatchFailed"
         />
@@ -257,6 +257,7 @@
         :visible-column-keys="errVisibleColumnKeys"
         :sort-by="errorSortBy"
         :sort-order="errorSortOrder"
+        :scroll-label="t('usage.tabs.errors')"
         @sort="onErrorSort"
         @update:page="onErrorPage"
         @update:pageSize="onErrorPageSize"
@@ -432,6 +433,8 @@ const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc',
 })
+/** The sort the list is requested with: the table's headers follow it (DataTable's page-owned sort). */
+const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }))
 
 const granularityOptions = computed<SelectOption[]>(() => [
   { value: 'day', label: t('admin.dashboard.day') },

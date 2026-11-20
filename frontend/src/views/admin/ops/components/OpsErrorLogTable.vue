@@ -10,8 +10,10 @@
         :loading="loading"
         clickable-rows
         server-side-sort
-        :default-sort-key="headerSortKey"
-        :default-sort-order="sortOrder ?? 'desc'"
+        :sort="pageSort"
+        :scroll-label="scrollLabel"
+        default-sort-key="created_at"
+        default-sort-order="desc"
         @sort="onSort"
         @rowClick="(row) => emit('openErrorDetail', row.id)"
       >
@@ -305,6 +307,8 @@ interface Props {
   /** The page's sort as it requests it (API keys): the headers follow it, also while its column is hidden. */
   sortBy?: string
   sortOrder?: 'asc' | 'desc'
+  /** Names the table's scroll area. */
+  scrollLabel?: string
 }
 
 interface Emits {
@@ -319,8 +323,13 @@ interface Emits {
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
-/** The header key of the page's sort (the API's status_code is the status column); time, newest first, by default. */
-const headerSortKey = computed(() => (props.sortBy === 'status_code' ? 'status' : props.sortBy || 'created_at'))
+/**
+ * The page's sort for the headers (the API's status_code is the status column). A page that gives none (the ops modal)
+ * leaves the sort to the table, time newest first.
+ */
+const pageSort = computed(() =>
+  props.sortBy ? { key: props.sortBy === 'status_code' ? 'status' : props.sortBy, order: props.sortOrder ?? 'desc' } : undefined
+)
 
 function onSort(key: string, order: 'asc' | 'desc') {
   emit('sort', mapErrorSortKey(key), order)

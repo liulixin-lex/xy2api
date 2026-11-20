@@ -145,8 +145,8 @@
             :loading="usageLoading"
             :columns="visibleColumns"
             :server-side-sort="true"
-            :default-sort-key="sortState.sort_by"
-            :default-sort-order="sortState.sort_order"
+            :sort="tableSort"
+            :scroll-label="t('usage.tabs.usage')"
             @sort="handleSort"
             @userClick="handleUserClick"
             @ipGeoBatchFailed="handleIpGeoBatchFailed"
@@ -173,6 +173,7 @@
             :visible-column-keys="errVisibleColumnKeys"
             :sort-by="errSortBy"
             :sort-order="errSortOrder"
+            :scroll-label="t('usage.tabs.errors')"
             user-clickable
             @userClick="handleUserClick"
             @openErrorDetail="openError"
@@ -342,6 +343,8 @@ const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
 })
+/** The sort the list is requested with: the table's headers follow it (DataTable's page-owned sort). */
+const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }))
 
 const getSingleQueryValue = (value: string | null | Array<string | null> | undefined): string | undefined => {
   if (Array.isArray(value)) return value.find((item): item is string => typeof item === 'string' && item.length > 0)

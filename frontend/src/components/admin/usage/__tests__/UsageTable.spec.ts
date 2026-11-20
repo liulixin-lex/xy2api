@@ -326,9 +326,10 @@ describe('admin UsageTable tooltip', () => {
   })
 
   it.each([
+    // Rates as the list pages write them (formatRate): at least one decimal, trailing zeros dropped.
     [0, '0.0x'],
-    [0.5, '0.50x'],
-    [undefined, '1.00x'],
+    [0.5, '0.5x'],
+    [undefined, '1.0x'],
   ])('shows the stored user rate %s in cost details', async (rate, expected) => {
     const wrapper = mount(UsageTable, {
       props: { data: [{ ...baseImageRow, rate_multiplier: rate }], loading: false, columns: [] },
@@ -381,7 +382,8 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('Service tier')
     expect(text).toContain('Fast')
     expect(text).toContain('Rate')
-    expect(text).toContain('1.00x')
+    expect(text).toContain('1.0x')
+    expect(text).not.toContain('1.00x')
     expect(text).toContain('Account rate')
     expect(text).toContain('User billed')
     expect(text).toContain('Account billed')

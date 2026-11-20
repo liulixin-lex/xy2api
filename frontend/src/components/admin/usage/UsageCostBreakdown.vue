@@ -92,7 +92,7 @@
     </div>
     <div class="flex items-center justify-between gap-6">
       <span :class="tone.label">{{ t('usage.rate') }}</span>
-      <span :class="tone.blue">{{ formatMultiplier(row.rate_multiplier ?? 1) }}x</span>
+      <span :class="tone.blue">{{ formatRate(row.rate_multiplier ?? 1) }}</span>
     </div>
     <div class="flex items-center justify-between gap-6">
       <span :class="tone.label">{{ t('usage.original') }}</span>
@@ -106,7 +106,7 @@
     <template v-if="showAccountBilling">
       <div class="flex items-center justify-between gap-6 border-t pt-1.5" :class="tone.divider">
         <span :class="tone.label">{{ t('usage.accountMultiplier') }}</span>
-        <span :class="tone.blue">{{ formatMultiplier(row.account_rate_multiplier ?? 1) }}x</span>
+        <span :class="tone.blue">{{ formatRate(row.account_rate_multiplier ?? 1) }}</span>
       </div>
       <div class="flex items-center justify-between gap-6">
         <span :class="tone.label">{{ t('usage.accountBilled') }}</span>
@@ -119,7 +119,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { formatMultiplier } from '@/utils/formatters'
+import { formatRate } from '@/utils/formatters'
 import { formatUsd } from '@/utils/format'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'

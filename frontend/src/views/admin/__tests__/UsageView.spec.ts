@@ -413,7 +413,7 @@ describe('admin UsageView columns per width', () => {
     const usage = w.findComponent({ name: 'UsageTable' })
     usage.vm.$emit('sort', 'model', 'asc')
     await flushPromises()
-    expect([usage.props('defaultSortKey'), usage.props('defaultSortOrder')]).toEqual(['model', 'asc'])
+    expect(usage.props('sort')).toEqual({ key: 'model', order: 'asc' })
     expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ sort_by: 'model', sort_order: 'asc' }), expect.anything())
     expect(w.find('[data-test="table-sort-hint"]').exists()).toBe(false)
     ;(w.vm as any).toggleCurrentColumn('model')

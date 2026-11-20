@@ -24,7 +24,7 @@ describe('usage list headers follow the page sort', () => {
 
   it('the usage table: hidden sorted column, no false arrow; shown again, its arrow', async () => {
     const wrapper = mount(UsageTable, {
-      props: { data: [], columns: [time], serverSideSort: true, defaultSortKey: 'model', defaultSortOrder: 'asc' },
+      props: { data: [], columns: [time], serverSideSort: true, sort: { key: 'model', order: 'asc' } },
       global: { stubs: { Icon: true, Teleport: true, EmptyState: true } },
     })
     expect(ariaSort(wrapper, 'Time')).toBe('none')
@@ -47,6 +47,21 @@ describe('usage list headers follow the page sort', () => {
     await wrapper.vm.$nextTick()
     expect(ariaSort(wrapper, modelLabel)).toBe('ascending')
     expect(ariaSort(wrapper, timeLabel)).toBe('none')
+  })
+
+  it('names each table\'s scroll area', () => {
+    const usage = mount(UsageTable, {
+      props: { data: [], columns: [time], scrollLabel: 'usage.tabs.usage' },
+      global: { stubs: { Icon: true, Teleport: true, EmptyState: true } },
+    })
+    expect(usage.find('[role="region"][aria-label="usage.tabs.usage"]').exists()).toBe(true)
+    for (const Table of [OpsErrorLogTable, UserErrorRequestsTable]) {
+      const errors = mount(Table as never, {
+        props: { rows: [], total: 0, loading: false, page: 1, pageSize: 20, scrollLabel: 'usage.tabs.errors' },
+        global: { stubs: { Icon: true, Teleport: true, Pagination: true, 'el-tooltip': true, UserErrorDetailModal: true } },
+      })
+      expect(errors.find('[role="region"][aria-label="usage.tabs.errors"]').exists()).toBe(true)
+    }
   })
 
   it('maps the errors API key status_code back to the status header', async () => {

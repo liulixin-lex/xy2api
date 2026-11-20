@@ -193,27 +193,15 @@ export function formatDateTime(
 }
 
 /**
- * A log line's local time: "11-20 06:54:11" within the current year, "2025-11-20 06:54:11" before it. The same digits in
- * every language, so a column of times lines up.
+ * A time with its year always, for a detail view: "2026-11-20 06:54:11" (the list writes this year's without it,
+ * formatListDateTime).
  */
-export function formatLogTime(date: string | Date | null | undefined, now: Date = new Date()): string {
-  const d = date ? new Date(date) : null
-  if (!d || isNaN(d.getTime())) return ''
-  return logTimeText(d, d.getFullYear() !== now.getFullYear())
-}
-
-/** The same time with its year always, for a detail view: "2026-11-20 06:54:11". */
 export function formatFullLogTime(date: string | Date | null | undefined): string {
-  const d = date ? new Date(date) : null
-  if (!d || isNaN(d.getTime())) return ''
-  return logTimeText(d, true)
-}
-
-function logTimeText(d: Date, withYear: boolean): string {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const day = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-  return withYear ? `${d.getFullYear()}-${day} ${time}` : `${day} ${time}`
+  if (!date) return ''
+  const d = new Date(date)
+  if (isNaN(d.getTime())) return ''
+  // A "now" in another year: the list's rule then always writes the year.
+  return formatListDateTime(d, {}, new Date(d.getFullYear() + 1, 0, 1))
 }
 
 /**
