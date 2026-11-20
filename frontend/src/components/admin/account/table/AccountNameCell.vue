@@ -16,15 +16,17 @@
 <script setup lang="ts">
 /**
  * Name column (prototype): the account name, and "platform · type" below it, each cut with "…" at the column's width
- * (on a phone the frozen identity column, mobile list plan). The whole name, email and parent show in the tip on hover,
- * or at once on a tap outside the name's link (touch has no hover).
+ * (on a phone the frozen identity column, mobile list plan). The whole name, email, parent and home page show in the
+ * tip on hover, or at once on a tap or click (touch has no hover). On a touch screen the first tap on a linked name
+ * shows the tip, the home page in it; a second tap, with the tip showing, opens the site.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import { platformLabel } from '@/utils/platformColors'
 import { sanitizeUrl } from '@/utils/url'
-import { showTipNow, vTip } from '@/utils/tip'
+import { usePointerCoarse } from '@/composables/usePointerCoarse'
+import { isTipShowing, showTipNow, vTip } from '@/utils/tip'
 import { accountTypeLabel } from './accountLabels'
 
 const props = defineProps<{ account: Account }>()
@@ -48,9 +50,12 @@ const email = computed(() => {
 const title = computed(() =>
   [props.account.name, email.value, props.account.parent_chatgpt_account_id, homepage.value].filter(Boolean).join('\n')
 )
-/** A tap or click shows the tip at once; the name's link still opens the site. */
+const coarse = usePointerCoarse()
+/** A tap or click shows the tip at once. A mouse click on the link opens the site; a tap does once the tip shows. */
 const reveal = (event: MouseEvent) => {
-  if (event.target instanceof Element && event.target.closest('a')) return
+  const onLink = event.target instanceof Element && !!event.target.closest('a')
+  if (onLink && (!coarse.value || isTipShowing(event.currentTarget))) return
+  if (onLink) event.preventDefault()
   showTipNow(event.currentTarget)
 }
 </script>
