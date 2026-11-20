@@ -6,6 +6,11 @@
     @apply border-gray-200 dark:border-dark-700;
   }
 
+  button:enabled,
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
   html {
     @apply scroll-smooth antialiased;
     color-scheme: light;
@@ -65,6 +70,14 @@
   }
 
 
+}
+
+@utility card {
+  @apply bg-white dark:bg-dark-800/50;
+  @apply rounded-2xl;
+  @apply border border-gray-100 dark:border-dark-700/50;
+  @apply shadow-card;
+  @apply transition-[transform,border-color] duration-200 ease-out;
 }
 
 @layer components {
@@ -227,15 +240,6 @@
   }
 
   /* ============ 卡片样式 ============ */
-  .card,
-  .stat-card {
-    @apply bg-white dark:bg-dark-800/50;
-    @apply rounded-2xl;
-    @apply border border-gray-100 dark:border-dark-700/50;
-    @apply shadow-card;
-    @apply transition-[transform,border-color] duration-200 ease-out;
-  }
-
   /* 悬停阴影由 styles/motion.css 的 ::after 绘制，只过渡其 opacity */
   .card-hover {
     @apply hover:-translate-y-0.5;
@@ -265,7 +269,7 @@
 
   /* ============ 统计卡片 ============ */
   .stat-card {
-    @apply p-5;
+    @apply card p-5;
     @apply flex items-start gap-4;
   }
 

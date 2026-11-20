@@ -93,7 +93,7 @@ export default defineConfig(({ mode }) => {
     ],
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src'),
+      '@': resolve(import.meta.dirname, 'src'),
       // 使用 vue-i18n 运行时版本，避免 CSP unsafe-eval 问题
       'vue-i18n': 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js'
     }
@@ -101,11 +101,9 @@ export default defineConfig(({ mode }) => {
   // Keep JSON module generation consistent with Vite 5.
   json: { stringify: false },
   build: {
-    // Preserve Vite 5's CommonJS execution behavior during the toolchain upgrade.
-    commonjsOptions: { strictRequires: 'auto' },
     outDir: '../backend/internal/web/dist',
     emptyOutDir: true,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         /**
          * 手动分包配置
@@ -177,7 +175,7 @@ export default defineConfig(({ mode }) => {
     }
   },
     server: {
-      fs: { allow: [__dirname, resolve(__dirname, '../docs/legal')] },
+      fs: { allow: [import.meta.dirname, resolve(import.meta.dirname, '../docs/legal')] },
       host: '0.0.0.0',
       port: devPort,
       proxy: {
