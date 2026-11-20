@@ -270,9 +270,7 @@
           </template>
 
           <template #cell-rate_multiplier="{ value }">
-            <span class="text-sm text-gray-700 dark:text-gray-300"
-              >{{ value }}x</span
-            >
+            <span class="text-sm tabular-nums text-gray-700 dark:text-gray-300">{{ formatRate(value) }}</span>
           </template>
 
           <template #cell-is_exclusive="{ value }">
@@ -284,53 +282,21 @@
           </template>
           <template #cell-category="{ row }"><GroupCategoryTags :group-id="row.id" /></template>
 
+          <!-- "available / total" on one line (mobile list plan, copy); rate-limited accounts after it when there are any. -->
           <template #cell-account_count="{ row }">
-            <div class="space-y-0.5 text-xs">
-              <div>
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsAvailable")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-emerald-600 dark:text-emerald-400"
-                  >{{ row.active_account_count || 0 }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-              <div v-if="row.rate_limited_account_count">
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsRateLimited")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-amber-600 dark:text-amber-400"
-                  >{{ row.rate_limited_account_count }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-              <div>
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsTotal")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >{{ row.account_count || 0 }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-            </div>
+            <span class="whitespace-nowrap text-sm tabular-nums" data-test="group-account-count">
+              <span class="font-medium text-emerald-600 dark:text-emerald-400">{{ row.active_account_count || 0 }}</span>
+              <span class="text-gray-400 dark:text-gray-500"> / </span>
+              <span class="text-gray-700 dark:text-gray-300">{{ row.account_count || 0 }}</span>
+              <span v-if="row.rate_limited_account_count" class="ml-1.5 text-xs text-amber-600 dark:text-amber-400">{{
+                t("admin.groups.accountsLimitedShort", { n: row.rate_limited_account_count })
+              }}</span>
+            </span>
           </template>
 
           <template #cell-sched_gate="{ row }">
             <span v-if="schedGateText(row)" class="sq-num whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{{ schedGateText(row) }}</span>
-            <span v-else class="text-sm text-gray-500 dark:text-dark-400">—</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-capacity="{ row }">
@@ -344,12 +310,12 @@
               :rpm-used="row.capacity.rpmUsed"
               :rpm-max="row.capacity.rpmMax"
             />
-            <span v-else class="text-xs text-gray-400">—</span>
+            <CellEmpty v-else />
           </template>
 
           <!-- Amounts on the accounts page's three-significant-digit rule, the exact one in the tip (7o-4). -->
           <template #cell-usage="{ row }">
-            <div v-if="!row.usage_summary" class="text-xs text-gray-400">—</div>
+            <CellEmpty v-if="!row.usage_summary" />
             <div v-else class="space-y-0.5 text-xs">
               <div class="text-gray-500 dark:text-gray-400">
                 <span class="text-gray-400 dark:text-gray-500">{{
@@ -4464,6 +4430,8 @@ import PendingChangesPill from "@/components/common/PendingChangesPill.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
 import GroupAliasPill from "@/components/common/GroupAliasPill.vue";
 import TableIdentityCell from "@/components/common/TableIdentityCell.vue";
+import CellEmpty from "@/components/common/CellEmpty.vue";
+import { formatRate } from "@/utils/formatters";
 import GroupActionMenu from "@/components/admin/group/GroupActionMenu.vue";
 import { groupRowActions, hasRowActions, type GroupRowAction, type GroupRowActions } from "@/components/admin/group/groupRowActions";
 import { useTableViewport } from "@/composables/useTableViewport";

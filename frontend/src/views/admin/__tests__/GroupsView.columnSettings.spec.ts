@@ -175,6 +175,12 @@ const DataTableStub = {
       <div v-if="data.length" data-test="billing-cell">
         <slot name="cell-billing_type" :row="data[0]" />
       </div>
+      <div v-if="data.length" data-test="rate-cell">
+        <slot name="cell-rate_multiplier" :row="data[0]" :value="data[0].rate_multiplier" />
+      </div>
+      <div v-if="data.length" data-test="accounts-cell">
+        <slot name="cell-account_count" :row="data[0]" />
+      </div>
     </div>
   `,
 }
@@ -567,5 +573,17 @@ describe('admin GroupsView column settings', () => {
       await flushPromises()
       expect(wrapper.find('[data-test="group-column-settings"]').exists()).toBe(true)
     })
+  })
+
+  // Mobile list plan, copy: the rate as "1.0x"; the accounts as "available / total", rate-limited ones after it.
+  it('writes the rate as 1.5x and the accounts as available / total', async () => {
+    listGroups.mockResolvedValue({
+      items: [{ id: 1, name: 'g', platform: 'anthropic', rate_multiplier: 1.5, status: 'active', active_account_count: 2, account_count: 3, rate_limited_account_count: 1, subscription_type: 'standard', is_exclusive: false, sort_order: 0 }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    const wrapper = await mountView()
+    expect(wrapper.get('[data-test="rate-cell"]').text()).toBe('1.5x')
+    const accounts = wrapper.get('[data-test="group-account-count"]')
+    expect(accounts.findAll(':scope > span').map((el) => el.text())).toEqual(['2', '/', '3', 'admin.groups.accountsLimitedShort'])
   })
 })
