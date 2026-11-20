@@ -548,7 +548,7 @@
             <div class="flex items-center gap-2">
               <div class="group relative">
                 <button
-                  class="font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
+                  class="users-balance font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
                   :disabled="!canReadRow(row)"
                   @click="handleBalanceHistory(row)"
                 >
@@ -563,7 +563,7 @@
               <button
                 v-if="canAdjustBalanceOf(row)"
                 @click.stop="handleDeposit(row)"
-                class="rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
+                class="users-balance rounded px-2 py-0.5 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                 :title="t('admin.users.deposit')"
               >
                 {{ t('admin.users.deposit') }}
@@ -1122,9 +1122,10 @@ const toggleableColumns = computed(() =>
   allColumns.value.filter(col => col.key !== 'email' && col.key !== 'actions')
 )
 
-// Default hidden columns from 768px (columns hidden by default on first load)
+// Default hidden columns from 768px. The user name is the identity's second line, so its own column starts hidden
+// (a saved setting keeps its own).
 const DEFAULT_HIDDEN_COLUMNS = [
-  'notes', 'groups', 'subscriptions', 'usage', 'concurrency',
+  'username', 'notes', 'groups', 'subscriptions', 'usage', 'concurrency',
   'usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity',
   'balance_platform_quota'
 ]
@@ -2254,7 +2255,15 @@ onUnmounted(() => {
   .action-menu-content button {
     min-height: 40px;
   }
+  .users-ops {
+    gap: 8px;
+  }
   .users-ops > button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+  /* The balance (its history) and "Deposit", 8px apart. */
+  .users-balance {
     min-width: 40px;
     min-height: 40px;
   }
