@@ -802,7 +802,7 @@
       <div
         v-if="activeMenuId !== null && menuPosition"
         class="action-menu-content fixed z-[9999] w-48 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10"
-        :style="{ top: menuPosition.top + 'px', left: menuPosition.left + 'px', zIndex: actionMenuLayer.zIndex.value }"
+        :style="{ top: menuPosition.top + 'px', left: menuPosition.left + 'px', zIndex: actionMenuLayer.zIndex.value, maxHeight: menuMaxHeight ? menuMaxHeight + 'px' : undefined, overflowY: menuMaxHeight ? 'auto' : undefined }"
         ref="actionMenuRef"
       >
         <div class="py-1">
@@ -974,7 +974,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -1723,63 +1723,62 @@ const menuPosition = ref<{ top: number; left: number } | null>(null)
 const actionMenuRef = ref<HTMLElement | null>(null)
 const actionMenuLayer = useOverlayLayer(() => activeMenuId.value !== null && !!menuPosition.value, { root: actionMenuRef, modal: false, floor: 9999, onEscape: () => closeActionMenu() })
 
+/** Where the row's menu was opened: its "⋯" (a phone centres the menu on it) or the click (wider screens). */
+let menuAnchor: { rect: DOMRect; x: number; y: number } | null = null
+/** Set when the menu is taller than the room on screen: it scrolls inside itself. */
+const menuMaxHeight = ref<number | null>(null)
+const MENU_PADDING = 8
+/** Places the open menu by its real size (a super admin's has nine items), inside the screen, after it renders. */
+const placeActionMenu = () => {
+  const menu = actionMenuRef.value
+  const anchor = menuAnchor
+  if (!menu || !anchor) return
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  const room = viewportHeight - MENU_PADDING * 2
+  const height = Math.min(menu.scrollHeight, room)
+  const width = menu.offsetWidth
+  const clampLeft = (left: number) => Math.max(MENU_PADDING, Math.min(left, viewportWidth - width - MENU_PADDING))
+  let left: number
+  let top: number
+  if (viewportWidth < 768) {
+    // 居中于按钮；优先显示在下方，放不下就在上方，都放不下就贴着视口
+    left = clampLeft(anchor.rect.left + anchor.rect.width / 2 - width / 2)
+    const below = anchor.rect.bottom + 4
+    const above = anchor.rect.top - height - 4
+    top = below + height <= viewportHeight - MENU_PADDING ? below : above >= MENU_PADDING ? above : viewportHeight - MENU_PADDING - height
+  } else {
+    left = clampLeft(anchor.x - width)
+    top = Math.min(anchor.y, viewportHeight - MENU_PADDING - height)
+  }
+  menuPosition.value = { top: Math.max(MENU_PADDING, top), left }
+  menuMaxHeight.value = menu.scrollHeight > room ? room : null
+}
+
 const openActionMenu = (user: AdminUser, e: MouseEvent) => {
   if (activeMenuId.value === user.id) {
     closeActionMenu()
-  } else {
-    const target = e.currentTarget as HTMLElement
-    if (!target) {
-      closeActionMenu()
-      return
-    }
-
-    const rect = target.getBoundingClientRect()
-    const menuWidth = 200
-    // A phone's menu also leads with editing and enabling.
-    const menuHeight = window.innerWidth < 768 ? 320 : 240
-    const padding = 8
-    const viewportWidth = window.innerWidth
-    const viewportHeight = window.innerHeight
-
-    let left, top
-
-    if (viewportWidth < 768) {
-      // 居中显示,水平位置
-      left = Math.max(padding, Math.min(
-        rect.left + rect.width / 2 - menuWidth / 2,
-        viewportWidth - menuWidth - padding
-      ))
-
-      // 优先显示在按钮下方
-      top = rect.bottom + 4
-
-      // 如果下方空间不够,显示在上方
-      if (top + menuHeight > viewportHeight - padding) {
-        top = rect.top - menuHeight - 4
-        // 如果上方也不够,就贴在视口顶部
-        if (top < padding) {
-          top = padding
-        }
-      }
-    } else {
-      left = Math.max(padding, Math.min(
-        e.clientX - menuWidth,
-        viewportWidth - menuWidth - padding
-      ))
-      top = e.clientY
-      if (top + menuHeight > viewportHeight - padding) {
-        top = viewportHeight - menuHeight - padding
-      }
-    }
-
-    menuPosition.value = { top, left }
-    activeMenuId.value = user.id
+    return
   }
+  const target = e.currentTarget as HTMLElement
+  if (!target) {
+    closeActionMenu()
+    return
+  }
+  const rect = target.getBoundingClientRect()
+  menuAnchor = { rect, x: e.clientX || rect.right, y: e.clientY || rect.bottom }
+  // Drawn first where the click was, then placed by its real height once it is there.
+  menuMaxHeight.value = null
+  menuPosition.value = { top: rect.bottom + 4, left: Math.max(MENU_PADDING, rect.left) }
+  activeMenuId.value = user.id
+  void nextTick(placeActionMenu)
 }
 
 const closeActionMenu = () => {
   activeMenuId.value = null
   menuPosition.value = null
+  menuMaxHeight.value = null
+  menuAnchor = null
 }
 
 // Close menu when clicking outside

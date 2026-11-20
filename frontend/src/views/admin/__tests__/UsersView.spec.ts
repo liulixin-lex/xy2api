@@ -885,5 +885,35 @@ describe('admin UsersView', () => {
       localStorage.removeItem('admin-users-usage-sort')
     }
   })
+
+  // Astra review: a super admin's menu (nine items, 395px) ran past a 320px-high screen; it is placed by its real
+  // height and scrolls inside itself when taller than the room.
+  it('places the row menu by its real height, scrolling inside when the screen is shorter', async () => {
+    const proto = HTMLElement.prototype
+    const scrollHeight = Object.getOwnPropertyDescriptor(proto, 'scrollHeight')
+    const offsetWidth = Object.getOwnPropertyDescriptor(proto, 'offsetWidth')
+    Object.defineProperty(proto, 'scrollHeight', { configurable: true, get() { return (this as HTMLElement).classList.contains('action-menu-content') ? 395 : 0 } })
+    Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return (this as HTMLElement).classList.contains('action-menu-content') ? 192 : 0 } })
+    const height = window.innerHeight
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 320 })
+    try {
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      await wrapper.get('[data-test="actions-42"] .action-menu-trigger').trigger('click')
+      await flushPromises()
+      const menu = wrapper.get('.action-menu-content').element as HTMLElement
+      expect(menu.style.maxHeight).toBe('304px')
+      expect(menu.style.overflowY).toBe('auto')
+      expect(menu.style.top).toBe('8px')
+      wrapper.unmount()
+    } finally {
+      if (scrollHeight) Object.defineProperty(proto, 'scrollHeight', scrollHeight)
+      else delete (proto as { scrollHeight?: number }).scrollHeight
+      if (offsetWidth) Object.defineProperty(proto, 'offsetWidth', offsetWidth)
+      else delete (proto as { offsetWidth?: number }).offsetWidth
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: height })
+    }
+  })
 })
 
