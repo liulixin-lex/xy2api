@@ -188,6 +188,42 @@ func TestSchedAdminSummaryRecentSince(t *testing.T) {
 	}
 }
 
+func TestSchedAdminSummaryRecentSinceAfterRebuildWithoutAccountSamplesOrGroups(t *testing.T) {
+	f := newQualityFixture(t)
+	evaluatedAt := f.now
+	ctx := context.Background()
+	admin := NewSchedAdminService(SchedAdminDependencies{
+		Engine:   f.e,
+		Accounts: &schedAdminAccounts{rows: map[int64]*Account{2: {ID: 2, Platform: PlatformOpenAI}}},
+		Now:      func() time.Time { return f.now },
+	})
+
+	f.now = evaluatedAt.Add(-time.Hour + time.Second)
+	reset, err := f.e.Reset(ctx, 2)
+	require.NoError(t, err)
+	f.now = evaluatedAt
+	f.cycle()
+
+	// The reset only expires when the published aggregation window advances.
+	f.now = evaluatedAt.Add(2 * time.Second)
+	before, err := admin.Summary(ctx, []int64{2})
+	require.NoError(t, err)
+	require.Len(t, before.Accounts, 1)
+	require.Equal(t, schedAdminTime(reset), before.Accounts[0].RecentSince)
+
+	_, err = f.e.Reset(ctx, 1)
+	require.NoError(t, err)
+	snap := f.e.Snapshot()
+	require.NotContains(t, snap.Accounts, int64(2))
+	require.Equal(t, f.now, snap.Account(1).To)
+	require.Equal(t, evaluatedAt, snap.At)
+	after, err := admin.Summary(ctx, []int64{2})
+	require.NoError(t, err)
+	require.Len(t, after.Accounts, 1)
+	require.Equal(t, schedAdminTime(reset), after.Accounts[0].ResetAt)
+	require.Nil(t, after.Accounts[0].RecentSince)
+}
+
 type schedAdminStatsAccounts struct {
 	*schedAdminAccounts
 	rearErr error

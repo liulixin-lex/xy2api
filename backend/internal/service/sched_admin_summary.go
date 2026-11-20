@@ -67,7 +67,7 @@ func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualityS
 	v := p.Account(a.ID)
 	windowEnd := v.To
 	if windowEnd.IsZero() { // Accounts without samples or group membership can lack a summary.
-		windowEnd = p.At
+		windowEnd = p.summaryWindowEnd
 	}
 	if p.ResetAt[a.ID].After(windowEnd.Add(-time.Hour)) {
 		out.RecentSince = out.ResetAt
