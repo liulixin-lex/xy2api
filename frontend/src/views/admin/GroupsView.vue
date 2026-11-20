@@ -2,10 +2,43 @@
   <AppLayout>
     <TablePageLayout table-layout>
       <template #filters>
-        <!-- The compact toolbar (12.9): live, refresh and column settings, a rule, then sort, categories and create. -->
-        <TableToolbar compact>
+        <!-- The compact toolbar (12.9): live, refresh and column settings, a rule, then sort, categories and create.
+             Below 768px the phone toolbar (mobile list plan): search, "Filters n" and create; the chosen filters as
+             tags; the count, live state and tools on one row, the page's own tools in "more". -->
+        <TableToolbar compact filter-sheet :filter-count="filterTags.length" @clear-filters="clearGroupFilters">
           <template #status>
+            <TableSortHint v-if="!phone && sortHint" :label="sortHint.label" :order="sortHint.order" />
             <LiveStatusIndicator :status="liveStatus" :pause="liveGroups.pause" :resume="liveGroups.resume" :detail="t('admin.groups.liveDetail')" />
+          </template>
+          <template v-if="phone" #sheet>
+            <div class="grid gap-4">
+              <label class="grid gap-1.5" data-filter="platform">
+                <span class="input-label !mb-0">{{ t('admin.groups.columns.platform') }}</span>
+                <Select v-model="filters.platform" :options="platformFilterOptions" :aria-label="t('admin.groups.columns.platform')" @change="applyGroupFilterChange" />
+              </label>
+              <label class="grid gap-1.5" data-filter="status">
+                <span class="input-label !mb-0">{{ t('admin.groups.columns.status') }}</span>
+                <Select v-model="filters.status" :options="statusOptions" :aria-label="t('admin.groups.columns.status')" @change="applyGroupFilterChange" />
+              </label>
+              <label v-if="!authStore.isSimpleMode" class="grid gap-1.5" data-filter="is_exclusive">
+                <span class="input-label !mb-0">{{ t('admin.groups.columns.type') }}</span>
+                <Select v-model="filters.is_exclusive" :options="exclusiveOptions" :aria-label="t('admin.groups.columns.type')" @change="applyGroupFilterChange" />
+              </label>
+              <label v-if="!authStore.isSimpleMode && (groupCategories.categories.length > 0 || filters.group_category)" class="grid gap-1.5" data-filter="group_category">
+                <span class="input-label !mb-0">{{ t('admin.groupCategories.column') }}</span>
+                <GroupCategoryFilter v-model="filters.group_category" @change="applyGroupFilterChange" />
+              </label>
+            </div>
+          </template>
+          <template v-if="phone" #tags>
+            <UsageFilterTags :tags="filterTags" @remove="removeGroupFilter" />
+          </template>
+          <template v-if="phone" #info>
+            <span data-test="groups-count">{{ t('common.table.count', { n: groupsTotal.toLocaleString() }) }}</span>
+            <template v-if="sortHint">
+              <span class="table-toolbar__sep" aria-hidden="true">·</span>
+              <TableSortHint :label="sortHint.label" :order="sortHint.order" />
+            </template>
           </template>
           <template #search>
             <label class="table-toolbar__search-box">
@@ -20,12 +53,13 @@
               />
             </label>
           </template>
-          <template #filters>
+          <template v-if="!phone" #filters>
             <Select
               v-model="filters.platform"
               size="sm"
               :options="platformFilterOptions"
               :placeholder="t('admin.groups.allPlatforms')"
+              data-filter="platform"
               class="table-toolbar__filter"
               @change="applyGroupFilters"
             />
@@ -34,6 +68,7 @@
               size="sm"
               :options="statusOptions"
               :placeholder="t('admin.groups.allStatus')"
+              data-filter="status"
               class="table-toolbar__filter"
               @change="applyGroupFilters"
             />
@@ -43,10 +78,11 @@
               size="sm"
               :options="exclusiveOptions"
               :placeholder="t('admin.groups.allGroups')"
+              data-filter="is_exclusive"
               class="table-toolbar__filter"
               @change="applyGroupFilters"
             />
-            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" size="sm" class="table-toolbar__filter" @change="applyGroupFilters" />
+            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" size="sm" data-filter="group_category" class="table-toolbar__filter" @change="applyGroupFilters" />
           </template>
 
           <template #actions>
@@ -67,11 +103,12 @@
             <div class="relative" ref="columnDropdownRef">
               <button
                 type="button"
-                @click="showColumnDropdown = !showColumnDropdown"
+                @click="phone ? (showColumnSheet = true) : (showColumnDropdown = !showColumnDropdown)"
                 class="table-toolbar__icon-btn table-toolbar__icon"
                 :aria-label="t('admin.groups.columnSettings')"
-                aria-haspopup="true"
-                :aria-expanded="showColumnDropdown ? 'true' : 'false'"
+                :aria-haspopup="phone ? 'dialog' : 'true'"
+                :aria-expanded="(phone ? showColumnSheet : showColumnDropdown) ? 'true' : 'false'"
+                data-test="group-columns"
                 v-tip="t('admin.groups.columnSettings')"
               >
                 <!-- The columns icon of the other pages' column settings: "grid" is the category manager's (7r-7). -->
@@ -80,15 +117,26 @@
                 </svg>
               </button>
               <div
-                v-if="showColumnDropdown"
+                v-if="showColumnDropdown && !phone"
                 class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
                 <GroupColumnSettings :columns="toggleableColumns" :is-visible="isColumnVisible" :at-default="columnVisibility.atDefault.value" @toggle="toggleColumn" @reset="resetColumns" />
               </div>
             </div>
-            <span v-if="canManage" class="table-toolbar__divider" aria-hidden="true"></span>
             <button
-              v-if="!authStore.isSimpleMode && canManage"
+              v-if="phone && hasPageTools"
+              type="button"
+              class="table-toolbar__icon-btn table-toolbar__icon"
+              aria-haspopup="dialog"
+              :aria-label="t('common.more')"
+              data-test="group-tools"
+              @click="showToolsSheet = true"
+            >
+              <Icon name="more" size="sm" />
+            </button>
+            <span v-if="canManage && !phone" class="table-toolbar__divider" aria-hidden="true"></span>
+            <button
+              v-if="!phone && !authStore.isSimpleMode && canManage"
               type="button"
               @click="openSortModal"
               class="table-toolbar__btn table-toolbar__btn--secondary"
@@ -98,16 +146,18 @@
               <Icon name="arrowsUpDown" size="sm" />
               <span class="table-toolbar__label table-toolbar__label--wide">{{ t("admin.groups.sortOrder") }}</span>
             </button>
-            <GroupCategoryManagerButton v-if="!authStore.isSimpleMode && canManage" />
+            <GroupCategoryManagerButton v-if="!authStore.isSimpleMode && canManage" ref="categoryManagerRef" :button-hidden="phone" />
+          </template>
+          <template v-if="canManage" #create>
             <button
-              v-if="canManage"
               type="button"
               @click="openCreateModal"
               class="table-toolbar__btn table-toolbar__btn--primary"
+              :aria-label="t('admin.groups.createGroup')"
               data-tour="groups-create-btn"
             >
               <Icon name="plus" size="sm" />
-              {{ t("admin.groups.createGroup") }}
+              {{ phone ? t("common.create") : t("admin.groups.createGroup") }}
             </button>
           </template>
         </TableToolbar>
@@ -4411,6 +4461,22 @@
       @close="showRPMOverridesModal = false"
       @success="reloadGroups"
     />
+    <!-- A phone's column settings: this width's own shown columns. -->
+    <BottomSheet :show="showColumnSheet" :title="t('common.table.columnsTitle')" test-id="group-column-sheet" @close="showColumnSheet = false">
+      <GroupColumnSettings :columns="toggleableColumns" :is-visible="isColumnVisible" :at-default="columnVisibility.atDefault.value" @toggle="toggleColumn" @reset="resetColumns" />
+    </BottomSheet>
+    <!-- A phone's page tools: the group order and the categories. -->
+    <BottomSheet :show="showToolsSheet" :title="t('common.more')" test-id="group-tools-sheet" @close="showToolsSheet = false">
+      <div class="grid gap-3">
+        <button type="button" class="btn btn-secondary w-full" data-test="group-tools-sort" @click="showToolsSheet = false; openSortModal()">
+          {{ t("admin.groups.sortOrder") }}
+        </button>
+        <button type="button" class="btn btn-secondary w-full" data-test="group-tools-categories" @click="showToolsSheet = false; categoryManagerRef?.open()">
+          {{ t("admin.groupCategories.manage") }}
+        </button>
+      </div>
+    </BottomSheet>
+
     <GroupActionMenu
       :show="!!rowMenu.group"
       :group="rowMenu.group"
@@ -4461,6 +4527,9 @@ import GroupActionMenu from "@/components/admin/group/GroupActionMenu.vue";
 import { groupRowActions, hasRowActions, type GroupRowAction, type GroupRowActions } from "@/components/admin/group/groupRowActions";
 import { useTableViewport } from "@/composables/useTableViewport";
 import { useColumnVisibility } from "@/composables/useColumnVisibility";
+import BottomSheet from "@/components/common/BottomSheet.vue";
+import TableSortHint from "@/components/common/TableSortHint.vue";
+import UsageFilterTags from "@/components/admin/usage/UsageFilterTags.vue";
 import GroupColumnSettings from "@/components/admin/group/GroupColumnSettings.vue";
 import GroupAliasField from "@/components/admin/group/GroupAliasField.vue";
 import Pagination from "@/components/common/Pagination.vue";
@@ -6008,7 +6077,55 @@ const handlePageSizeChange = (pageSize: number) => {
 const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }));
 
 // ---- Row actions below 1024px: "⋯" and its menu ----
-const { desktop } = useTableViewport();
+const { phone, desktop } = useTableViewport();
+
+// ---- The phone toolbar: tags, count, sort hint, sheets ----
+const showColumnSheet = ref(false);
+const showToolsSheet = ref(false);
+const categoryManagerRef = ref<{ open: () => void } | null>(null);
+watch(phone, (on) => {
+  if (!on) {
+    showColumnSheet.value = false;
+    showToolsSheet.value = false;
+  } else showColumnDropdown.value = false;
+});
+const hasPageTools = computed(() => !authStore.isSimpleMode && canManage.value);
+const optionLabel = (options: { value: string; label: string }[], value: string) =>
+  options.find((option) => option.value === value)?.label ?? value;
+/** The chosen filters, in the fields' order, as the phone's removable tags ("Filters n" counts them). */
+const filterTags = computed(() => {
+  const tags: { key: keyof typeof filters; label: string; text: string }[] = [];
+  if (filters.platform) tags.push({ key: "platform", label: t("admin.groups.columns.platform"), text: optionLabel(platformFilterOptions.value, filters.platform) });
+  if (filters.status) tags.push({ key: "status", label: t("admin.groups.columns.status"), text: optionLabel(statusOptions.value, filters.status) });
+  if (!authStore.isSimpleMode && filters.is_exclusive) tags.push({ key: "is_exclusive", label: t("admin.groups.columns.type"), text: optionLabel(exclusiveOptions.value, filters.is_exclusive) });
+  if (!authStore.isSimpleMode && filters.group_category) {
+    const name = groupCategories.categories.find((category) => String(category.id) === filters.group_category)?.name;
+    tags.push({ key: "group_category", label: t("admin.groupCategories.column"), text: name ?? filters.group_category });
+  }
+  return tags;
+});
+/** A filter changed in the sheet or by a tag: back to the first page, then reload. */
+const applyGroupFilterChange = () => {
+  pagination.page = 1;
+  void applyGroupFilters();
+};
+const removeGroupFilter = (key: string) => {
+  filters[key as keyof typeof filters] = "";
+  applyGroupFilterChange();
+};
+const clearGroupFilters = () => {
+  filters.platform = "";
+  filters.status = "";
+  filters.is_exclusive = "";
+  filters.group_category = "";
+  applyGroupFilterChange();
+};
+/** The sort while its column is hidden, named in the toolbar (the default order is no column). */
+const sortHint = computed(() => {
+  const column = allColumns.value.find((col) => col.key === sortState.sort_by);
+  if (!column || isColumnVisible(column.key)) return null;
+  return { label: column.label, order: sortState.sort_order };
+});
 const NO_ROW_ACTIONS: GroupRowActions = { board: false, edit: false, duplicate: false, composite: false, rate: false, rpm: false, delete: false };
 const rowActions = (group: { platform: string }) =>
   groupRowActions(group, { simpleMode: authStore.isSimpleMode, manage: canManage.value, adjustBalance: canAdjustBalance.value });

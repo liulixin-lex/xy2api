@@ -1,5 +1,6 @@
 <template>
   <button
+    v-if="!buttonHidden"
     type="button"
     class="table-toolbar__btn table-toolbar__btn--secondary"
     data-test="group-category-manage"
@@ -191,6 +192,10 @@ const deleteConfirmMessage = computed(() => {
 const clearErrors = () => {
   draftError.value = null
 }
+
+/** The phone's groups toolbar opens it from its "more" sheet, its own button hidden. */
+withDefaults(defineProps<{ buttonHidden?: boolean }>(), { buttonHidden: false })
+defineExpose({ open: () => openManager() })
 
 async function openManager() {
   open.value = true
