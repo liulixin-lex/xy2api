@@ -247,16 +247,21 @@ export function insideLayerAbove(token: symbol, el: Element): boolean {
 /**
  * Which element of `regions` the focus belongs to, for a caller about to remove them (a toolbar changing form across
  * a width): the focused element when it lies in one; when it lies in a layer opened from one (a Select's list,
- * teleported out of a bottom sheet), that layer's opener, followed down through nested layers; failing an opener
- * there (a list opened by a press that left focus elsewhere), the region's control whose popup is open
- * (`aria-expanded="true"`, the first region first). Null when focus is elsewhere on the page.
+ * teleported out of a bottom sheet), that layer's opener, followed down through nested layers. A press that does not
+ * focus what it presses (Safari) leaves the opener on whatever held focus, such as the sheet's panel: an opener that
+ * is not itself the open control gives way to the open control inside it (`aria-expanded="true"`). Failing an opener
+ * in the regions, the regions' open control (the first region first). Null when focus is elsewhere on the page.
  */
 export function focusOrigin(regions: readonly (Element | null | undefined)[], active: Element | null = document.activeElement): HTMLElement | null {
   const within = regions.filter((region): region is Element => !!region)
   const inRegion = (el: Element) => within.some((region) => region.contains(el))
+  const OPEN = '[aria-expanded="true"]'
   let at: Element | null = active
   for (let depth = 0; at instanceof HTMLElement && depth <= layers.length; depth++) {
-    if (inRegion(at)) return at
+    if (inRegion(at)) {
+      if (at === active || at.matches(OPEN)) return at
+      return at.querySelector<HTMLElement>(OPEN) ?? at
+    }
     const el: Element = at
     const layer = [...layers].reverse().find((candidate) => candidate.root()?.contains(el))
     if (!layer) return null

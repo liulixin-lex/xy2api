@@ -55,6 +55,18 @@ describe('focusOrigin', () => {
     expect(focusOrigin([sheet])).toBe(trigger)
   })
 
+  // Safari does not focus a pressed button: the list's opener is what held focus, here the sheet's panel.
+  it('takes the open control inside an opener that is not itself the control (a press that did not focus it)', () => {
+    const sheet = el('div')
+    const panel = el('div', sheet, { tabindex: '-1' })
+    el('button', panel, { 'aria-expanded': 'false', 'data-test': 'other' })
+    const trigger = el('button', panel, { 'aria-expanded': 'true' })
+    panel.focus()
+    const { search } = openList()
+    search.focus()
+    expect(focusOrigin([sheet])).toBe(trigger)
+  })
+
   it("falls back to the region's open control when the list's opener is elsewhere, the first region first", () => {
     const sheet = el('div')
     const toolbar = el('div')
