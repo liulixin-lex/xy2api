@@ -303,11 +303,14 @@ describe('UsageTable after review', () => {
     await detail.get('[data-testid="usage-detail-copy-request_id"]').trigger('click')
     await detail.get('[data-testid="usage-detail-copy-upstream_request_id"]').trigger('click')
     expect(writeText.mock.calls).toEqual([['r-1'], ['up-9']])
-    // Browser acceptance (step 1), item 7: the copy button's 40px target grows to the left only, never past the row's
-    // end (it made the dialog's body 10px wider than its box).
-    const copy = detail.get('[data-testid="usage-detail-copy-request_id"]').classes()
-    expect(copy).toEqual(expect.arrayContaining(['before:-inset-y-2.5', 'before:-left-[22px]', 'before:right-0']))
-    expect(copy.some((c) => /^before:-inset-\d|^before:-right-|^before:-inset-x-/.test(c))).toBe(false)
+    // Browser acceptance, item 7, and the review after it, item 4: each copy button is a 40×40 box in its own 40px row,
+    // no target reaching past the button (the targets overlapped, and one stuck out past the body's edge).
+    for (const key of ['request_id', 'upstream_request_id']) {
+      expect(detail.get(`[data-testid="usage-detail-${key}"]`).classes()).toContain('min-h-10')
+      const copy = detail.get(`[data-testid="usage-detail-copy-${key}"]`).classes()
+      expect(copy).toEqual(expect.arrayContaining(['h-10', 'w-10', 'justify-end']))
+      expect(copy.some((c) => c.startsWith('before:') || /^-m[xy]?-|^-m[trbl]-/.test(c))).toBe(false)
+    }
   })
 
   // Re-review: the user page is projected by role everywhere (cells, tips, detail): the model and reasoning effort asked
