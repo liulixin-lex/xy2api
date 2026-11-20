@@ -28,11 +28,11 @@
            1440px (a tablet, or a desktop beside the open navigation) the docs and model plaza links and the frozen amount
            fold to their icons and the balance, below 1280px the user's name to the avatar, so the page's name keeps its
            room. -->
-      <div class="flex shrink-0 items-center gap-1 sm:gap-3">
+      <div class="header-tools flex shrink-0 items-center gap-1 sm:gap-3">
         <!-- Page search (Ctrl/⌘K) -->
         <button
           type="button"
-          class="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          class="header-hit flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
           :title="`${t('commandPalette.open')} (${commandShortcut})`"
           :aria-label="t('commandPalette.open')"
           aria-haspopup="dialog"
@@ -54,7 +54,7 @@
           rel="noopener noreferrer"
           :title="t('nav.docs')"
           :aria-label="t('nav.docs')"
-          class="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
+          class="header-hit hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
         >
           <Icon name="book" size="sm" />
           <span class="hidden min-[1440px]:inline">{{ t('nav.docs') }}</span>
@@ -66,7 +66,7 @@
           :to="{ path: '/model-plaza', query: { embedded: '1' } }"
           :title="t('nav.modelPlaza')"
           :aria-label="t('nav.modelPlaza')"
-          class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          class="header-hit flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
         >
           <Icon name="grid" size="sm" />
           <span class="hidden min-[1440px]:inline">{{ t('nav.modelPlaza') }}</span>
@@ -457,6 +457,18 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* Touch (pointer: coarse, mobile list plan): the header's controls are 40px to hit and 8px apart (the bell, the
+   language and the subscription badge set their own 40px); a mouse keeps them as they are. */
+@media (pointer: coarse) {
+  .header-tools {
+    gap: 8px;
+  }
+  .header-hit {
+    min-width: 40px;
+    min-height: 40px;
+    justify-content: center;
+  }
+}
 /* The user menu never runs past the visible height (a phone on its side, with the balance in it): it scrolls on its
    own, the page behind it does not. Its top sits 62-64px down (below the avatar button and the 8px gap, mt-2), so 72px
    off the height leaves at least 8px free below. dvh follows the browser's address bar, vh is the fallback. */

@@ -18,7 +18,7 @@ describe('AppHeader page title on narrow screens', () => {
 
   it('lets the title side shrink while the buttons on the right keep their size', () => {
     expect(source).toContain('<div class="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">')
-    expect(source).toContain('<div class="flex shrink-0 items-center gap-1 sm:gap-3">')
+    expect(source).toContain('<div class="header-tools flex shrink-0 items-center gap-1 sm:gap-3">')
   })
 
   // Opus review, suggestion 8: on the user side at 768–1023px every item on the right squeezed the title to 0px.

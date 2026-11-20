@@ -205,15 +205,12 @@ defineExpose({ close: () => { open.value = false } })
     display: inline-block;
   }
 }
-/* Touch from 1024px: 40px to hit, its look unchanged (7n-3). */
-@media (min-width: 1024px) and (pointer: coarse) {
+/* Touch: a real 40px target at every width (mobile list plan), as the toolbar's other buttons are (TableToolbar, with
+   any-pointer too). A mouse keeps the 32px control. */
+@media (any-pointer: coarse) {
   .tools-btn {
-    position: relative;
-  }
-  .tools-btn::after {
-    position: absolute;
-    inset: -4px;
-    content: '';
+    min-width: 40px;
+    min-height: 40px;
   }
 }
 </style>
