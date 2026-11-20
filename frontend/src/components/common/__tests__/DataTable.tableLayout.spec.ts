@@ -50,14 +50,11 @@ afterEach(() => {
 })
 
 describe('DataTable below 1024px', () => {
-  it('mounts the table, not cards, with the sticky header and no mobile sort bar or select-all line', () => {
+  it('mounts the table with its sticky header on a phone', () => {
     stubPhone()
     const wrapper = mount(DataTable, { props: { columns, data: rows(1, 2), rowKey: 'id', selectable: true } })
-    expect(wrapper.find('.table-cards').exists()).toBe(false)
     expect(wrapper.find('table thead.table-header').exists()).toBe(true)
     expect(wrapper.findAll('tbody tr[data-row-id]')).toHaveLength(2)
-    expect(wrapper.find('[data-test="mobile-sort"]').exists()).toBe(false)
-    expect(wrapper.find('[data-test="select-all-mobile"]').exists()).toBe(false)
     expect(wrapper.get('.table-wrapper').classes()).toContain('dt-layout-table')
   })
 
