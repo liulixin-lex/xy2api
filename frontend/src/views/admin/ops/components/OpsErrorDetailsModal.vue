@@ -164,6 +164,8 @@ async function fetchErrorLogs() {
   }
 
 
+// Immediate: a deep link (?open_error_details=1) opens the list before the dialog mounts, so `show` is already true
+// and would never change to load it.
 watch(
   () => props.show,
   (open) => {
@@ -172,7 +174,8 @@ watch(
     page.value = 1
     pageSize.value = 10
     resetFilters()
-  }
+  },
+  { immediate: true }
 )
 
 watch(
