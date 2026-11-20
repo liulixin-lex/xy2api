@@ -32,7 +32,7 @@
         <!-- Page search (Ctrl/⌘K) -->
         <button
           type="button"
-          class="header-hit flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          class="header-hit hidden items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white md:flex"
           :title="`${t('commandPalette.open')} (${commandShortcut})`"
           :aria-label="t('commandPalette.open')"
           aria-haspopup="dialog"
@@ -60,13 +60,13 @@
           <span class="hidden min-[1440px]:inline">{{ t('nav.docs') }}</span>
         </a>
 
-        <!-- Model Plaza Entry (icon only below sm) -->
+        <!-- Model Plaza Entry (in the user menu below md) -->
         <router-link
           v-if="user && modelPlazaEnabled"
           :to="{ path: '/model-plaza', query: { embedded: '1' } }"
           :title="t('nav.modelPlaza')"
           :aria-label="t('nav.modelPlaza')"
-          class="header-hit flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          class="header-hit hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white md:flex"
         >
           <Icon name="grid" size="sm" />
           <span class="hidden min-[1440px]:inline">{{ t('nav.modelPlaza') }}</span>
@@ -76,7 +76,7 @@
         <LocaleSwitcher />
 
         <!-- Subscription Progress (for users with active subscriptions; not mounted at all when the feature is off) -->
-        <SubscriptionProgressMini v-if="user && subscriptionFeatureEnabled" />
+        <SubscriptionProgressMini v-if="user && subscriptionFeatureEnabled" class="hidden md:block" />
 
         <!-- Balance Display -->
         <div
@@ -180,6 +180,25 @@
               </div>
 
               <div class="py-1">
+                <!-- Below 768px the header has no room for every entry and the page's name with each button its own 40px:
+                     the search, the model plaza and the subscriptions sit here, and the docs below 640px. -->
+                <button type="button" class="dropdown-item w-full md:hidden" data-test="menu-search" @click="closeDropdown(); openPalette()">
+                  <Icon name="search" size="sm" />
+                  {{ t('commandPalette.open') }}
+                </button>
+                <router-link v-if="modelPlazaEnabled" :to="{ path: '/model-plaza', query: { embedded: '1' } }" class="dropdown-item md:hidden" data-test="menu-model-plaza" @click="closeDropdown">
+                  <Icon name="grid" size="sm" />
+                  {{ t('nav.modelPlaza') }}
+                </router-link>
+                <router-link v-if="subscriptionFeatureEnabled && hasActiveSubscriptions" to="/subscriptions" class="dropdown-item md:hidden" data-test="menu-subscriptions" @click="closeDropdown">
+                  <Icon name="creditCard" size="sm" />
+                  {{ t('nav.mySubscriptions') }}
+                </router-link>
+                <a v-if="docUrl" :href="docUrl" target="_blank" rel="noopener noreferrer" class="dropdown-item sm:hidden" data-test="menu-docs" @click="closeDropdown">
+                  <Icon name="book" size="sm" />
+                  {{ t('nav.docs') }}
+                </a>
+
                 <router-link to="/profile" @click="closeDropdown" class="dropdown-item">
                   <Icon name="user" size="sm" />
                   {{ t('nav.profile') }}
@@ -308,7 +327,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
+import { useAppStore, useAuthStore, useOnboardingStore, useSubscriptionStore } from '@/stores'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
@@ -378,6 +397,9 @@ const displayName = computed(() => {
 
 // 订阅功能关闭时不挂载顶栏订阅徽章（组件 onMounted 会拉取订阅接口）。
 const subscriptionFeatureEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.subscription))
+const subscriptionStore = useSubscriptionStore()
+/** As SubscriptionProgressMini shows itself: only with an active subscription. */
+const hasActiveSubscriptions = computed(() => subscriptionStore.hasActiveSubscriptions)
 
 // /purchase 的标题/描述随站点计费模式切换，与 document.title 共用同一解析。
 const routeMetaKeys = computed(() => resolveRouteMetaKeys(route, {
