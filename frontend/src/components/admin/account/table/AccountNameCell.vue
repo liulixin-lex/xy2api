@@ -85,6 +85,18 @@ const reveal = (event: MouseEvent) => {
     text-decoration: underline;
   }
 }
+/* Touch: the link's hit area is the whole name block and 4px past it (44px with the two lines); the first tap shows
+   the tip, the next opens the site (reveal). */
+@media (pointer: coarse) {
+  .account-name {
+    position: relative;
+  }
+  .account-name__link::after {
+    position: absolute;
+    inset: -4px 0;
+    content: '';
+  }
+}
 .account-name__sub {
   overflow: hidden;
   color: var(--color-text-muted);
