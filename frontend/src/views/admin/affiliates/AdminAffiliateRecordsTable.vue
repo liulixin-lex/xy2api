@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
         <div class="flex flex-wrap items-center gap-3">
           <div class="relative w-full md:w-80">
@@ -9,7 +9,7 @@
           </div>
           <input v-model="filters.start_at" type="date" class="input w-full sm:w-44" :title="t('admin.affiliates.records.startAt')" @change="reloadFromFirstPage" />
           <input v-model="filters.end_at" type="date" class="input w-full sm:w-44" :title="t('admin.affiliates.records.endAt')" @change="reloadFromFirstPage" />
-          <button class="btn btn-secondary px-2 md:px-3" :disabled="loading" :title="t('common.refresh')" @click="loadRecords">
+          <button class="btn btn-secondary justify-center px-2 md:px-3 [@media(pointer:coarse)]:min-w-10" :disabled="loading" :title="t('common.refresh')" :aria-label="t('common.refresh')" @click="loadRecords">
             <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
           </button>
           <button
@@ -26,6 +26,8 @@
 
       <template #table>
         <DataTable
+          layout="table"
+          :scroll-label="t(titleKey)"
           :columns="columns"
           :data="records"
           :loading="loading"
@@ -45,7 +47,7 @@
             />
           </template>
           <template #cell-invitee="{ row }">
-            <span v-if="row.invitee_id == null" class="text-sm text-gray-400 dark:text-dark-500">-</span>
+            <CellEmpty v-if="row.invitee_id == null" />
             <UserCell
               v-else
               :id="row.invitee_id"
@@ -65,22 +67,23 @@
             />
           </template>
           <template #cell-aff_code="{ row }">
-            <span class="font-mono text-sm text-gray-700 dark:text-gray-300">{{ row.aff_code || '-' }}</span>
+            <span v-if="row.aff_code" class="font-mono text-sm text-gray-700 dark:text-gray-300">{{ row.aff_code }}</span>
+            <CellEmpty v-else />
           </template>
+          <!-- The rebates' frozen identity column: at most 240px, the trade number cut with "…" and whole on a tap. -->
           <template #cell-order="{ row }">
-            <span v-if="row.order_id == null" class="text-sm text-gray-400 dark:text-dark-500">-</span>
-            <div v-else class="space-y-0.5">
-              <div class="font-mono text-sm text-gray-900 dark:text-white">#{{ row.order_id }}</div>
-              <div class="max-w-56 truncate text-sm text-gray-500 dark:text-dark-400">{{ row.out_trade_no }}</div>
+            <CellEmpty v-if="row.order_id == null" />
+            <div v-else class="max-w-[240px]">
+              <TableIdentityCell class="font-mono" :primary="`#${row.order_id}`" :secondary="row.out_trade_no" />
             </div>
           </template>
           <template #cell-payment_type="{ row }">
             <template v-if="row.payment_type">{{ t('payment.methods.' + row.payment_type, row.payment_type) }}</template>
-            <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+            <CellEmpty v-else />
           </template>
           <template #cell-order_status="{ row }">
             <OrderStatusBadge v-if="row.order_status" :status="row.order_status" />
-            <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+            <CellEmpty v-else />
           </template>
           <template #cell-total_rebate="{ row }">
             <AmountText :value="row.total_rebate" />
@@ -89,7 +92,7 @@
             <NullableAmountText :value="row.order_amount" />
           </template>
           <template #cell-pay_amount="{ row }">
-            <span v-if="row.pay_amount == null" class="text-sm text-gray-400 dark:text-dark-500">-</span>
+            <CellEmpty v-if="row.pay_amount == null" />
             <span v-else class="text-sm text-gray-900 dark:text-white">¥{{ formatAmount(row.pay_amount) }}</span>
           </template>
           <template #cell-rebate_amount="{ row }">
@@ -116,7 +119,8 @@
             <NullableAmountText :value="row.history_quota_after" />
           </template>
           <template #cell-created_at="{ row }">
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{ formatDateTime(row.created_at) }}</span>
+            <span v-if="row.created_at" class="whitespace-nowrap text-sm tabular-nums text-gray-700 dark:text-gray-300">{{ formatListDateTime(row.created_at) }}</span>
+            <CellEmpty v-else />
           </template>
         </DataTable>
       </template>
@@ -177,6 +181,8 @@ import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import CellEmpty from '@/components/common/CellEmpty.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
 import AffiliateOfflineWithdrawDialog from './AffiliateOfflineWithdrawDialog.vue'
 import type { Column } from '@/components/common/types'
@@ -184,7 +190,7 @@ import { useAppStore } from '@/stores/app'
 import { affiliatesAPI, type AffiliateInviteRecord, type AffiliateRebateRecord, type AffiliateTransferRecord, type AffiliateUserOverview, type ListAffiliateRecordsParams } from '@/api/admin/affiliates'
 import type { PaginatedResponse } from '@/types'
 import { extractI18nErrorMessage } from '@/utils/apiError'
-import { formatDateTime as formatDisplayDateTime } from '@/utils/format'
+import { formatListDateTime } from '@/utils/format'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
 type RecordType = 'invites' | 'rebates' | 'transfers'
@@ -193,6 +199,10 @@ type AffiliateRecord = AffiliateInviteRecord | AffiliateRebateRecord | Affiliate
 const props = defineProps<{
   type: RecordType
 }>()
+/** The page's title (the route's), naming the table's scroll area. */
+const titleKey = computed(() =>
+  props.type === 'invites' ? 'nav.affiliateInviteRecords' : props.type === 'rebates' ? 'nav.affiliateRebateRecords' : 'nav.affiliateTransferRecords'
+)
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -356,10 +366,6 @@ function formatPercent(value: number | null | undefined): string {
   return `${Number.isInteger(rounded) ? rounded.toString() : rounded.toString()}%`
 }
 
-function formatDateTime(value: string | null | undefined): string {
-  return value ? formatDisplayDateTime(value) : '-'
-}
-
 async function openUserOverview(userId: number) {
   if (!userId) return
   overviewDialog.value = true
@@ -384,16 +390,19 @@ const UserCell = defineComponent({
   },
   emits: ['open'],
   setup(cellProps, { emit }) {
-    return () => h('div', { class: 'space-y-0.5' }, [
+    // At most 224px, each line cut with "…" at the cell's width (a phone's frozen column is narrower): a clickable email
+    // opens the user's overview, which shows both whole; on touch its hit area is 40px high.
+    return () => h('div', { class: 'min-w-0 max-w-56 space-y-0.5' }, [
       h('div', { class: 'font-mono text-sm text-gray-900 dark:text-white' }, `#${cellProps.id}`),
       h(cellProps.clickable ? 'button' : 'div', {
         class: cellProps.clickable
-          ? 'max-w-56 truncate text-left text-sm font-medium text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300'
-          : 'max-w-56 truncate text-sm text-gray-700 dark:text-gray-300',
+          ? "relative block max-w-full truncate text-left text-sm font-medium text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300 [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:inset-x-0 [@media(pointer:coarse)]:before:-inset-y-2.5 [@media(pointer:coarse)]:before:content-['']"
+          : 'max-w-full truncate text-sm text-gray-700 dark:text-gray-300',
         type: cellProps.clickable ? 'button' : undefined,
+        title: cellProps.email || undefined,
         onClick: cellProps.clickable ? () => emit('open', cellProps.id) : undefined,
-      }, cellProps.email || '-'),
-      h('div', { class: 'max-w-56 truncate text-sm text-gray-500 dark:text-dark-400' }, cellProps.username || '-'),
+      }, cellProps.email || h(CellEmpty)),
+      h('div', { class: 'max-w-full truncate text-sm text-gray-500 dark:text-dark-400', title: cellProps.username || undefined }, cellProps.username || h(CellEmpty)),
     ])
   },
 })
@@ -420,7 +429,7 @@ const NullableAmountText = defineComponent({
     return () => {
       const value = amountProps.value
       if (value === null || value === undefined) {
-        return h('span', { class: 'text-sm text-gray-400 dark:text-dark-500' }, '-')
+        return h(CellEmpty)
       }
       return h(AmountText, { value })
     }
