@@ -289,6 +289,25 @@ describe('user UsageView', () => {
     }
   })
 
+  // Browser acceptance (step 1), item 1: the user's own list is always counted (the server narrows it to the user), so
+  // its count stays even when it looks like "this page's end + 1".
+  it('keeps the exact count on the phone info line', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => ({
+      matches: q.includes('min-width') ? false : true, media: q, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    query.mockResolvedValue({ items: Array.from({ length: 20 }, (_, i) => ({ ...usageLog, id: i + 1 })), total: 21, pages: 2 })
+    try {
+      const wrapper = mountUsageView({ Teleport: true })
+      await flushPromises()
+      expect((wrapper.vm as any).pagination.total).toBe(21)
+      expect(wrapper.get('[data-testid="usage-count"]').text()).toBe('common.table.count')
+      wrapper.unmount()
+    } finally {
+      media.mockRestore()
+    }
+  })
+
   it('keeps usage metrics hidden from users until an admin makes them public', async () => {
     const wrapper = mountUsageView()
     await flushPromises()

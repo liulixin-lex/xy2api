@@ -88,12 +88,13 @@
           <template v-if="activeTab === 'usage'" #status>
             <LiveStatusIndicator :status="liveStatus" :pause="liveUsage.pause" :resume="liveUsage.resume" :detail="t('admin.usage.liveDetail')" />
           </template>
-          <!-- Phone toolbar: the count of the tab (and the sort while its column is hidden), the columns tool -->
+          <!-- Phone toolbar: the count of the tab (and the sort while its column is hidden), the columns tool. The usage
+               tab's count only when it is exact (the summary above has the requests either way). -->
           <template #info>
             <template v-if="activeTab !== 'ranking'">
-              <span data-testid="usage-count">{{ t('common.table.count', { n: (activeTab === 'errors' ? errTotal : usageTotal).toLocaleString() }) }}</span>
+              <span v-if="countShown" data-testid="usage-count">{{ t('common.table.count', { n: (activeTab === 'errors' ? errTotal : usageTotal).toLocaleString() }) }}</span>
               <template v-if="hiddenSort">
-                <span class="table-toolbar__sep" aria-hidden="true">·</span>
+                <span v-if="countShown" class="table-toolbar__sep" aria-hidden="true">·</span>
                 <TableSortHint :label="hiddenSort.label" :order="hiddenSort.order" />
               </template>
             </template>
@@ -226,7 +227,7 @@ import { requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import { useUsageStatsState } from './usageStatsState'
 import UsageOverview from '@/components/admin/usage/UsageOverview.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
-import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportTasks from '@/components/usage/UsageExportTasks.vue'
+import UsageTable from '@/components/admin/usage/UsageTable.vue'; import { usageTotalIsExact } from '@/components/admin/usage/usageTotal'; import UsageExportTasks from '@/components/usage/UsageExportTasks.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
 import UsageColumnSettings from '@/components/admin/usage/UsageColumnSettings.vue'
@@ -483,6 +484,11 @@ const liveUsage = useLiveTable<AdminUsageLog>({
   tasks: [{ name: 'stats', intervalMs: 30_000, run: (signal) => runStatsTask(signal) }]
 })
 const { rows: usageRows, loading: usageLoading, total: usageTotal, pending, pendingMore, status: liveStatus } = liveUsage
+/** The usage total is a count, not "this page's end + 1" (see usageTotalIsExact); the errors list always counts. */
+const usageTotalExact = computed(() => usageTotalIsExact(filters.value, {
+  page: pagination.page, pageSize: pagination.page_size, rows: usageRows.value.length, total: usageTotal.value,
+}))
+const countShown = computed(() => activeTab.value === 'errors' || usageTotalExact.value)
 const newRecordsText = (n: string) => t('admin.usage.newRecords', { n })
 const usageRowClass = (row: AdminUsageLog) =>
   liveUsage.transitioning.value || liveUsage.isDimmed(usageRowId(row)) ? 'opacity-60' : undefined

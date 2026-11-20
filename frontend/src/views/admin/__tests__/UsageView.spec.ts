@@ -395,6 +395,7 @@ describe('admin UsageView columns per width', () => {
 
   it('shows the phone defaults below 768px and keeps a change there in the phone memory only', async () => {
     setPhone(true)
+    list.mockResolvedValue({ items: [], total: 0, pages: 1 })
     const w = mountView()
     await flushPromises()
     expect(keys(w)).toEqual(['user', 'account', 'model', 'tokens', 'cost', 'latency', 'created_at'])
@@ -408,6 +409,34 @@ describe('admin UsageView columns per width', () => {
     await phoneTools.get('[data-testid="usage-column-reset"]').trigger('click')
     expect(keys(w)).not.toContain('group')
     expect(localStorage.getItem('usage-hidden-columns-narrow')).toBeNull()
+    w.unmount()
+  })
+
+  // Browser acceptance (step 1), item 1: without a user, key or account filter the list's total is "this page's end + 1"
+  // while more rows follow: the phone info line shows no count then; a narrowed list or the last page shows it.
+  it('shows the usage count only when it is exact', async () => {
+    setPhone(true)
+    const rows = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, source: 'usage', created_at: '2026-11-20T00:00:00Z' }))
+    list.mockResolvedValue({ items: rows, total: 21, pages: 2 })
+    const w = mountView()
+    await flushPromises()
+    expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
+    list.mockResolvedValue({ items: rows.slice(0, 7), total: 7, pages: 1 })
+    ;(w.vm as any).filters = { ...(w.vm as any).filters, model: 'gpt-6.1' }
+    ;(w.vm as any).applyFilters()
+    await flushPromises()
+    expect(w.get('[data-testid="usage-count"]').text()).toBe('common.table.count')
+    list.mockResolvedValue({ items: rows, total: 1234, pages: 62 })
+    ;(w.vm as any).filters = { ...(w.vm as any).filters, user_id: 7 }
+    ;(w.vm as any).applyFilters()
+    await flushPromises()
+    expect(w.get('[data-testid="usage-count"]').exists()).toBe(true)
+    // The errors list always counts.
+    listErrorLogs.mockReset().mockResolvedValue({ items: [], total: 21 })
+    ;(w.vm as any).filters = { ...(w.vm as any).filters, user_id: undefined }
+    ;(w.vm as any).switchTab('errors')
+    await flushPromises()
+    expect(w.get('[data-testid="usage-count"]').exists()).toBe(true)
     w.unmount()
   })
 
