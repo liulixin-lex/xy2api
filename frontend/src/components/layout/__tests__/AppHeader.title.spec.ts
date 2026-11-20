@@ -39,4 +39,10 @@ describe('AppHeader page title on narrow screens', () => {
     expect(source).toContain('<span v-if="frozenBalance > 0" class="sr-only min-[1440px]:hidden">{{ balanceFrozenLabel }}</span>')
     expect(source).toContain('<div class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 min-[1440px]:hidden">')
   })
+
+  // Astra third re-review #1: with the balance in it, the menu ran past a phone on its side and Logout was out of reach.
+  it('keeps the user menu within the visible height, scrolling on its own', () => {
+    expect(source).toContain('class="dropdown user-menu right-0 mt-2 w-56"')
+    expect(source).toMatch(/\.user-menu \{\s*max-height: calc\(100vh - 72px\);\s*max-height: calc\(100dvh - 72px\);\s*overflow-y: auto;\s*overscroll-behavior: contain;/)
+  })
 })

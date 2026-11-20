@@ -156,7 +156,7 @@
 
           <!-- Dropdown Menu -->
           <transition name="dropdown">
-            <div v-if="dropdownOpen" class="dropdown right-0 mt-2 w-56">
+            <div v-if="dropdownOpen" class="dropdown user-menu right-0 mt-2 w-56" data-test="user-menu">
               <!-- User Info -->
               <div class="border-b border-gray-100 px-4 py-3 dark:border-dark-700">
                 <div class="text-sm font-medium text-gray-900 dark:text-white">
@@ -457,6 +457,15 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* The user menu never runs past the visible height (a phone on its side, with the balance in it): it scrolls on its
+   own, the page behind it does not. Its top sits 62-64px down (below the avatar button and the 8px gap, mt-2), so 72px
+   off the height leaves at least 8px free below. dvh follows the browser's address bar, vh is the fallback. */
+.user-menu {
+  max-height: calc(100vh - 72px);
+  max-height: calc(100dvh - 72px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.2s ease;
