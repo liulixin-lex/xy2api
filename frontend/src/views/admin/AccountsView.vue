@@ -74,8 +74,7 @@
             row-key="id"
             :row-class="accountRowClass"
             :server-side-sort="true"
-            default-sort-key="last_used_at"
-            default-sort-order="desc"
+            :sort="tableSort"
             :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
             :estimate-row-height="78"
             :overscan="5"
@@ -478,6 +477,8 @@ const loadInitialSort = (): { sort_by: string; sort_order: SortOrder } => {
   }
 }
 const sortState = reactive(loadInitialSort())
+/** The sort the list is requested with: the table's headers show this one, whatever columns this width shows. */
+const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }))
 
 // ---- Filters, search and the page ----
 const filters = reactive<Required<ToolbarFilters>>({ platform: '', status: '', group: '', sched_quality: '', type: '', privacy_mode: '', iq_status: '', group_category: '' })

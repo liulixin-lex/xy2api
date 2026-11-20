@@ -528,6 +528,12 @@ interface Props {
   defaultSortKey?: string
   defaultSortOrder?: 'asc' | 'desc'
   /**
+   * The page's own sort (server-side sorting, mobile list plan): the headers show it and the table keeps no sort of its
+   * own, so hiding the sorted column (another width's columns) changes no request, no stored preference and no other
+   * header; the column shows its arrow again when it is back. A header click still emits `sort` and stores the choice.
+   */
+  sort?: { key: string; order: 'asc' | 'desc' } | null
+  /**
    * Persist sort state (key + order) to localStorage using this key.
    * If provided, DataTable will load the stored sort state on mount.
    */
@@ -575,6 +581,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   layout: 'cards',
+  sort: undefined,
   loading: false,
   stickyFirstColumn: true,
   stickyActionsColumn: true,
@@ -589,9 +596,13 @@ const props = withDefaults(defineProps<Props>(), {
 
 /** The table is mounted: always in the table layout, from 1024px in the cards layout. */
 const showsTable = computed(() => props.layout === 'table' || isDesktopViewport.value)
-/** Below 1024px rows are windowed only inside a bounded table region (TablePageLayout); a page that scrolls renders them all. */
+/**
+ * Where rows may be windowed. The table layout: only inside a bounded table region, at every width (TablePageLayout's
+ * one decision, useTableRegion); a table outside it, or while the page scrolls, renders every row. The cards layout
+ * keeps its rule: from 1024px.
+ */
 const tableRegion = inject(TABLE_REGION_KEY, null)
-const windowedHere = computed(() => isDesktopViewport.value || (props.layout === 'table' && tableRegion?.value === true))
+const windowedHere = computed(() => (props.layout === 'table' ? tableRegion?.value === true : isDesktopViewport.value))
 
 // A reload keeps the rows it already has (same DOM nodes, same scroll position) and shows a thin progress bar; the
 // skeleton is only for a load with nothing on screen yet. The table stays clickable throughout (no inert).
@@ -849,6 +860,8 @@ const handleSort = (key: string) => {
     newOrder = sortOrder.value === 'asc' ? 'desc' : 'asc'
   }
 
+  // A header click is the user's choice: the one place the sort is stored.
+  writePersistedSortState({ key, order: newOrder })
   if (props.serverSideSort) {
     // Server-side sort mode: emit event and update internal state for UI feedback
     sortKey.value = key
@@ -1165,18 +1178,28 @@ const getAdaptivePaddingClass = () => {
 const adaptivePaddingClass = computed(() => getAdaptivePaddingClass())
 const stickyColumnClasses = computed(() => props.columns.map((column, index) => getStickyColumnClass(column, index)))
 
-// Init + keep persisted sort state consistent with current columns
-const didInitSort = ref(false)
+// Init + keep the sort consistent with the current columns (a sort the table owns)
+/** The page owns the sort: the headers follow it, whatever columns are shown. */
+const pageOwnsSort = computed(() => props.sort !== undefined)
+watch(
+  () => props.sort,
+  (sort) => {
+    if (!pageOwnsSort.value) return
+    sortKey.value = sort?.key ?? ''
+    sortOrder.value = sort?.order ?? 'asc'
+  },
+  { immediate: true, deep: true }
+)
 
 onMounted(() => {
-  const initial = resolveInitialSortState()
-  applySortState(initial)
-  didInitSort.value = true
+  if (!pageOwnsSort.value) applySortState(resolveInitialSortState())
 })
 
 watch(
   columnsSignature,
   () => {
+    // A column shown or hidden changes nothing in a sort the page owns (only whether its header shows the arrow).
+    if (pageOwnsSort.value) return
     // If current sort key is no longer sortable/visible, fall back to default/persisted.
     const normalized = normalizeSortKey(sortKey.value)
     if (!sortKey.value) {
@@ -1194,18 +1217,6 @@ watch(
         sortOrder.value = 'asc'
       }
     }
-  },
-  { flush: 'post' }
-)
-
-watch(
-  [sortKey, sortOrder],
-  ([nextKey, nextOrder]) => {
-    if (!didInitSort.value) return
-    if (!props.sortStorageKey) return
-    const key = normalizeSortKey(nextKey)
-    if (!key) return
-    writePersistedSortState({ key, order: normalizeSortOrder(nextOrder) })
   },
   { flush: 'post' }
 )

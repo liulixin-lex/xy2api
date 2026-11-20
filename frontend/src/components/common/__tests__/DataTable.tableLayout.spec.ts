@@ -106,6 +106,30 @@ describe('DataTable layout="table" below 1024px', () => {
     expect(th.attributes('aria-sort')).toBe('descending')
   })
 
+  // Astra review #2: a page's own sort stays the sort when its column is hidden; only a header click stores a choice.
+  it('follows the page\'s sort whatever columns are shown, and stores only a header click', async () => {
+    stubPhone()
+    const both = [{ key: 'id', label: 'ID', sortable: true }, { key: 'last_used_at', label: 'Last used', sortable: true }]
+    localStorage.setItem('table-sort', JSON.stringify({ key: 'id', order: 'asc' }))
+    const wrapper = mount(DataTable, {
+      props: { layout: 'table', columns: both, data: rows(1), rowKey: 'id', serverSideSort: true, sort: { key: 'id', order: 'asc' }, sortStorageKey: 'table-sort', defaultSortKey: 'last_used_at', defaultSortOrder: 'desc' }
+    })
+    const ariaSort = () => Object.fromEntries(wrapper.findAll('thead th').map((th) => [th.text(), th.attributes('aria-sort')]))
+    expect(ariaSort()).toEqual({ ID: 'ascending', 'Last used': 'none' })
+    // The other width hides the ID column: nothing else takes the arrow, nothing is emitted or stored.
+    await wrapper.setProps({ columns: [both[1]] })
+    expect(ariaSort()).toEqual({ 'Last used': 'none' })
+    expect(wrapper.emitted('sort')).toBeUndefined()
+    expect(JSON.parse(localStorage.getItem('table-sort')!)).toEqual({ key: 'id', order: 'asc' })
+    await wrapper.setProps({ columns: both })
+    expect(ariaSort()).toEqual({ ID: 'ascending', 'Last used': 'none' })
+    // A header click is the user's choice: emitted and stored.
+    await wrapper.get('[data-test="sort-last_used_at"]').trigger('click')
+    expect(wrapper.emitted('sort')).toEqual([['last_used_at', 'asc']])
+    expect(JSON.parse(localStorage.getItem('table-sort')!)).toEqual({ key: 'last_used_at', order: 'asc' })
+    localStorage.clear()
+  })
+
   it('selects only eligible rows and keeps keys from other pages', async () => {
     stubPhone()
     const wrapper = mount(DataTable, {
@@ -156,9 +180,15 @@ describe('DataTable layout="table" below 1024px', () => {
     await nextTick()
     expect((natural.findComponent(DataTable).vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(false)
     expect(natural.findAll('tbody tr[data-row-id]')).toHaveLength(12)
-    // Outside TablePageLayout below 1024px: the page scrolls, no windowing.
+    // Outside TablePageLayout the page scrolls, no windowing: on a phone and on a desktop alike (Astra review #8).
     const alone = mount(DataTable, { props: { layout: 'table', columns, data, rowKey: 'id', virtualizeThreshold: 3 } })
     expect((alone.vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(false)
+    Object.defineProperty(window, 'matchMedia', { writable: true, value: () => ({ matches: true, media: '', addEventListener: vi.fn(), removeEventListener: vi.fn() }) })
+    const wide = mount(DataTable, { props: { layout: 'table', columns, data, rowKey: 'id', virtualizeThreshold: 3 } })
+    expect((wide.vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(false)
+    // The cards layout keeps its desktop rule.
+    const legacy = mount(DataTable, { props: { columns, data, rowKey: 'id', virtualizeThreshold: 3 } })
+    expect((legacy.vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(true)
   })
 
   it('tracks its size while mounted: the frozen columns\' edge line follows the sideways scroll', async () => {
