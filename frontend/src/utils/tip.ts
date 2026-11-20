@@ -212,18 +212,33 @@ function hide() {
   window.removeEventListener('scroll', hide, true)
 }
 
-/** Wholly inside the viewport and the visible box of its nearest scrolling ancestor. */
+const px = (value: string) => Number.parseFloat(value) || 0
+
+/**
+ * Wholly inside the viewport and the visible box of its nearest scrolling ancestor, as the browser decides it: the
+ * element with its scroll-margin, the box less its scroll-padding (a table's sticky header, DataTable).
+ */
 function wholeInView(el: HTMLElement) {
   const rect = el.getBoundingClientRect()
+  const own = getComputedStyle(el)
+  const top = rect.top - px(own.scrollMarginTop)
+  const bottom = rect.bottom + px(own.scrollMarginBottom)
+  const left = rect.left - px(own.scrollMarginLeft)
+  const right = rect.right + px(own.scrollMarginRight)
   let box = { top: 0, left: 0, bottom: window.innerHeight, right: window.innerWidth }
   for (let node = el.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
-    const { overflowX, overflowY } = getComputedStyle(node)
-    if (!/auto|scroll|overlay/.test(`${overflowX} ${overflowY}`)) continue
+    const style = getComputedStyle(node)
+    if (!/auto|scroll|overlay/.test(`${style.overflowX} ${style.overflowY}`)) continue
     const r = node.getBoundingClientRect()
-    box = { top: Math.max(box.top, r.top), left: Math.max(box.left, r.left), bottom: Math.min(box.bottom, r.bottom), right: Math.min(box.right, r.right) }
+    box = {
+      top: Math.max(box.top, r.top + px(style.scrollPaddingTop)),
+      left: Math.max(box.left, r.left + px(style.scrollPaddingLeft)),
+      bottom: Math.min(box.bottom, r.bottom - px(style.scrollPaddingBottom)),
+      right: Math.min(box.right, r.right - px(style.scrollPaddingRight))
+    }
     break
   }
-  return rect.top >= box.top && rect.left >= box.left && rect.bottom <= box.bottom && rect.right <= box.right
+  return top >= box.top && left >= box.left && bottom <= box.bottom && right <= box.right
 }
 
 /**

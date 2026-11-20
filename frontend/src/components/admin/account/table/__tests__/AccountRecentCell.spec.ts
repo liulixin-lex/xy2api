@@ -158,6 +158,10 @@ describe('AccountRecentCell', () => {
     // table, whose cell clips outside 72px, the page draws it inside the column's cell, in the side padding.
     const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
     expect(source('../AccountRecentCell.vue')).not.toMatch(/outline/)
+    // Scrolled to, the table cell keeps that padding (about 10px above and below) in view, so the whole ring shows.
+    expect(source('../../../../../views/admin/AccountsView.vue')).toMatch(
+      /\.account-table :deep\(td\.acol-sq_recent \.recent:not\(\.recent--card\)\) \{\s*scroll-margin-top: 10px;\s*scroll-margin-bottom: 10px;\s*\}/
+    )
     expect(source('../../../../../views/admin/AccountsView.vue')).toMatch(
       /@supports selector\(:has\(\*\)\) \{\s*\.account-table :deep\(td\.acol-sq_recent:has\(\.recent:focus-visible\)\) \{\s*outline: 2px solid var\(--sq-ring\);\s*outline-offset: -2px;\s*\}\s*\.account-table :deep\(td\.acol-sq_recent \.recent:focus-visible\) \{\s*outline: none;\s*\}/
     )

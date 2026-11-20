@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, reactive } from 'vue'
 
 import DataTable from '../DataTable.vue'
+import dataTableSource from '../DataTable.vue?raw'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key })
@@ -202,6 +203,29 @@ describe('DataTable sideways scroll state', () => {
   }
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  // The sticky header covers the top of the scroll box: its measured height (both rows of a grouped header) is the
+  // box's scroll-padding-top, so a focus scroll or scrollIntoView stops a row below it, whatever the page's header.
+  it('keeps the sticky header\'s measured height as the scroll box\'s top padding, following the header\'s resizes', async () => {
+    stubViewport(true)
+    const resized = observeResizes()
+    const wrapper = mount(DataTable, { props: { columns: [...columns, { key: 'note', label: 'Note' }], data: rows(1), rowKey: 'id' } })
+    await nextTick()
+    const box = wrapper.get('.table-wrapper').element as HTMLElement
+    const head = box.querySelector<HTMLElement>(':scope > table > thead')!
+    let height = 54
+    vi.spyOn(head, 'getBoundingClientRect').mockImplementation(() => ({ height }) as DOMRect)
+    resized(head)
+    expect(box.style.getPropertyValue('--table-head-h')).toBe('54px')
+    // Grouped columns add a second header row; the observer sees the header grow.
+    await wrapper.setProps({ columns: [{ ...columns[0], group: 'g' }, { key: 'note', label: 'Note', group: 'g' }] })
+    expect(head.querySelectorAll('tr')).toHaveLength(2)
+    height = 105.5
+    resized(head)
+    expect(box.style.getPropertyValue('--table-head-h')).toBe('105.5px')
+    expect(dataTableSource).toMatch(/\.table-wrapper \{[^}]*scroll-padding-top: var\(--table-head-h, var\(--header-height, 40px\)\);/)
+    wrapper.unmount()
   })
 
   it('drops is-scrollable when the table narrows after the wrapper resized (7e-7)', async () => {
