@@ -394,6 +394,8 @@ function whyOf(view: PerfView): string {
 </script>
 
 <style scoped>
+@reference "../../../style.css";
+
 .gperf__line {
   display: flex;
   flex-wrap: wrap;
@@ -577,6 +579,8 @@ function whyOf(view: PerfView): string {
 <!-- Dark theme: not scoped (a scoped `:global(.dark) .x` compiles to a bare `.dark` rule on <html>); every class here
      carries the gperf__ prefix. The held account column takes the dialog's own dark background. -->
 <style>
+@reference "../../../style.css";
+
 .dark .gperf__acct {
   background: theme('colors.dark.800');
 }

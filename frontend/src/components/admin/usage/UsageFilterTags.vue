@@ -33,6 +33,8 @@ const { t } = useI18n()
 </script>
 
 <style scoped>
+@reference "../../../style.css";
+
 .usage-tag {
   display: inline-flex;
   max-width: 100%;

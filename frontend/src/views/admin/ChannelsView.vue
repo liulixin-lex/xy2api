@@ -1752,6 +1752,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 .channel-dialog-body {
   display: flex;
   flex-direction: column;

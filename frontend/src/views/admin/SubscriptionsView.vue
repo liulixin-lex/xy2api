@@ -1652,6 +1652,8 @@ const guideLayer = useOverlayLayer(() => showGuideModal.value, { root: guideRef,
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 .usage-row {
   @apply space-y-1;
 }

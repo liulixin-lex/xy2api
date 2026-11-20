@@ -574,6 +574,8 @@ onScopeDispose(() => running?.kill())
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 .qpanel {
   position: fixed;
   right: 0;

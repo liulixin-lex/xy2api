@@ -312,6 +312,8 @@ watch(
 </template>
 
 <style>
+@reference "../../../../style.css";
+
 /* The compact filters are for a mouse; on touch the selects keep their own 40px size (mobile list plan). */
 @media (pointer: fine) {
   .compact-select .select-trigger {

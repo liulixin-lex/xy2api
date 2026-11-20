@@ -215,6 +215,8 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 .table-toolbar {
   display: flex;
   flex-wrap: wrap;

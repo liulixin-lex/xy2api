@@ -453,6 +453,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 .custom-page-layout {
   @apply flex flex-col;
   height: calc(100vh - 64px - 4rem);
@@ -541,6 +543,8 @@ onUnmounted(() => {
 </style>
 
 <style>
+@reference "../../style.css";
+
 .markdown-page-content {
   line-height: 1.7;
   color: inherit;

@@ -211,6 +211,8 @@ const rows = computed(() =>
 </script>
 
 <style scoped>
+@reference "../../../../style.css";
+
 .grows {
   display: grid;
 }

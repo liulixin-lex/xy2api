@@ -348,6 +348,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+@reference "../../style.css";
+
 .date-picker-trigger {
   @apply flex items-center gap-2;
   @apply rounded-lg px-3 py-2 text-sm;
