@@ -26,12 +26,16 @@
           <template #filters>
             <!-- Role Filter (visible when enabled) -->
             <div v-if="visibleFilters.has('role')" class="table-toolbar__filter" data-filter="role">
+              <!-- Nothing chosen: the filter's name (decided, item 15); "all" stays first in its list. -->
               <Select
                 v-model="filters.role"
                 size="sm"
                 :options="roleFilterOptions"
+                :aria-label="t('admin.users.columns.role')"
                 @change="applyFilter"
-              />
+              >
+                <template #selected="{ option }">{{ filters.role ? option?.label ?? filters.role : t('admin.users.columns.role') }}</template>
+              </Select>
             </div>
 
             <!-- Status Filter (visible when enabled) -->
@@ -40,8 +44,11 @@
                 v-model="filters.status"
                 size="sm"
                 :options="statusFilterOptions"
+                :aria-label="t('admin.users.columns.status')"
                 @change="applyFilter"
-              />
+              >
+                <template #selected="{ option }">{{ filters.status ? option?.label ?? filters.status : t('admin.users.columns.status') }}</template>
+              </Select>
             </div>
 
             <!-- Group Filter (visible when enabled) -->
@@ -54,8 +61,11 @@
                 creatable
                 :creatable-prefix="t('admin.users.fuzzySearch')"
                 :search-placeholder="t('admin.users.searchAuthorizedGroups')"
+                :aria-label="t('admin.users.authorizedGroupFilter')"
                 @change="applyFilter"
-              />
+              >
+                <template #selected="{ option }">{{ filters.group ? option?.label ?? filters.group : t('admin.users.authorizedGroupFilter') }}</template>
+              </Select>
             </div>
 
             <!-- API Key Group Filter (visible when enabled) -->
@@ -66,8 +76,11 @@
                 :options="apiKeyGroupFilterOptions"
                 searchable
                 :search-placeholder="t('admin.users.searchApiKeyGroups')"
+                :aria-label="t('admin.users.apiKeyGroupFilter')"
                 @change="applyFilter"
-              />
+              >
+                <template #selected="{ option }">{{ filters.apiKeyGroup !== null ? option?.label : t('admin.users.apiKeyGroupFilter') }}</template>
+              </Select>
             </div>
 
             <!-- Dynamic Attribute Filters -->

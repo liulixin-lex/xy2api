@@ -950,5 +950,17 @@ describe('admin UsersView', () => {
       localStorage.removeItem('user-filter-values')
     }
   })
+
+  // Decided (item 15): from 768px a filter with nothing chosen shows its name; "all" stays first in its list.
+  it('names the wide filters while nothing is chosen', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { dirname, resolve } = await import('node:path')
+    const { fileURLToPath } = await import('node:url')
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../UsersView.vue'), 'utf8')
+    for (const [field, label] of [['role', "t('admin.users.columns.role')"], ['status', "t('admin.users.columns.status')"], ['group', "t('admin.users.authorizedGroupFilter')"]]) {
+      expect(source).toContain(`<template #selected="{ option }">{{ filters.${field} ? option?.label ?? filters.${field} : ${label} }}</template>`)
+    }
+    expect(source).toContain(`<template #selected="{ option }">{{ filters.apiKeyGroup !== null ? option?.label : t('admin.users.apiKeyGroupFilter') }}</template>`)
+  })
 })
 
