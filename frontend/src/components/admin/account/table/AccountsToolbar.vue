@@ -502,7 +502,7 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
   .tb :deep(.table-toolbar__actions) {
     flex-wrap: nowrap;
   }
-  /* Its own fixed search box, 220px (160px at 768–1279, below), not the shared flexible one (12.12-10): this row
+  /* Its own fixed search box, 220px (176px at 768–1279, below), not the shared flexible one (12.12-10): this row
      folds its filters into "more filters" instead. */
   .tb.table-toolbar--compact :deep(.table-toolbar__search) {
     flex: none;
@@ -689,10 +689,11 @@ defineExpose({ focusSearch: () => searchRef.value?.focus() })
     padding-block: 8px;
   }
 }
-/* 768–1279: the search box and filters narrow (two classes: over the shared compact 220px) */
+/* 768–1279: the search box and filters narrow (two classes: over the shared compact 220px). 176px holds the whole hint
+   "名称、备注或 ID" (160px cut it). */
 @media (min-width: 768px) and (max-width: 1279px) {
   .tb.table-toolbar--compact :deep(.table-toolbar__search) {
-    width: 160px;
+    width: 176px;
   }
   /* The direct filters on the toolbar only: the fields in "more filters" keep filling their column (12.12-4). */
   .tb-filters .tb-sel {
