@@ -26,8 +26,9 @@ const primaryRef = ref<HTMLElement | null>(null)
 const secondaryRef = ref<HTMLElement | null>(null)
 const cut = ref(false)
 /**
- * Whether a line is cut: its content wider than its box. Rounded widths miss a cut under a pixel (a box of 46.84px
- * showing 48.22px of text reads 47 / 48 at most), so the text's own width is measured too where the browser can.
+ * Whether a line is cut: its content wider than its box. Rounded widths miss a cut under a pixel (116.484px of text in
+ * a 116.391px box reads 116 / 116 and still draws "…"), so the text's own width is measured too where the browser can,
+ * with only a rounding error's allowance.
  */
 const lineCut = (el: HTMLElement) => {
   if (el.scrollWidth > el.clientWidth) return true
@@ -35,7 +36,7 @@ const lineCut = (el: HTMLElement) => {
   const range = document.createRange()
   range.selectNodeContents(el)
   const text = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect().width : 0
-  return text > el.getBoundingClientRect().width + 0.5
+  return text > el.getBoundingClientRect().width + 0.01
 }
 const isCut = () => [primaryRef.value, secondaryRef.value].some((el) => !!el && lineCut(el))
 const tipText = computed(() => props.full || [props.primary, props.secondary].filter(Boolean).join('\n'))

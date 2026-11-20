@@ -35,6 +35,16 @@ describe('TableIdentityCell', () => {
     expect(document.getElementById('sq-tip')?.textContent).toBe('someone@example.test\nSomeone')
   })
 
+  // Astra review: 116.484px of text in a 116.391px box, both 116 rounded, draws "…".
+  it('shows the whole text when the rounded widths are equal but the text is cut', async () => {
+    const wrapper = mount(TableIdentityCell, { props: { primary: 'tdf@example.test' }, attachTo: document.body })
+    const primary = wrapper.get('.table-identity__primary').element
+    box(primary, 116, 116.391)
+    textWidths(new Map([[primary, 116.484]]))
+    await wrapper.get('[data-test="table-identity"]').trigger('click')
+    expect(document.getElementById('sq-tip')?.textContent).toBe('tdf@example.test')
+  })
+
   it('offers no tip when both lines fit', async () => {
     const wrapper = mount(TableIdentityCell, { props: { primary: 'a@b.c', secondary: 'A' }, attachTo: document.body })
     const primary = wrapper.get('.table-identity__primary').element
