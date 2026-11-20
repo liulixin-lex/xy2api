@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { shallowRef } from 'vue'
 
 import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
 import { basis, errorEvidence, groupModel, legacyBasis, legacyLine, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
@@ -12,6 +13,7 @@ import SchedEvidence from '../SchedEvidence.vue'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
+import { formatShortTime } from '@/components/admin/account/table/accountTime'
 
 const { api, backendSummary } = vi.hoisted(() => ({
   api: { accountDetail: vi.fn(), accountDecisions: vi.fn(), accountPerformance: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() },
@@ -445,8 +447,8 @@ describe('SchedQualityPanel', () => {
       error: { n: 40, short: true, red: false, rate: 0.025, failed: 1 },
       cache: { ratio: 0.4, turns: 2 }
     }
-    const row = { id: 7, name: 'acc-7', platform: 'openai', type: 'oauth', quality } as never
-    mount(withSchedHost(SchedQualityPanel, { row: () => row }), { attachTo: document.body, props: { account: () => row } })
+    const row = shallowRef({ id: 7, name: 'acc-7', platform: 'openai', type: 'oauth', quality })
+    mount(withSchedHost(SchedQualityPanel, { row: () => row.value as never }), { attachTo: document.body, props: { account: () => row.value as never } })
     await openOn()
     expect(backendSummary).not.toHaveBeenCalled()
     // The recent cell's four rows with their samples (muted under the sample minimum), and nothing beside them to
@@ -462,6 +464,13 @@ describe('SchedQualityPanel', () => {
       ['cache', 'admin.accounts.table.recent.cacheTurns', '40% (muted)', tooFew('admin.accounts.table.tip.turns:{"n":2}')]
     ])
     expect(document.querySelector('[data-test="qp-threshold-note"]')).toBeNull()
+    // The note by the heading is the tip card's title: the last hour, or since the backend's recent_since.
+    const windowNote = () => document.querySelector('[data-qp-section="recent"] [data-qp-recent-window]')!.textContent
+    expect(windowNote()).toBe('admin.accounts.table.tip.recentTitle')
+    const since = '2026-11-20T01:02:00Z'
+    row.value = { ...row.value, quality: { ...quality, recent_since: since } }
+    await flushPromises()
+    expect(windowNote()).toBe(`admin.accounts.table.tip.recentSince:${JSON.stringify({ time: formatShortTime(since) })}`)
   })
 
   it('shows each line\'s identity: unknown in grey with 证据不够, trial with its time left, rear with its stay and end', async () => {

@@ -71,9 +71,12 @@ export interface RecentRow {
 
 const ROW_KEYS: RecentKey[] = ['ttfo', 'slow', 'error', 'cache']
 
-/** "近 1 小时", or "HH:MM 起" when a reset within the hour shortened the window (the backend's recent_since). */
-export function recentTitle(quality: Pick<RecentQuality, 'recent_since'>, t: Translate): string {
-  return quality.recent_since
+/**
+ * The window, for the tip card's title and the panel's recent heading: "近 1 小时", or "HH:MM 起" when a reset within
+ * the hour shortened it (the backend's recent_since).
+ */
+export function recentTitle(quality: Pick<RecentQuality, 'recent_since'> | null, t: Translate): string {
+  return quality?.recent_since
     ? t('admin.accounts.table.tip.recentSince', { time: formatShortTime(quality.recent_since) })
     : t('admin.accounts.table.tip.recentTitle')
 }

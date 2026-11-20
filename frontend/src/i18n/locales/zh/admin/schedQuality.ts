@@ -35,7 +35,6 @@ export default {
       noAutoStates: '当前没有自动状态',
       recentTitle: '近期状况',
       recentRatioTitle: '近期状况与上游倍率',
-      recentNote: '全账号近 1 小时的总体数值',
       ratio: '上游倍率',
       lastProbe: '上次探测 {time}',
       notProbed: '未探测',

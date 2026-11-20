@@ -35,7 +35,6 @@ export default {
       noAutoStates: 'No automatic states right now',
       recentTitle: 'Recent status',
       recentRatioTitle: 'Recent status and upstream ratio',
-      recentNote: 'The whole account over the last hour',
       ratio: 'Upstream ratio',
       lastProbe: 'last probed {time}',
       notProbed: 'not probed',

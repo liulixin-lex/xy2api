@@ -152,7 +152,7 @@
             <section class="qp-section" data-qp-section="recent">
               <h3 class="qp-h">
                 <span>{{ ratio ? t('admin.schedQuality.panel.recentRatioTitle') : t('admin.schedQuality.panel.recentTitle') }}</span>
-                <span class="qp-h-note">{{ t('admin.schedQuality.panel.recentNote') }}</span>
+                <span class="qp-h-note" data-qp-recent-window>{{ recentWindow }}</span>
               </h3>
               <div class="rlist">
                 <div v-for="line in recentLines" :key="line.key" class="rrow" :data-qp-recent="line.key">
@@ -237,7 +237,7 @@ import { useAdminPermission } from '@/composables/useAdminPermission'
 import { isReducedMotion } from '@/composables/useMotionPreference'
 import { motionDuration, motionEase } from '@/utils/motionTokens'
 import { probeFailureText, upstreamRateView } from '@/components/account/upstreamBillingRate'
-import { recentRows } from '@/components/admin/account/table/accountRecent'
+import { recentRows, recentTitle } from '@/components/admin/account/table/accountRecent'
 import { accountTypeLabel } from '@/components/admin/account/table/accountLabels'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { platformLabel } from '@/utils/platformColors'
@@ -542,8 +542,9 @@ watch(canManage, (allowed) => {
 })
 
 // ---- Recent values and the upstream ratio (also readable on touch) ----
-// The four rows of the recent cell's tip card, the whole account's over the last hour with their samples: nothing is
+// The recent cell's tip card: its window as the note by the heading, then its four rows with their samples. Nothing is
 // compared with a threshold here (7k-1); the groups' rows above judge per group and model.
+const recentWindow = computed(() => recentTitle(summary.value ?? null, t))
 const recentLines = computed(() => recentRows(summary.value ?? null, t))
 
 const ratio = computed(() => {
