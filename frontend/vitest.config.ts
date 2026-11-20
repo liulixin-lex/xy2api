@@ -6,12 +6,12 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src'),
+      '@': resolve(import.meta.dirname, 'src'),
       'vue-i18n': 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js'
     }
   },
   server: {
-    fs: { allow: [__dirname, resolve(__dirname, '../docs/legal')] }
+    fs: { allow: [import.meta.dirname, resolve(import.meta.dirname, '../docs/legal')] }
   },
   test: {
     // Keep paired idle-callback polyfills backed by fake setTimeout/clearTimeout.

@@ -2,11 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   addCustomModelAllowlistItem,
-  createModelAllowlistState,
-  type ModelAllowlistAddError,
-} from "../groupModelAllowlist";
-
-import {
   buildModelAllowlistConfig,
   createModelAllowlistState,
   hydrateModelAllowlistState,
@@ -15,6 +10,7 @@ import {
   selectAllModelAllowlistItems,
   setModelAllowlistCandidates,
   toggleModelAllowlistItem,
+  type ModelAllowlistAddError,
 } from "../groupModelAllowlist";
 
 describe("groupModelAllowlist", () => {
