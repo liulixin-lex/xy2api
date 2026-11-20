@@ -450,6 +450,22 @@ export default {
     latencyLastAttemptHint: '最后一次尝试的首字：只从最后一次尝试开始计，不含之前失败的尝试和排队；按系统设置里的首 token 统计口径。',
     latencyLastAttemptUnknownHint: '未知：最后一次尝试没有首字记录（没有计费的请求不记这一项）。',
     latencyUnknown: '未知',
+    latencyWaitShort: '等待',
+    latencyLastAttemptShort: '首字',
+    requestDetail: {
+      button: '明细',
+      open: '查看 {time} 的明细',
+      title: '请求明细',
+      request: '请求',
+      unbilled: '未出账'
+    },
+    overview: {
+      requests: '请求',
+      tokens: 'Token',
+      cost: '消费',
+      expand: '展开图表',
+      collapse: '收起图表'
+    },
     e2eFirstOutputP50: '用户等待中位数',
     e2eFirstOutputSamples: '基于 {n} 个请求',
     e2eFirstOutputNone: '范围内没有端到端记录',
@@ -459,7 +475,7 @@ export default {
     e2eFirstOutputBlocked: '列表读取失败，这个筛选范围的统计还没有读',
     e2eFirstOutputP50Missing: '基于 {n} 个请求，但返回里没有中位数',
     e2eFirstOutputHint: '端到端首输出的中位数：从请求进入网关到用户收到首个有效输出，含排队和之前失败的尝试。只算有这项记录的请求。',
-    outputTps: '平均TPS',
+    outputTps: '平均 TPS',
     outputTpsHint: '平均 TPS = 输出 Token ÷ 请求总耗时（含首 Token 等待），单位 t/s（每秒输出 Token 数）。输出可能已包含推理 Token，不重复相加；无有效输出或耗时时显示 —。',
     time: '时间',
     ws: 'WS',

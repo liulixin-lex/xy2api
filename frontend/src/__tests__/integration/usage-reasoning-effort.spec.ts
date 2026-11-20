@@ -273,7 +273,7 @@ describe('usage reasoning effort page display', () => {
     const cell = reasoningCellText(wrapper)
     expect(cell).toContain('Max')
     expect(cell).not.toContain('XHigh')
-    expect(cell).not.toContain('↳')
+    expect(cell).not.toContain('→')
     expect(wrapper.text()).not.toContain('XHigh')
   })
 
@@ -303,7 +303,7 @@ describe('usage reasoning effort page display', () => {
     const cell = reasoningCellText(wrapper)
     expect(cell).toContain('Max')
     expect(cell).toContain('XHigh')
-    expect(cell).toContain('↳')
+    expect(cell).toContain('→')
   })
 
   it('admin usage page shows a single value when reasoning effort was not mapped', async () => {
@@ -335,6 +335,6 @@ describe('usage reasoning effort page display', () => {
 
     const cell = reasoningCellText(wrapper)
     expect(cell).toContain('High')
-    expect(cell).not.toContain('↳')
+    expect(cell).not.toContain('→')
   })
 })

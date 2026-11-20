@@ -445,6 +445,22 @@ export default {
     latencyLastAttemptHint: 'First token of the last attempt: counted from the start of the last attempt only, without earlier failed attempts or queueing; measured as the first-token metric in system settings says.',
     latencyLastAttemptUnknownHint: 'Unknown: the last attempt has no first-token record (requests without a bill do not record it).',
     latencyUnknown: 'Unknown',
+    latencyWaitShort: 'Wait',
+    latencyLastAttemptShort: 'First token',
+    requestDetail: {
+      button: 'Details',
+      open: 'View details for {time}',
+      title: 'Request details',
+      request: 'Request',
+      unbilled: 'Not billed'
+    },
+    overview: {
+      requests: 'Requests',
+      tokens: 'Tokens',
+      cost: 'Cost',
+      expand: 'Show charts',
+      collapse: 'Hide charts'
+    },
     e2eFirstOutputP50: 'Median user wait',
     e2eFirstOutputSamples: 'Based on {n} request | Based on {n} requests',
     e2eFirstOutputNone: 'No end-to-end records in the range',

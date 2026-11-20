@@ -111,9 +111,23 @@ const DataTableStub = {
         <slot name="cell-cost" :row="row" />
         <slot name="cell-request_id" :row="row" />
         <slot name="cell-upstream_request_id" :row="row" />
+        <slot name="cell-created_at" :row="row" :value="row.created_at" />
       </div>
     </div>
   `,
+}
+
+/** Opens a row's request detail with its "Details" button and returns the dialog's body. */
+async function openDetail(wrapper: ReturnType<typeof mount>, scope?: string) {
+  const root = scope ? wrapper.get(scope) : wrapper
+  await root.get('[data-testid="usage-detail-open"]').trigger('click')
+  await nextTick()
+  return wrapper.get('[data-testid="usage-request-detail"]')
+}
+
+async function closeDetail(wrapper: ReturnType<typeof mount>) {
+  await wrapper.get('[role="dialog"] button[aria-label]').trigger('click')
+  await nextTick()
 }
 
 const baseImageRow = {
@@ -178,7 +192,7 @@ describe('admin UsageTable tooltip', () => {
     expect(anchor.nextElementSibling?.firstElementChild).toBe(wrapper.findComponent(DataTableStub).element)
   })
 
-  it('shows enabled average TPS using total duration and excludes media rows', () => {
+  it('shows enabled average TPS using total duration and excludes media rows', async () => {
     const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', output_tokens: 1000, duration_ms: 20_000, first_token_ms: 10_000 }
     const wrapper = mount(UsageTable, {
       props: {
@@ -189,8 +203,16 @@ describe('admin UsageTable tooltip', () => {
       },
       global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
     })
-    expect(wrapper.findAll('[data-testid="usage-token-speed"]').map(cell => cell.text())).toEqual(['50.0 t/s', '—'])
-    expect(wrapper.text()).toContain('Avg TPS')
+    // The one-line latency summary leaves the rate to the request detail.
+    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+    const speeds: (string | null)[] = []
+    for (const id of ['req-admin-image', 'no-duration', 'image']) {
+      const detail = await openDetail(wrapper, `[data-request-id="${id}"]`)
+      speeds.push(detail.find('[data-testid="usage-token-speed"]').exists() ? detail.get('[data-testid="usage-token-speed"]').text() : null)
+      if (id === 'req-admin-image') expect(detail.text()).toContain('Avg TPS')
+      await closeDetail(wrapper)
+    }
+    expect(speeds).toEqual(['50.0 t/s', '—', null])
   })
 
   beforeEach(() => {
@@ -479,7 +501,7 @@ describe('admin UsageTable tooltip', () => {
     const text = wrapper.text()
     expect(text).toContain('Max')
     expect(text).toContain('XHigh')
-    expect(text).toContain('↳')
+    expect(text).toContain('→')
   })
 
   it('shows a single reasoning effort when requested matches forwarded', () => {
@@ -505,7 +527,7 @@ describe('admin UsageTable tooltip', () => {
 
     const text = wrapper.text()
     expect(text).toContain('Max')
-    expect(text).not.toContain('↳')
+    expect(text).not.toContain('→')
   })
 
   it('hides mapped reasoning effort for user rows that only have the requested value', () => {
@@ -531,7 +553,7 @@ describe('admin UsageTable tooltip', () => {
 
     expect(wrapper.text()).toContain('Max')
     expect(wrapper.text()).not.toContain('XHigh')
-    expect(wrapper.text()).not.toContain('↳')
+    expect(wrapper.text()).not.toContain('→')
   })
 
 	it.each([
@@ -954,42 +976,56 @@ describe('admin usage metric visibility', () => {
   const row = { ...baseImageRow, billing_mode: 'token', image_count: 0, input_tokens: 500, cache_read_tokens: 1500, output_tokens: 100, duration_ms: 3000, first_token_ms: 1000 }
   const mountMetrics = (props = {}, data = [row]) => mount(UsageTable, {
     props: { data, columns: [], ...props },
-    global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><slot name="cell-tokens" :row="row"/><slot name="cell-latency" :row="row"/></template></div>' }, Icon: true, Teleport: true } },
+    global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><slot name="cell-tokens" :row="row"/><slot name="cell-latency" :row="row"/><slot name="cell-created_at" :row="row" :value="row.created_at"/></template></div>' }, Icon: true, Teleport: true } },
   })
-  it('hides both metrics by default for shared user rendering', () => {
+  // Both metrics left the one-line cells for the request detail (and the token tip); the settings still decide them.
+  it('hides both metrics by default for shared user rendering', async () => {
     const wrapper = mountMetrics()
-    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+    const detail = await openDetail(wrapper)
+    expect(detail.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
+    expect(detail.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain(' t/s')
     expect(wrapper.text()).not.toContain('Avg TPS')
   })
-  it.each([[true,true],[true,false],[false,true],[false,false]])('obeys independent flags %s / %s', (showCacheHitRate, showTokenSpeed) => {
+  it.each([[true,true],[true,false],[false,true],[false,false]])('obeys independent flags %s / %s', async (showCacheHitRate, showTokenSpeed) => {
     const wrapper = mountMetrics({ showCacheHitRate, showTokenSpeed })
-    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(showCacheHitRate)
-    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(showTokenSpeed)
+    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+    const detail = await openDetail(wrapper)
+    expect(detail.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(showCacheHitRate)
+    expect(detail.find('[data-testid="usage-token-speed"]').exists()).toBe(showTokenSpeed)
     if (showCacheHitRate) {
-      const percent = wrapper.get('[data-testid="usage-cache-hit-rate"]')
+      const percent = detail.get('[data-testid="usage-cache-hit-rate"]')
       expect(percent.text()).toBe('75.0%')
-      expect(percent.element.parentElement?.textContent?.trim()).toBe('75.0%')
+      expect(percent.element.previousElementSibling?.textContent).toBe('usage.cacheHitRate')
     }
-    if (showTokenSpeed) expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 t/s')
+    if (showTokenSpeed) expect(detail.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 t/s')
     else expect(wrapper.text()).not.toContain(' t/s')
+    await closeDetail(wrapper)
+    // The token tip on hover shows the same share under the same setting.
+    await wrapper.get('.group.relative').trigger('mouseenter')
+    expect(wrapper.get('.fixed').find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(showCacheHitRate)
   })
   it('updates reactively after changing settings', async () => {
     const wrapper = mountMetrics({ showCacheHitRate: true, showTokenSpeed: true })
+    const detail = await openDetail(wrapper)
+    expect(detail.find('[data-testid="usage-token-speed"]').exists()).toBe(true)
     await wrapper.setProps({ showCacheHitRate: false, showTokenSpeed: false })
     expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
   })
-  it('uses the same rate and explanation when first-token time is missing', () => {
+  it('uses the same rate and explanation when first-token time is missing', async () => {
     const wrapper = mountMetrics({ showEndToEnd: true, showTokenSpeed: true }, [{ ...row, first_token_ms: null } as unknown as typeof row])
-    expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 t/s')
-    expect(wrapper.get('[data-testid="usage-token-speed"]').attributes('title')).toBe('usage.outputTpsHint')
+    const detail = await openDetail(wrapper)
+    const speed = detail.get('[data-testid="usage-token-speed"]')
+    expect(speed.text()).toBe('33.3 t/s')
+    expect(speed.element.previousElementSibling?.getAttribute('title')).toBe('usage.outputTpsHint')
   })
-  it('does not label media requests with token speed or cache rate', () => {
+  it('does not label media requests with token speed or cache rate', async () => {
     const wrapper = mountMetrics({ showCacheHitRate: true, showTokenSpeed: true }, [{ ...row, image_count: 2, billing_mode: 'image' }])
-    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+    const detail = await openDetail(wrapper)
+    expect(detail.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
+    expect(detail.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
   })
 })
 
@@ -997,80 +1033,97 @@ describe('admin usage latency: the user wait first', () => {
   const row = { ...baseImageRow, billing_mode: 'token', image_count: 0, duration_ms: 70_000, first_token_ms: 800, end_to_end_first_output_ms: 51_000 }
   const mountLatency = (props = {}, data: unknown[] = [row]) => mount(UsageTable, {
     props: { data: data as never[], columns: [], ...props },
-    global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><slot name="cell-latency" :row="row"/></template></div>' }, Icon: true, Teleport: true } },
+    global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><div data-test="latency"><slot name="cell-latency" :row="row"/></div><slot name="cell-created_at" :row="row" :value="row.created_at"/></template></div>' }, Icon: true, Teleport: true } },
   })
+  const cell = (w: ReturnType<typeof mountLatency>) => w.get('[data-test="latency"]')
+  // The summary's pieces in reading order (labels, values, separators).
+  const parts = (w: ReturnType<typeof mountLatency>) => cell(w).findAll('[data-testid="usage-latency-summary"] > span:nth-child(2) > span').map((el) => el.text())
 
+  // One line: "wait X · first token Y"; the wait has no grade of its own, the last attempt's first token keeps its color.
   it('shows user wait in neutral text and colors the last first token and upper bar by its severity', () => {
     const wrapper = mountLatency({ showEndToEnd: true })
     const e2e = wrapper.get('[data-testid="usage-latency-e2e"]')
     expect(e2e.text()).toBe('51.00s')
-    expect(e2e.classes()).toContain('text-gray-500')
+    expect(e2e.classes()).toContain('text-gray-700')
+    expect(e2e.classes().some((c) => /(emerald|amber|orange|red)-/.test(c))).toBe(false)
     const last = wrapper.get('[data-testid="usage-latency-last-attempt"]')
     expect(last.text()).toBe('800ms')
     expect(last.classes()).toContain('text-emerald-600')
-    expect(wrapper.text()).toContain('usage.latencyEndToEnd')
-    expect(wrapper.text()).toContain('usage.latencyLastAttempt')
-    expect(wrapper.text()).not.toContain('usage.latencyFirstToken')
+    expect(parts(wrapper)).toEqual(['usage.latencyWaitShort', '51.00s', '·', 'usage.latencyLastAttemptShort', '800ms'])
+    // The admin page never uses the user page's plain first-token label: its first token is the last attempt's.
+    expect(cell(wrapper).text()).not.toContain('usage.latencyFirstToken')
+    const labels = cell(wrapper).findAll('span.text-xs')
+    expect(labels.map((l) => l.attributes('title'))).toEqual(['usage.latencyEndToEndHint', 'usage.latencyLastAttemptHint'])
     expect(wrapper.get('span[aria-hidden="true"]').classes()).toEqual(expect.arrayContaining(['from-emerald-500', 'to-amber-400']))
   })
 
   it.each([
     [800, ['from-emerald-500', 'to-gray-400']],
     [null, ['bg-gray-400']],
-  ] as const)('shows missing duration in neutral colors with first-token value %s', (firstTokenMs, expectedBar) => {
+  ] as const)('shows missing duration in neutral colors with first-token value %s', async (firstTokenMs, expectedBar) => {
     const wrapper = mountLatency({ showEndToEnd: true }, [{ ...row, first_token_ms: firstTokenMs, duration_ms: null }])
     expect(wrapper.get('span[aria-hidden="true"]').classes()).toEqual(expect.arrayContaining([...expectedBar]))
-    const durationLabel = wrapper.findAll('span').find(el => el.text() === 'usage.latencyLastAttemptDuration')
-    const duration = durationLabel?.element.nextElementSibling
-    expect(duration?.textContent).toBe('-')
-    expect(duration?.classList.contains('text-gray-400')).toBe(true)
+    const detail = await openDetail(wrapper)
+    const duration = detail.get('[data-testid="usage-detail-duration"]')
+    expect(duration.element.previousElementSibling?.textContent).toBe('usage.latencyLastAttemptDuration')
+    expect(duration.text()).toBe('—')
+    expect(duration.classes()).toContain('text-gray-400')
   })
 
-  // Review item 9: each value stands on its own; a missing one is unknown, never filled from the other.
+  // Review item 9: each value stands on its own; a missing one is unknown, never filled from the other. The row and the
+  // request detail judge it the same way.
   it.each([
     ['no end-to-end value', { end_to_end_first_output_ms: null, first_token_ms: 800 }, { e2e: null, last: '800ms' }],
     ['no last-attempt value', { end_to_end_first_output_ms: 51_000, first_token_ms: null }, { e2e: '51.00s', last: null }],
     ['neither', { end_to_end_first_output_ms: null, first_token_ms: null }, { e2e: null, last: null }]
-  ])('shows each value or unknown with why on its own: %s', (_, patch, expected) => {
+  ])('shows each value or unknown with why on its own: %s', async (_, patch, expected) => {
     const wrapper = mountLatency({ showEndToEnd: true }, [{ ...row, ...patch }])
-    const e2e = wrapper.get('[data-testid="usage-latency-e2e"]')
-    const last = wrapper.get('[data-testid="usage-latency-last-attempt"]')
-    if (expected.e2e) {
-      expect(e2e.text()).toBe(expected.e2e)
-      expect(e2e.attributes('title')).toBeUndefined()
-    } else {
-      expect(e2e.text()).toBe('usage.latencyUnknown')
-      expect(e2e.attributes('title')).toBe('usage.latencyEndToEndUnknownHint')
+    const rowCell = cell(wrapper)
+    const detail = await openDetail(wrapper)
+    const pairs = [
+      [rowCell.get('[data-testid="usage-latency-e2e"]'), detail.get('[data-testid="usage-detail-e2e"]'), expected.e2e, 'usage.latencyEndToEndUnknownHint'],
+      [rowCell.get('[data-testid="usage-latency-last-attempt"]'), detail.get('[data-testid="usage-detail-first-token"]'), expected.last, 'usage.latencyLastAttemptUnknownHint'],
+    ] as const
+    for (const [inRow, inDetail, value, hint] of pairs) {
+      for (const el of [inRow, inDetail]) {
+        if (value) {
+          expect(el.text()).toBe(value)
+          expect(el.attributes('title')).toBeUndefined()
+        } else {
+          expect(el.text()).toBe('usage.latencyUnknown')
+          expect(el.attributes('title')).toBe(hint)
+        }
+      }
     }
-    if (expected.last) {
-      expect(last.text()).toBe(expected.last)
-      expect(last.attributes('title')).toBeUndefined()
-    } else {
-      expect(last.text()).toBe('usage.latencyUnknown')
-      expect(last.attributes('title')).toBe('usage.latencyLastAttemptUnknownHint')
-      expect(wrapper.get('span[aria-hidden="true"]').classes()).toContain('bg-amber-400')
-    }
-    expect(wrapper.text()).toContain('usage.latencyLastAttemptDuration1m 10s')
+    if (!expected.last) expect(wrapper.get('span[aria-hidden="true"]').classes()).toContain('bg-amber-400')
+    expect(detail.get('[data-testid="usage-detail-duration"]').text()).toBe('1m 10s')
   })
 
   // Browser check #5: duration_ms is the last attempt's; on the admin page, under the user wait, it is named so.
-  it('names the duration "last attempt" with why on the admin page, and keeps "total" without a tip on the user page', () => {
-    const label = (w: ReturnType<typeof mountLatency>, key: string) => w.findAll('span').find((el) => el.text() === key)
+  it('names the duration "last attempt" with why on the admin page, and keeps "total" without a tip on the user page', async () => {
+    const label = (detail: Awaited<ReturnType<typeof openDetail>>) => detail.get('[data-testid="usage-detail-duration"]').element.previousElementSibling as HTMLElement
     const admin = mountLatency({ showEndToEnd: true })
-    expect(label(admin, 'usage.latencyLastAttemptDuration')?.attributes('title')).toBe('usage.latencyLastAttemptDurationHint')
-    expect(label(admin, 'usage.latencyDuration')).toBeUndefined()
+    const adminLabel = label(await openDetail(admin))
+    expect(adminLabel.textContent).toBe('usage.latencyLastAttemptDuration')
+    expect(adminLabel.getAttribute('title')).toBe('usage.latencyLastAttemptDurationHint')
     const user = mountLatency()
-    expect(label(user, 'usage.latencyDuration')?.attributes('title')).toBeUndefined()
-    expect(label(user, 'usage.latencyLastAttemptDuration')).toBeUndefined()
+    const userLabel = label(await openDetail(user))
+    expect(userLabel.textContent).toBe('usage.latencyDuration')
+    expect(userLabel.hasAttribute('title')).toBe(false)
   })
 
-  it('keeps the first token on the shared user page, whose answer has no end-to-end value', () => {
+  // The user page's one line: "first token X · duration Y", each graded, no admin-only figure or tip.
+  it('keeps the first token on the shared user page, whose answer has no end-to-end value', async () => {
     const wrapper = mountLatency({ showTokenSpeed: true })
     expect(wrapper.find('[data-testid="usage-latency-e2e"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('usage.latencyFirstToken')
-    expect(wrapper.text()).toContain('Avg TPS')
-    expect(wrapper.find('[title]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('800ms')
+    expect(parts(wrapper)).toEqual(['usage.latencyFirstToken', '800ms', '·', 'usage.duration', '1m 10s'])
+    expect(wrapper.get('[data-testid="usage-latency-first-token"]').classes()).toContain('text-emerald-600')
+    expect(wrapper.get('[data-testid="usage-latency-duration"]').classes()).toContain('text-amber-600')
+    expect(cell(wrapper).find('[title]').exists()).toBe(false)
+    const detail = await openDetail(wrapper)
+    expect(detail.find('[data-testid="usage-detail-e2e"]').exists()).toBe(false)
+    expect(detail.text()).toContain('Avg TPS')
+    expect(detail.find('[title]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('51.00s')
   })
 })

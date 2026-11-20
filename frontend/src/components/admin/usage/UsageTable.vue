@@ -41,55 +41,46 @@
             >
               {{ row.user.email }}
             </button>
-            <span v-else class="font-medium text-gray-900 dark:text-white">-</span>
-            <span v-if="row.user?.deleted_at" class="ml-1 inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30">
+            <span v-else class="text-gray-400 dark:text-gray-500">—</span>
+            <span v-if="row.user?.deleted_at" class="ml-1 inline-flex items-center rounded px-1 py-px text-xs font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30">
               {{ t('admin.usage.userDeletedBadge') }}
             </span>
-            <span class="ml-1 text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
+            <span class="ml-1 tabular-nums text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
           </div>
         </template>
 
         <template #cell-api_key="{ row }">
-          <span class="text-sm text-gray-900 dark:text-white">{{ row.api_key?.name || '-' }}</span>
+          <span v-if="row.api_key?.name" class="text-sm text-gray-900 dark:text-white">{{ row.api_key.name }}</span>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
         </template>
 
         <template #cell-account="{ row }">
-          <span class="block text-sm text-gray-900 dark:text-white">{{ row.account?.name || '-' }}</span>
-          <!-- 后端 0.6.5 请求层：换号后成功的请求标"已救回"，换过号的标次数 -->
-          <span v-if="row.result === 2 || (row.switches ?? 0) > 0" class="mt-0.5 flex flex-wrap gap-x-1.5 text-xs" data-testid="usage-request-marks">
+          <span class="text-sm" :class="row.account?.name ? 'text-gray-900 dark:text-white' : 'text-gray-400 dark:text-gray-500'">{{ row.account?.name || '—' }}</span>
+          <!-- 后端 0.6.5 请求层：换号后成功的请求标"已救回"，换过号的标次数；与账号同一行 -->
+          <span v-if="row.result === 2 || (row.switches ?? 0) > 0" class="ml-1.5 inline-flex gap-x-1.5 text-xs" data-testid="usage-request-marks">
             <span v-if="row.result === 2" class="text-amber-600 dark:text-amber-400">{{ t('admin.usage.resultRescued') }}</span>
             <span v-if="(row.switches ?? 0) > 0" class="text-gray-500 dark:text-gray-400">{{ t('admin.usage.switches', { n: row.switches }) }}</span>
           </span>
         </template>
 
+        <!-- 请求模型和发往上游的模型写在同一行（a → b）；上游答回的模型不一致属少见的异常，另起一行标出 -->
         <template #cell-model="{ row }">
-          <div class="space-y-0.5 text-xs">
-            <div v-if="row.model_mapping_chain && row.model_mapping_chain.includes('→')" class="space-y-0.5">
-              <div v-for="(step, i) in mappingChainSteps(row.model_mapping_chain)" :key="i"
-                   class="break-all"
-                   :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
-                   :style="i > 0 ? `padding-left: ${i * 0.75}rem` : ''">
-                <span v-if="i > 0" class="mr-0.5">↳</span>{{ step }}
-              </div>
+          <div class="text-sm">
+            <div data-testid="usage-model-steps">
+              <template v-for="(step, i) in modelSteps(row)" :key="i">
+                <span v-if="i > 0" class="mx-1 text-gray-400 dark:text-gray-500" aria-hidden="true">→</span>
+                <span :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'">{{ step }}</span>
+              </template>
             </div>
-            <div v-else-if="row.upstream_model && row.upstream_model !== row.model" class="space-y-0.5">
-              <div class="break-all font-medium text-gray-900 dark:text-white">
-                {{ row.model }}
-              </div>
-              <div class="break-all text-gray-500 dark:text-gray-400">
-                <span class="mr-0.5">↳</span>{{ row.upstream_model }}
-              </div>
-            </div>
-            <span v-else class="font-medium text-gray-900 dark:text-white">{{ row.model }}</span>
             <div
-              v-if="row.upstream_model_mismatch === true && row.upstream_response_model"
-              class="break-all pl-3 text-[11px]"
+              v-if="hasModelAudit(row)"
+              class="mt-0.5 text-xs"
               :class="isLikelyModelVariant(row) ? 'text-amber-600 dark:text-amber-400' : 'text-orange-600 dark:text-orange-400'"
-              :title="modelAuditTitle(row)"
+              :title="modelAuditTitle(row, t)"
             >
-              <span class="mr-1">↳ {{ t('usage.upstreamResponseModel') }}:</span>{{ row.upstream_response_model }}
+              <span class="mr-1">{{ t('usage.upstreamResponseModel') }}:</span>{{ row.upstream_response_model }}
               <span
-                class="ml-1 inline-flex rounded px-1 py-px text-[10px] font-medium ring-1 ring-inset"
+                class="ml-1 inline-flex rounded px-1 py-px text-xs font-medium leading-tight ring-1 ring-inset"
                 :class="isLikelyModelVariant(row)
                   ? 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30'
                   : 'bg-orange-50 text-orange-700 ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-500/30'"
@@ -101,40 +92,34 @@
         </template>
 
         <template #cell-reasoning_effort="{ row }">
-          <div v-if="hasReasoningEffortMapping(row)" data-testid="reasoning-effort-cell" class="space-y-0.5 text-xs">
-            <div class="font-medium text-gray-900 dark:text-white">
-              {{ formatReasoningEffort(row.reasoning_effort) }}
-            </div>
-            <div class="text-gray-500 dark:text-gray-400">
-              <span class="mr-0.5">↳</span>{{ formatReasoningEffort(row.upstream_reasoning_effort) }}
-            </div>
-          </div>
-          <span v-else data-testid="reasoning-effort-cell" class="text-sm text-gray-900 dark:text-white">
-            {{ formatReasoningEffort(row.reasoning_effort) }}
+          <span data-testid="reasoning-effort-cell" class="text-sm">
+            <span class="text-gray-900 dark:text-white" :class="{ 'font-medium': hasReasoningEffortMapping(row) }">{{ formatReasoningEffort(row.reasoning_effort) }}</span>
+            <template v-if="hasReasoningEffortMapping(row)">
+              <span class="mx-1 text-gray-400 dark:text-gray-500" aria-hidden="true">→</span>
+              <span class="text-gray-500 dark:text-gray-400">{{ formatReasoningEffort(row.upstream_reasoning_effort) }}</span>
+            </template>
           </span>
         </template>
 
+        <!-- 入站端点；管理端上游端点不同时同一行“入站 → 上游”，两者带名称的完整值在悬停和明细里 -->
         <template #cell-endpoint="{ row }">
-          <div class="max-w-[320px] space-y-1 text-xs">
-            <div class="break-all text-gray-700 dark:text-gray-300">
-              <span class="font-medium text-gray-500 dark:text-gray-400">{{ t('usage.inbound') }}:</span>
-              <span class="ml-1">{{ row.inbound_endpoint?.trim() || '-' }}</span>
-            </div>
-            <div v-if="showUpstreamEndpoint" class="break-all text-gray-700 dark:text-gray-300">
-              <span class="font-medium text-gray-500 dark:text-gray-400">{{ t('usage.upstream') }}:</span>
-              <span class="ml-1">{{ row.upstream_endpoint?.trim() || '-' }}</span>
-            </div>
-          </div>
+          <span class="text-xs" :title="endpointTitle(row)" data-testid="usage-endpoint">
+            <span :class="endpointPair(row, showUpstreamEndpoint).inbound ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'">{{ endpointPair(row, showUpstreamEndpoint).inbound || '—' }}</span>
+            <template v-if="upstreamDiffers(row)">
+              <span class="mx-1 text-gray-400 dark:text-gray-500" aria-hidden="true">→</span>
+              <span class="text-gray-500 dark:text-gray-400">{{ endpointPair(row, showUpstreamEndpoint).upstream }}</span>
+            </template>
+          </span>
         </template>
 
         <template #cell-group="{ row }">
-          <div class="flex flex-col items-start gap-1">
-            <span v-if="row.group || (showFallbackOrigin && row.origin_group_id)" class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
-              {{ showFallbackOrigin && row.origin_group_id ? (row.origin_group_name || `#${row.origin_group_id}`) : row.group?.name }}
+          <div class="flex items-center gap-1.5">
+            <span v-if="groupLabel(row, showFallbackOrigin)" class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
+              {{ groupLabel(row, showFallbackOrigin) }}
             </span>
-            <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+            <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
             <span
-              v-if="crossGroup(row)"
+              v-if="crossGroup(row, showFallbackOrigin)"
               data-testid="usage-fallback-marker"
               class="text-xs text-amber-700 dark:text-amber-300"
               :title="t('admin.resilience.usage.fallbackTitle')"
@@ -145,9 +130,9 @@
         </template>
 
         <template #cell-stream="{ row }">
-          <div class="flex flex-wrap items-center gap-1">
+          <div class="flex items-center gap-1">
             <span data-testid="request-type-badge" class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium" :class="getRequestTypeBadgeClass(row)">
-              {{ getRequestTypeLabel(row) }}
+              {{ requestTypeLabel(row, t) }}
             </span>
             <span
               v-if="row.native_compaction_v2"
@@ -165,58 +150,28 @@
           </span>
         </template>
 
+        <!-- 一行输入 / 输出；缓存、缓存读取占比、媒体 Token 在悬停和明细里 -->
         <template #cell-tokens="{ row }">
           <!-- 无账单请求未观测到用量：不编造 0 -->
           <span v-if="isUnbilled(row) && row.input_tokens == null && row.output_tokens == null" class="text-sm text-gray-400 dark:text-gray-500">—</span>
           <!-- 图片生成请求（仅按次计费时显示图片格式） -->
-          <div v-else-if="isImageUsage(row)" class="flex items-center gap-1.5">
-            <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div v-else-if="isImageUsage(row)" class="flex items-center justify-end gap-1.5 whitespace-nowrap text-sm">
+            <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
-            <span class="font-medium text-gray-900 dark:text-white">{{ row.image_count }}{{ t('usage.imageUnit') }}</span>
-            <span class="text-gray-400">({{ formatImageBillingSize(row, t) }})</span>
+            <span class="font-medium tabular-nums text-gray-900 dark:text-white">{{ row.image_count }}{{ t('usage.imageUnit') }}</span>
+            <span class="text-gray-500 dark:text-gray-400">({{ formatImageBillingSize(row, t) }})</span>
           </div>
           <!-- Token 请求 -->
-          <div v-else class="flex items-center gap-1.5">
-            <div class="space-y-1 text-sm">
-              <div class="flex items-center gap-2">
-                <div class="inline-flex items-center gap-1">
-                  <Icon name="arrowDown" size="sm" class="h-3.5 w-3.5 text-emerald-500" />
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.input_tokens?.toLocaleString() || 0 }}</span>
-                </div>
-                <div class="inline-flex items-center gap-1">
-                  <Icon name="arrowUp" size="sm" class="h-3.5 w-3.5 text-violet-500" />
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.output_tokens?.toLocaleString() || 0 }}</span>
-                </div>
-              </div>
-              <div v-if="row.cache_read_tokens > 0 || row.cache_creation_tokens > 0" class="flex items-center gap-2">
-                <div v-if="row.cache_read_tokens > 0" class="inline-flex items-center gap-1">
-                  <svg class="h-3.5 w-3.5 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
-                  <span class="font-medium text-sky-600 dark:text-sky-400">{{ formatCacheTokens(row.cache_read_tokens) }}</span>
-                </div>
-                <div v-if="row.cache_creation_tokens > 0" class="inline-flex items-center gap-1">
-                  <svg class="h-3.5 w-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                  <span class="font-medium text-amber-600 dark:text-amber-400">{{ formatCacheTokens(row.cache_creation_tokens) }}</span>
-                  <span v-if="row.cache_creation_1h_tokens > 0" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/30">1h</span>
-                  <span v-if="row.cache_ttl_overridden" :title="t('usage.cacheTtlOverriddenHint')" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">{{ t('usage.cacheTtlOverriddenLabel') }}</span>
-                </div>
-              </div>
-              <div v-if="props.showCacheHitRate && hasUsageTokenMetrics(row)" class="flex items-center gap-2 text-xs" :title="t('usage.cacheHitRateHint')">
-                <span data-testid="usage-cache-hit-rate" :aria-label="`${t('usage.cacheHitRate')}: ${formatCacheHitRate(row)}`" class="font-medium tabular-nums text-sky-600 dark:text-sky-400">{{ formatCacheHitRate(row) }}</span>
-              </div>
-              <div v-if="hasImageInputTokens(row)" class="flex items-center gap-2">
-                <div class="inline-flex items-center gap-1">
-                  <svg class="h-3.5 w-3.5 text-fuchsia-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                  <span class="font-medium text-fuchsia-600 dark:text-fuchsia-400">{{ row.image_input_tokens.toLocaleString() }}</span>
-                </div>
-              </div>
-              <div v-if="hasImageOutputTokens(row)" class="flex items-center gap-2">
-                <div class="inline-flex items-center gap-1">
-                  <svg class="h-3.5 w-3.5 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                  <span class="font-medium text-pink-600 dark:text-pink-400">{{ row.image_output_tokens.toLocaleString() }}</span>
-                </div>
-              </div>
-            </div>
+          <div v-else class="flex items-center justify-end gap-2 whitespace-nowrap text-sm" data-testid="usage-token-summary">
+            <span class="inline-flex items-center gap-1" :title="t('admin.usage.inputTokens')">
+              <Icon name="arrowDown" size="sm" class="h-3.5 w-3.5 text-emerald-500" />
+              <span class="font-medium tabular-nums text-gray-900 dark:text-white">{{ row.input_tokens?.toLocaleString() || 0 }}</span>
+            </span>
+            <span class="inline-flex items-center gap-1" :title="t('admin.usage.outputTokens')">
+              <Icon name="arrowUp" size="sm" class="h-3.5 w-3.5 text-violet-500" />
+              <span class="font-medium tabular-nums text-gray-900 dark:text-white">{{ row.output_tokens?.toLocaleString() || 0 }}</span>
+            </span>
             <!-- Token Detail Tooltip（账单明细只有 usage 行才有） -->
             <div
               v-if="!isUnbilled(row)"
@@ -231,71 +186,82 @@
           </div>
         </template>
 
+        <!-- 一行实付（6 位小数）；管理端同一行跟着账号计费“A $…”；细项在悬停和明细里 -->
         <template #cell-cost="{ row }">
           <!-- 无账单请求没有费用：显示 —，失败 / 取消的标上结果 -->
           <div v-if="isUnbilled(row) && row.actual_cost == null" class="text-sm text-gray-400 dark:text-gray-500" data-testid="usage-unbilled">
-            —<span v-if="unbilledWord(row)" class="ml-1.5 text-xs">{{ unbilledWord(row) }}</span>
+            —<span v-if="unbilledWord(row, t)" class="ml-1.5 text-xs">{{ unbilledWord(row, t) }}</span>
           </div>
-          <div v-else class="text-sm">
-            <div class="flex items-center gap-1.5">
-              <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
-              <span
-                v-if="row.long_context_billing_applied"
-                data-testid="long-context-billing-marker"
-                :title="t('admin.usage.longContextPricingTooltip')"
-                class="inline-flex items-center rounded px-1 py-px text-[10px] font-semibold leading-tight bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30"
-              >{{ t('admin.usage.longContext') }}</span>
-              <!-- Cost Detail Tooltip -->
-              <div
-                class="group relative"
-                @mouseenter="showTooltip($event, row)"
-                @mouseleave="hideTooltip"
-              >
-                <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
-                  <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
-                </div>
+          <div v-else class="flex items-center justify-end gap-1.5 whitespace-nowrap text-sm">
+            <span class="font-medium tabular-nums text-green-600 dark:text-green-400">{{ formatUsd(row.actual_cost, 6) }}</span>
+            <span
+              v-if="row.long_context_billing_applied"
+              data-testid="long-context-billing-marker"
+              :title="t('admin.usage.longContextPricingTooltip')"
+              class="inline-flex items-center rounded px-1 py-px text-xs font-semibold leading-tight bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30"
+            >{{ t('admin.usage.longContext') }}</span>
+            <span v-if="showAccountBilling && row.account_rate_multiplier != null" data-testid="usage-account-billed" class="text-xs tabular-nums text-orange-500 dark:text-orange-400">
+              A {{ formatUsd(accountBilled(row), 6) }}
+            </span>
+            <!-- Cost Detail Tooltip -->
+            <div
+              class="group relative"
+              @mouseenter="showTooltip($event, row)"
+              @mouseleave="hideTooltip"
+            >
+              <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
+                <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
               </div>
-            </div>
-            <div v-if="showAccountBilling && row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-orange-500 dark:text-orange-400">
-              A ${{ accountBilled(row).toFixed(6) }}
             </div>
           </div>
         </template>
 
-        <!-- 色条上端按末次首字分档，下端按耗时分档。 -->
+        <!--
+          一行摘要。管理端“等待 X · 首字 Y”：用户等待（端到端首输出）中性色，末次首字按分档着色；用户端“首字 X · 耗时 Y”。
+          色条上端按首字分档，下端按耗时分档（耗时的数值和平均 TPS 在明细里）。
+        -->
         <template #cell-latency="{ row }">
-          <div class="flex items-stretch gap-2">
+          <div class="flex items-center justify-end gap-2 whitespace-nowrap" data-testid="usage-latency-summary">
             <span
-              class="w-1 shrink-0 rounded-full"
+              class="h-4 w-1 shrink-0 rounded-full"
               :class="latencyBarClasses(row)"
               aria-hidden="true"
             ></span>
-            <div class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs">
+            <span class="flex items-baseline gap-1.5">
               <template v-if="showEndToEnd">
-                <span class="text-gray-500 dark:text-gray-400" :title="t('usage.latencyEndToEndHint')">{{ t('usage.latencyEndToEnd') }}</span>
-                <span v-if="row.end_to_end_first_output_ms != null" data-testid="usage-latency-e2e" class="tabular-nums text-gray-500 dark:text-gray-400">{{ formatDuration(row.end_to_end_first_output_ms) }}</span>
-                <span v-else data-testid="usage-latency-e2e" class="cursor-help text-gray-400 dark:text-gray-500" :title="t('usage.latencyEndToEndUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
-                <span class="text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptHint')">{{ t('usage.latencyLastAttempt') }}</span>
-                <span v-if="row.first_token_ms != null" data-testid="usage-latency-last-attempt" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatDuration(row.first_token_ms) }}</span>
-                <span v-else data-testid="usage-latency-last-attempt" class="cursor-help text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400" :title="t('usage.latencyEndToEndHint')">{{ t('usage.latencyWaitShort') }}</span>
+                <span v-if="row.end_to_end_first_output_ms != null" data-testid="usage-latency-e2e" class="text-sm font-medium tabular-nums text-gray-700 dark:text-gray-300">{{ formatLatency(row.end_to_end_first_output_ms) }}</span>
+                <span v-else data-testid="usage-latency-e2e" class="cursor-help text-sm text-gray-400 dark:text-gray-500" :title="t('usage.latencyEndToEndUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
+                <span class="text-gray-300 dark:text-gray-600" aria-hidden="true">·</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400" :title="t('usage.latencyLastAttemptHint')">{{ t('usage.latencyLastAttemptShort') }}</span>
+                <span v-if="row.first_token_ms != null" data-testid="usage-latency-last-attempt" class="text-sm font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatLatency(row.first_token_ms) }}</span>
+                <span v-else data-testid="usage-latency-last-attempt" class="cursor-help text-sm text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
               </template>
               <template v-else>
-                <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyFirstToken') }}</span>
-                <span v-if="row.first_token_ms != null" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatDuration(row.first_token_ms) }}</span>
-                <span v-else class="text-gray-400 dark:text-gray-500">-</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.latencyFirstToken') }}</span>
+                <span v-if="row.first_token_ms != null" data-testid="usage-latency-first-token" class="text-sm font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatLatency(row.first_token_ms) }}</span>
+                <span v-else data-testid="usage-latency-first-token" class="text-sm text-gray-400 dark:text-gray-500">—</span>
+                <span class="text-gray-300 dark:text-gray-600" aria-hidden="true">·</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.duration') }}</span>
+                <span data-testid="usage-latency-duration" class="text-sm font-medium tabular-nums" :class="row.duration_ms == null ? 'text-gray-400 dark:text-gray-500' : LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms)]">{{ formatLatency(row.duration_ms) }}</span>
               </template>
-              <span class="text-gray-400 dark:text-gray-500" :title="showEndToEnd ? t('usage.latencyLastAttemptDurationHint') : undefined">{{ showEndToEnd ? t('usage.latencyLastAttemptDuration') : t('usage.latencyDuration') }}</span>
-              <span class="font-medium tabular-nums" :class="row.duration_ms == null ? 'text-gray-400 dark:text-gray-500' : LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms)]">{{ formatDuration(row.duration_ms) }}</span>
-              <template v-if="props.showTokenSpeed && hasUsageTokenMetrics(row)">
-                <span class="text-gray-500 dark:text-gray-400" :title="showEndToEnd ? t('usage.outputTpsHint') : undefined">{{ t('usage.outputTps') }}</span>
-                <span data-testid="usage-token-speed" class="whitespace-nowrap font-medium tabular-nums text-gray-700 dark:text-gray-300" :title="showEndToEnd ? t('usage.outputTpsHint') : undefined">{{ formatTokenSpeed(row) }}</span>
-              </template>
-            </div>
+            </span>
           </div>
         </template>
 
-        <template #cell-created_at="{ value }">
-          <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
+        <!-- 时间（今年省略年份）+ 每行一个“明细”按钮：点按、Enter、Space 打开同一个明细对话框 -->
+        <template #cell-created_at="{ row, value }">
+          <div class="flex items-center gap-3 whitespace-nowrap">
+            <span class="text-sm tabular-nums text-gray-600 dark:text-gray-400">{{ formatLogTime(value) }}</span>
+            <button
+              type="button"
+              data-testid="usage-detail-open"
+              class="relative rounded text-xs font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors before:absolute before:-inset-x-2 before:-inset-y-3 before:content-[''] hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
+              :aria-label="t('usage.requestDetail.open', { time: formatLogTime(value) })"
+              aria-haspopup="dialog"
+              @click="detailRow = row"
+            >{{ t('usage.requestDetail.button') }}</button>
+          </div>
         </template>
 
         <template #cell-request_id="{ row }">
@@ -313,7 +279,7 @@
               <Icon :name="copiedRequestId === row.request_id ? 'check' : 'copy'" size="sm" class="h-3.5 w-3.5" />
             </button>
           </div>
-          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
         </template>
 
         <template #cell-upstream_request_id="{ row }">
@@ -331,20 +297,21 @@
               <Icon :name="copiedRequestId === row.upstream_request_id ? 'check' : 'copy'" size="sm" class="h-3.5 w-3.5" />
             </button>
           </div>
-          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
         </template>
 
         <template #cell-user_agent="{ row }">
-          <span v-if="row.user_agent" class="text-sm text-gray-600 dark:text-gray-400 block max-w-[320px] truncate" :title="row.user_agent">{{ formatUserAgent(row.user_agent) }}</span>
-          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+          <span v-if="row.user_agent" class="text-sm text-gray-600 dark:text-gray-400 block max-w-[320px] truncate" :title="row.user_agent">{{ row.user_agent }}</span>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
         </template>
 
+        <!-- IP 和归属地查询同一行 -->
         <template #cell-ip_address="{ row }">
-          <div v-if="row.ip_address">
+          <div v-if="row.ip_address" class="flex items-center gap-2">
             <span class="text-sm font-mono text-gray-600 dark:text-gray-400">{{ row.ip_address }}</span>
-            <IpGeoCell :ip="row.ip_address" />
+            <IpGeoCell :ip="row.ip_address" class="!mt-0" />
           </div>
-          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">—</span>
         </template>
 
         <template #empty><EmptyState :message="t('usage.noRecords')" /></template>
@@ -363,78 +330,7 @@
       }"
     >
       <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
-        <div class="space-y-1.5">
-          <div>
-            <div class="text-xs font-semibold text-gray-300 mb-1">{{ t('usage.tokenDetails') }}</div>
-            <div v-if="tokenTooltipData && tokenTooltipData.input_tokens > 0 && !hasImageInputTokens(tokenTooltipData)" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('admin.usage.inputTokens') }}</span>
-              <span class="font-medium text-white">{{ tokenTooltipData.input_tokens.toLocaleString() }}</span>
-            </div>
-            <div v-if="tokenTooltipData && hasImageInputTokens(tokenTooltipData) && textInputTokens(tokenTooltipData) > 0" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('admin.usage.inputTokens') }}</span>
-              <span class="font-medium text-white">{{ textInputTokens(tokenTooltipData).toLocaleString() }}</span>
-            </div>
-            <div v-if="tokenTooltipData && hasImageInputTokens(tokenTooltipData)" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('usage.imageInputTokens') }}</span>
-              <span class="font-medium text-fuchsia-300">{{ tokenTooltipData.image_input_tokens.toLocaleString() }}</span>
-            </div>
-            <div v-if="tokenTooltipData && tokenTooltipData.output_tokens > 0 && !hasImageOutputTokens(tokenTooltipData)" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('admin.usage.outputTokens') }}</span>
-              <span class="font-medium text-white">{{ tokenTooltipData.output_tokens.toLocaleString() }}</span>
-            </div>
-            <div v-if="tokenTooltipData && hasImageOutputTokens(tokenTooltipData) && textOutputTokens(tokenTooltipData) > 0" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('admin.usage.outputTokens') }}</span>
-              <span class="font-medium text-white">{{ textOutputTokens(tokenTooltipData).toLocaleString() }}</span>
-            </div>
-            <div v-if="tokenTooltipData && hasImageOutputTokens(tokenTooltipData)" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('usage.imageOutputTokens') }}</span>
-              <span class="font-medium text-pink-300">{{ tokenTooltipData.image_output_tokens.toLocaleString() }}</span>
-            </div>
-            <div v-if="tokenTooltipData && tokenTooltipData.cache_creation_tokens > 0">
-              <!-- 有 5m/1h 明细时，展开显示 -->
-              <template v-if="tokenTooltipData.cache_creation_5m_tokens > 0 || tokenTooltipData.cache_creation_1h_tokens > 0">
-                <div v-if="tokenTooltipData.cache_creation_5m_tokens > 0" class="flex items-center justify-between gap-4">
-                  <span class="text-gray-400 flex items-center gap-1.5">
-                    {{ t('admin.usage.cacheCreation5mTokens') }}
-                    <span class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-amber-500/20 text-amber-400 ring-1 ring-inset ring-amber-500/30">5m</span>
-                  </span>
-                  <span class="font-medium text-white">{{ tokenTooltipData.cache_creation_5m_tokens.toLocaleString() }}</span>
-                </div>
-                <div v-if="tokenTooltipData.cache_creation_1h_tokens > 0" class="flex items-center justify-between gap-4">
-                  <span class="text-gray-400 flex items-center gap-1.5">
-                    {{ t('admin.usage.cacheCreation1hTokens') }}
-                    <span class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-500/20 text-orange-400 ring-1 ring-inset ring-orange-500/30">1h</span>
-                  </span>
-                  <span class="font-medium text-white">{{ tokenTooltipData.cache_creation_1h_tokens.toLocaleString() }}</span>
-                </div>
-              </template>
-              <!-- 无明细时，只显示聚合值 -->
-              <div v-else class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('admin.usage.cacheCreationTokens') }}</span>
-                <span class="font-medium text-white">{{ tokenTooltipData.cache_creation_tokens.toLocaleString() }}</span>
-              </div>
-            </div>
-            <p
-              v-if="tokenTooltipData && tokenTooltipData.anthropic_cache_ttl_policy != null && tokenTooltipData.cache_creation_tokens > (tokenTooltipData.cache_creation_5m_tokens || 0) + (tokenTooltipData.cache_creation_1h_tokens || 0)"
-              class="text-gray-300"
-            >{{ t((tokenTooltipData.cache_creation_5m_tokens || 0) + (tokenTooltipData.cache_creation_1h_tokens || 0) > 0 ? 'usage.anthropicCacheTTL.partialDetail' : 'usage.anthropicCacheTTL.unknownDetail') }}</p>
-            <div v-if="tokenTooltipData && tokenTooltipData.cache_ttl_overridden" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400 flex items-center gap-1.5">
-                {{ t('usage.cacheTtlOverriddenLabel') }}
-                <span class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-500/20 text-rose-400 ring-1 ring-inset ring-rose-500/30">{{ t('usage.cacheTtlOverriddenLabel') }}</span>
-              </span>
-              <span class="font-medium text-rose-400">{{ tokenTooltipData.cache_creation_1h_tokens > 0 ? t('usage.cacheTtlOverridden1h') : t('usage.cacheTtlOverridden5m') }}</span>
-            </div>
-            <div v-if="tokenTooltipData && tokenTooltipData.cache_read_tokens > 0" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('admin.usage.cacheReadTokens') }}</span>
-              <span class="font-medium text-white">{{ tokenTooltipData.cache_read_tokens.toLocaleString() }}</span>
-            </div>
-          </div>
-          <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
-            <span class="text-gray-400">{{ t('usage.totalTokens') }}</span>
-            <span class="font-semibold text-blue-400">{{ ((tokenTooltipData?.input_tokens || 0) + (tokenTooltipData?.output_tokens || 0) + (tokenTooltipData?.cache_creation_tokens || 0) + (tokenTooltipData?.cache_read_tokens || 0)).toLocaleString() }}</span>
-          </div>
-        </div>
+        <UsageTokenBreakdown v-if="tokenTooltipData" :row="tokenTooltipData" :show-cache-hit-rate="props.showCacheHitRate" />
         <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
       </div>
     </div>
@@ -451,142 +347,29 @@
       }"
     >
       <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
-        <div class="space-y-1.5">
-          <!-- Cost Breakdown -->
-          <div class="mb-2 border-b border-gray-700 pb-1.5">
-            <div class="text-xs font-semibold text-gray-300 mb-1">{{ t('usage.costDetails') }}</div>
-            <div v-if="tooltipData && tooltipData.input_cost > 0" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('admin.usage.inputCost') }}</span>
-              <span class="font-medium text-white">${{ tooltipData.input_cost.toFixed(8) }}</span>
-            </div>
-            <div v-if="tooltipData && hasImageInputCost(tooltipData)" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('usage.imageInputCost') }}</span>
-              <span class="font-medium text-fuchsia-300">${{ tooltipData.image_input_cost.toFixed(8) }}</span>
-            </div>
-            <div v-if="tooltipData && tooltipData.output_cost > 0" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('admin.usage.outputCost') }}</span>
-              <span class="font-medium text-white">${{ tooltipData.output_cost.toFixed(8) }}</span>
-            </div>
-            <div v-if="tooltipData && hasImageOutputCost(tooltipData)" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('usage.imageOutputCost') }}</span>
-              <span class="font-medium text-pink-300">${{ tooltipData.image_output_cost.toFixed(8) }}</span>
-            </div>
-            <!-- Token billing: show unit prices per 1M tokens -->
-            <template v-if="tooltipData && !isImageUsage(tooltipData) && (!tooltipData.billing_mode || tooltipData.billing_mode === BILLING_MODE_TOKEN)">
-              <div v-if="tooltipData && textInputTokens(tooltipData) > 0" class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.inputTokenPrice') }}</span>
-                <span class="font-medium text-sky-300">{{ formatTokenPricePerMillion(tooltipData.input_cost, textInputTokens(tooltipData)) }} {{ t('usage.perMillionTokens') }}</span>
-              </div>
-              <div v-if="tooltipData && hasImageInputTokens(tooltipData)" class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.imageInputTokenPrice') }}</span>
-                <span class="font-medium text-fuchsia-300">{{ formatTokenPricePerMillion(tooltipData.image_input_cost ?? 0, tooltipData.image_input_tokens) }} {{ t('usage.perMillionTokens') }}</span>
-              </div>
-              <div v-if="tooltipData && tooltipData.output_cost > 0 && textOutputTokens(tooltipData) > 0" class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.outputTokenPrice') }}</span>
-                <span class="font-medium text-violet-300">{{ formatTokenPricePerMillion(tooltipData.output_cost, textOutputTokens(tooltipData)) }} {{ t('usage.perMillionTokens') }}</span>
-              </div>
-              <div v-if="tooltipData && hasImageOutputTokens(tooltipData)" class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.imageOutputTokenPrice') }}</span>
-                <span class="font-medium text-pink-300">{{ formatTokenPricePerMillion(tooltipData.image_output_cost ?? 0, tooltipData.image_output_tokens) }} {{ t('usage.perMillionTokens') }}</span>
-              </div>
-            </template>
-            <template v-else-if="tooltipData && isImageUsage(tooltipData)">
-              <div class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.imageCount') }}</span>
-                <span class="font-medium text-white">{{ tooltipData.image_count }}{{ t('usage.imageUnit') }}</span>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.imageBillingSize') }}</span>
-                <span class="font-medium text-white">{{ formatImageBillingSize(tooltipData, t) }}</span>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.imageSizeSource') }}</span>
-                <span class="font-medium text-white">{{ formatImageSizeSource(tooltipData, t) }}</span>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.imageInputSize') }}</span>
-                <span class="font-medium text-white">{{ formatImageInputSize(tooltipData, t) }}</span>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.imageOutputSize') }}</span>
-                <span class="font-medium text-white">{{ formatImageOutputSize(tooltipData, t) }}</span>
-              </div>
-              <div v-if="formatImageSizeBreakdown(tooltipData)" class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.imageSizeBreakdown') }}</span>
-                <span class="font-medium text-white">{{ formatImageSizeBreakdown(tooltipData) }}</span>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.imageUnitPrice') }}</span>
-                <span class="font-medium text-sky-300">${{ imageUnitPrice(tooltipData).toFixed(8) }}</span>
-              </div>
-              <div class="flex items-center justify-between gap-4">
-                <span class="text-gray-400">{{ t('usage.imageTotalPrice') }}</span>
-                <span class="font-medium text-white">${{ tooltipData.total_cost?.toFixed(8) || '0.00000000' }}</span>
-              </div>
-            </template>
-            <div v-else class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('usage.unitPrice') }}</span>
-              <span class="font-medium text-sky-300">${{ tooltipData?.total_cost?.toFixed(8) || '0.00000000' }}</span>
-            </div>
-            <div v-if="tooltipData && tooltipData.cache_creation_cost > 0" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('admin.usage.cacheCreationCost') }}</span>
-              <span class="font-medium text-white">${{ tooltipData.cache_creation_cost.toFixed(8) }}</span>
-            </div>
-            <div v-if="tooltipData && tooltipData.cache_read_cost > 0" class="flex items-center justify-between gap-4">
-              <span class="text-gray-400">{{ t('admin.usage.cacheReadCost') }}</span>
-              <span class="font-medium text-white">${{ tooltipData.cache_read_cost.toFixed(8) }}</span>
-            </div>
-          </div>
-          <!-- Rate and Summary -->
-          <div class="flex items-center justify-between gap-6">
-            <span class="text-gray-400">{{ t('usage.serviceTier') }}</span>
-            <span class="font-semibold text-cyan-300">{{ getUsageServiceTierLabel(tooltipData?.service_tier, t) }}</span>
-          </div>
-          <div class="flex items-center justify-between gap-6">
-            <span class="text-gray-400">{{ t('usage.rate') }}</span>
-            <span class="font-semibold text-blue-400">{{ formatMultiplier(tooltipData?.rate_multiplier ?? 1) }}x</span>
-          </div>
-          <div class="flex items-center justify-between gap-6">
-            <span class="text-gray-400">{{ t('usage.original') }}</span>
-            <span class="font-medium text-white">${{ tooltipData?.total_cost?.toFixed(8) || '0.00000000' }}</span>
-          </div>
-          <div class="flex items-center justify-between gap-6">
-            <span class="text-gray-400">{{ t('usage.userBilled') }}</span>
-            <span class="font-semibold text-green-400">${{ tooltipData?.actual_cost?.toFixed(8) || '0.00000000' }}</span>
-          </div>
-          <!-- Account billing (separated from user billing) -->
-          <template v-if="showAccountBilling">
-            <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
-              <span class="text-gray-400">{{ t('usage.accountMultiplier') }}</span>
-              <span class="font-semibold text-blue-400">{{ formatMultiplier(tooltipData?.account_rate_multiplier ?? 1) }}x</span>
-            </div>
-            <div class="flex items-center justify-between gap-6">
-              <span class="text-gray-400">{{ t('usage.accountBilled') }}</span>
-              <span class="font-semibold text-green-400">
-                ${{ accountBilled({
-                  total_cost: tooltipData?.total_cost,
-                  account_stats_cost: tooltipData?.account_stats_cost,
-                  account_rate_multiplier: tooltipData?.account_rate_multiplier,
-                }).toFixed(8) }}
-              </span>
-            </div>
-          </template>
-        </div>
+        <UsageCostBreakdown v-if="tooltipData" :row="tooltipData" :show-account-billing="showAccountBilling" />
         <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
       </div>
     </div>
   </Teleport>
+
+  <UsageRequestDetailDialog
+    :row="detailRow"
+    :show-end-to-end="props.showEndToEnd"
+    :show-token-speed="props.showTokenSpeed"
+    :show-cache-hit-rate="props.showCacheHitRate"
+    :show-account-billing="showAccountBilling"
+    :show-upstream-endpoint="showUpstreamEndpoint"
+    :show-fallback-origin="props.showFallbackOrigin"
+    @close="detailRow = null"
+  />
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { formatDateTime, formatReasoningEffort, reasoningEffortValuesEqual } from '@/utils/format'
-import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
-import { formatTokenPricePerMillion } from '@/utils/usagePricing'
-import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
-import { resolveUsageRequestType } from '@/utils/usageRequestType'
+import { formatLogTime, formatReasoningEffort, formatUsd } from '@/utils/format'
 import {
   LATENCY_BAR_CLASSES,
   LATENCY_BAR_FROM_CLASSES,
@@ -596,44 +379,35 @@ import {
   firstTokenSeverity,
 } from '@/utils/latencyHealth'
 import {
-  BILLING_MODE_TOKEN,
   getBillingModeLabel,
   getBillingModeBadgeClass,
   isImageUsage,
   getDisplayBillingMode,
-  imageUnitPrice,
 } from '@/utils/billingMode'
-import {
-  formatImageBillingSize,
-  formatImageInputSize,
-  formatImageOutputSize,
-  formatImageSizeBreakdown,
-  formatImageSizeSource,
-  hasImageOutputTokens,
-  textOutputTokens,
-  hasImageOutputCost,
-  hasImageInputTokens,
-  textInputTokens,
-  hasImageInputCost,
-} from '@/utils/imageUsage'
-
-/** Compute the account-billed cost for display: (account_stats_cost ?? total_cost) * rate_multiplier */
-function mappingChainSteps(chain: string): string[] {
-  return chain.split('→')
-}
-
-function accountBilled(row: { total_cost?: number | null; account_stats_cost?: number | null; account_rate_multiplier?: number | null }): number {
-  const base = row.account_stats_cost != null ? row.account_stats_cost : (row.total_cost ?? 0)
-  const result = base * (row.account_rate_multiplier ?? 1)
-  return Number.isNaN(result) ? 0 : result
-}
-
-
-import { formatCacheHitRate, formatTokenSpeed, hasUsageTokenMetrics } from '@/utils/usageMetrics'
+import { formatImageBillingSize } from '@/utils/imageUsage'
+import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
+import UsageTokenBreakdown from './UsageTokenBreakdown.vue'
+import UsageCostBreakdown from './UsageCostBreakdown.vue'
+import UsageRequestDetailDialog from './UsageRequestDetailDialog.vue'
+import {
+  accountBilled,
+  crossGroup,
+  endpointPair,
+  formatLatency,
+  groupLabel,
+  hasModelAudit,
+  hasReasoningEffortMapping,
+  isLikelyModelVariant,
+  isUnbilled,
+  modelAuditTitle,
+  modelSteps,
+  requestTypeLabel,
+  unbilledWord,
+} from './usageRow'
 import { fetchBatch, getEntry } from '@/utils/ipGeoLookup'
 import type { AdminUsageLog } from '@/types'
 import type { Column } from '@/components/common/types'
@@ -683,7 +457,10 @@ const appStore = useAppStore()
 const copiedRequestId = ref<string | null>(null)
 const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
+const showFallbackOrigin = computed(() => props.showFallbackOrigin)
 const ipGeoBatchLoading = ref(false)
+/** The row whose request detail dialog is open (a snapshot: a live refresh does not change it under the reader). */
+const detailRow = ref<AdminUsageLog | null>(null)
 
 // 后端 0.6.5 起，管理端列表把没有账单的请求（多为失败或取消）和 usage 行排在一起。这些行来自另一张表：
 // id 自成序列，没有费用，常常也没有 Token 数。行键带上来源；费用与 Token 显示 —，不编造 0。
@@ -696,45 +473,21 @@ const isAtTop = () => tableRef.value?.isAtTop() ?? true
 const scrollToTop = () => tableRef.value?.scrollToTop()
 defineExpose({ isAtTop, scrollToTop })
 
-const isUnbilled = (row: AdminUsageLog) => row.source === 'unbilled'
-/**
- * Served by another group than the request's: judged only by the original and the serving group ids, both known and
- * different (the bill's fallback flag means a rear account took the request, not another group).
- */
-const crossGroup = (row: AdminUsageLog) =>
-  props.showFallbackOrigin && row.origin_group_id != null && row.group_id != null && row.origin_group_id !== row.group_id
 const rowKey = (row: AdminUsageLog) => `${row.source ?? 'usage'}:${row.id}`
-const unbilledWord = (row: AdminUsageLog) =>
-  row.result === 3 ? t('admin.usage.resultFailed') : row.result === 4 ? t('admin.usage.resultCanceled') : ''
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
 
-const hasReasoningEffortMapping = (row: AdminUsageLog): boolean => {
-  const requested = row.reasoning_effort?.trim() || ''
-  const forwarded = row.upstream_reasoning_effort?.trim() || ''
-  return requested !== '' && forwarded !== '' && !reasoningEffortValuesEqual(requested, forwarded)
+/** The upstream endpoint is shown on this page, known and not the inbound one. */
+const upstreamDiffers = (row: AdminUsageLog) => {
+  const { inbound, upstream } = endpointPair(row, showUpstreamEndpoint)
+  return !!upstream && upstream !== inbound
 }
-
-const sentUpstreamModel = (row: AdminUsageLog): string => row.upstream_model?.trim() || row.model?.trim() || ''
-
-const normalizeModelVariant = (model: string): string => model
-  .trim()
-  .toLowerCase()
-  .replace(/-latest$/, '')
-  .replace(/-\d{4}-\d{2}-\d{2}$/, '')
-  .replace(/-\d{8}$/, '')
-
-const isLikelyModelVariant = (row: AdminUsageLog): boolean => {
-  const sent = sentUpstreamModel(row)
-  const response = row.upstream_response_model?.trim() || ''
-  return sent !== '' && response !== '' && normalizeModelVariant(sent) === normalizeModelVariant(response)
+const endpointTitle = (row: AdminUsageLog) => {
+  const { inbound, upstream } = endpointPair(row, showUpstreamEndpoint)
+  const lines = [`${t('usage.inboundEndpoint')}: ${inbound || '—'}`]
+  if (upstream != null) lines.push(`${t('usage.upstreamEndpoint')}: ${upstream || '—'}`)
+  return lines.join('\n')
 }
-
-const modelAuditTitle = (row: AdminUsageLog): string => [
-  `${t('usage.requestedModel')}: ${row.model || '-'}`,
-  `${t('usage.sentUpstreamModel')}: ${sentUpstreamModel(row) || '-'}`,
-  `${t('usage.upstreamResponseModel')}: ${row.upstream_response_model || '-'}`,
-].join('\n')
 
 const currentPageIps = computed(() =>
   Array.from(new Set(props.data.map((row) => row.ip_address).filter((ip): ip is string => Boolean(ip))))
@@ -785,16 +538,6 @@ const tokenTooltipVisible = ref(false)
 const tokenTooltipPosition = ref({ x: 0, y: 0 })
 const tokenTooltipData = ref<AdminUsageLog | null>(null)
 
-const getRequestTypeLabel = (row: AdminUsageLog): string => {
-  const requestType = resolveUsageRequestType(row)
-  if (requestType === 'cyber') return t('usage.cyber')
-  if (requestType === 'live') return t('usage.live')
-  if (requestType === 'ws_v2') return t('usage.ws')
-  if (requestType === 'stream') return t('usage.stream')
-  if (requestType === 'sync') return t('usage.sync')
-  return t('usage.unknown')
-}
-
 const getRequestTypeBadgeClass = (row: AdminUsageLog): string => {
   const requestType = resolveUsageRequestType(row)
   if (requestType === 'cyber') return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
@@ -805,13 +548,6 @@ const getRequestTypeBadgeClass = (row: AdminUsageLog): string => {
   return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
 }
 
-
-
-const formatUserAgent = (ua: string): string => {
-  return ua
-}
-
-// 超过 1 分钟简化为 "Xm Ys"，免去人工换算（超过 1 小时再进位为 "Xh Ym"）
 function latencyBarClasses(row: AdminUsageLog) {
   const duration = row.duration_ms == null ? null : durationSeverity(row.duration_ms)
   if (row.first_token_ms == null) {
@@ -822,15 +558,6 @@ function latencyBarClasses(row: AdminUsageLog) {
     LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(row.first_token_ms)],
     duration == null ? 'to-gray-400 dark:to-gray-500' : LATENCY_BAR_TO_CLASSES[duration],
   ]
-}
-
-const formatDuration = (ms: number | null | undefined): string => {
-  if (ms == null) return '-'
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60_000) return `${(ms / 1000).toFixed(2)}s`
-  const totalSec = Math.round(ms / 1000)
-  if (totalSec < 3600) return `${Math.floor(totalSec / 60)}m ${totalSec % 60}s`
-  return `${Math.floor(totalSec / 3600)}h ${Math.floor((totalSec % 3600) / 60)}m`
 }
 
 // Cost tooltip functions

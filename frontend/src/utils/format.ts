@@ -175,6 +175,30 @@ export function formatDateTime(
 }
 
 /**
+ * A log line's local time: "11-20 06:54:11" within the current year, "2025-11-20 06:54:11" before it. The same digits in
+ * every language, so a column of times lines up.
+ */
+export function formatLogTime(date: string | Date | null | undefined, now: Date = new Date()): string {
+  const d = date ? new Date(date) : null
+  if (!d || isNaN(d.getTime())) return ''
+  return logTimeText(d, d.getFullYear() !== now.getFullYear())
+}
+
+/** The same time with its year always, for a detail view: "2026-11-20 06:54:11". */
+export function formatFullLogTime(date: string | Date | null | undefined): string {
+  const d = date ? new Date(date) : null
+  if (!d || isNaN(d.getTime())) return ''
+  return logTimeText(d, true)
+}
+
+function logTimeText(d: Date, withYear: boolean): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const day = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  return withYear ? `${d.getFullYear()}-${day} ${time}` : `${day} ${time}`
+}
+
+/**
  * 格式化日期时间（精确到分钟）
  */
 export function formatDateTimeToMinute(
@@ -376,6 +400,21 @@ export function formatNumberLocaleString(num: number): string {
  */
 export function formatCostFixed(amount: number, fractionDigits: number = 4): string {
   return amount.toFixed(fractionDigits)
+}
+
+/** A dollar amount with thousands separators and fixed decimals, the same in every language: "$1,234.567890". */
+export function formatUsd(amount: number | null | undefined, fractionDigits: number): string {
+  const value = typeof amount === 'number' && Number.isFinite(amount) ? amount : 0
+  return `$${getNumberFormat('en-US', { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(value)}`
+}
+
+/**
+ * A total in dollars: two decimals with thousands separators ("$30,750.20"). A total that is not zero but would show as
+ * "$0.00" keeps six decimals, as one request's cost does, so a small spend never reads as none.
+ */
+export function formatUsdTotal(amount: number | null | undefined): string {
+  const value = typeof amount === 'number' && Number.isFinite(amount) ? amount : 0
+  return formatUsd(value, value !== 0 && Math.abs(value) < 0.005 ? 6 : 2)
 }
 
 /**
