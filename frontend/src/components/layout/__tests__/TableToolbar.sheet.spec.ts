@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { h, nextTick } from 'vue'
@@ -101,3 +104,14 @@ describe('TableToolbar phone first row', () => {
     }
   })
 })
+
+// Astra post-acceptance review #2: at 320px the merged info row put "Filters" over the live status. The row wraps and
+// the actions take the next line, on the right (measured in Chrome; jsdom lays nothing out).
+describe('TableToolbar phone info row', () => {
+  it('wraps, the actions to a line of their own on the right, wrapping within it if they must', () => {
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../TableToolbar.vue'), 'utf8')
+    expect(source).toMatch(/\.table-toolbar--phone \.table-toolbar__info-row \{\s*display: flex;\s*flex-wrap: wrap;/)
+    expect(source).toMatch(/\.table-toolbar--phone \.table-toolbar__actions \{\s*flex: 0 1 auto;\s*flex-wrap: wrap;\s*margin-left: auto;/)
+  })
+})
+

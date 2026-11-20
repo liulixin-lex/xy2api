@@ -459,6 +459,7 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
 }
 .table-toolbar--phone .table-toolbar__info-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -478,9 +479,12 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
 .table-toolbar--phone .table-toolbar__sep {
   color: var(--color-text-muted);
 }
+/* When the info and the actions ("Filters" among them) do not fit one line, the actions take the next one, on the
+   right, and wrap within it if they must: nothing overlaps, every target keeps its 8px. */
 .table-toolbar--phone .table-toolbar__actions {
-  flex: none;
-  flex-wrap: nowrap;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 .table-toolbar__sheet-btn {
   gap: 6px;
