@@ -16,7 +16,7 @@
               <input
                 v-model="searchQuery"
                 type="text"
-                :placeholder="phone ? t('admin.users.searchUsersShort') : t('admin.users.searchUsers')"
+                :placeholder="t('admin.users.searchUsersShort')"
                 class="table-toolbar__input users-search"
                 @input="handleSearch"
               />
@@ -2418,13 +2418,21 @@ onUnmounted(() => {
   padding-right: var(--cell-pad-x);
   padding-left: var(--cell-pad-x);
 }
-/* A phone: the short hint whole at 390, where the field has 151px beside "筛选" and "添加" (141px in English); the
-   hint is 147px at 12px (133px in English), 195px at 16px. Narrower it ends in an ellipsis. Typed text stays 16px,
-   so the browser does not zoom in. */
-@media (max-width: 767px) {
-  .users-search {
-    text-overflow: ellipsis;
+/* The search hint is the short one at every width (the full text stays the field's name): the field is at most 220px,
+   178px for text, and the full hint (209px in Chinese at the desktop's 13px, 273px in English) was cut even at 1440.
+   The short one is 159px at the field's 13px; with touch, where the field is 16px, it is 14px (171px), and on a phone,
+   where the field has 151px at 390 beside "筛选" and "添加", 12px (147px; 133px in English). Narrower (an iPad in
+   landscape, whose actions leave the field 176px) it ends in an ellipsis. Only the hint shrinks: typed text stays
+   16px on touch, so the browser does not zoom in. */
+.users-search {
+  text-overflow: ellipsis;
+}
+@media (pointer: coarse) {
+  .users-search::placeholder {
+    font-size: 14px;
   }
+}
+@media (max-width: 767px) {
   .users-search::placeholder {
     font-size: 12px;
   }

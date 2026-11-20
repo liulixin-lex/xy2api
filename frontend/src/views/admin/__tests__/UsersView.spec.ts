@@ -851,6 +851,17 @@ describe('admin UsersView', () => {
     }
   })
 
+  // Follow-ups after #96: the full hint did not fit the field at any width; the short one shows, the full text names it.
+  it('shows the short search hint at every width, the full text as the field\'s name', async () => {
+    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    const box = wrapper.get('.table-toolbar__search-box')
+    expect(box.get('input').attributes('placeholder')).toBe('admin.users.searchUsersShort')
+    expect(box.get('.sr-only').text()).toBe('admin.users.searchUsers')
+    wrapper.unmount()
+  })
+
   // Follow-ups after #96 (package A): the phone info row is "N 条 · ● 实时 [刷新][列][⋯]"; "⋯" holds the attributes
   // config and the bulk actions with their text, and the search shows a short hint.
   it('puts the attributes config and the bulk actions behind the phone toolbar\'s "⋯", with a short search hint', async () => {
