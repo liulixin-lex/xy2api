@@ -1,11 +1,46 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
-        <!-- The compact toolbar (12.9): live, refresh and column settings, a rule, then sort, categories and create. -->
-        <TableToolbar compact>
+        <!-- The compact toolbar (12.9): live, refresh and column settings, a rule, then sort, categories and create.
+             Below 768px the phone toolbar (mobile list plan): search, "Filters n" and create; the chosen filters as
+             tags; the count, live state and tools on one row, the page's own tools in "more". -->
+        <TableToolbar compact filter-sheet :filter-count="filterTags.length" @clear-filters="clearGroupFilters">
           <template #status>
+            <TableSortHint v-if="!phone && sortHint" :label="sortHint.label" :order="sortHint.order" />
             <LiveStatusIndicator :status="liveStatus" :pause="liveGroups.pause" :resume="liveGroups.resume" :detail="t('admin.groups.liveDetail')" />
+          </template>
+          <!-- The toolbar renders each slot in its own form (sheet, tags, info on a phone; filters in the row): not gated on
+               the page's width here, whose media query may flip before the toolbar's and remove a focused field first. -->
+          <template #sheet>
+            <div class="grid gap-4">
+              <label class="grid gap-1.5" data-filter="platform">
+                <span class="input-label !mb-0">{{ t('admin.groups.columns.platform') }}</span>
+                <Select v-model="filters.platform" :options="platformFilterOptions" :aria-label="t('admin.groups.columns.platform')" @change="applyGroupFilterChange" />
+              </label>
+              <label class="grid gap-1.5" data-filter="status">
+                <span class="input-label !mb-0">{{ t('admin.groups.columns.status') }}</span>
+                <Select v-model="filters.status" :options="statusOptions" :aria-label="t('admin.groups.columns.status')" @change="applyGroupFilterChange" />
+              </label>
+              <label v-if="!authStore.isSimpleMode" class="grid gap-1.5" data-filter="is_exclusive">
+                <span class="input-label !mb-0">{{ t('admin.groups.columns.type') }}</span>
+                <Select v-model="filters.is_exclusive" :options="exclusiveOptions" :aria-label="t('admin.groups.columns.type')" @change="applyGroupFilterChange" />
+              </label>
+              <label v-if="!authStore.isSimpleMode && (groupCategories.categories.length > 0 || filters.group_category)" class="grid gap-1.5" data-filter="group_category">
+                <span class="input-label !mb-0">{{ t('admin.groupCategories.column') }}</span>
+                <GroupCategoryFilter v-model="filters.group_category" @change="applyGroupFilterChange" />
+              </label>
+            </div>
+          </template>
+          <template #tags>
+            <UsageFilterTags :tags="filterTags" @remove="removeGroupFilter" />
+          </template>
+          <template #info>
+            <span data-test="groups-count">{{ t('common.table.count', { n: groupsTotal.toLocaleString() }) }}</span>
+            <template v-if="sortHint">
+              <span class="table-toolbar__sep" aria-hidden="true">·</span>
+              <TableSortHint :label="sortHint.label" :order="sortHint.order" />
+            </template>
           </template>
           <template #search>
             <label class="table-toolbar__search-box">
@@ -25,28 +60,37 @@
               v-model="filters.platform"
               size="sm"
               :options="platformFilterOptions"
-              :placeholder="t('admin.groups.allPlatforms')"
+              :aria-label="t('admin.groups.columns.platform')"
+              data-filter="platform"
               class="table-toolbar__filter"
               @change="applyGroupFilters"
-            />
+            >
+              <template #selected="{ option }">{{ option && option.value !== '' ? option.label : t('admin.groups.columns.platform') }}</template>
+            </Select>
             <Select
               v-model="filters.status"
               size="sm"
               :options="statusOptions"
-              :placeholder="t('admin.groups.allStatus')"
+              :aria-label="t('admin.groups.columns.status')"
+              data-filter="status"
               class="table-toolbar__filter"
               @change="applyGroupFilters"
-            />
+            >
+              <template #selected="{ option }">{{ option && option.value !== '' ? option.label : t('admin.groups.columns.status') }}</template>
+            </Select>
             <Select
               v-if="!authStore.isSimpleMode"
               v-model="filters.is_exclusive"
               size="sm"
               :options="exclusiveOptions"
-              :placeholder="t('admin.groups.allGroups')"
+              :aria-label="t('admin.groups.columns.type')"
+              data-filter="is_exclusive"
               class="table-toolbar__filter"
               @change="applyGroupFilters"
-            />
-            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" size="sm" class="table-toolbar__filter" @change="applyGroupFilters" />
+            >
+              <template #selected="{ option }">{{ option && option.value !== '' ? option.label : t('admin.groups.columns.type') }}</template>
+            </Select>
+            <GroupCategoryFilter v-if="!authStore.isSimpleMode" v-model="filters.group_category" size="sm" :field-label="t('admin.groupCategories.column')" data-filter="group_category" class="table-toolbar__filter" @change="applyGroupFilters" />
           </template>
 
           <template #actions>
@@ -67,11 +111,12 @@
             <div class="relative" ref="columnDropdownRef">
               <button
                 type="button"
-                @click="showColumnDropdown = !showColumnDropdown"
+                @click="phone ? (showColumnSheet = true) : (showColumnDropdown = !showColumnDropdown)"
                 class="table-toolbar__icon-btn table-toolbar__icon"
                 :aria-label="t('admin.groups.columnSettings')"
-                aria-haspopup="true"
-                :aria-expanded="showColumnDropdown ? 'true' : 'false'"
+                :aria-haspopup="phone ? 'dialog' : 'true'"
+                :aria-expanded="(phone ? showColumnSheet : showColumnDropdown) ? 'true' : 'false'"
+                data-test="group-columns"
                 v-tip="t('admin.groups.columnSettings')"
               >
                 <!-- The columns icon of the other pages' column settings: "grid" is the category manager's (7r-7). -->
@@ -80,51 +125,47 @@
                 </svg>
               </button>
               <div
-                v-if="showColumnDropdown"
+                v-if="showColumnDropdown && !phone"
                 class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-popover border border-line-popover bg-surface-popover py-1 shadow-dropdown"
               >
-                <!-- A multi-select list: a shown column is told by its brand check alone, without the selected background
-                     or text colour (12.6-5). -->
-                <button
-                  v-for="col in toggleableColumns"
-                  :key="col.key"
-                  type="button"
-                  @click="toggleColumn(col.key)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-surface-popover-hover dark:text-gray-300"
-                >
-                  <span>{{ col.label }}</span>
-                  <Icon
-                    v-if="isColumnVisible(col.key)"
-                    name="check"
-                    size="sm"
-                    class="text-primary-500"
-                    :stroke-width="2"
-                  />
-                </button>
+                <GroupColumnSettings :columns="toggleableColumns" :is-visible="isColumnVisible" :at-default="columnVisibility.atDefault.value" @toggle="toggleColumn" @reset="resetColumns" />
               </div>
             </div>
-            <span v-if="canManage" class="table-toolbar__divider" aria-hidden="true"></span>
             <button
-              v-if="!authStore.isSimpleMode && canManage"
+              v-if="phone && hasPageTools"
+              type="button"
+              class="table-toolbar__icon-btn table-toolbar__icon"
+              aria-haspopup="dialog"
+              :aria-label="t('common.more')"
+              data-test="group-tools"
+              @click="showToolsSheet = true"
+            >
+              <Icon name="more" size="sm" />
+            </button>
+            <span v-if="canManage && !phone" class="table-toolbar__divider" aria-hidden="true"></span>
+            <button
+              v-if="!phone && !authStore.isSimpleMode && canManage"
               type="button"
               @click="openSortModal"
-              class="table-toolbar__btn table-toolbar__btn--secondary"
+              class="table-toolbar__btn table-toolbar__btn--secondary [@media(pointer:coarse)]:min-w-10"
               :aria-label="t('admin.groups.sortOrder')"
               v-tip="t('admin.groups.sortOrder')"
             >
               <Icon name="arrowsUpDown" size="sm" />
               <span class="table-toolbar__label table-toolbar__label--wide">{{ t("admin.groups.sortOrder") }}</span>
             </button>
-            <GroupCategoryManagerButton v-if="!authStore.isSimpleMode && canManage" />
+            <GroupCategoryManagerButton v-if="!authStore.isSimpleMode && canManage" ref="categoryManagerRef" :button-hidden="phone" />
+          </template>
+          <template v-if="canManage" #create>
             <button
-              v-if="canManage"
               type="button"
               @click="openCreateModal"
               class="table-toolbar__btn table-toolbar__btn--primary"
+              :aria-label="t('admin.groups.createGroup')"
               data-tour="groups-create-btn"
             >
               <Icon name="plus" size="sm" />
-              {{ t("admin.groups.createGroup") }}
+              {{ phone ? t("common.create") : t("admin.groups.createGroup") }}
             </button>
           </template>
         </TableToolbar>
@@ -135,20 +176,24 @@
         <DataTable
           ref="groupsTableRef"
           class="dense-cells"
+          layout="table"
+          :scroll-label="t('admin.groups.title')"
           :columns="columns"
           :data="groups"
           :loading="loading"
           :row-class="groupRowClass"
           :server-side-sort="true"
-          default-sort-key="sort_order"
-          default-sort-order="asc"
+          :sort="tableSort"
           @sort="handleSort"
         >
+          <!-- The frozen identity column: the alias pill, then the name cut with "…", whole in its tip or on a tap; at most
+               240px wide on tablets and computers too (the column's own width on a phone). -->
+          <!-- The pill inside the cell, so the whole name area opens the full name; on touch 40px high (Astra review 2), its
+               negative margins keeping the row's height. -->
           <template #cell-name="{ row, value }">
-            <span class="inline-flex items-center gap-2">
-              <GroupAliasPill :group="row" />
-              <span class="font-medium text-fg-primary">{{ value }}</span>
-            </span>
+            <TableIdentityCell class="max-w-[240px] [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:py-2.5" :primary="value" data-test="group-name">
+              <template #primary><GroupAliasPill :group="row" class="mr-2 align-middle" />{{ value }}</template>
+            </TableIdentityCell>
           </template>
 
           <template #cell-id="{ value }">
@@ -235,9 +280,7 @@
           </template>
 
           <template #cell-rate_multiplier="{ value }">
-            <span class="text-sm text-gray-700 dark:text-gray-300"
-              >{{ value }}x</span
-            >
+            <span class="text-sm tabular-nums text-gray-700 dark:text-gray-300">{{ formatRate(value) }}</span>
           </template>
 
           <template #cell-is_exclusive="{ value }">
@@ -249,53 +292,21 @@
           </template>
           <template #cell-category="{ row }"><GroupCategoryTags :group-id="row.id" /></template>
 
+          <!-- "available / total" on one line (mobile list plan, copy); rate-limited accounts after it when there are any. -->
           <template #cell-account_count="{ row }">
-            <div class="space-y-0.5 text-xs">
-              <div>
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsAvailable")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-emerald-600 dark:text-emerald-400"
-                  >{{ row.active_account_count || 0 }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-              <div v-if="row.rate_limited_account_count">
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsRateLimited")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-amber-600 dark:text-amber-400"
-                  >{{ row.rate_limited_account_count }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-              <div>
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsTotal")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >{{ row.account_count || 0 }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-            </div>
+            <span class="whitespace-nowrap text-sm tabular-nums" data-test="group-account-count">
+              <span class="font-medium text-emerald-600 dark:text-emerald-400">{{ (row.active_account_count || 0).toLocaleString() }}</span>
+              <span class="text-gray-400 dark:text-gray-500"> / </span>
+              <span class="text-gray-700 dark:text-gray-300">{{ (row.account_count || 0).toLocaleString() }}</span>
+              <span v-if="row.rate_limited_account_count" class="ml-1.5 text-xs text-amber-600 dark:text-amber-400">{{
+                t("admin.groups.accountsLimitedShort", { n: row.rate_limited_account_count.toLocaleString() })
+              }}</span>
+            </span>
           </template>
 
           <template #cell-sched_gate="{ row }">
             <span v-if="schedGateText(row)" class="sq-num whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{{ schedGateText(row) }}</span>
-            <span v-else class="text-sm text-gray-500 dark:text-dark-400">—</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-capacity="{ row }">
@@ -309,12 +320,12 @@
               :rpm-used="row.capacity.rpmUsed"
               :rpm-max="row.capacity.rpmMax"
             />
-            <span v-else class="text-xs text-gray-400">—</span>
+            <CellEmpty v-else />
           </template>
 
           <!-- Amounts on the accounts page's three-significant-digit rule, the exact one in the tip (7o-4). -->
           <template #cell-usage="{ row }">
-            <div v-if="!row.usage_summary" class="text-xs text-gray-400">—</div>
+            <CellEmpty v-if="!row.usage_summary" />
             <div v-else class="space-y-0.5 text-xs">
               <div class="text-gray-500 dark:text-gray-400">
                 <span class="text-gray-400 dark:text-gray-500">{{
@@ -351,12 +362,30 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <!-- Below 1024px only "⋯" (a 40px button), its menu the row's actions in the same order (mobile list plan). -->
+            <!-- The block's negative margins give back the button's extra height: the row stays a text line high. -->
+            <div v-if="!desktop" class="-my-2.5 flex justify-center">
+              <button
+                v-if="hasRowActions(rowActions(row))"
+                type="button"
+                class="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                :aria-label="`${t('common.more')} ${row.name}`"
+                aria-haspopup="menu"
+                :aria-expanded="rowMenu.group?.id === row.id ? 'true' : 'false'"
+                :data-sq-trigger="`group-board:${row.id}`"
+                data-test="group-row-more"
+                @click="openRowMenu(row, $event)"
+              >
+                <Icon name="more" size="sm" />
+              </button>
+            </div>
+            <!-- From 1024px the buttons; on touch 8px apart. -->
+            <div v-else class="flex items-center gap-1 [@media(pointer:coarse)]:gap-2">
               <button
                 v-if="!authStore.isSimpleMode && row.platform === 'openai'"
                 type="button"
                 data-testid="group-sched-board"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
                 :data-sq-trigger="`group-board:${row.id}`"
                 @click="openSchedBoard({ id: row.id, name: row.name })"
               >
@@ -366,7 +395,7 @@
               <button
                 v-if="canManage"
                 @click="handleEdit(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t("common.edit") }}</span>
@@ -381,7 +410,7 @@
                 "
                 :disabled="duplicatingGroupIds.has(row.id)"
                 @click="handleDuplicate(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="copy" size="sm" />
                 <span class="text-xs">
@@ -396,7 +425,7 @@
                 v-if="!authStore.isSimpleMode && canManage && row.platform === 'composite'"
                 data-testid="group-composite-routes"
                 @click="handleCompositeRoutes(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-cyan-600 dark:hover:bg-dark-700 dark:hover:text-cyan-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-cyan-600 dark:hover:bg-dark-700 dark:hover:text-cyan-400"
               >
                 <Icon name="swap" size="sm" />
                 <span class="text-xs">{{
@@ -407,7 +436,7 @@
                 v-if="!authStore.isSimpleMode && canManage && canAdjustBalance"
                 data-testid="group-rate-multipliers"
                 @click="handleRateMultipliers(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
               >
                 <Icon name="dollar" size="sm" />
                 <span class="text-xs">{{
@@ -418,7 +447,7 @@
                 v-if="!authStore.isSimpleMode && canManage"
                 data-testid="group-rpm-overrides"
                 @click="handleRPMOverrides(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
               >
                 <Icon name="bolt" size="sm" />
                 <span class="text-xs">{{
@@ -428,7 +457,7 @@
               <button
                 v-if="canManage"
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
                 <Icon name="trash" size="sm" />
                 <span class="text-xs">{{ t("common.delete") }}</span>
@@ -4350,6 +4379,32 @@
       @close="showRPMOverridesModal = false"
       @success="reloadGroups"
     />
+    <!-- A phone's column settings: this width's own shown columns. -->
+    <BottomSheet :show="showColumnSheet" :title="t('common.table.columnsTitle')" test-id="group-column-sheet" @close="showColumnSheet = false">
+      <GroupColumnSettings :columns="toggleableColumns" :is-visible="isColumnVisible" :at-default="columnVisibility.atDefault.value" @toggle="toggleColumn" @reset="resetColumns" />
+    </BottomSheet>
+    <!-- A phone's page tools: the group order and the categories. -->
+    <BottomSheet :show="showToolsSheet" :title="t('common.more')" test-id="group-tools-sheet" @close="showToolsSheet = false">
+      <div class="grid gap-3">
+        <button type="button" class="btn btn-secondary w-full" data-test="group-tools-sort" @click="showToolsSheet = false; openSortModal()">
+          {{ t("admin.groups.sortOrder") }}
+        </button>
+        <button type="button" class="btn btn-secondary w-full" data-test="group-tools-categories" @click="showToolsSheet = false; categoryManagerRef?.open()">
+          {{ t("admin.groupCategories.manage") }}
+        </button>
+      </div>
+    </BottomSheet>
+
+    <GroupActionMenu
+      :show="!!rowMenu.group"
+      :group="rowMenu.group"
+      :anchor-rect="rowMenu.anchorRect"
+      :actions="rowMenu.group ? rowActions(rowMenu.group) : NO_ROW_ACTIONS"
+      :duplicating="!!rowMenu.group && duplicatingGroupIds.has(rowMenu.group.id)"
+      @action="onRowAction"
+      @close="closeRowMenu"
+    />
+
     <SchedQualityLayers />
   </AppLayout>
 </template>
@@ -4385,6 +4440,17 @@ import LiveStatusIndicator from "@/components/common/LiveStatusIndicator.vue";
 import PendingChangesPill from "@/components/common/PendingChangesPill.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
 import GroupAliasPill from "@/components/common/GroupAliasPill.vue";
+import TableIdentityCell from "@/components/common/TableIdentityCell.vue";
+import CellEmpty from "@/components/common/CellEmpty.vue";
+import { formatRate } from "@/utils/formatters";
+import GroupActionMenu from "@/components/admin/group/GroupActionMenu.vue";
+import { groupRowActions, hasRowActions, type GroupRowAction, type GroupRowActions } from "@/components/admin/group/groupRowActions";
+import { useTableViewport } from "@/composables/useTableViewport";
+import { useColumnVisibility } from "@/composables/useColumnVisibility";
+import BottomSheet from "@/components/common/BottomSheet.vue";
+import TableSortHint from "@/components/common/TableSortHint.vue";
+import UsageFilterTags from "@/components/admin/usage/UsageFilterTags.vue";
+import GroupColumnSettings from "@/components/admin/group/GroupColumnSettings.vue";
 import GroupAliasField from "@/components/admin/group/GroupAliasField.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import Toggle from "@/components/common/Toggle.vue";
@@ -4667,7 +4733,8 @@ const allColumns = computed<Column[]>(() => {
     { key: "name", label: t("admin.groups.columns.name"), sortable: true },
     { key: "id", label: t("admin.groups.columns.id"), sortable: true },
     { key: "platform", label: t("admin.groups.columns.platform"), sortable: true },
-    { key: "account_count", label: t("admin.groups.columns.accounts"), sortable: true },
+    // A number column: right-aligned, thousands separators (mobile list plan item 19).
+    { key: "account_count", label: t("admin.groups.columns.accounts"), sortable: true, class: "text-right" },
     { key: "status", label: t("admin.groups.columns.status"), sortable: true, cardHeadEnd: true },
     { key: "actions", label: t("admin.groups.columns.actions"), sortable: false },
   ];
@@ -4689,108 +4756,45 @@ const allColumns = computed<Column[]>(() => {
 const toggleableColumns = computed(() =>
   allColumns.value.filter((col) => !ALWAYS_VISIBLE_COLUMNS.has(col.key)),
 );
-const hiddenColumns = reactive<Set<string>>(new Set());
 const showColumnDropdown = ref(false);
 const columnDropdownRef = ref<HTMLElement | null>(null);
 
-const getValidHiddenColumnKeys = () =>
-  new Set(toggleableColumns.value.map((col) => col.key));
-
-const loadSavedColumns = () => {
-  hiddenColumns.clear();
-  try {
-    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY);
-    const validKeys = getValidHiddenColumnKeys();
-
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) {
-        parsed
-          .filter(
-            (key): key is string =>
-              typeof key === "string" && validKeys.has(key),
-          )
-          .forEach((key) => hiddenColumns.add(key));
-      }
-
-      // Existing admins: auto-hide columns newly added as default-hidden.
-      const storedVersion = Number(
-        localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) ?? "1",
-      );
-      if (storedVersion < COLUMN_SETTINGS_VERSION) {
-        let mutated = false;
-        for (let v = storedVersion + 1; v <= COLUMN_SETTINGS_VERSION; v++) {
-          for (const key of VERSION_NEW_HIDDEN_COLUMNS[v] ?? []) {
-            if (validKeys.has(key) && !hiddenColumns.has(key)) {
-              hiddenColumns.add(key);
-              mutated = true;
-            }
-          }
-        }
-        if (mutated) {
-          saveColumnsToStorage();
-        } else {
-          localStorage.setItem(
-            COLUMN_SETTINGS_VERSION_KEY,
-            String(COLUMN_SETTINGS_VERSION),
-          );
-        }
-      }
-    } else {
-      DEFAULT_HIDDEN_COLUMNS.forEach((key) => {
-        if (validKeys.has(key)) hiddenColumns.add(key);
-      });
-      saveColumnsToStorage();
-    }
-  } catch (error) {
-    console.error("Failed to load group column settings:", error);
-    DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key));
+/** Below 768px (mobile list plan): name (frozen), platform, accounts and status, then "⋯"; the rest in the settings. */
+const NARROW_HIDDEN_COLUMNS_KEY = "group-hidden-columns-narrow";
+const NARROW_DEFAULT_HIDDEN_COLUMNS = ["id", "billing_type", "rate_multiplier", "is_exclusive", "category", "sched_gate", "capacity", "usage"];
+/** The wide memory is the page's existing key: its version chain hides the columns added since it was saved. */
+const migrateGroupColumns = (hidden: Set<string>) => {
+  const stored = Number(localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) ?? "1");
+  if (stored >= COLUMN_SETTINGS_VERSION) return false;
+  for (let v = stored + 1; v <= COLUMN_SETTINGS_VERSION; v++) {
+    for (const key of VERSION_NEW_HIDDEN_COLUMNS[v] ?? []) hidden.add(key);
   }
+  localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION));
+  return true;
 };
-
-const saveColumnsToStorage = () => {
-  try {
-    const validKeys = getValidHiddenColumnKeys();
-    const keys = [...hiddenColumns].filter((key) => validKeys.has(key));
-    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify(keys));
-    localStorage.setItem(
-      COLUMN_SETTINGS_VERSION_KEY,
-      String(COLUMN_SETTINGS_VERSION),
-    );
-  } catch (error) {
-    console.error("Failed to save group column settings:", error);
-  }
+// Nothing saved yet: the defaults are current, so a set saved later is not run through the chain again.
+try {
+  if (localStorage.getItem(HIDDEN_COLUMNS_KEY) === null) localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION));
+} catch { /* storage unavailable: the defaults apply */ }
+/** A source skips a hidden column; once it is shown again (a toggle, a reset, the other width), that source runs now. */
+const refreshShownSources = (keys: string[]) => {
+  if (keys.includes("usage") || keys.includes("billing_type")) void liveGroups.refresh("usage");
+  if (keys.includes("capacity")) void liveGroups.refresh("capacity");
+  if (keys.includes("sched_gate")) void liveGroups.refresh("schedGates");
 };
-
-const isColumnVisible = (key: string) => !hiddenColumns.has(key);
+const columnVisibility = useColumnVisibility({
+  keys: computed(() => toggleableColumns.value.map((col) => col.key)),
+  wide: { storageKey: HIDDEN_COLUMNS_KEY, defaultHidden: DEFAULT_HIDDEN_COLUMNS, migrate: migrateGroupColumns },
+  narrow: { storageKey: NARROW_HIDDEN_COLUMNS_KEY, defaultHidden: NARROW_DEFAULT_HIDDEN_COLUMNS },
+  onShown: refreshShownSources,
+});
+const isColumnVisible = (key: string) => columnVisibility.isVisible(key);
 const hasVisibleUsageSummaryConsumer = computed(
   () => !authStore.isSimpleMode && (isColumnVisible("usage") || isColumnVisible("billing_type")),
 );
 const hasVisibleCapacityColumn = computed(() => !authStore.isSimpleMode && isColumnVisible("capacity"));
-
-const toggleColumn = (key: string) => {
-  const validKeys = getValidHiddenColumnKeys();
-  if (!validKeys.has(key)) return;
-
-  const wasHidden = hiddenColumns.has(key);
-  if (wasHidden) {
-    hiddenColumns.delete(key);
-  } else {
-    hiddenColumns.add(key);
-  }
-  saveColumnsToStorage();
-
-  // A source skips a hidden column; once it is shown again, that source runs now.
-  if (wasHidden && (key === "usage" || key === "billing_type")) {
-    void liveGroups.refresh("usage");
-  }
-  if (wasHidden && key === "capacity") {
-    void liveGroups.refresh("capacity");
-  }
-  if (wasHidden && key === "sched_gate") {
-    void liveGroups.refresh("schedGates");
-  }
-};
+const toggleColumn = (key: string) => columnVisibility.toggle(key);
+const resetColumns = () => columnVisibility.reset();
 
 // 「门槛」列：每个 OpenAI 分组的三个阈值简写，未启用为“—”（设计 D.3）。每次加载后逐组读取（并发 4），不参与定时更新。
 const schedGateText = (group: LiveGroup) => {
@@ -4799,14 +4803,8 @@ const schedGateText = (group: LiveGroup) => {
 };
 
 const columns = computed<Column[]>(() =>
-  allColumns.value.filter(
-    (col) => ALWAYS_VISIBLE_COLUMNS.has(col.key) || !hiddenColumns.has(col.key),
-  ),
+  allColumns.value.filter((col) => ALWAYS_VISIBLE_COLUMNS.has(col.key) || isColumnVisible(col.key)),
 );
-
-if (typeof window !== "undefined") {
-  loadSavedColumns();
-}
 
 // Filter options
 const statusOptions = computed(() => [
@@ -6009,6 +6007,90 @@ const handlePageSizeChange = (pageSize: number) => {
   pagination.page_size = pageSize;
   pagination.page = 1;
   void reloadGroups();
+};
+
+/** The page's own sort for the headers (the default, sort_order, is no column: no arrow until a header is chosen). */
+const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }));
+
+// ---- Row actions below 1024px: "⋯" and its menu ----
+const { phone, desktop } = useTableViewport();
+
+// ---- The phone toolbar: tags, count, sort hint, sheets ----
+const showColumnSheet = ref(false);
+const showToolsSheet = ref(false);
+const categoryManagerRef = ref<{ open: () => void } | null>(null);
+watch(phone, (on) => {
+  if (!on) {
+    showColumnSheet.value = false;
+    showToolsSheet.value = false;
+  } else showColumnDropdown.value = false;
+});
+const hasPageTools = computed(() => !authStore.isSimpleMode && canManage.value);
+const optionLabel = (options: { value: string; label: string }[], value: string) =>
+  options.find((option) => option.value === value)?.label ?? value;
+/** The chosen filters, in the fields' order, as the phone's removable tags ("Filters n" counts them). */
+const filterTags = computed(() => {
+  const tags: { key: keyof typeof filters; label: string; text: string }[] = [];
+  if (filters.platform) tags.push({ key: "platform", label: t("admin.groups.columns.platform"), text: optionLabel(platformFilterOptions.value, filters.platform) });
+  if (filters.status) tags.push({ key: "status", label: t("admin.groups.columns.status"), text: optionLabel(statusOptions.value, filters.status) });
+  if (!authStore.isSimpleMode && filters.is_exclusive) tags.push({ key: "is_exclusive", label: t("admin.groups.columns.type"), text: optionLabel(exclusiveOptions.value, filters.is_exclusive) });
+  if (!authStore.isSimpleMode && filters.group_category) {
+    const name = groupCategories.categories.find((category) => String(category.id) === filters.group_category)?.name;
+    tags.push({ key: "group_category", label: t("admin.groupCategories.column"), text: name ?? filters.group_category });
+  }
+  return tags;
+});
+/** A filter changed in the sheet or by a tag: back to the first page, then reload. */
+const applyGroupFilterChange = () => {
+  pagination.page = 1;
+  void applyGroupFilters();
+};
+const removeGroupFilter = (key: string) => {
+  filters[key as keyof typeof filters] = "";
+  applyGroupFilterChange();
+};
+const clearGroupFilters = () => {
+  filters.platform = "";
+  filters.status = "";
+  filters.is_exclusive = "";
+  filters.group_category = "";
+  applyGroupFilterChange();
+};
+/** The sort while its column is hidden, named in the toolbar (the default order is no column). */
+const sortHint = computed(() => {
+  const column = allColumns.value.find((col) => col.key === sortState.sort_by);
+  if (!column || isColumnVisible(column.key)) return null;
+  return { label: column.label, order: sortState.sort_order };
+});
+const NO_ROW_ACTIONS: GroupRowActions = { board: false, edit: false, duplicate: false, composite: false, rate: false, rpm: false, delete: false };
+const rowActions = (group: { platform: string }) =>
+  groupRowActions(group, { simpleMode: authStore.isSimpleMode, manage: canManage.value, adjustBalance: canAdjustBalance.value });
+const rowMenu = reactive<{ group: LiveGroup | null; anchorRect: DOMRect | null; opener: HTMLElement | null }>({ group: null, anchorRect: null, opener: null });
+const openRowMenu = (group: LiveGroup, event: MouseEvent) => {
+  rowMenu.group = group;
+  rowMenu.opener = event.currentTarget as HTMLElement;
+  rowMenu.anchorRect = rowMenu.opener.getBoundingClientRect();
+};
+/** Closing gives focus back to the row's "⋯" when it was in the menu (or nowhere); a dialog an item opened keeps it. */
+const closeRowMenu = () => {
+  const opener = rowMenu.opener;
+  const active = document.activeElement;
+  rowMenu.group = null;
+  rowMenu.anchorRect = null;
+  rowMenu.opener = null;
+  if (opener?.isConnected && (!active || active === document.body || active.closest('[data-test="group-action-menu"]'))) opener.focus();
+};
+watch(desktop, (on) => { if (on) closeRowMenu(); });
+const onRowAction = (action: GroupRowAction) => {
+  const group = rowMenu.group;
+  if (!group) return;
+  if (action === "board") openSchedBoard({ id: group.id, name: group.name });
+  else if (action === "edit") void handleEdit(group);
+  else if (action === "duplicate") void handleDuplicate(group);
+  else if (action === "composite") void handleCompositeRoutes(group);
+  else if (action === "rate") handleRateMultipliers(group);
+  else if (action === "rpm") handleRPMOverrides(group);
+  else handleDelete(group);
 };
 
 const handleSort = (key: string, order: 'asc' | 'desc') => {
@@ -7305,6 +7387,9 @@ const saveSortOrder = async () => {
 onMounted(() => {
   void reloadGroups();
   if (!authStore.isSimpleMode) {
+    // The category filter's options: on a phone the filter is in the closed sheet, so the page asks for them itself
+    // (shared with the inline filter's own request, Astra review 1).
+    void groupCategories.reload();
     void loadLiveCapability();
     loadModelAllowlistCandidates("create", 0, createForm.platform);
   }

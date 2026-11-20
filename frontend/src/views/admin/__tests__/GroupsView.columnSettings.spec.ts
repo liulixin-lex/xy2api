@@ -175,6 +175,12 @@ const DataTableStub = {
       <div v-if="data.length" data-test="billing-cell">
         <slot name="cell-billing_type" :row="data[0]" />
       </div>
+      <div v-if="data.length" data-test="rate-cell">
+        <slot name="cell-rate_multiplier" :row="data[0]" :value="data[0].rate_multiplier" />
+      </div>
+      <div v-if="data.length" data-test="accounts-cell">
+        <slot name="cell-account_count" :row="data[0]" />
+      </div>
     </div>
   `,
 }
@@ -319,7 +325,8 @@ describe('admin GroupsView column settings', () => {
       'status',
       'actions',
     ])
-    expect(localStorage.getItem('group-hidden-columns')).toBe(JSON.stringify(['id']))
+    // The defaults apply without being written (two column memories, mobile list plan); the version is current.
+    expect(localStorage.getItem('group-hidden-columns')).toBeNull()
     expect(localStorage.getItem('group-column-settings-version')).toBe('2')
   })
 
@@ -519,5 +526,77 @@ describe('admin GroupsView column settings', () => {
     const badge = wrapper.getComponent({ name: 'GroupCapacityBadge' })
 
     expect(badge.props()).toMatchObject({ concurrencyUsed: 5, concurrencyMax: 600, concurrencyGroupUsed: 3 })
+  })
+
+  // Mobile list plan, step 2: below 768px the phone's own memory and defaults (name, platform, accounts, status, then
+  // "⋯"); a change there is written to the phone's key only, and "restore defaults" removes that key alone.
+  describe('below 768px', () => {
+    const setPhone = () => vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query.includes('min-width') ? false : true, media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    afterEach(() => { vi.restoreAllMocks() })
+
+    it('shows the phone defaults and keeps a change in the phone memory only', async () => {
+      setPhone()
+      localStorage.setItem('group-hidden-columns', JSON.stringify(['usage']))
+      localStorage.setItem('group-column-settings-version', '2')
+      const wrapper = await mountView()
+      expect(columnKeys(wrapper)).toEqual(['name', 'platform', 'account_count', 'status', 'actions'])
+      await openColumnSettings(wrapper)
+      await clickColumnToggle(wrapper, 'Usage')
+      expect(columnKeys(wrapper)).toContain('usage')
+      expect(JSON.parse(localStorage.getItem('group-hidden-columns-narrow')!)).not.toContain('usage')
+      expect(localStorage.getItem('group-hidden-columns')).toBe(JSON.stringify(['usage']))
+      await wrapper.get('[data-test="group-columns-reset"]').trigger('click')
+      await flushPromises()
+      expect(columnKeys(wrapper)).toEqual(['name', 'platform', 'account_count', 'status', 'actions'])
+      expect(localStorage.getItem('group-hidden-columns-narrow')).toBeNull()
+    })
+
+    // Astra review 1: the category filter lives in the closed sheet on a phone; the page loads its options itself.
+    it('loads the categories for the sheet\'s category filter without the inline filter', async () => {
+      setPhone()
+      listGroupCategories.mockResolvedValue([{ id: 3, name: 'VIP', sort_order: 0, group_count: 2 }])
+      const wrapper = await mountView()
+      expect(listGroupCategories).toHaveBeenCalled()
+      await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[data-test="filter-sheet"] [data-filter="group_category"]').exists()).toBe(true)
+    })
+
+    it('shows the phone toolbar: count, filters as removable tags, columns in a sheet', async () => {
+      setPhone()
+      const wrapper = await mountView()
+      expect(wrapper.find('[data-test="groups-count"]').exists()).toBe(true)
+      expect(wrapper.find('[data-test="table-toolbar-phone"]').exists()).toBe(true)
+      ;(wrapper.vm as any).filters.platform = 'openai'
+      await flushPromises()
+      const tag = wrapper.get('[data-testid="usage-filter-tag"]')
+      expect(tag.text()).toContain('Platform')
+      listGroups.mockClear()
+      await tag.get('button').trigger('click')
+      await flushPromises()
+      expect(listGroups).toHaveBeenCalled()
+      expect(listGroups.mock.calls.at(-1)![2]).toMatchObject({ platform: undefined })
+      expect(wrapper.find('[data-testid="usage-filter-tag"]').exists()).toBe(false)
+      await wrapper.get('[data-test="group-columns"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[data-test="group-column-settings"]').exists()).toBe(true)
+    })
+  })
+
+  // Mobile list plan, copy: the rate as "1.0x"; the accounts as "available / total", rate-limited ones after it.
+  it('writes the rate as 1.5x and the accounts as available / total', async () => {
+    listGroups.mockResolvedValue({
+      items: [{ id: 1, name: 'g', platform: 'anthropic', rate_multiplier: 1.5, status: 'active', active_account_count: 1234, account_count: 2234, rate_limited_account_count: 1, subscription_type: 'standard', is_exclusive: false, sort_order: 0 }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    })
+    const wrapper = await mountView()
+    expect(wrapper.get('[data-test="rate-cell"]').text()).toBe('1.5x')
+    const accounts = wrapper.get('[data-test="group-account-count"]')
+    // Astra review 6: thousands separators, and a right-aligned number column.
+    expect(accounts.findAll(':scope > span').map((el) => el.text())).toEqual(['1,234', '/', '2,234', 'admin.groups.accountsLimitedShort'])
+    expect((wrapper.vm as any).columns.find((col: { key: string }) => col.key === 'account_count').class).toBe('text-right')
   })
 })
