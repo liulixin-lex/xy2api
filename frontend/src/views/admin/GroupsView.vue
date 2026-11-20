@@ -190,7 +190,7 @@
           <!-- The pill inside the cell, so the whole name area opens the full name; on touch 40px high (Astra review 2), its
                negative margins keeping the row's height. -->
           <template #cell-name="{ row, value }">
-            <TableIdentityCell class="max-w-[240px] [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:py-2.5" :primary="value" data-test="group-name">
+            <TableIdentityCell class="!max-w-[240px] [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:py-2.5" :primary="value" data-test="group-name">
               <template #primary><GroupAliasPill :group="row" class="mr-2 align-middle" />{{ value }}</template>
             </TableIdentityCell>
           </template>
