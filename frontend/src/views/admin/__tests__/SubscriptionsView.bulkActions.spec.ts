@@ -31,7 +31,7 @@ function mountView() {
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
-        DataTable: { name: 'DataTable', props: ['data', 'selectedKeys'], emits: ['update:selectedKeys', 'sort'], template: '<div />' },
+        DataTable: { name: 'DataTable', props: ['data', 'selectedKeys', 'sort'], emits: ['update:selectedKeys', 'sort'], template: '<div />' },
         BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
         Pagination: true, Select: true, ConfirmDialog: true, Icon: true,
         GroupBadge: true, GroupOptionItem: true, EmptyState: true, Teleport: true, RouterLink: true
@@ -104,6 +104,15 @@ describe('subscription bulk operations', () => {
     wrapper.findAllComponents({ name: 'Select' })[0]!.vm.$emit('change')
     await flushPromises()
     expect(wrapper.getComponent({ name: 'DataTable' }).props('selectedKeys')).toEqual([])
+  })
+
+  it('gives the table the sort it requests with, from the first load', async () => {
+    const table = wrapper.getComponent({ name: 'DataTable' })
+    expect(table.props('sort')).toEqual({ key: 'created_at', order: 'desc' })
+    table.vm.$emit('sort', 'status', 'asc')
+    await flushPromises()
+    expect(table.props('sort')).toEqual({ key: 'status', order: 'asc' })
+    expect(list).toHaveBeenLastCalledWith(1, expect.any(Number), expect.objectContaining({ sort_by: 'status', sort_order: 'asc' }), expect.anything())
   })
 
   it('assigns multiple users once and retries only failed users', async () => {

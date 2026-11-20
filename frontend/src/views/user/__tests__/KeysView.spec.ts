@@ -161,7 +161,7 @@ const TablePageLayoutStub = {
 
 const DataTableStub = {
   name: 'DataTable',
-  props: { columns: Array, data: Array, selectedKeys: Array, selectable: Boolean },
+  props: { columns: Array, data: Array, selectedKeys: Array, selectable: Boolean, sort: Object },
   emits: ['sort', 'update:selectedKeys'],
   template: `
     <div>
@@ -577,6 +577,18 @@ describe('user KeysView column settings', () => {
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
+  })
+
+  it('gives the table the sort it requests with, from the first load', async () => {
+    const wrapper = await mountView()
+    const table = wrapper.findComponent({ name: 'DataTable' })
+    expect(table.props('sort')).toEqual({ key: 'created_at', order: 'desc' })
+
+    table.vm.$emit('sort', 'status', 'asc')
+    await flushPromises()
+
+    expect(table.props('sort')).toEqual({ key: 'status', order: 'asc' })
+    expect(listKeys).toHaveBeenLastCalledWith(1, expect.any(Number), expect.objectContaining({ sort_by: 'status', sort_order: 'asc' }), expect.anything())
   })
 
   describe('create provider selection', () => {
