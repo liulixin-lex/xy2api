@@ -39,21 +39,16 @@
 
     <div class="hidden lg:flex lg:flex-1 lg:items-center lg:justify-between">
       <!-- Desktop pagination info -->
-      <div class="flex items-center space-x-4">
-        <p class="text-sm text-gray-700 dark:text-gray-300">
-          {{ t('pagination.showing') }}
-          <span class="font-medium">{{ fromItem }}</span>
-          {{ t('pagination.to') }}
-          <span class="font-medium">{{ toItem }}</span>
-          {{ t('pagination.of') }}
-          <span class="font-medium">{{ total }}</span>
-          {{ t('pagination.results') }}
+      <div class="flex items-center space-x-3">
+        <!-- "第 1–20 条，共 74 条 · 每页 [20]" (mobile list plan, copy) -->
+        <p class="text-sm tabular-nums text-gray-700 dark:text-gray-300" data-test="pagination-range">
+          {{ t('pagination.range', { from: formatCount(fromItem), to: formatCount(toItem), total: formatCount(total) }) }}
         </p>
 
         <!-- Page size selector -->
         <div v-if="showPageSizeSelector" class="flex items-center space-x-2">
           <span class="text-sm text-gray-700 dark:text-gray-300"
-            >{{ t('pagination.perPage') }}:</span
+            ><span aria-hidden="true">· </span>{{ t('pagination.perPage') }}</span
           >
           <div class="page-size-select w-20">
             <Select
@@ -139,7 +134,10 @@ import Select from './Select.vue'
 import { getConfiguredTablePageSizeOptions, normalizeTablePageSize } from '@/utils/tablePreferences'
 import { setPersistedPageSize } from '@/composables/usePersistedPageSize'
 
-const { t } = useI18n()
+const i18n = useI18n()
+const { t } = i18n
+/** Counts with thousands separators ("1,234"), in the page's language. */
+const formatCount = (value: number) => value.toLocaleString(i18n.locale?.value)
 
 interface Props {
   total: number
