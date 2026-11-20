@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -648,6 +649,26 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 			(*owner).httpStatus = resp.StatusCode
 			(*owner).expectTerminal = isEventStreamResponse(resp.Header)
 			(*owner).mu.Unlock()
+		}
+	}
+	if resp != nil && (resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity) && account.IsOpenAI() {
+		tier := normalizedOpenAIServiceTierValue(gjson.GetBytes(body, "service_tier").String())
+		if tier == OpenAIFastTierPriority || tier == OpenAIFastTierUltrafast || tier == "default" {
+			model := gjson.GetBytes(body, "model").String()
+			protocol := openAITierHTTPProtocol(req.URL.Path)
+			if protocol == "" {
+				return resp, err
+			}
+			refusal := s.readUpstreamErrorBody(resp)
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(refusal))
+			if s.learnOpenAITierRefusal(ctx, account, model, tier, protocol, resp.StatusCode, refusal) {
+				(*owner).finishHTTP(resp, refusal)
+				_ = resp.Body.Close()
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, Reason: openAITierUnavailable, ClientStatusCode: http.StatusServiceUnavailable, ClientMessage: openAITierUnavailable, NextAccountAction: NextAccountRetry, ResponseBody: refusal}
+			}
 		}
 	}
 	if err != nil {

@@ -107,7 +107,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 
 	// 4. Apply OpenAI fast policy on the CC body
-	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, upstreamBody)
+	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(context.WithValue(ctx, openAITierEndpointKey{}, APIProtocolChatCompletions), account, upstreamModel, upstreamBody)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
 		if errors.As(policyErr, &blocked) {

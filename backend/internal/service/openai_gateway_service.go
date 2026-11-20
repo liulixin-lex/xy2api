@@ -249,6 +249,9 @@ type OpenAIUsage struct {
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
+	ResponseTierEvidence []string
+	ResponseTierConflict bool
+	TierDecision         *OpenAITierDecision
 	ResponseFactsKnown   bool
 	UsagePresent         bool
 	UsageSource          string

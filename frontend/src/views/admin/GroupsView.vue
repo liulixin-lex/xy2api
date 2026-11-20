@@ -1508,7 +1508,7 @@
             :loading="createModelAllowlistLoading"
           />
           <div class="mt-3 space-y-2">
-            <PricingEntryCard v-for="(entry, index) in createForm.model_pricing" :key="index" :entry="entry" :platform="createForm.platform" hide-token-intervals @update="createForm.model_pricing[index] = $event" @remove="createForm.model_pricing.splice(index, 1)" />
+            <PricingEntryCard v-for="(entry, index) in createForm.model_pricing" :key="index" :entry="entry" :platform="groupPricingPlatform(createForm.platform, entry)" :enable-tier-multipliers="supportsGroupOpenAIFast(groupPricingPlatform(createForm.platform, entry))" hide-token-intervals @update="createForm.model_pricing[index] = $event" @remove="createForm.model_pricing.splice(index, 1)" />
           </div>
         </div>
 
@@ -1574,41 +1574,11 @@
             </div>
           </div>
         </div>
-        <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
-        <div
+        <OpenAITierPolicyFields
           v-if="supportsGroupOpenAIFast(createForm.platform)"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
-        >
-          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-            {{ t("admin.groups.openaiFast.title") }}
-          </h4>
-          <div class="flex items-center justify-between gap-4">
-            <label class="text-sm text-gray-600 dark:text-gray-400">
-              {{ t("admin.groups.openaiFast.force") }}
-            </label>
-            <Toggle
-              data-testid="create-force-openai-fast"
-              :aria-label="t('admin.groups.openaiFast.force')"
-              v-model="createForm.force_openai_fast"
-            />
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {{ t("admin.groups.openaiFast.hint") }}
-          </p>
-          <div class="flex items-center justify-between gap-4 mt-4">
-            <label class="text-sm text-gray-600 dark:text-gray-400">
-              {{ t("admin.groups.openaiFast.free") }}
-            </label>
-            <Toggle
-              data-testid="create-free-openai-fast"
-              :aria-label="t('admin.groups.openaiFast.free')"
-              v-model="createForm.free_openai_fast"
-            />
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {{ t("admin.groups.openaiFast.freeHint") }}
-          </p>
-        </div>
+          v-model="createTierPolicy"
+          :fallback="!!createForm.availability_fallback_group_id"
+        />
 
         <!-- Codex Live 开关（OpenAI 与 Composite 平台） -->
         <div
@@ -3252,7 +3222,7 @@
             :loading="editModelAllowlistLoading"
           />
           <div class="mt-3 space-y-2">
-            <PricingEntryCard v-for="(entry, index) in editForm.model_pricing" :key="index" :entry="entry" :platform="editForm.platform" hide-token-intervals @update="editForm.model_pricing[index] = $event" @remove="editForm.model_pricing.splice(index, 1)" />
+            <PricingEntryCard v-for="(entry, index) in editForm.model_pricing" :key="index" :entry="entry" :platform="groupPricingPlatform(editForm.platform, entry)" :enable-tier-multipliers="supportsGroupOpenAIFast(groupPricingPlatform(editForm.platform, entry))" hide-token-intervals @update="editForm.model_pricing[index] = $event" @remove="editForm.model_pricing.splice(index, 1)" />
           </div>
         </fieldset>
 
@@ -3322,43 +3292,14 @@
             </div>
           </div>
         </div>
-        <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
-        <div
+        <OpenAITierPolicyFields
           v-if="supportsGroupOpenAIFast(editForm.platform)"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
-        >
-          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-            {{ t("admin.groups.openaiFast.title") }}
-          </h4>
-          <div class="flex items-center justify-between gap-4">
-            <label class="text-sm text-gray-600 dark:text-gray-400">
-              {{ t("admin.groups.openaiFast.force") }}
-            </label>
-            <Toggle
-              data-testid="edit-force-openai-fast"
-              :aria-label="t('admin.groups.openaiFast.force')"
-              :disabled="!canAdjustBalance"
-              v-model="editForm.force_openai_fast"
-            />
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {{ t("admin.groups.openaiFast.hint") }}
-          </p>
-          <div class="flex items-center justify-between gap-4 mt-4">
-            <label class="text-sm text-gray-600 dark:text-gray-400">
-              {{ t("admin.groups.openaiFast.free") }}
-            </label>
-            <Toggle
-              data-testid="edit-free-openai-fast"
-              :aria-label="t('admin.groups.openaiFast.free')"
-              :disabled="!canAdjustBalance"
-              v-model="editForm.free_openai_fast"
-            />
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {{ t("admin.groups.openaiFast.freeHint") }}
-          </p>
-        </div>
+          v-model="editTierPolicy"
+          v-model:migrate="migrateTierPolicy"
+          :legacy="legacyTierPolicy"
+          :disabled="!canAdjustBalance"
+          :fallback="!!editForm.availability_fallback_group_id"
+        />
 
         <!-- Codex Live 开关（OpenAI 与 Composite 平台） -->
         <div
@@ -4480,6 +4421,7 @@ import GroupCategoryTags from "@/components/admin/group/GroupCategoryTags.vue";
 import GroupCategoryField from "@/components/admin/group/GroupCategoryField.vue";
 import { useGroupCategoriesStore } from "@/stores/groupCategories";
 import { cloneGroupSystemPromptConfig } from "@/utils/groupSystemPrompt";
+import OpenAITierPolicyFields from "@/components/admin/group/OpenAITierPolicyFields.vue";
 import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
 import type { PricingFormEntry } from "@/components/admin/channel/types";
 import {
@@ -4490,6 +4432,8 @@ import {
   mTokToPerToken,
   perTokenToMTok,
   toNullableNumber,
+  tierMultipliersToAPI,
+  tierMultiplierError,
   validateReasoningEffortMultipliers,
 } from "@/components/admin/channel/types";
 import type { ChannelModelPricing } from "@/api/admin/channels";
@@ -4510,7 +4454,7 @@ import {
   type MessagesDispatchMappingRow,
 } from "./groupsMessagesDispatch";
 import {
-  normalizeGroupOpenAIFast,
+  groupTierPolicy,
   supportsGroupOpenAIFast,
 } from "./groupsOpenAIFast";
 import {
@@ -4594,10 +4538,16 @@ const emptyGroupPricing = (): PricingFormEntry => ({
 const addGroupPricing = (entries: PricingFormEntry[]) =>
   entries.push(emptyGroupPricing());
 
+const groupPricingPlatform = (platform: string, entry: PricingFormEntry) =>
+  platform === "composite" ? entry.platform || platform : platform;
+
 const groupPricingFromAPI = (
   pricing: ChannelModelPricing[] | undefined,
 ): PricingFormEntry[] =>
   (pricing || []).map((entry) => ({
+    id: entry.id,
+    platform: entry.platform,
+    ...tierMultipliersToAPI(entry),
     models: entry.models || [],
     billing_mode: entry.billing_mode || "token",
     input_price: perTokenToMTok(entry.input_price),
@@ -4622,7 +4572,10 @@ const groupPricingToAPI = (
   pricing
     .filter((entry) => entry.models.length > 0)
     .map((entry) => ({
-      platform,
+      platform: platform === "composite" && entry.billing_mode === "token" && toNullableNumber(entry.ultrafast_multiplier) != null
+        ? "openai" : groupPricingPlatform(platform, entry),
+      id: entry.id,
+      ...tierMultipliersToAPI(entry),
       models: entry.models,
       billing_mode: entry.billing_mode,
       input_price: mTokToPerToken(entry.input_price),
@@ -4636,10 +4589,7 @@ const groupPricingToAPI = (
       image_input_price: mTokToPerToken(entry.image_input_price),
       image_output_price: mTokToPerToken(entry.image_output_price),
       per_request_price: toNullableNumber(entry.per_request_price),
-      intervals:
-        entry.billing_mode === "token"
-          ? []
-          : formIntervalsToAPI(entry.intervals || []),
+      intervals: formIntervalsToAPI(entry.intervals || []),
       time_pricing: null,
     }));
 
@@ -4655,7 +4605,10 @@ const canCopyAccounts = computed(() => canAdjustBalance.value || adminAccess.can
 // Catalog §2.2.1 and R8-4: omit protected fields, including normalized NULL prices.
 const operatorGroupPriceFields = [
   "platform",
-  "force_openai_fast",
+  "openai_tier_policy_version",
+  "openai_fast_mode",
+  "openai_ultrafast_mode",
+  "free_openai_ultrafast",
   "rate_multiplier",
   "subscription_type",
   "daily_limit_usd",
@@ -5338,6 +5291,13 @@ const submitEditAllowlistCustomEntry = () => {
   }
 };
 
+const createTierPolicy = ref(groupTierPolicy());
+const editTierPolicy = ref(groupTierPolicy());
+const migrateTierPolicy = ref(false);
+const legacyTierPolicy = computed(() => (editingGroup.value?.openai_tier_policy_version ?? 1) === 1);
+watch(migrateTierPolicy, (enabled) => {
+  if (!enabled && editingGroup.value) editTierPolicy.value = groupTierPolicy(editingGroup.value);
+});
 const createForm = reactive({
   name: "",
   alias: "",
@@ -5354,8 +5314,6 @@ const createForm = reactive({
   long_context_pricing_enabled: false,
   long_context_pricing_scope: "selected" as LongContextPricingScope,
   long_context_pricing_models: [] as string[],
-  force_openai_fast: false,
-  free_openai_fast: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
   allow_image_generation: false,
@@ -5725,8 +5683,6 @@ const editForm = reactive({
   long_context_pricing_enabled: true,
   long_context_pricing_scope: "all" as LongContextPricingScope,
   long_context_pricing_models: [] as string[],
-  force_openai_fast: false,
-  free_openai_fast: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
   allow_image_generation: false,
@@ -6105,8 +6061,7 @@ const closeCreateModal = () => {
   createForm.long_context_pricing_enabled = false;
   createForm.long_context_pricing_scope = "selected";
   createForm.long_context_pricing_models = [];
-  createForm.force_openai_fast = false;
-  createForm.free_openai_fast = false;
+  createTierPolicy.value = groupTierPolicy();
   createForm.model_pricing = [];
   createForm.web_search_price_per_call = null;
   createForm.search_price_per_1k = null;
@@ -6244,9 +6199,9 @@ const validateProfitControlForm = (
   return true;
 };
 
-const validateGroupReasoningMultipliers = (pricing: PricingFormEntry[]): boolean => {
+const validateGroupMultipliers = (pricing: PricingFormEntry[], platform: string): boolean => {
   for (const entry of pricing) {
-    const error = validateReasoningEffortMultipliers(entry.reasoning_effort_multipliers, t);
+    const error = tierMultiplierError(entry, groupPricingPlatform(platform, entry), t) ?? validateReasoningEffortMultipliers(entry.reasoning_effort_multipliers, t);
     if (error) {
       appStore.showError(`${entry.models.join(", ") || t("admin.channels.form.unnamed")}: ${error}`);
       return false;
@@ -6275,7 +6230,7 @@ const handleCreateGroup = async () => {
   if (!validateProfitControlForm(createForm, createFloorUnreadable.value)) {
     return;
   }
-  if (!validateGroupReasoningMultipliers(createForm.model_pricing)) return;
+  if (!validateGroupMultipliers(createForm.model_pricing, createForm.platform)) return;
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
   if (
     createModelAllowlistState.enabled &&
@@ -6296,14 +6251,9 @@ const handleCreateGroup = async () => {
     // 构建请求数据，包含模型路由配置
     const requestData = {
       ...createGroupForm,
-      force_openai_fast: normalizeGroupOpenAIFast(
-        createForm.platform,
-        createForm.force_openai_fast,
-      ),
-      free_openai_fast: normalizeGroupOpenAIFast(
-        createForm.platform,
-        createForm.free_openai_fast,
-      ),
+      ...(supportsGroupOpenAIFast(createForm.platform)
+        ? { ...createTierPolicy.value, openai_tier_policy_version: 2 as const }
+        : {}),
       model_pricing: groupPricingToAPI(
         createForm.model_pricing,
         createForm.platform,
@@ -6460,8 +6410,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.long_context_pricing_models = [
     ...(group.long_context_pricing_models ?? []),
   ];
-  editForm.force_openai_fast = group.force_openai_fast ?? false;
-  editForm.free_openai_fast = group.free_openai_fast ?? false;
+  editTierPolicy.value = groupTierPolicy(group);
+  migrateTierPolicy.value = false;
   editForm.model_pricing = groupPricingFromAPI(group.model_pricing);
   editForm.allow_image_generation = group.allow_image_generation ?? false;
   editForm.allow_batch_image_generation =
@@ -6603,8 +6553,7 @@ const closeEditModal = () => {
   editForm.long_context_pricing_enabled = true;
   editForm.long_context_pricing_scope = "all";
   editForm.long_context_pricing_models = [];
-  editForm.force_openai_fast = false;
-  editForm.free_openai_fast = false;
+  editTierPolicy.value = groupTierPolicy();
   editForm.model_pricing = [];
   editForm.web_search_price_per_call = null;
   editForm.search_price_per_1k = null;
@@ -6643,7 +6592,7 @@ const handleUpdateGroup = async () => {
     return;
   }
   if (editSchedPolicyRef.value && !editSchedPolicyRef.value.valid) return;
-  if (!validateGroupReasoningMultipliers(editForm.model_pricing)) return;
+  if (!validateGroupMultipliers(editForm.model_pricing, editForm.platform)) return;
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
   if (
     editModelAllowlistState.enabled &&
@@ -6668,14 +6617,9 @@ const handleUpdateGroup = async () => {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
     const payload = {
       ...editForm,
-      force_openai_fast: normalizeGroupOpenAIFast(
-        editForm.platform,
-        editForm.force_openai_fast,
-      ),
-      free_openai_fast: normalizeGroupOpenAIFast(
-        editForm.platform,
-        editForm.free_openai_fast,
-      ),
+      ...(supportsGroupOpenAIFast(editForm.platform) && (!legacyTierPolicy.value || migrateTierPolicy.value)
+        ? { ...editTierPolicy.value, openai_tier_policy_version: 2 as const }
+        : {}),
       model_pricing: groupPricingToAPI(
         editForm.model_pricing,
         editForm.platform,
@@ -6832,7 +6776,11 @@ const handleUpdateGroup = async () => {
           if (viewUnmounted) return;
         }
       }
-      await adminAPI.groups.update(groupId, requestData);
+      const updated = await adminAPI.groups.update(groupId, {
+        ...requestData,
+        revision: editingGroup.value.revision ?? editingGroup.value.updated_at,
+      });
+      if (updated?.revision) editingGroup.value = { ...editingGroup.value, ...updated };
       savedEditGroupRequestKey = groupRequestKey;
     }
     // 分组之后再存分类；失败时提示“分组已保存，分类未保存”。
@@ -6844,7 +6792,10 @@ const handleUpdateGroup = async () => {
     if (categoriesSaved) appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
   } catch (error: any) {
-    if (extractApiErrorCode(error) === "INVALID_GROUP_ALIAS") editAliasFieldRef.value?.showServerError();
+    if (extractApiErrorCode(error) === "CONFIGURATION_REVISION_CONFLICT") {
+      appStore.showError(t("admin.channels.form.revisionConflict"));
+      void reloadGroups();
+    } else if (extractApiErrorCode(error) === "INVALID_GROUP_ALIAS") editAliasFieldRef.value?.showServerError();
     else appStore.showError(extractApiErrorMessage(error, t("admin.groups.failedToUpdate")));
     console.error("Error updating group:", error);
   } finally {

@@ -284,8 +284,14 @@ describe('UsageTable after review', () => {
 
   it('hides the hover-only info icons on touch screens, where "Details" carries them', () => {
     const wrapper = mountTable(ADMIN)
-    for (const key of ['tokens', 'cost']) expect(cell(wrapper, key).get('.group.relative').classes()).toContain('[@media(hover:none)]:hidden')
+    expect(cell(wrapper, 'tokens').get('.group.relative').classes()).toContain('[@media(hover:none)]:hidden')
     expect(cell(wrapper, 'latency').get('[data-testid="usage-latency-tip"]').classes()).toContain('[@media(hover:none)]:hidden')
+  })
+
+  it('keeps the tier details button available with a 40px touch target', () => {
+    const button = cell(mountTable(ADMIN), 'cost').get('button[data-testid="usage-tier-details"]')
+    expect(button.classes()).toEqual(expect.arrayContaining(['[@media(any-pointer:coarse)]:h-10', '[@media(any-pointer:coarse)]:w-10']))
+    expect(button.classes()).not.toContain('[@media(hover:none)]:hidden')
   })
 
   it('lists account and rescue marks, API key, IP, copyable request IDs and UA on the admin page', async () => {

@@ -556,6 +556,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", invalidStreamFieldTypeMessage)
 		return
 	}
+	c.Request = c.Request.WithContext(service.WithOpenAITierInput(c.Request.Context(), body, service.APIProtocolResponses, ""))
 	if _, err := service.ValidateOpenAIServiceTierField(body); err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
@@ -1382,6 +1383,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
+	c.Request = c.Request.WithContext(service.WithOpenAITierInput(c.Request.Context(), body, service.APIProtocolAnthropic, c.GetHeader("Anthropic-Beta")))
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
 	setOpsRequestContext(c, reqModel, reqStream)
 	installResilienceRetryAdvice(c, h.gatewayService, apiKey, reqModel)
@@ -1826,6 +1828,10 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 
 // handleAnthropicFailoverExhausted maps upstream failover errors to Anthropic format.
 func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
+	if failoverErr != nil && (failoverErr.Reason == "OPENAI_TIER_ROUTE_CONFLICT" || failoverErr.Reason == "OPENAI_TIER_CAPABILITY_UNAVAILABLE") {
+		h.anthropicStreamingAwareError(c, http.StatusServiceUnavailable, string(failoverErr.Reason), failoverErr.ClientMessage, streamStarted)
+		return
+	}
 	recordExhaustedRecovery(c, failoverErr)
 	if c.GetBool(ginKeyResilienceFinalized) {
 		return
@@ -2425,7 +2431,7 @@ func (k *openAIWSTurnBillingAPIKeys) begin(ctx context.Context, apiKeyService *s
 	if turn > 1 && apiKeyService != nil {
 		turnKey = refreshOpenAIWSTurnBillingAPIKey(ctx, apiKeyService, turnKey)
 	}
-	pricingKey := conn
+	pricingKey := service.ServingPricingKey(ctx, conn)
 	if turn > 1 {
 		if service.BillingAPIKey(ctx, conn) != conn {
 			// Fallback keeps the refreshed origin snapshot for authorization but
@@ -2826,6 +2832,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "invalid JSON payload")
 		return
 	}
+	if _, tierErr := service.ValidateOpenAIServiceTierField(firstMessage); tierErr != nil {
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, tierErr.Error())
+		return
+	}
 	reqModel := strings.TrimSpace(gjson.GetBytes(firstMessage, "model").String())
 	if reqModel == "" {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
@@ -2851,6 +2861,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "Failed to resolve composite model route")
 			return
 		}
+		routeCtx, tierErr := service.OpenAITierCompositeFallback(c.Request.Context(), h.compositeResolver, apiKey, decision)
+		if tierErr != nil {
+			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "OPENAI_TIER_ROUTE_CONFLICT")
+			return
+		}
+		c.Request = c.Request.WithContext(routeCtx)
 		if decision.Matched {
 			c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(c.Request.Context(), decision))
 			wsRouteModel = decision.UpstreamModel
@@ -3100,8 +3116,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// ctx）。连接内不重选号，但每个 turn 开始经 BeforeTurn 重新冻结 pricingAt
 	// 并按最新门复核当前账号（准入与计费同源），峰前建连保活不能让后续 turn
 	// 继续按建连时刻的谷价计费。生图意图只影响能力路由与图片计费，不关门。
-	// 建连时刻只用于选号/准入，不作为任何 turn 的计费定价时刻。
-	wsPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
+	// 首帧选号、出站与结算共用该轮的时间和价卡。
+	wsPricingCtx, wsPricingAt := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
 	ctx = wsPricingCtx
 
 	beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, true, h.gatewayService, openAIResponsesRequestScope(imageIntent))
@@ -3118,7 +3134,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 		reqLog.Debug("openai.websocket_account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
-			service.WithOpenAIEncryptedContentMigrationGuard(ctx, wsAttemptMessage),
+			service.WithOpenAITierInput(service.WithOpenAIEncryptedContentMigrationGuard(ctx, wsAttemptMessage), wsAttemptMessage, service.APIProtocolResponses, ""),
 			apiKey.GroupID,
 			previousResponseID,
 			sessionHash,
@@ -3301,7 +3317,24 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 		var qualityTurnPinned atomic.Bool
 		qualityTurnPinned.Store(service.OpenAIQualityTurnPinned(firstMessage))
+		var policyTurn int
+		var policyTurnCtx context.Context
+		var policyTurnAt time.Time
+		turnContext := func(_ context.Context, turn int) context.Context {
+			if policyTurn != turn {
+				turnKeyCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
+				if turn == 1 {
+					policyTurnCtx, policyTurnAt = turnKeyCtx, wsPricingAt
+				} else {
+					policyTurnCtx, policyTurnAt = h.gatewayService.WithOpenAITurnPricingContext(turnKeyCtx, apiKey.GroupID)
+				}
+				turnPricing.freeze(policyTurnAt)
+				policyTurn = turn
+			}
+			return policyTurnCtx
+		}
 		hooks := &service.OpenAIWSIngressHooks{
+			PolicyContext:               turnContext,
 			ClientLifecycleContext:      clientLifecycleCtx,
 			InitialRequestModel:         reqModel,
 			InitialTurnStartedAt:        firstTurnStartedAt,
@@ -3395,10 +3428,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 长连接跨峰谷/倍率刷新防护：每个 turn 按当前时刻重装门并复核
 				// 当前账号，越线即要求客户端重连重选（连接绑定单一上游账号，
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
-				turnBillingCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
-				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(turnBillingCtx, apiKey.GroupID)
+				turnCtx := turnContext(ctx, turn)
 				turnAdmissionCtx := service.WithOpenAIQualityTurnExemption(turnCtx, turn == 1 || qualityTurnPinned.Load())
-				turnPricing.freeze(turnAt)
 				if turn == 1 {
 					return nil
 				}
@@ -3641,6 +3672,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if !ensureUserSlotHeld() {
 					return
 				}
+				if policyTurnCtx != nil {
+					ctx, wsPricingAt = policyTurnCtx, policyTurnAt
+				}
 				wsAttemptMessage = qualityReroute.Payload
 				reqModel = qualityReroute.Model
 				channelMappingWS, _ = h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, reqModel)
@@ -3665,6 +3699,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				wsAttemptMessage = nextAttemptMessage
 				if retryCurrentTurn {
+					if policyTurnCtx != nil {
+						ctx, wsPricingAt = policyTurnCtx, policyTurnAt
+					}
 					previousResponseID = ""
 					reqLog.Warn("openai.websocket_current_turn_failover_retry",
 						zap.Int64("account_id", account.ID),
@@ -3911,6 +3948,10 @@ func (h *OpenAIGatewayHandler) handleConcurrencyError(c *gin.Context, err error,
 }
 
 func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
+	if failoverErr != nil && (failoverErr.Reason == "OPENAI_TIER_ROUTE_CONFLICT" || failoverErr.Reason == "OPENAI_TIER_CAPABILITY_UNAVAILABLE") {
+		h.handleStreamingAwareErrorWithCode(c, http.StatusServiceUnavailable, "api_error", string(failoverErr.Reason), failoverErr.ClientMessage, streamStarted, false)
+		return
+	}
 	recordExhaustedRecovery(c, failoverErr)
 	if message, matched := inferenceNotFoundExhaustedMessage(c, failoverErr); matched {
 		h.handleStreamingAwareErrorWithCode(c, http.StatusNotFound, "invalid_request_error", "model_not_found", message, streamStarted, false)

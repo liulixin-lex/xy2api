@@ -110,6 +110,11 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 		return fallback
 	}
 	result := noAccountErrorClassification{Status: 503, ErrType: "api_error", Message: "Service temporarily unavailable"}
+	for _, code := range []string{"OPENAI_TIER_ROUTE_CONFLICT", "OPENAI_TIER_CAPABILITY_UNAVAILABLE"} {
+		if e.Reasons[service.SelectionReason(code)] > 0 {
+			return noAccountErrorClassification{Status: 503, ErrType: code, Code: code, Message: "No eligible account can satisfy the requested group service tier"}
+		}
+	}
 	if !e.Known {
 		return result
 	}

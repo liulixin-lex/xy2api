@@ -121,6 +121,9 @@ func (s *OpenAIGatewayService) accountRequestCompatibleWithParent(ctx context.Co
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
 		return false, "model_not_supported"
 	}
+	if reason := s.openAITierSelectionReason(ctx, account, req.RequestedModel, req.RequireCompact); reason != "" {
+		return false, reason
+	}
 	compactOutboundModel := ""
 	if req.RequireCompact && s != nil {
 		compactOutboundModel = s.openAICodexTicketOutboundModel(account, req.RequestedModel, true)

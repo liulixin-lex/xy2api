@@ -134,6 +134,14 @@ const (
 	FieldForceOpenaiFast = "force_openai_fast"
 	// FieldFreeOpenaiFast holds the string denoting the free_openai_fast field in the database.
 	FieldFreeOpenaiFast = "free_openai_fast"
+	// FieldOpenaiFastMode holds the string denoting the openai_fast_mode field in the database.
+	FieldOpenaiFastMode = "openai_fast_mode"
+	// FieldOpenaiUltrafastMode holds the string denoting the openai_ultrafast_mode field in the database.
+	FieldOpenaiUltrafastMode = "openai_ultrafast_mode"
+	// FieldOpenaiTierPolicyVersion holds the string denoting the openai_tier_policy_version field in the database.
+	FieldOpenaiTierPolicyVersion = "openai_tier_policy_version"
+	// FieldFreeOpenaiUltrafast holds the string denoting the free_openai_ultrafast field in the database.
+	FieldFreeOpenaiUltrafast = "free_openai_ultrafast"
 	// FieldRequireOauthOnly holds the string denoting the require_oauth_only field in the database.
 	FieldRequireOauthOnly = "require_oauth_only"
 	// FieldRequirePrivacySet holds the string denoting the require_privacy_set field in the database.
@@ -296,6 +304,10 @@ var Columns = []string{
 	FieldAllowLive,
 	FieldForceOpenaiFast,
 	FieldFreeOpenaiFast,
+	FieldOpenaiFastMode,
+	FieldOpenaiUltrafastMode,
+	FieldOpenaiTierPolicyVersion,
+	FieldFreeOpenaiUltrafast,
 	FieldRequireOauthOnly,
 	FieldRequirePrivacySet,
 	FieldDefaultMappedModel,
@@ -433,6 +445,14 @@ var (
 	DefaultForceOpenaiFast bool
 	// DefaultFreeOpenaiFast holds the default value on creation for the "free_openai_fast" field.
 	DefaultFreeOpenaiFast bool
+	// DefaultOpenaiFastMode holds the default value on creation for the "openai_fast_mode" field.
+	DefaultOpenaiFastMode string
+	// DefaultOpenaiUltrafastMode holds the default value on creation for the "openai_ultrafast_mode" field.
+	DefaultOpenaiUltrafastMode string
+	// DefaultOpenaiTierPolicyVersion holds the default value on creation for the "openai_tier_policy_version" field.
+	DefaultOpenaiTierPolicyVersion int
+	// DefaultFreeOpenaiUltrafast holds the default value on creation for the "free_openai_ultrafast" field.
+	DefaultFreeOpenaiUltrafast bool
 	// DefaultRequireOauthOnly holds the default value on creation for the "require_oauth_only" field.
 	DefaultRequireOauthOnly bool
 	// DefaultRequirePrivacySet holds the default value on creation for the "require_privacy_set" field.
@@ -738,6 +758,26 @@ func ByForceOpenaiFast(opts ...sql.OrderTermOption) OrderOption {
 // ByFreeOpenaiFast orders the results by the free_openai_fast field.
 func ByFreeOpenaiFast(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldFreeOpenaiFast, opts...).ToFunc()
+}
+
+// ByOpenaiFastMode orders the results by the openai_fast_mode field.
+func ByOpenaiFastMode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOpenaiFastMode, opts...).ToFunc()
+}
+
+// ByOpenaiUltrafastMode orders the results by the openai_ultrafast_mode field.
+func ByOpenaiUltrafastMode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOpenaiUltrafastMode, opts...).ToFunc()
+}
+
+// ByOpenaiTierPolicyVersion orders the results by the openai_tier_policy_version field.
+func ByOpenaiTierPolicyVersion(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOpenaiTierPolicyVersion, opts...).ToFunc()
+}
+
+// ByFreeOpenaiUltrafast orders the results by the free_openai_ultrafast field.
+func ByFreeOpenaiUltrafast(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFreeOpenaiUltrafast, opts...).ToFunc()
 }
 
 // ByRequireOauthOnly orders the results by the require_oauth_only field.

@@ -10,6 +10,11 @@ import (
 var OperatorGroupPriceFields = []string{
 	"Platform",
 	"ForceOpenAIFast",
+	"LegacyForceOpenAIFast",
+	"OpenAIFastMode",
+	"OpenAIUltrafastMode",
+	"OpenAITierPolicyVersion",
+	"FreeOpenAIUltrafast",
 	"RateMultiplier",
 	"SubscriptionType",
 	"DailyLimitUSD",
@@ -51,6 +56,7 @@ var OperatorGroupPriceFields = []string{
 }
 var OperatorGroupFreeFields = []string{
 	"Name",
+	"Revision",
 	"Alias",
 	"Description",
 	"IsExclusive",
@@ -136,17 +142,23 @@ var operatorGroupJSONNames = map[string]string{
 	"AllowMessagesDispatch":           "allow_messages_dispatch",
 	"AllowLive":                       "allow_live",
 	"ForceOpenAIFast":                 "force_openai_fast",
-	"FreeOpenAIFast":                  "free_openai_fast",
-	"RequireOAuthOnly":                "require_oauth_only",
-	"RequirePrivacySet":               "require_privacy_set",
-	"DefaultMappedModel":              "default_mapped_model",
-	"MessagesDispatchModelConfig":     "messages_dispatch_model_config",
-	"ModelAllowlist":                  "model_allowlist",
-	"CodexModelsManifestConfig":       "codex_models_manifest_config",
-	"MaxReasoningEffort":              "max_reasoning_effort",
-	"MaxReasoningEffortOverLimit":     "max_reasoning_effort_over_limit",
-	"ReasoningEffortMappings":         "reasoning_effort_mappings",
-	"CopyAccountsFromGroupIDs":        "copy_accounts_from_group_ids",
+	"LegacyForceOpenAIFast":           "force_openai_fast",
+	"OpenAIFastMode":                  "openai_fast_mode",
+	"OpenAIUltrafastMode":             "openai_ultrafast_mode",
+	"OpenAITierPolicyVersion":         "openai_tier_policy_version",
+	"FreeOpenAIUltrafast":             "free_openai_ultrafast",
+
+	"FreeOpenAIFast":              "free_openai_fast",
+	"RequireOAuthOnly":            "require_oauth_only",
+	"RequirePrivacySet":           "require_privacy_set",
+	"DefaultMappedModel":          "default_mapped_model",
+	"MessagesDispatchModelConfig": "messages_dispatch_model_config",
+	"ModelAllowlist":              "model_allowlist",
+	"CodexModelsManifestConfig":   "codex_models_manifest_config",
+	"MaxReasoningEffort":          "max_reasoning_effort",
+	"MaxReasoningEffortOverLimit": "max_reasoning_effort_over_limit",
+	"ReasoningEffortMappings":     "reasoning_effort_mappings",
+	"CopyAccountsFromGroupIDs":    "copy_accounts_from_group_ids",
 }
 
 func (s *adminServiceImpl) operatorGroupCreateRules(ctx context.Context, input *CreateGroupInput) error {
@@ -173,7 +185,7 @@ func (s *adminServiceImpl) operatorGroupCreateRules(ctx context.Context, input *
 	}
 	return nil
 }
-func (s *adminServiceImpl) operatorGroupUpdateRules(ctx context.Context, id int64, input *UpdateGroupInput) error {
+func (s *adminServiceImpl) operatorGroupUpdateRules(ctx context.Context, id int64, input *UpdateGroupInput, loaded ...*Group) error {
 	sc, _, err := s.operatorScope(ctx)
 	if err != nil {
 		return err
@@ -181,12 +193,17 @@ func (s *adminServiceImpl) operatorGroupUpdateRules(ctx context.Context, id int6
 	if sc == nil || sc.Has(operatoraccess.FlagUsersBalanceAdjust) {
 		return nil
 	}
-	if s.groupRepo == nil {
-		return operatorUnavailable()
-	}
-	group, err := s.groupRepo.GetByID(ctx, id)
-	if err != nil {
-		return operatorLoadError(err, ErrGroupNotFound)
+	var group *Group
+	if len(loaded) > 0 {
+		group = loaded[0]
+	} else {
+		if s.groupRepo == nil {
+			return operatorUnavailable()
+		}
+		group, err = s.groupRepo.GetByID(ctx, id)
+		if err != nil {
+			return operatorLoadError(err, ErrGroupNotFound)
+		}
 	}
 	if group == nil {
 		return ErrGroupNotFound
@@ -217,6 +234,30 @@ func (s *adminServiceImpl) operatorGroupUpdateRules(ctx context.Context, id int6
 			}
 			if !reflect.DeepEqual(normalizePrice(incomingPrice), normalizePrice(storedPrice)) {
 				return operatorFieldError(operatorGroupJSONNames[name])
+			}
+			continue
+		}
+		if name == "ModelPricing" {
+			pricing, err := normalizeGroupModelPricing(group.Platform, *input.ModelPricing)
+			if err != nil {
+				return err
+			}
+			pricing, err = mergeUltrafastPricing(group.ModelPricing, pricing, input.Revision != nil)
+			if err != nil {
+				return err
+			}
+			current, err := normalizeGroupModelPricing(group.Platform, group.ModelPricing)
+			if err != nil {
+				return operatorUnavailable()
+			}
+			for i := range pricing {
+				pricing[i].UltrafastMultiplierSet = false
+			}
+			for i := range current {
+				current[i].UltrafastMultiplierSet = false
+			}
+			if !reflect.DeepEqual(pricing, current) {
+				return operatorFieldError("model_pricing")
 			}
 			continue
 		}
@@ -261,6 +302,9 @@ func (s *adminServiceImpl) operatorGroupUpdateRules(ctx context.Context, id int6
 	return nil
 }
 func operatorGroupFieldSet(v reflect.Value) bool {
+	if !v.IsValid() {
+		return false
+	}
 	switch v.Kind() {
 	case reflect.Pointer, reflect.Map, reflect.Slice:
 		return !v.IsNil()

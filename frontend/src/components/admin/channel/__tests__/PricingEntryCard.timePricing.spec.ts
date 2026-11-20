@@ -1,7 +1,7 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import PricingEntryCard from '../PricingEntryCard.vue'
-import type { PricingFormEntry } from '../types'
+import { tierMultiplierError, type PricingFormEntry } from '../types'
 import channelsAPI from '@/api/admin/channels'
 
 vi.mock('@/api/admin/channels', () => ({
@@ -80,6 +80,20 @@ describe('PricingEntryCard time pricing visibility', () => {
 })
 
 describe('PricingEntryCard request multipliers', () => {
+  it('validates stored OpenAI precision for each accelerated tier and retains other platform rules', () => {
+    const t = (key: string) => key
+    for (const field of ['fast_multiplier', 'ultrafast_multiplier'] as const) {
+      for (const value of [0, -1, 1e-7, 1.1234567, 1e6, Infinity]) {
+        expect(tierMultiplierError({ ...createEntry(), [field]: value }, 'openai', t)).toBe('admin.channels.form.tierMultiplierRange')
+      }
+      for (const value of [null, '', 1e-6, 0.5, 1, 2.5, 999999.999999]) {
+        expect(tierMultiplierError({ ...createEntry(), [field]: value }, 'openai', t)).toBeNull()
+      }
+    }
+    expect(tierMultiplierError({ ...createEntry(), fast_multiplier: 1e-7 }, 'anthropic', t)).toBeNull()
+    expect(tierMultiplierError({ ...createEntry(), flex_multiplier: 1e-7 }, 'openai', t)).toBeNull()
+  })
+
   it('shows Fast and Flex controls only when explicitly enabled', () => {
     const hidden = shallowMount(PricingEntryCard, { props: { entry: createEntry() } })
     expect(hidden.text()).not.toContain('admin.channels.form.fastMultiplier')

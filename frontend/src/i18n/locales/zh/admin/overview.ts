@@ -1348,11 +1348,16 @@ export default {
         enableAnyway: '仍然开启'
       },
       openaiFast: {
-        title: 'OpenAI Fast 模式',
-        force: '强制使用 Fast（priority）',
-        hint: '开启后，此分组的 OpenAI 请求固定使用 service_tier=priority，优先于全局 Fast/Flex 策略，并按 Fast 单价计费，分组倍率保持不变。保存后新请求生效，已建立的 WebSocket 会话需重连。',
-        free: '免费 Fast',
-        freeHint: '该分组的 Fast 请求仍使用 priority 档位，但客户实际费用按同一请求的 Standard 价格计算。'
+        title: "OpenAI 服务档位",
+        scope: "适用于 OpenAI GPT 文本请求，包括组合分组中的 OpenAI 路由。最多强制开启一档，两档可同时关闭。",
+        inherit: "跟随请求及系统规则",
+        forceOn: "强制开启",
+        forceOff: "强制关闭",
+        waive: "免 {tier} 加速差价",
+        billing: "赠免只影响客户实扣。例如，Standard 为 $1、Fast 为 $2 时，免费 Fast 将计费上限设为 $1，再应用分组倍率。",
+        migrate: "保存时迁入新版档位策略",
+        legacy: "此组使用旧计费契约。迁移后，强开档位需要支持该档的路由，上游确认降档可降低账单。保留旧契约时请保持未勾选。",
+        fallback: "请求由兜底组承接时，使用承接组的价卡和赠免设置。",
       },
       invalidRequestFallback: {
         title: '无效请求兜底分组',

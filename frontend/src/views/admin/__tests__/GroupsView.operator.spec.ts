@@ -128,7 +128,7 @@ function mountView() {
         Pagination: true,
         BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
         GroupCategoryField: true,
-        ReasoningEffortPolicyFields: { template: '<div />', methods: { validate: () => true } },
+        ReasoningEffortPolicyFields: { template: '<div />', methods: { validate: () => true, resetValidation: () => {} } },
         CodexManifestAccountsField: true,
         EmptyState: true,
         Select: true,
@@ -185,7 +185,7 @@ describe('GroupsView protected edit prices', () => {
   it.each([false, true, 'admin'] as const)('renames a group with NULL prices and omits protected prices when flag=%s', async (flag) => {
     seedOperator(flag ? ['users.balance_adjust'] : [])
     if (flag === 'admin') getActivePinia()!.state.value.auth = { user: { id: 1, role: 'admin' } }
-    api.listGroups.mockResolvedValue({ items: [createGroup({ platform: 'openai' })], total: 1 })
+    api.listGroups.mockResolvedValue({ items: [createGroup({ platform: 'openai', openai_tier_policy_version: 2, openai_ultrafast_mode: 'force_on', free_openai_ultrafast: true })], total: 1 })
     const wrapper = mountView()
     await flushPromises()
     await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
@@ -194,17 +194,79 @@ describe('GroupsView protected edit prices', () => {
     for (const fieldset of wrapper.findAll('[data-testid="group-protected-pricing"]')) {
       expect(fieldset.attributes('disabled') !== undefined).toBe(!flag)
     }
-    expect(wrapper.get('[data-testid="edit-force-openai-fast"]').attributes('disabled') !== undefined).toBe(!flag)
+    expect(wrapper.get('[data-testid="openai_fast_mode"]').attributes('disabled') !== undefined).toBe(!flag)
     await wrapper.get('#edit-group-form').trigger('submit')
     await flushPromises()
     const payload = api.updateGroup.mock.calls.at(-1)![1]
     expect(payload.name).toBe('Renamed')
-    const protectedFields = ['platform', 'force_openai_fast', 'rate_multiplier', 'subscription_type', 'daily_limit_usd', 'weekly_limit_usd', 'monthly_limit_usd', 'long_context_pricing_enabled', 'long_context_pricing_scope', 'long_context_pricing_models', 'model_pricing', 'image_rate_independent', 'image_rate_multiplier', 'batch_image_discount_multiplier', 'batch_image_hold_multiplier', 'video_rate_independent', 'video_rate_multiplier', 'peak_rate_enabled', 'peak_start', 'peak_end', 'peak_rate_multiplier', 'profit_control_enabled', 'profit_min_margin', 'profit_safety_buffer', 'image_price_1k', 'image_price_2k', 'image_price_4k', 'video_price_480p', 'video_price_720p', 'video_price_1080p', 'video_model_prices', 'web_search_price_per_call', 'search_price_per_1k', 'audio_realtime_price_per_min', 'audio_tts_price_per_million_chars', 'audio_stt_price_per_hour', 'free_openai_fast', 'max_reasoning_effort', 'reasoning_effort_mappings']
+    const protectedFields = ['platform', 'openai_fast_mode', 'openai_ultrafast_mode', 'openai_tier_policy_version', 'free_openai_ultrafast', 'rate_multiplier', 'subscription_type', 'daily_limit_usd', 'weekly_limit_usd', 'monthly_limit_usd', 'long_context_pricing_enabled', 'long_context_pricing_scope', 'long_context_pricing_models', 'model_pricing', 'image_rate_independent', 'image_rate_multiplier', 'batch_image_discount_multiplier', 'batch_image_hold_multiplier', 'video_rate_independent', 'video_rate_multiplier', 'peak_rate_enabled', 'peak_start', 'peak_end', 'peak_rate_multiplier', 'profit_control_enabled', 'profit_min_margin', 'profit_safety_buffer', 'image_price_1k', 'image_price_2k', 'image_price_4k', 'video_price_480p', 'video_price_720p', 'video_price_1080p', 'video_model_prices', 'web_search_price_per_call', 'search_price_per_1k', 'audio_realtime_price_per_min', 'audio_tts_price_per_million_chars', 'audio_stt_price_per_hour', 'free_openai_fast', 'max_reasoning_effort', 'reasoning_effort_mappings']
     for (const field of protectedFields) expect(Object.hasOwn(payload, field), field).toBe(!!flag)
     wrapper.unmount()
   })
 })
 
+
+describe('GroupsView OpenAI tier contract', () => {
+  it.each([false, true])('only migrates a legacy forced group with explicit consent (%s)', async (migrate) => {
+    seedOperator(['users.balance_adjust'])
+    const group = createGroup({ platform: 'openai', force_openai_fast: true, free_openai_fast: true, revision: '2026-11-20T08:30:12.123456Z' })
+    api.listGroups.mockResolvedValue({ items: [group], total: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'common.edit')!.trigger('click')
+    const fast = wrapper.get<HTMLSelectElement>('[data-testid="openai_fast_mode"]')
+    const ultra = wrapper.get<HTMLSelectElement>('[data-testid="openai_ultrafast_mode"]')
+    expect(fast.element.value).toBe('force_on')
+    expect(fast.element.disabled).toBe(true)
+    if (migrate) {
+      await wrapper.get('[data-testid="migrate-openai-tier"]').setValue(true)
+      expect(ultra.get('option[value="force_on"]').attributes('disabled')).toBeDefined()
+      await fast.setValue('force_off')
+      await ultra.setValue('force_on')
+      await wrapper.get('[data-testid="free_openai_ultrafast"]').setValue(true)
+    }
+    await wrapper.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+    const payload = api.updateGroup.mock.calls.at(-1)![1]
+    expect(payload.revision).toBe(group.revision)
+    expect(payload).not.toHaveProperty('force_openai_fast')
+    if (migrate) expect(payload).toMatchObject({
+      openai_tier_policy_version: 2, openai_fast_mode: 'force_off', openai_ultrafast_mode: 'force_on',
+      free_openai_fast: true, free_openai_ultrafast: true,
+    })
+    else for (const key of ['openai_tier_policy_version', 'openai_fast_mode', 'openai_ultrafast_mode', 'free_openai_fast', 'free_openai_ultrafast']) {
+      expect(payload).not.toHaveProperty(key)
+    }
+    wrapper.unmount()
+  })
+
+  it('creates a composite group with both tiers disabled and both premiums waived', async () => {
+    seedOperator(['users.balance_adjust'])
+    api.listGroups.mockResolvedValue({ items: [], total: 0 })
+    api.createGroup.mockResolvedValue({ id: 3 })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'admin.groups.createGroup')!.trigger('click')
+    await wrapper.get('[data-tour="group-form-name"]').setValue('Tier policy')
+    wrapper.getComponent('[data-tour="group-form-platform"]').vm.$emit('update:modelValue', 'composite')
+    await flushPromises()
+    for (const tier of ['fast', 'ultrafast']) {
+      const mode = wrapper.get<HTMLSelectElement>(`[data-testid="openai_${tier}_mode"]`)
+      const waiver = wrapper.get<HTMLInputElement>(`[data-testid="free_openai_${tier}"]`)
+      expect(mode.element.value).toBe('inherit')
+      expect(waiver.element.checked).toBe(false)
+      await mode.setValue('force_off')
+      await waiver.setValue(true)
+    }
+    await wrapper.get('#create-group-form').trigger('submit')
+    await flushPromises()
+    expect(api.createGroup.mock.calls.at(-1)![0]).toMatchObject({
+      openai_tier_policy_version: 2, openai_fast_mode: 'force_off', openai_ultrafast_mode: 'force_off',
+      free_openai_fast: true, free_openai_ultrafast: true,
+    })
+    wrapper.unmount()
+  })
+})
 
 describe('GroupsView account copying', () => {
   it.each([

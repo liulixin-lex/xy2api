@@ -392,6 +392,7 @@ describe('GroupsView duplicate action', () => {
         platform: 'openai', models: ['example-model'], billing_mode: 'token',
         input_price: 3e-6, output_price: 15e-6, cache_write_price: null, cache_read_price: null,
         image_input_price: null, image_output_price: null, per_request_price: null,
+        fast_multiplier: 2.5, ultrafast_multiplier: 4.5, flex_multiplier: 0.5,
         reasoning_effort_multipliers: { high: 1.5, max: 3 }, intervals: [], time_pricing: null,
       }],
     }
@@ -408,7 +409,7 @@ describe('GroupsView duplicate action', () => {
     await wrapper.get('#edit-group-form').trigger('submit')
     await flushPromises()
     expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining({
-      model_pricing: [expect.objectContaining({ reasoning_effort_multipliers: { high: 0.5 } })],
+      model_pricing: [expect.objectContaining({ fast_multiplier: 2.5, ultrafast_multiplier: 4.5, flex_multiplier: 0.5, reasoning_effort_multipliers: { high: 0.5 } })],
     }))
     wrapper.unmount()
   })

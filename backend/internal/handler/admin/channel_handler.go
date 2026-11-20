@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -43,6 +44,7 @@ type createChannelRequest struct {
 }
 
 type updateChannelRequest struct {
+	Revision                   *string                           `json:"revision"`
 	Name                       string                            `json:"name" binding:"omitempty,max=100"`
 	Description                *string                           `json:"description"`
 	Status                     string                            `json:"status" binding:"omitempty,oneof=active disabled"`
@@ -58,22 +60,26 @@ type updateChannelRequest struct {
 }
 
 type channelModelPricingRequest struct {
-	Platform                   string                     `json:"platform" binding:"omitempty,max=50"`
-	Models                     []string                   `json:"models" binding:"required,min=1,max=100"`
-	BillingMode                string                     `json:"billing_mode" binding:"omitempty,oneof=token per_request image"`
-	InputPrice                 *float64                   `json:"input_price" binding:"omitempty,min=0"`
-	OutputPrice                *float64                   `json:"output_price" binding:"omitempty,min=0"`
-	CacheWritePrice            *float64                   `json:"cache_write_price" binding:"omitempty,min=0"`
-	CacheWrite1hPrice          *float64                   `json:"cache_write_1h_price" binding:"omitempty,min=0"`
-	CacheReadPrice             *float64                   `json:"cache_read_price" binding:"omitempty,min=0"`
-	FastMultiplier             *float64                   `json:"fast_multiplier" binding:"omitempty,gt=0"`
-	FlexMultiplier             *float64                   `json:"flex_multiplier" binding:"omitempty,gt=0"`
-	ReasoningEffortMultipliers map[string]float64         `json:"reasoning_effort_multipliers"`
-	ImageInputPrice            *float64                   `json:"image_input_price" binding:"omitempty,min=0"`
-	ImageOutputPrice           *float64                   `json:"image_output_price" binding:"omitempty,min=0"`
-	PerRequestPrice            *float64                   `json:"per_request_price" binding:"omitempty,min=0"`
-	Intervals                  []pricingIntervalRequest   `json:"intervals"`
-	TimePricing                *channelTimePricingRequest `json:"time_pricing"`
+	ID                            int64                      `json:"id"`
+	UltrafastMultiplier           *float64                   `json:"ultrafast_multiplier"`
+	UltrafastMultiplierSet        bool                       `json:"-"`
+	Platform                      string                     `json:"platform" binding:"omitempty,max=50"`
+	Models                        []string                   `json:"models" binding:"required,min=1,max=100"`
+	BillingMode                   string                     `json:"billing_mode" binding:"omitempty,oneof=token per_request image"`
+	InputPrice                    *float64                   `json:"input_price" binding:"omitempty,min=0"`
+	OutputPrice                   *float64                   `json:"output_price" binding:"omitempty,min=0"`
+	CacheWritePrice               *float64                   `json:"cache_write_price" binding:"omitempty,min=0"`
+	CacheWrite1hPrice             *float64                   `json:"cache_write_1h_price" binding:"omitempty,min=0"`
+	CacheReadPrice                *float64                   `json:"cache_read_price" binding:"omitempty,min=0"`
+	FastMultiplier                *float64                   `json:"fast_multiplier" binding:"omitempty,gt=0"`
+	FastMultiplierExcessPrecision bool                       `json:"-"`
+	FlexMultiplier                *float64                   `json:"flex_multiplier" binding:"omitempty,gt=0"`
+	ReasoningEffortMultipliers    map[string]float64         `json:"reasoning_effort_multipliers"`
+	ImageInputPrice               *float64                   `json:"image_input_price" binding:"omitempty,min=0"`
+	ImageOutputPrice              *float64                   `json:"image_output_price" binding:"omitempty,min=0"`
+	PerRequestPrice               *float64                   `json:"per_request_price" binding:"omitempty,min=0"`
+	Intervals                     []pricingIntervalRequest   `json:"intervals"`
+	TimePricing                   *channelTimePricingRequest `json:"time_pricing"`
 }
 
 type channelTimePricingRequest struct {
@@ -113,6 +119,7 @@ type accountStatsPricingRuleRequest struct {
 }
 
 type channelResponse struct {
+	Revision                   string                            `json:"revision"`
 	ID                         int64                             `json:"id"`
 	Name                       string                            `json:"name"`
 	Description                string                            `json:"description"`
@@ -131,6 +138,7 @@ type channelResponse struct {
 }
 
 type channelModelPricingResponse struct {
+	UltrafastMultiplier        *float64                    `json:"ultrafast_multiplier"`
 	ID                         int64                       `json:"id"`
 	Platform                   string                      `json:"platform"`
 	Models                     []string                    `json:"models"`
@@ -194,6 +202,7 @@ func channelToResponse(ch *service.Channel) *channelResponse {
 	}
 	resp := &channelResponse{
 		ID:             ch.ID,
+		Revision:       service.ConfigurationRevision(ch.UpdatedAt),
 		Name:           ch.Name,
 		Description:    ch.Description,
 		Status:         ch.Status,
@@ -271,6 +280,7 @@ func pricingToResponse(p *service.ChannelModelPricing) channelModelPricingRespon
 		CacheWrite1hPrice:          p.CacheWrite1hPrice,
 		CacheReadPrice:             p.CacheReadPrice,
 		FastMultiplier:             p.FastMultiplier,
+		UltrafastMultiplier:        p.UltrafastMultiplier,
 		FlexMultiplier:             p.FlexMultiplier,
 		ReasoningEffortMultipliers: p.ReasoningEffortMultipliers,
 		ImageInputPrice:            p.ImageInputPrice,
@@ -320,6 +330,27 @@ func intervalToResponse(iv service.PricingInterval) pricingIntervalResponse {
 	}
 }
 
+func (p *channelModelPricingRequest) UnmarshalJSON(data []byte) error {
+	type pricing channelModelPricingRequest
+	var decoded struct {
+		*pricing
+		UltrafastMultiplier json.RawMessage `json:"ultrafast_multiplier"`
+		FastMultiplier      json.RawMessage `json:"fast_multiplier"`
+	}
+	decoded.pricing = (*pricing)(p)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	p.UltrafastMultiplierSet = decoded.UltrafastMultiplier != nil
+	var err error
+	p.FastMultiplier, p.FastMultiplierExcessPrecision, err = service.DecodeFastMultiplier(decoded.FastMultiplier)
+	if err != nil {
+		return err
+	}
+	p.UltrafastMultiplier, err = service.DecodeUltrafastMultiplier(decoded.UltrafastMultiplier)
+	return err
+}
+
 func pricingRequestToService(reqs []channelModelPricingRequest, allowChannelMultipliers bool) []service.ChannelModelPricing {
 	result := make([]service.ChannelModelPricing, 0, len(reqs))
 	for _, r := range reqs {
@@ -354,28 +385,33 @@ func pricingRequestToService(reqs []channelModelPricingRequest, allowChannelMult
 				SortOrder:            iv.SortOrder,
 			})
 		}
-		var fastMultiplier, flexMultiplier *float64
+		var fastMultiplier, flexMultiplier, ultraMultiplier *float64
 		if allowChannelMultipliers {
 			fastMultiplier = r.FastMultiplier
 			flexMultiplier = r.FlexMultiplier
+			ultraMultiplier = r.UltrafastMultiplier
 		}
 		result = append(result, service.ChannelModelPricing{
-			Platform:                   platform,
-			Models:                     r.Models,
-			BillingMode:                billingMode,
-			InputPrice:                 r.InputPrice,
-			OutputPrice:                r.OutputPrice,
-			CacheWritePrice:            r.CacheWritePrice,
-			CacheWrite1hPrice:          r.CacheWrite1hPrice,
-			CacheReadPrice:             r.CacheReadPrice,
-			FastMultiplier:             fastMultiplier,
-			FlexMultiplier:             flexMultiplier,
-			ReasoningEffortMultipliers: r.ReasoningEffortMultipliers,
-			ImageInputPrice:            r.ImageInputPrice,
-			ImageOutputPrice:           r.ImageOutputPrice,
-			PerRequestPrice:            r.PerRequestPrice,
-			Intervals:                  intervals,
-			TimePricing:                timePricingRequestToService(r.TimePricing),
+			ID:                            r.ID,
+			UltrafastMultiplier:           ultraMultiplier,
+			UltrafastMultiplierSet:        allowChannelMultipliers && r.UltrafastMultiplierSet,
+			Platform:                      platform,
+			Models:                        r.Models,
+			BillingMode:                   billingMode,
+			InputPrice:                    r.InputPrice,
+			OutputPrice:                   r.OutputPrice,
+			CacheWritePrice:               r.CacheWritePrice,
+			CacheWrite1hPrice:             r.CacheWrite1hPrice,
+			CacheReadPrice:                r.CacheReadPrice,
+			FastMultiplier:                fastMultiplier,
+			FastMultiplierExcessPrecision: allowChannelMultipliers && r.FastMultiplierExcessPrecision,
+			FlexMultiplier:                flexMultiplier,
+			ReasoningEffortMultipliers:    r.ReasoningEffortMultipliers,
+			ImageInputPrice:               r.ImageInputPrice,
+			ImageOutputPrice:              r.ImageOutputPrice,
+			PerRequestPrice:               r.PerRequestPrice,
+			Intervals:                     intervals,
+			TimePricing:                   timePricingRequestToService(r.TimePricing),
 		})
 	}
 	return result
@@ -528,6 +564,7 @@ func (h *ChannelHandler) Update(c *gin.Context) {
 	}
 
 	input := &service.UpdateChannelInput{
+		Revision:                   req.Revision,
 		Name:                       req.Name,
 		Description:                req.Description,
 		Status:                     req.Status,

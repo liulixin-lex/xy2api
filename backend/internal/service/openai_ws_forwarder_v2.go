@@ -227,10 +227,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	acquireCtx, schedDial := withSchedWSDialObservation(acquireCtx, ctx, s, account, reqStream)
 	schedDial.learnCapability = s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(payload))
 
+	tierAttempt, _ := ctx.Value(openAITierAttemptKey{}).(*openAITierAttempt)
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
+		BindRoutingHint: tierAttempt.bindsRoutingHint(),
+		Account:         account,
+		WSURL:           wsURL,
+		Headers:         wsHeaders,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
@@ -376,7 +378,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s.cfg != nil && s.cfg.Gateway.OpenAICache.DiagnosticsEnabled {
 		s.captureCacheDiagnostic(c, payloadAsJSONBytes(wirePayload))
 	}
-	learnCapability = &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, payloadAsJSONBytes(wirePayload))}
+	wireBody := payloadAsJSONBytes(wirePayload)
+	s.bindOpenAITierRefusal(ctx, responseModelObserver, account, gjson.GetBytes(wireBody, "model").String(), gjson.GetBytes(wireBody, "service_tier").String(), APIProtocolResponses)
+	defer responseModelObserver.finishTierRefusal()
+	learnCapability = &capabilityStreamFailure{learn: s.capabilityWSFailureLearner(ctx, account, wireBody)}
 	// This boundary belongs to every real application send, even when quality
 	// recording is disabled. A failed first send must precede the next send.
 	resilience.StateFrom(ctx).NoteGatewaySend(account.ID)
@@ -472,6 +477,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			UpstreamResponseModel:         responseModelObserver.Model(),
 			UpstreamResponseModelConflict: responseModelObserver.Conflict(),
 			UpstreamResponseServiceTier:   responseModelObserver.ServiceTier(),
+			ResponseTierEvidence:          append([]string(nil), responseModelObserver.tierEvidence...),
+			ResponseTierConflict:          responseModelObserver.terminalTierConflict || responseModelObserver.terminalTier == "" && responseModelObserver.firstTierConflict,
 			ServiceTier:                   resolvedOpenAIUpstreamServiceTierFromObserver(responseModelObserver, extractOpenAIServiceTier(reqBody)),
 			ReasoningEffort:               extractOpenAIReasoningEffort(reqBody, mappedModel, originalModel),
 			Stream:                        reqStream,

@@ -96,8 +96,9 @@ type BillingCache interface {
 
 // ModelPricing 模型价格配置（per-token价格，与LiteLLM格式一致）
 type ModelPricing struct {
-	// UltrafastMultiplier is model-owned and independent of operator Fast pricing.
+	// UltrafastMultiplier is the model default. The selected card may override it.
 	UltrafastMultiplier                float64
+	UltrafastMultiplierOverride        *float64           `json:",omitempty"`
 	InputPricePerToken                 float64            // 每token输入价格 (USD)
 	InputPricePerTokenPriority         float64            // priority service tier 下每token输入价格 (USD)
 	ImageInputPricePerToken            float64            // 图片输入 token 价格 (USD)，用于多模态 embedding 等图文不同价场景；为 0 时回退到 InputPricePerToken
@@ -155,8 +156,13 @@ func serviceTierCostMultiplier(serviceTier string) float64 {
 
 func configuredServiceTierMultiplier(serviceTier string, pricing *ModelPricing) float64 {
 	if pricing != nil {
-		if normalizeBillingServiceTier(serviceTier) == OpenAIFastTierUltrafast && pricing.UltrafastMultiplier > 0 {
-			return pricing.UltrafastMultiplier
+		if normalizeBillingServiceTier(serviceTier) == OpenAIFastTierUltrafast {
+			if pricing.UltrafastMultiplierOverride != nil {
+				return *pricing.UltrafastMultiplierOverride
+			}
+			if pricing.UltrafastMultiplier > 0 {
+				return pricing.UltrafastMultiplier
+			}
 		}
 		switch normalizeBillingServiceTier(serviceTier) {
 		case "priority", "fast":
@@ -201,6 +207,11 @@ type UsageTokens struct {
 
 // CostBreakdown 费用明细
 type CostBreakdown struct {
+	billingModel      string
+	tierPriceSource   string
+	tierPriceRevision string
+	tierMultiplier    *float64 // nil when per-component prices apply
+
 	PricingSource json.RawMessage `json:"-"`
 
 	InputCost                 float64 // 文本输入费用（不含图片输入，图片输入单独记入 ImageInputCost）
@@ -1423,6 +1434,7 @@ func (s *BillingService) modelPricingWithChannelSource(model string, channelPric
 	if err != nil {
 		return nil, nil, err
 	}
+	channelPricing = openAITierPriceCard(context.Background(), model, channelPricing)
 	if channelPricing == nil {
 		return pricing, provenance, nil
 	}
@@ -1431,6 +1443,7 @@ func (s *BillingService) modelPricingWithChannelSource(model string, channelPric
 	pricing = &cloned
 	applyChannelTokenPriceOverrides(pricing, channelPricing)
 	pricing.FastMultiplier = channelPricing.FastMultiplier
+	pricing.UltrafastMultiplierOverride = channelPricing.UltrafastMultiplier
 	pricing.FlexMultiplier = channelPricing.FlexMultiplier
 	pricing.ReasoningEffortMultipliers = maps.Clone(channelPricing.ReasoningEffortMultipliers)
 	applyChannelImagePriceOverrides(channelPricing, pricing)
@@ -1511,6 +1524,9 @@ type CostInput struct {
 // CalculateCostUnified 统一计费入口，支持三种计费模式。
 // 使用 ModelPricingResolver 解析定价，然后根据 BillingMode 分发计算。
 func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, error) {
+	if prices := openAITierPricesFromContext(input.Ctx); prices != nil {
+		s = prices.billing
+	}
 	if input.Resolver == nil {
 		// 无 Resolver，回退到旧路径
 		applyLongContextBilling := longContextPricingEnabledForRequest(input.Group, input.Model, input.LongContextBillingEnabled)
@@ -1528,10 +1544,11 @@ func (s *BillingService) CalculateCostUnified(input CostInput) (*CostBreakdown, 
 	resolved := input.Resolved
 	if resolved == nil {
 		resolved = input.Resolver.Resolve(input.Ctx, PricingInput{
-			Purpose: input.Purpose,
-			Model:   input.Model,
-			GroupID: input.GroupID,
-			Group:   input.Group,
+			Purpose:   input.Purpose,
+			PricingAt: input.PricingAt,
+			Model:     input.Model,
+			GroupID:   input.GroupID,
+			Group:     input.Group,
 		})
 	}
 
@@ -1611,6 +1628,10 @@ func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input Cos
 
 	breakdown := s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongCtx)
 	attachPricingSource(breakdown, intervalPricingSource(resolved, pricingContext))
+	if resolved.channelPricing != nil {
+		breakdown.tierPriceSource = resolved.Source
+		breakdown.tierPriceRevision = pricingContentRevision(resolved.channelPricing)
+	}
 	applyCostBreakdownMultiplier(breakdown, resolvedChannelTimeMultiplier(resolved, input.PricingAt))
 	applyCostBreakdownMultiplier(breakdown, reasoningEffortBillingMultiplier(input.ReasoningEffort, pricing.ReasoningEffortMultipliers))
 	return breakdown, nil
@@ -1671,6 +1692,9 @@ func (s *BillingService) computeTokenBreakdown(
 	}
 
 	bd := &CostBreakdown{}
+	if !usePriorityServiceTierPricing(serviceTier, pricing) {
+		bd.tierMultiplier = &tierMultiplier
+	}
 	// 分离图片输入 token 与文本输入 token（多模态 embedding、图片编辑等图文不同价场景）。
 	// InputCost 仅计文本输入，图片输入费用单独记入 ImageInputCost，便于对账；总额不变。
 	// ImageInputTokens 为 0 时（绝大多数 chat/vision 流量）走原始单价路径，行为不变。
