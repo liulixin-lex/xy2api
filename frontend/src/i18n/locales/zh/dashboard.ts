@@ -451,6 +451,7 @@ export default {
     latencyLastAttemptUnknownHint: '未知：最后一次尝试没有首字记录（没有计费的请求不记这一项）。',
     latencyUnknown: '未知',
     latencyWaitShort: '等待',
+    removeFilter: '移除筛选：{label}',
     latencyDetails: '延迟明细',
     requestDetail: {
       button: '明细',

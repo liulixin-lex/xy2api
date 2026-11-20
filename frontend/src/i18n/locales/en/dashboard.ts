@@ -446,6 +446,7 @@ export default {
     latencyLastAttemptUnknownHint: 'Unknown: the last attempt has no first-token record (requests without a bill do not record it).',
     latencyUnknown: 'Unknown',
     latencyWaitShort: 'Wait',
+    removeFilter: 'Remove filter: {label}',
     latencyDetails: 'Latency Breakdown',
     requestDetail: {
       button: 'Details',

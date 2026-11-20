@@ -247,6 +247,40 @@ describe('user UsageView', () => {
     }
   })
 
+  // Mobile list plan (B): below 768px the phone defaults (API key frozen first) and the phone toolbar, whose tags remove
+  // a filter at once; the wide memory keeps the page's existing key.
+  it('shows the phone defaults and the phone toolbar below 768px, a tag removing its filter at once', async () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => ({
+      matches: q.includes('min-width') ? false : true, media: q, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList)
+    localStorage.removeItem('user-usage-hidden-columns-narrow')
+    localStorage.setItem('user-usage-hidden-columns', JSON.stringify(['model']))
+    try {
+      const wrapper = mountUsageView({ Teleport: true })
+      await flushPromises()
+      expect(wrapper.findComponent(UsageTable).props('columns').map((c: { key: string }) => c.key))
+        .toEqual(['api_key', 'model', 'tokens', 'cost', 'latency', 'created_at'])
+      expect(wrapper.find('[data-testid="usage-filters-phone"]').exists()).toBe(true)
+      expect(wrapper.find('label.input-label').exists()).toBe(false)
+
+      ;(wrapper.vm as any).filters.model = 'gpt-5.4'
+      await flushPromises()
+      const tag = wrapper.get('[data-testid="usage-filter-tag"]')
+      expect(tag.text()).toBe('Model：gpt-5.4')
+      query.mockClear()
+      await tag.get('button').trigger('click')
+      await flushPromises()
+      expect(query).toHaveBeenCalledWith(expect.objectContaining({ model: undefined }), expect.anything())
+      expect(wrapper.find('[data-testid="usage-filter-tag"]').exists()).toBe(false)
+      expect(JSON.parse(localStorage.getItem('user-usage-hidden-columns')!)).toEqual(['model'])
+      wrapper.unmount()
+    } finally {
+      media.mockRestore()
+      localStorage.removeItem('user-usage-hidden-columns')
+    }
+  })
+
   it('keeps usage metrics hidden from users until an admin makes them public', async () => {
     const wrapper = mountUsageView()
     await flushPromises()

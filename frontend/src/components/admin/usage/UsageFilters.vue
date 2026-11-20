@@ -1,189 +1,244 @@
 <template>
   <div :class="flat ? 'p-4 sm:p-6' : 'card p-6'">
+    <!-- The fields, defined once: in the row from 768px, in the phone toolbar's bottom sheet below it. -->
+    <DefineFields>
+      <!-- User Search -->
+      <div ref="userSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
+        <label class="input-label">{{ t('admin.usage.userFilter') }}</label>
+        <input
+          v-model="userKeyword"
+          type="text"
+          class="input pr-8 [@media(pointer:coarse)]:text-base"
+          :placeholder="t('admin.usage.searchUserPlaceholder')"
+          @input="debounceUserSearch"
+          @focus="showUserDropdown = true"
+        />
+        <button
+          v-if="filters.user_id"
+          type="button"
+          @click="clearUser"
+          class="absolute right-2 top-9 text-gray-400"
+          aria-label="Clear user filter"
+        >
+          ✕
+        </button>
+        <div
+          v-if="showUserDropdown && (userResults.length > 0 || userKeyword)"
+          class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:bg-dark-800"
+        >
+          <button
+            v-for="u in userResults"
+            :key="u.id"
+            type="button"
+            @click="selectUser(u)"
+            class="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-dark-700"
+          >
+            <span>{{ u.email }}<span v-if="u.deleted" class="ml-1 text-xs text-gray-400">（{{ t('admin.usage.userDeletedBadge') }}）</span></span>
+            <span class="ml-2 text-xs text-gray-400">#{{ u.id }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- API Key Search -->
+      <div ref="apiKeySearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
+        <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
+        <input
+          v-model="apiKeyKeyword"
+          type="text"
+          class="input pr-8 [@media(pointer:coarse)]:text-base"
+          :placeholder="t('admin.usage.searchApiKeyPlaceholder')"
+          @input="debounceApiKeySearch"
+          @focus="onApiKeyFocus"
+        />
+        <button
+          v-if="filters.api_key_id"
+          type="button"
+          @click="onClearApiKey"
+          class="absolute right-2 top-9 text-gray-400"
+          aria-label="Clear API key filter"
+        >
+          ✕
+        </button>
+        <div
+          v-if="showApiKeyDropdown && apiKeyResults.length > 0"
+          class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:bg-dark-800"
+        >
+          <button
+            v-for="k in apiKeyResults"
+            :key="k.id"
+            type="button"
+            @click="selectApiKey(k)"
+            class="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-dark-700"
+          >
+            <span class="truncate">{{ k.name || `#${k.id}` }}</span>
+            <span class="ml-2 text-xs text-gray-400">#{{ k.id }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Model Filter -->
+      <div class="w-full sm:w-auto sm:min-w-[220px]">
+        <label class="input-label">{{ t('usage.model') }}</label>
+        <Select v-model="filters.model" :options="modelOptions" searchable @change="emitChange" />
+      </div>
+
+      <!-- Account Filter -->
+      <div ref="accountSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[220px]">
+        <label class="input-label">{{ t('admin.usage.account') }}</label>
+        <input
+          v-model="accountKeyword"
+          type="text"
+          class="input pr-8 [@media(pointer:coarse)]:text-base"
+          :placeholder="t('admin.usage.searchAccountPlaceholder')"
+          @input="debounceAccountSearch"
+          @focus="showAccountDropdown = true"
+        />
+        <button
+          v-if="filters.account_id"
+          type="button"
+          @click="clearAccount"
+          class="absolute right-2 top-9 text-gray-400"
+          aria-label="Clear account filter"
+        >
+          ✕
+        </button>
+        <div
+          v-if="showAccountDropdown && (accountResults.length > 0 || accountKeyword)"
+          class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:bg-dark-800"
+        >
+          <button
+            v-for="a in accountResults"
+            :key="a.id"
+            type="button"
+            @click="selectAccount(a)"
+            class="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-dark-700"
+          >
+            <span class="truncate">{{ a.name }}</span>
+            <span class="ml-2 text-xs text-gray-400">#{{ a.id }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Request Type Filter (usage only) -->
+      <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+        <label class="input-label">{{ t('usage.type') }}</label>
+        <Select v-model="filters.request_type" :options="requestTypeOptions" @change="emitChange" />
+      </div>
+
+      <!-- Native compaction is independent of the transport request type. -->
+      <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+        <label class="input-label">{{ t('usage.compactionFilter') }}</label>
+        <Select v-model="filters.native_compaction_v2" :options="compactionOptions" @change="emitChange" />
+      </div>
+
+      <!-- Billing Type Filter (usage only) -->
+      <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[200px]">
+        <label class="input-label">{{ t('admin.usage.billingType') }}</label>
+        <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="emitChange" />
+      </div>
+
+      <!-- Billing Mode Filter (usage only；用户排行的 user-breakdown 接口不支持该维度) -->
+      <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[200px]">
+        <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
+        <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="emitChange" />
+      </div>
+
+      <!-- Request result filter (usage only; backend 0.6.5 request ledger: list and stats) -->
+      <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[180px]">
+        <label class="input-label">{{ t('admin.usage.result') }}</label>
+        <Select v-model="filters.result" :options="resultOptions" @change="emitChange" />
+      </div>
+
+      <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[220px]">
+        <label class="input-label">{{ t('admin.usage.upstreamModelAudit') }}</label>
+        <Select v-model="filters.upstream_model_mismatch" :options="upstreamModelMismatchOptions" @change="emitChange" />
+      </div>
+
+      <!-- Error Phase Filter (errors only) -->
+      <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+        <label class="input-label">{{ t('admin.ops.errorLog.type') }}</label>
+        <Select v-model="filters.error_phase" :options="errorPhaseOptions" @change="emitChange" />
+      </div>
+
+      <!-- Error Category Filter (errors only) -->
+      <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+        <label class="input-label">{{ t('usage.errors.category') }}</label>
+        <Select v-model="filters.error_category" :options="errorCategoryOptions" @change="emitChange" />
+      </div>
+
+      <!-- Status Code Filter (errors only) -->
+      <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+        <label class="input-label">{{ t('admin.ops.errorLog.status') }}</label>
+        <Select v-model="filters.status_code" :options="statusCodeOptions" @change="emitChange" />
+      </div>
+
+      <!-- Group Filter -->
+      <div class="w-full sm:w-auto sm:min-w-[200px]">
+        <label class="input-label">{{ t('admin.usage.group') }}</label>
+        <Select v-model="filters.group_id" :options="groupOptions" searchable @change="emitChange" />
+      </div>
+
+    </DefineFields>
+
+    <!-- Below 768px (mobile list plan): "Filters n" opens the fields in a bottom sheet (applied at once), the chosen
+         ones as removable tags; the count, live state, refresh, columns and "more" (reset, cleanup, export) on a row. -->
+    <TableToolbar v-if="phone" filter-sheet :filter-count="tags.length" data-testid="usage-filters-phone" @clear-filters="clearAll">
+      <template #sheet>
+        <div class="grid gap-4"><ReuseFields /></div>
+      </template>
+      <template #tags>
+        <UsageFilterTags :tags="tags" @remove="removeFilter" />
+      </template>
+      <template #info><slot name="info" /></template>
+      <template v-if="$slots.status" #status><slot name="status" /></template>
+      <template #actions>
+        <button
+          v-if="showActions"
+          type="button"
+          class="table-toolbar__icon-btn table-toolbar__icon"
+          :aria-label="t('common.refresh')"
+          data-testid="usage-refresh"
+          @click="$emit('refresh')"
+        >
+          <Icon name="refresh" size="sm" />
+        </button>
+        <slot name="phone-tools" />
+        <button
+          v-if="showActions"
+          type="button"
+          class="table-toolbar__icon-btn table-toolbar__icon"
+          aria-haspopup="dialog"
+          :aria-label="t('common.more')"
+          data-testid="usage-more"
+          @click="moreOpen = true"
+        >
+          <Icon name="more" size="sm" />
+        </button>
+      </template>
+    </TableToolbar>
+    <BottomSheet v-if="phone && showActions" :show="moreOpen" :title="t('common.more')" test-id="usage-more-sheet" @close="moreOpen = false">
+      <div class="grid gap-3">
+        <button type="button" class="btn btn-secondary w-full" @click="moreOpen = false; $emit('reset')">{{ t('common.reset') }}</button>
+        <template v-if="mode === 'usage'">
+          <button v-if="canCleanup" type="button" class="btn btn-danger w-full" @click="moreOpen = false; $emit('cleanup')">
+            {{ t('admin.usage.cleanup.button') }}
+          </button>
+          <button v-if="canExport" type="button" class="btn btn-primary w-full" :disabled="exporting" @click="moreOpen = false; $emit('export')">
+            {{ t('usage.exportExcel') }}
+          </button>
+        </template>
+      </div>
+    </BottomSheet>
+
     <!-- Toolbar: left filters (multi-line) + right actions -->
-    <div class="flex flex-wrap items-end justify-between gap-4">
-      <!-- Left: filters (allowed to wrap to multiple rows) -->
-      <div class="flex flex-1 flex-wrap items-end gap-4">
-        <!-- User Search -->
-        <div ref="userSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
-          <label class="input-label">{{ t('admin.usage.userFilter') }}</label>
-          <input
-            v-model="userKeyword"
-            type="text"
-            class="input pr-8"
-            :placeholder="t('admin.usage.searchUserPlaceholder')"
-            @input="debounceUserSearch"
-            @focus="showUserDropdown = true"
-          />
-          <button
-            v-if="filters.user_id"
-            type="button"
-            @click="clearUser"
-            class="absolute right-2 top-9 text-gray-400"
-            aria-label="Clear user filter"
-          >
-            ✕
-          </button>
-          <div
-            v-if="showUserDropdown && (userResults.length > 0 || userKeyword)"
-            class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:bg-dark-800"
-          >
-            <button
-              v-for="u in userResults"
-              :key="u.id"
-              type="button"
-              @click="selectUser(u)"
-              class="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-dark-700"
-            >
-              <span>{{ u.email }}<span v-if="u.deleted" class="ml-1 text-xs text-gray-400">（{{ t('admin.usage.userDeletedBadge') }}）</span></span>
-              <span class="ml-2 text-xs text-gray-400">#{{ u.id }}</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- API Key Search -->
-        <div ref="apiKeySearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
-          <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
-          <input
-            v-model="apiKeyKeyword"
-            type="text"
-            class="input pr-8"
-            :placeholder="t('admin.usage.searchApiKeyPlaceholder')"
-            @input="debounceApiKeySearch"
-            @focus="onApiKeyFocus"
-          />
-          <button
-            v-if="filters.api_key_id"
-            type="button"
-            @click="onClearApiKey"
-            class="absolute right-2 top-9 text-gray-400"
-            aria-label="Clear API key filter"
-          >
-            ✕
-          </button>
-          <div
-            v-if="showApiKeyDropdown && apiKeyResults.length > 0"
-            class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:bg-dark-800"
-          >
-            <button
-              v-for="k in apiKeyResults"
-              :key="k.id"
-              type="button"
-              @click="selectApiKey(k)"
-              class="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-dark-700"
-            >
-              <span class="truncate">{{ k.name || `#${k.id}` }}</span>
-              <span class="ml-2 text-xs text-gray-400">#{{ k.id }}</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Model Filter -->
-        <div class="w-full sm:w-auto sm:min-w-[220px]">
-          <label class="input-label">{{ t('usage.model') }}</label>
-          <Select v-model="filters.model" :options="modelOptions" searchable @change="emitChange" />
-        </div>
-
-        <!-- Account Filter -->
-        <div ref="accountSearchRef" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[220px]">
-          <label class="input-label">{{ t('admin.usage.account') }}</label>
-          <input
-            v-model="accountKeyword"
-            type="text"
-            class="input pr-8"
-            :placeholder="t('admin.usage.searchAccountPlaceholder')"
-            @input="debounceAccountSearch"
-            @focus="showAccountDropdown = true"
-          />
-          <button
-            v-if="filters.account_id"
-            type="button"
-            @click="clearAccount"
-            class="absolute right-2 top-9 text-gray-400"
-            aria-label="Clear account filter"
-          >
-            ✕
-          </button>
-          <div
-            v-if="showAccountDropdown && (accountResults.length > 0 || accountKeyword)"
-            class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:bg-dark-800"
-          >
-            <button
-              v-for="a in accountResults"
-              :key="a.id"
-              type="button"
-              @click="selectAccount(a)"
-              class="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-dark-700"
-            >
-              <span class="truncate">{{ a.name }}</span>
-              <span class="ml-2 text-xs text-gray-400">#{{ a.id }}</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Request Type Filter (usage only) -->
-        <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
-          <label class="input-label">{{ t('usage.type') }}</label>
-          <Select v-model="filters.request_type" :options="requestTypeOptions" @change="emitChange" />
-        </div>
-
-        <!-- Native compaction is independent of the transport request type. -->
-        <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
-          <label class="input-label">{{ t('usage.compactionFilter') }}</label>
-          <Select v-model="filters.native_compaction_v2" :options="compactionOptions" @change="emitChange" />
-        </div>
-
-        <!-- Billing Type Filter (usage only) -->
-        <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[200px]">
-          <label class="input-label">{{ t('admin.usage.billingType') }}</label>
-          <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="emitChange" />
-        </div>
-
-        <!-- Billing Mode Filter (usage only；用户排行的 user-breakdown 接口不支持该维度) -->
-        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[200px]">
-          <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
-          <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="emitChange" />
-        </div>
-
-        <!-- Request result filter (usage only; backend 0.6.5 request ledger: list and stats) -->
-        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[180px]">
-          <label class="input-label">{{ t('admin.usage.result') }}</label>
-          <Select v-model="filters.result" :options="resultOptions" @change="emitChange" />
-        </div>
-
-        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[220px]">
-          <label class="input-label">{{ t('admin.usage.upstreamModelAudit') }}</label>
-          <Select v-model="filters.upstream_model_mismatch" :options="upstreamModelMismatchOptions" @change="emitChange" />
-        </div>
-
-        <!-- Error Phase Filter (errors only) -->
-        <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
-          <label class="input-label">{{ t('admin.ops.errorLog.type') }}</label>
-          <Select v-model="filters.error_phase" :options="errorPhaseOptions" @change="emitChange" />
-        </div>
-
-        <!-- Error Category Filter (errors only) -->
-        <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
-          <label class="input-label">{{ t('usage.errors.category') }}</label>
-          <Select v-model="filters.error_category" :options="errorCategoryOptions" @change="emitChange" />
-        </div>
-
-        <!-- Status Code Filter (errors only) -->
-        <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
-          <label class="input-label">{{ t('admin.ops.errorLog.status') }}</label>
-          <Select v-model="filters.status_code" :options="statusCodeOptions" @change="emitChange" />
-        </div>
-
-        <!-- Group Filter -->
-        <div class="w-full sm:w-auto sm:min-w-[200px]">
-          <label class="input-label">{{ t('admin.usage.group') }}</label>
-          <Select v-model="filters.group_id" :options="groupOptions" searchable @change="emitChange" />
-        </div>
-
+    <div v-if="!phone" class="flex flex-wrap items-end justify-between gap-4">
+      <!-- Left: filters (allowed to wrap to multiple rows); below 1024px they take the whole row and the actions wrap under them -->
+      <div class="flex flex-1 flex-wrap items-end gap-4 max-lg:basis-full">
+        <ReuseFields />
       </div>
 
       <!-- Right: actions -->
-      <div v-if="showActions" class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
+      <div v-if="showActions" class="flex w-full flex-wrap items-center justify-end gap-3 sm:ml-auto sm:w-auto">
         <!-- The page's live indicator, next to the refresh button -->
         <slot name="status" />
         <button type="button" @click="$emit('refresh')" class="btn btn-secondary">
@@ -209,6 +264,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, toRef, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { createReusableTemplate } from '@vueuse/core'
+import TableToolbar from '@/components/layout/TableToolbar.vue'
+import BottomSheet from '@/components/common/BottomSheet.vue'
+import Icon from '@/components/icons/Icon.vue'
+import UsageFilterTags, { type UsageFilterTag } from './UsageFilterTags.vue'
+import { usePhoneViewport } from '@/composables/useTableViewport'
 import { adminAPI } from '@/api/admin'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
@@ -353,6 +414,72 @@ const upstreamModelMismatchOptions = ref<SelectOption[]>([
 ])
 
 const emitChange = () => emit('change')
+
+const [DefineFields, ReuseFields] = createReusableTemplate()
+const phone = usePhoneViewport()
+const moreOpen = ref(false)
+watch(phone, (on) => { if (!on) moreOpen.value = false })
+
+/** A select's label for the chosen value; nothing for "all" (null, undefined or an empty string). */
+const chosen = (value: unknown) => value !== null && value !== undefined && value !== ''
+const optionLabel = (options: SelectOption[], value: unknown) =>
+  options.find((option) => option.value === value)?.label ?? String(value)
+
+/**
+ * The filters in this mode that are not "all", in the fields' order, as phone tags ("Filters n" counts them). The date
+ * range is not one of them: it sits above the list, outside the sheet.
+ */
+const tags = computed<UsageFilterTag[]>(() => {
+  const f = filters.value
+  const out: UsageFilterTag[] = []
+  const add = (key: string, label: string, text: string) => out.push({ key, label, text })
+  if (chosen(f.user_id)) add('user', t('admin.usage.userFilter'), userKeyword.value || `#${f.user_id}`)
+  if (chosen(f.api_key_id)) add('api_key', t('usage.apiKeyFilter'), apiKeyKeyword.value || `#${f.api_key_id}`)
+  if (chosen(f.model)) add('model', t('usage.model'), String(f.model))
+  if (chosen(f.account_id)) add('account', t('admin.usage.account'), accountKeyword.value || `#${f.account_id}`)
+  if (props.mode !== 'errors') {
+    if (chosen(f.request_type)) add('request_type', t('usage.type'), optionLabel(requestTypeOptions.value, f.request_type))
+    if (chosen(f.native_compaction_v2)) add('native_compaction_v2', t('usage.compactionFilter'), optionLabel(compactionOptions.value, f.native_compaction_v2))
+    if (chosen(f.billing_type)) add('billing_type', t('admin.usage.billingType'), optionLabel(billingTypeOptions.value, f.billing_type))
+  }
+  if (props.mode === 'usage') {
+    if (chosen(f.billing_mode)) add('billing_mode', t('admin.usage.billingMode'), optionLabel(billingModeOptions.value, f.billing_mode))
+    if (chosen(f.result)) add('result', t('admin.usage.result'), optionLabel(resultOptions.value, f.result))
+    if (chosen(f.upstream_model_mismatch)) add('upstream_model_mismatch', t('admin.usage.upstreamModelAudit'), optionLabel(upstreamModelMismatchOptions.value, f.upstream_model_mismatch))
+  }
+  if (props.mode === 'errors') {
+    if (chosen(f.error_phase)) add('error_phase', t('admin.ops.errorLog.type'), optionLabel(errorPhaseOptions.value, f.error_phase))
+    if (chosen(f.error_category)) add('error_category', t('usage.errors.category'), optionLabel(errorCategoryOptions.value, f.error_category))
+    if (chosen(f.status_code)) add('status_code', t('admin.ops.errorLog.status'), optionLabel(statusCodeOptions.value, f.status_code))
+  }
+  if (chosen(f.group_id)) add('group', t('admin.usage.group'), optionLabel(groupOptions.value, f.group_id))
+  return out
+})
+
+/** Each select's "all" value, as the page's reset sets it. */
+const SELECT_DEFAULTS: Record<string, null | undefined> = {
+  model: undefined, request_type: undefined, native_compaction_v2: null, billing_type: null, billing_mode: undefined,
+  result: null, upstream_model_mismatch: undefined, error_phase: undefined, error_category: undefined,
+  status_code: undefined, group_id: undefined,
+}
+const FIELD_OF_TAG: Record<string, string> = { group: 'group_id' }
+
+const clearTag = (key: string) => {
+  if (key === 'user') { clearPendingUserSearch(); userKeyword.value = ''; userResults.value = []; filters.value.user_id = undefined; clearApiKey(); return }
+  if (key === 'api_key') { clearApiKey(); return }
+  if (key === 'account') { accountKeyword.value = ''; accountResults.value = []; filters.value.account_id = undefined; return }
+  const field = FIELD_OF_TAG[key] ?? key
+  filters.value[field] = SELECT_DEFAULTS[field]
+}
+const removeFilter = (key: string) => {
+  clearTag(key)
+  emitChange()
+}
+/** "Clear all" in the sheet: every chosen filter, applied once; the date range stays. */
+const clearAll = () => {
+  for (const tag of tags.value) clearTag(tag.key)
+  emitChange()
+}
 
 const clearPendingUserSearch = () => {
   if (userSearchTimeout) {

@@ -134,7 +134,7 @@ const UsageFiltersStub = defineComponent({
     })
     return { userKeyword, accountKeyword }
   },
-  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><span data-test="account-filter-label">{{ accountKeyword }}</span><slot name="status" /><slot name="after-reset" /></div>',
+  template: '<div><span data-test="user-filter-label">{{ userKeyword }}</span><span data-test="account-filter-label">{{ accountKeyword }}</span><slot name="status" /><slot name="after-reset" /><div data-test="phone-tools"><slot name="phone-tools" /></div><div data-test="info"><slot name="info" /></div></div>',
 })
 const UsageTableStub = {
   props: ['columns'],
@@ -345,6 +345,84 @@ describe('admin UsageView below 1024px', () => {
     expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).exists()).toBe(true)
     expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).props('startDate')).toBe('2026-11-01')
     wrapper.unmount()
+  })
+})
+
+// Mobile list plan (B): the usage columns are remembered twice, below 768px (phone defaults) and from 768px (the page's
+// existing key and its version chain); the errors tab keeps its own keys the same way.
+describe('admin UsageView columns per width', () => {
+  const setPhone = (phone: boolean) => vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+    matches: query.includes('min-width') ? !phone : true, media: query, onchange: null,
+    addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+  }) as unknown as MediaQueryList)
+  const mountView = () => mount(UsageView, {
+    global: { stubs: {
+      AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub, UsageTable: true,
+      UsageExportProgress: true, UsageCleanupDialog: true, UserBalanceHistoryModal: true, Pagination: true, Select: true,
+      DateRangePicker: true, Icon: true, TokenUsageTrend: true, ModelDistributionChart: true, GroupDistributionChart: true,
+      EndpointDistributionChart: true, UserTokenRanking: true, Teleport: true,
+    } },
+  })
+  const keys = (w: ReturnType<typeof mountView>) => w.findComponent({ name: 'UsageTable' }).props('columns').map((c: { key: string }) => c.key)
+
+  // This file stubs localStorage with mocks; back them with a map here.
+  const store = new Map<string, string>()
+  beforeEach(() => {
+    vi.useFakeTimers()
+    store.clear()
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) => store.get(key) ?? null)
+    vi.mocked(localStorage.setItem).mockImplementation((key: string, value: string) => { store.set(key, String(value)) })
+    vi.mocked(localStorage.removeItem).mockImplementation((key: string) => { store.delete(key) })
+    list.mockReset().mockResolvedValue({ items: [], total: 1234, pages: 62 })
+    getStats.mockReset().mockResolvedValue({ total_requests: 0, total_input_tokens: 0, total_output_tokens: 0, total_cache_tokens: 0, total_tokens: 0, total_cost: 0, total_actual_cost: 0, average_duration_ms: 0 })
+    getSnapshotV2.mockReset().mockResolvedValue({ trend: [], models: [], groups: [] })
+    getModelStats.mockReset().mockResolvedValue({ models: [] })
+  })
+  afterEach(() => {
+    vi.mocked(window.matchMedia).mockRestore?.()
+    vi.mocked(localStorage.getItem).mockReset().mockReturnValue(null)
+    vi.mocked(localStorage.setItem).mockReset()
+    vi.mocked(localStorage.removeItem).mockReset()
+    vi.useRealTimers()
+  })
+
+  it('shows the phone defaults below 768px and keeps a change there in the phone memory only', async () => {
+    setPhone(true)
+    const w = mountView()
+    await flushPromises()
+    expect(keys(w)).toEqual(['user', 'account', 'model', 'tokens', 'cost', 'latency', 'created_at'])
+    expect(w.get('[data-test="info"]').text()).toBe('common.table.count')
+    const phoneTools = w.get('[data-test="phone-tools"]')
+    await phoneTools.get('[data-testid="usage-column-settings"]').trigger('click')
+    await phoneTools.get('[data-testid="usage-column-toggle-group"]').trigger('change')
+    expect(keys(w)).toContain('group')
+    expect(JSON.parse(localStorage.getItem('usage-hidden-columns-narrow')!)).not.toContain('group')
+    expect(localStorage.getItem('usage-hidden-columns')).toBeNull()
+    await phoneTools.get('[data-testid="usage-column-reset"]').trigger('click')
+    expect(keys(w)).not.toContain('group')
+    expect(localStorage.getItem('usage-hidden-columns-narrow')).toBeNull()
+    w.unmount()
+  })
+
+  it('reads the existing key from 768px, its version chain included, and leaves it alone on a phone', async () => {
+    localStorage.setItem('usage-hidden-columns', JSON.stringify(['endpoint']))
+    localStorage.setItem('usage-hidden-columns-version', 'request-id-hidden-by-default')
+    setPhone(false)
+    const wide = mountView()
+    await flushPromises()
+    // A saved set is the whole hidden set: only endpoint and, from the chain, the upstream ID are hidden.
+    expect(keys(wide)).toEqual(['user', 'api_key', 'account', 'model', 'reasoning_effort', 'group', 'stream', 'billing_mode', 'tokens', 'cost', 'latency', 'created_at', 'request_id', 'user_agent', 'ip_address'])
+    // The chain hid the column added since (upstream ID) and wrote it back once.
+    expect(JSON.parse(localStorage.getItem('usage-hidden-columns')!)).toEqual(['endpoint', 'upstream_request_id'])
+    wide.unmount()
+    vi.mocked(window.matchMedia).mockRestore()
+
+    setPhone(true)
+    const narrow = mountView()
+    await flushPromises()
+    expect(keys(narrow)).toEqual(['user', 'account', 'model', 'tokens', 'cost', 'latency', 'created_at'])
+    expect(JSON.parse(localStorage.getItem('usage-hidden-columns')!)).toEqual(['endpoint', 'upstream_request_id'])
+    narrow.unmount()
   })
 })
 
