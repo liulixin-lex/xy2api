@@ -55,7 +55,7 @@ export default {
           trialUntil: '试用到 {time}',
           count: '{n} 次',
           slow: '{n} 次',
-          slowTimeouts: '{n} 次，含超时 {timeouts} 次',
+          slowTimeouts: '{slow} 次，含超时 {n} 次',
           failed: '{failed}/{n} 次请求',
           turns: '{n} 轮',
           tooFew: '{note} · 样本不足',

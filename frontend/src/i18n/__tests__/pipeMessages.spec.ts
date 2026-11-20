@@ -12,6 +12,7 @@ const pluralKeys = new Set([
   'batchImage.create.referenceCount',
   'admin.accounts.table.tip.count',
   'admin.accounts.table.tip.failed',
+  'admin.accounts.table.tip.slowTimeouts',
   'admin.groups.profitControl.floorBelow',
   'admin.groups.profitControl.pinnedCount',
   'admin.accounts.table.tip.turns',

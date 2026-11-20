@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, ref, withDirectives } from 'vue'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
@@ -43,6 +46,27 @@ describe('v-tip cards', () => {
     expect(texts('.sq-tip__first')).toEqual(['模型', 'Astra', '<b>x</b>'])
     expect(texts('.sq-tip__end')).toEqual(['恢复', '15m 后恢复', ''])
     expect(tip().querySelectorAll('.sq-tip__c.sq-tip__tone--back')).toHaveLength(1)
+  })
+
+  // The recent status's card (wrapEnd) wraps its notes on a narrow screen; every other card keeps the note whole and
+  // lets the label and value give way, as before.
+  it('keeps the note column whole by default, and wraps it in what is left only when the card asks (wrapEnd)', () => {
+    const grid = (card: TipContent) => {
+      content.value = card
+      hover(mount(Host, { attachTo: document.body }).element)
+      const el = tip().querySelector<HTMLElement>('.sq-tip__grid')!
+      // jsdom writes 0 as 0px.
+      return [el.className, el.style.gridTemplateColumns.replaceAll('0px', '0')]
+    }
+    const rows = [['首字中位', '7.0s', '8 次，含超时 2 次 · 样本不足']]
+    expect(grid({ title: 'g', rows })).toEqual(['sq-tip__grid', 'repeat(2, minmax(0, max-content)) minmax(max-content, 1fr)'])
+    expect(grid({ title: 'g', rows, wrapEnd: true })).toEqual(['sq-tip__grid sq-tip__grid--wrap', 'repeat(2, max-content) minmax(0, 1fr)'])
+    // Two columns have no note to wrap.
+    expect(grid({ title: 'g', rows: [['豁免至', '长期']], wrapEnd: true })).toEqual(['sq-tip__grid', 'repeat(2, minmax(0, max-content))'])
+    // A variable, not a literal: Vite rewrites new URL('<literal>', import.meta.url) into an asset URL.
+    const file = '../../styles/schedQuality.css'
+    const css = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8')
+    expect(css).toMatch(/\.sq-tip__grid--wrap \.sq-tip__end \{ white-space: normal; overflow-wrap: anywhere; \}/)
   })
 
   it('has no note column with two columns, and no data area without rows', () => {
@@ -101,5 +125,164 @@ describe('v-tip cards', () => {
     hover(el)
     expect(room).toEqual(['304px', '552px'])
     expect(tip().style.left).toBe('8px')
+  })
+})
+
+// A scroll hides any tip (spec E). Keyboard focus on an element below the fold would have the browser scroll it in
+// smoothly (html has scroll-behavior: smooth), so v-tip scrolls it in at once itself and shows the tip two frames later.
+describe('v-tip on keyboard focus and scroll', () => {
+  const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  const scroll = () => document.dispatchEvent(new Event('scroll'))
+  const shown = () => !(document.getElementById('sq-tip')?.hidden ?? true)
+  const focusHost = () => {
+    const el = mount(Host, { attachTo: document.body }).element as HTMLElement
+    el.focus()
+    return el
+  }
+  /** A target at `top` (the viewport is 768px high) whose scrollIntoView brings it to 700 and records smoothness. */
+  const offScreen = (top: number) => {
+    const el = mount(Host, { attachTo: document.body }).element as HTMLElement
+    let at = top
+    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top: at, bottom: at + 20, left: 100, right: 124, width: 24, height: 20 }) as DOMRect)
+    const jumps: [ScrollIntoViewOptions | boolean | undefined, string][] = []
+    el.scrollIntoView = vi.fn((options?: ScrollIntoViewOptions | boolean) => {
+      jumps.push([options, document.documentElement.style.scrollBehavior])
+      at = 700
+    })
+    return { el, jumps }
+  }
+  afterEach(() => {
+    document.documentElement.style.scrollBehavior = ''
+    delete document.documentElement.dataset.motion
+  })
+
+  it('scrolls an off-screen target in at once (smooth scrolling off for the call), then shows its tip; a later scroll hides it', async () => {
+    content.value = 'tip text'
+    document.documentElement.style.scrollBehavior = 'smooth'
+    const { el, jumps } = offScreen(900)
+    el.focus()
+    expect(jumps).toEqual([[{ block: 'nearest', inline: 'nearest' }, 'auto']])
+    expect(document.documentElement.style.scrollBehavior).toBe('smooth')
+    // The jump's scroll event comes with the next frame, before the tip shows.
+    scroll()
+    await frame()
+    expect(shown()).toBe(false)
+    await frame()
+    expect([shown(), el.getAttribute('aria-describedby'), tip().style.top]).toEqual([true, 'sq-tip', '694px'])
+    // The user's own scroll hides it as any other.
+    scroll()
+    expect([shown(), el.getAttribute('aria-describedby')]).toEqual([false, null])
+  })
+
+  it('shows the tip however the scroll events come while it waits (滚、滚、静、滚、静、静); none for a target in view', async () => {
+    content.value = 'tip text'
+    const { el, jumps } = offScreen(-200)
+    el.focus()
+    scroll()
+    scroll()
+    await frame()
+    scroll()
+    await frame()
+    await frame()
+    expect([shown(), el.getAttribute('aria-describedby'), jumps.length]).toEqual([true, 'sq-tip', 1])
+    el.blur()
+    // In view: no scrolling, the tip two frames later.
+    const inView = mount(Host, { attachTo: document.body }).element as HTMLElement
+    inView.scrollIntoView = vi.fn()
+    inView.focus()
+    await frame()
+    await frame()
+    expect(shown()).toBe(true)
+    expect(inView.scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('works the same under reduced motion (no smooth scrolling to stop)', async () => {
+    content.value = 'tip text'
+    document.documentElement.dataset.motion = 'reduced'
+    const { el, jumps } = offScreen(900)
+    el.focus()
+    await frame()
+    await frame()
+    expect([jumps.length, shown(), document.documentElement.style.scrollBehavior]).toEqual([1, true, ''])
+  })
+
+  it('cancels a tip waiting to show on Escape (kept from the page with no layer open) and on blur', async () => {
+    content.value = 'tip text'
+    const el = focusHost()
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+    document.dispatchEvent(escape)
+    expect(escape.defaultPrevented).toBe(true)
+    await frame()
+    await frame()
+    expect([shown(), el.getAttribute('aria-describedby')]).toEqual([false, null])
+    el.blur()
+    el.focus()
+    el.blur()
+    await frame()
+    await frame()
+    expect(shown()).toBe(false)
+  })
+
+  it('closes a hover tip on scroll, also one hovered open again on a keyboard-focused element after Escape', async () => {
+    content.value = 'tip text'
+    const hovered = mount(Host, { attachTo: document.body }).element as HTMLElement
+    hover(hovered)
+    vi.useRealTimers()
+    expect(shown()).toBe(true)
+    scroll()
+    expect([shown(), hovered.getAttribute('aria-describedby')]).toEqual([false, null])
+
+    const focused = focusHost()
+    await frame()
+    await frame()
+    expect(shown()).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(shown()).toBe(false)
+    hover(focused)
+    vi.useRealTimers()
+    expect([shown(), document.activeElement === focused]).toEqual([true, true])
+    scroll()
+    expect([shown(), focused.getAttribute('aria-describedby')]).toEqual([false, null])
+  })
+
+  it('closes a shown keyboard-focused tip on Escape and on blur', async () => {
+    content.value = 'tip text'
+    const el = focusHost()
+    await frame()
+    await frame()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect([shown(), el.getAttribute('aria-describedby')]).toEqual([false, null])
+    el.blur()
+    el.focus()
+    await frame()
+    await frame()
+    expect(shown()).toBe(true)
+    el.blur()
+    expect([shown(), el.getAttribute('aria-describedby')]).toEqual([false, null])
+  })
+
+  // A fixed box is as wide as its text but no wider than the room right of its left: measured at its last left, a tip
+  // after one further right came out narrower and moved on the next showing (320px screen).
+  it('measures where nothing squeezes it: the same place on a narrow screen whichever tip showed before', () => {
+    vi.stubGlobal('innerWidth', 320)
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return Math.min((this.textContent?.length ?? 0) * 10, 320 - (Number.parseFloat(this.style.left) || 0))
+    })
+    const tipOn = (text: string, left: number) => {
+      const el = mount(defineComponent({ setup: () => () => withDirectives(h('button', { type: 'button' }, 'x'), [[vTip, text]]) }), { attachTo: document.body }).element as HTMLElement
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 300, bottom: 320, left, width: 24, height: 20 } as DOMRect)
+      return el
+    }
+    const right = tipOn('ok', 290)
+    const wide = tipOn('x'.repeat(30), 150)
+    const showOn = (el: HTMLElement) => {
+      hover(el)
+      const at = [tip().style.left, tip().style.top]
+      el.dispatchEvent(new Event('mouseleave'))
+      return at
+    }
+    expect(showOn(right)).toEqual(['292px', '294px'])
+    expect(showOn(wide)).toEqual(['12px', '294px'])
+    expect(showOn(wide)).toEqual(['12px', '294px'])
   })
 })

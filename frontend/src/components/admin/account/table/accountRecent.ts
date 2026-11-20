@@ -5,7 +5,6 @@
  * Nothing here compares a value with a threshold or colours it; the group dots judge each group and model (7k).
  */
 import type { BackendAccountSummary, BackendDim } from '@/api/admin/schedQualityTypes'
-import { formatShortTime } from './accountTime'
 
 export type RecentQuality = Pick<BackendAccountSummary, 'first_output' | 'slow_10s' | 'error' | 'cache' | 'recent_since'>
 type Translate = (key: string, params?: Record<string, unknown>, plural?: number) => string
@@ -16,7 +15,7 @@ export const RECENT_DIMS: BackendDim[] = ['ttfo', 'error', 'cache']
 /** First token, the share over 10 s and cache read muted under this many samples; errors take the backend's `short`. */
 export const RECENT_MIN_SAMPLES = 20
 
-/** 50ms under a second (0.1s would hide 50 against 100); 3.2s; whole seconds from 100s up. */
+/** 50ms under a second (0.1s would hide 50 against 100); 3.2s; whole seconds from 100s up. The group board's format. */
 export function formatRecentSeconds(ms: number): string {
   if (Math.round(ms) < 1000) return `${Math.round(ms)}ms`
   const s = ms / 1000
@@ -24,9 +23,9 @@ export function formatRecentSeconds(ms: number): string {
 }
 
 /**
- * The same time for the 72px recent cell, at most "0.99s" / "59.9s" wide: under a second in hundredths (0.10s, 0.05s;
- * "100ms" does not fit the cell), from 1s as formatRecentSeconds but whole seconds already from 99.95s. The tip card
- * and the panel keep formatRecentSeconds.
+ * The recent status's first token, the same in the 72px cell, its tip card and the panel, at most "0.99s" / "59.9s"
+ * wide: under a second in hundredths (0.10s, 0.05s; "100ms" does not fit the cell), then tenths, whole seconds from
+ * 99.95s (120s).
  */
 export function formatRecentSecondsCompact(ms: number): string {
   const s = ms / 1000
@@ -71,13 +70,17 @@ export interface RecentRow {
 
 const ROW_KEYS: RecentKey[] = ['ttfo', 'slow', 'error', 'cache']
 
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
 /**
- * The window, for the tip card's title and the panel's recent heading: "近 1 小时", or "HH:MM 起" when a reset within
- * the hour shortened it (the backend's recent_since).
+ * The window, for the tip card's title and the panel's recent heading: "近 1 小时", or "HH:MM 起" in local time when a
+ * reset within the hour shortened it (the backend's recent_since). Never a date: the window is an hour at most, so
+ * "23:55 起" just after midnight is still clear.
  */
 export function recentTitle(quality: Pick<RecentQuality, 'recent_since'> | null, t: Translate): string {
-  return quality?.recent_since
-    ? t('admin.accounts.table.tip.recentSince', { time: formatShortTime(quality.recent_since) })
+  const since = quality?.recent_since ? new Date(quality.recent_since) : null
+  return since && !Number.isNaN(since.getTime())
+    ? t('admin.accounts.table.tip.recentSince', { time: `${pad2(since.getHours())}:${pad2(since.getMinutes())}` })
     : t('admin.accounts.table.tip.recentTitle')
 }
 
@@ -102,7 +105,7 @@ export function recentRows(quality: RecentQuality | null, t: Translate): RecentR
   return [
     row(
       'ttfo',
-      median === null ? null : median === 'timeout' ? t('admin.accounts.table.recent.timeout') : formatRecentSeconds(median),
+      median === null ? null : median === 'timeout' ? t('admin.accounts.table.recent.timeout') : formatRecentSecondsCompact(median),
       first.n < RECENT_MIN_SAMPLES,
       t('admin.accounts.table.tip.count', { n: first.n }, first.n)
     ),
@@ -111,7 +114,8 @@ export function recentRows(quality: RecentQuality | null, t: Translate): RecentR
       formatSharePercent(slow.slow, slow.n),
       slow.n < RECENT_MIN_SAMPLES,
       slow.timeouts > 0
-        ? t('admin.accounts.table.tip.slowTimeouts', { n: slow.slow, timeouts: slow.timeouts })
+        // n is the timeouts: English takes its plural from it ("1 timeout").
+        ? t('admin.accounts.table.tip.slowTimeouts', { slow: slow.slow, n: slow.timeouts }, slow.timeouts)
         : t('admin.accounts.table.tip.slow', { n: slow.slow })
     ),
     row(
