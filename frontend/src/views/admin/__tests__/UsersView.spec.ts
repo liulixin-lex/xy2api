@@ -781,5 +781,42 @@ describe('admin UsersView', () => {
       localStorage.removeItem('user-hidden-columns')
     }
   })
+
+  it('filters from the phone sheet, shows the choice as a tag, and keeps it shown from 768px', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    try {
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      expect(wrapper.get('[data-test="users-count"]').text()).toBe('common.table.count')
+      await wrapper.get('[data-test="toolbar-filter-button"]').trigger('click')
+      await flushPromises()
+      const role = wrapper.get('[data-test="filter-sheet"] [data-filter="role"]').findComponent({ name: 'Select' })
+      role.vm.$emit('update:modelValue', 'operator')
+      await flushPromises()
+      expect(listUsers).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ role: 'operator' }), expect.any(Object))
+      expect(wrapper.get('[data-test="toolbar-filter-count"]').text()).toBe('1')
+      const tag = wrapper.get('[data-key="role"]')
+      expect(tag.text()).toContain('admin.users.operator')
+      expect(JSON.parse(localStorage.getItem('user-visible-filters')!)).toContain('role')
+      await tag.get('button').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[data-key="role"]').exists()).toBe(false)
+      expect(listUsers).toHaveBeenLastCalledWith(1, 20, expect.not.objectContaining({ role: 'operator' }), expect.any(Object))
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+      localStorage.removeItem('user-visible-filters')
+      localStorage.removeItem('user-filter-values')
+    }
+  })
 })
 

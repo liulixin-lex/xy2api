@@ -4,8 +4,9 @@
       <template #filters>
         <!-- The compact toolbar (12.9): live, refresh, filter and column settings, a rule, then attributes, the bulk
              menu and create. -->
-        <TableToolbar compact>
+        <TableToolbar compact filter-sheet :filter-count="filterTags.length" @clear-filters="clearAllFilters">
           <template #status>
+            <TableSortHint v-if="!phone && sortHint" :label="sortHint.label" :order="sortHint.order" />
             <LiveStatusIndicator :status="liveStatus" :pause="liveUsers.pause" :resume="liveUsers.resume" :detail="t('admin.users.liveDetail')" />
           </template>
           <template #search>
@@ -22,38 +23,29 @@
             </label>
           </template>
 
-          <template #filters>
+          <template v-if="!phone" #filters>
             <!-- Role Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('role')" class="table-toolbar__filter">
+            <div v-if="visibleFilters.has('role')" class="table-toolbar__filter" data-filter="role">
               <Select
                 v-model="filters.role"
                 size="sm"
-                :options="[
-                  { value: '', label: t('admin.users.allRoles') },
-                  { value: 'admin', label: t('admin.users.admin') },
-                  { value: 'operator', label: t('admin.users.operator') },
-                  { value: 'user', label: t('admin.users.user') }
-                ]"
+                :options="roleFilterOptions"
                 @change="applyFilter"
               />
             </div>
 
             <!-- Status Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('status')" class="table-toolbar__filter">
+            <div v-if="visibleFilters.has('status')" class="table-toolbar__filter" data-filter="status">
               <Select
                 v-model="filters.status"
                 size="sm"
-                :options="[
-                  { value: '', label: t('admin.users.allStatus') },
-                  { value: 'active', label: t('common.active') },
-                  { value: 'disabled', label: t('admin.users.disabled') }
-                ]"
+                :options="statusFilterOptions"
                 @change="applyFilter"
               />
             </div>
 
             <!-- Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('group')" class="table-toolbar__filter">
+            <div v-if="visibleFilters.has('group')" class="table-toolbar__filter" data-filter="group">
               <Select
                 v-model="filters.group"
                 size="sm"
@@ -67,7 +59,7 @@
             </div>
 
             <!-- API Key Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('apiKeyGroup')" class="table-toolbar__filter">
+            <div v-if="visibleFilters.has('apiKeyGroup')" class="table-toolbar__filter" data-filter="apiKeyGroup">
               <Select
                 v-model="filters.apiKeyGroup"
                 size="sm"
@@ -83,6 +75,7 @@
               <div
                 v-if="visibleFilters.has(`attr_${attrId}`)"
                 class="relative table-toolbar__filter"
+                :data-filter="`attr_${attrId}`"
               >
                 <!-- Text/Email/URL/Textarea/Date type: styled input -->
                 <input
@@ -130,6 +123,77 @@
             </template>
           </template>
 
+          <!-- A phone (mobile list plan): every filter in the bottom sheet, the attributes' too, applied at once; the chosen
+               ones as removable tags; the count and the sort (when its column is hidden) beside the live state. -->
+          <template v-if="phone" #sheet>
+            <div class="users-sheet__field" data-filter="role">
+              <span class="users-sheet__k">{{ t('admin.users.columns.role') }}</span>
+              <Select :model-value="filters.role" :options="roleFilterOptions" :aria-label="t('admin.users.columns.role')" @update:model-value="setSheetFilter('role', $event)" />
+            </div>
+            <div class="users-sheet__field" data-filter="status">
+              <span class="users-sheet__k">{{ t('admin.users.columns.status') }}</span>
+              <Select :model-value="filters.status" :options="statusFilterOptions" :aria-label="t('admin.users.columns.status')" @update:model-value="setSheetFilter('status', $event)" />
+            </div>
+            <div class="users-sheet__field" data-filter="group">
+              <span class="users-sheet__k">{{ t('admin.users.authorizedGroupFilter') }}</span>
+              <Select
+                :model-value="filters.group"
+                :options="groupFilterOptions"
+                searchable
+                creatable
+                :creatable-prefix="t('admin.users.fuzzySearch')"
+                :search-placeholder="t('admin.users.searchAuthorizedGroups')"
+                :aria-label="t('admin.users.authorizedGroupFilter')"
+                @update:model-value="setSheetFilter('group', $event)"
+              />
+            </div>
+            <div class="users-sheet__field" data-filter="apiKeyGroup">
+              <span class="users-sheet__k">{{ t('admin.users.apiKeyGroupFilter') }}</span>
+              <Select
+                :model-value="filters.apiKeyGroup"
+                :options="apiKeyGroupFilterOptions"
+                searchable
+                :search-placeholder="t('admin.users.searchApiKeyGroups')"
+                :aria-label="t('admin.users.apiKeyGroupFilter')"
+                @update:model-value="setSheetFilter('apiKeyGroup', $event)"
+              />
+            </div>
+            <label v-for="attr in filterableAttributes" :key="attr.id" class="users-sheet__field" :data-filter="`attr_${attr.id}`">
+              <span class="users-sheet__k">{{ attr.name }}</span>
+              <Select
+                v-if="attr.type === 'select' || attr.type === 'multi_select'"
+                :model-value="activeAttributeFilters[attr.id] ?? ''"
+                :options="[{ value: '', label: attr.name }, ...(attr.options || [])]"
+                :aria-label="attr.name"
+                @update:model-value="setSheetAttribute(attr.id, String($event ?? ''), true)"
+              />
+              <input
+                v-else
+                :value="activeAttributeFilters[attr.id] ?? ''"
+                :type="attr.type === 'number' ? 'number' : 'text'"
+                class="table-toolbar__input table-toolbar__input--plain"
+                :placeholder="attr.name"
+                @change="setSheetAttribute(attr.id, ($event.target as HTMLInputElement).value, true)"
+              />
+            </label>
+          </template>
+          <template v-if="phone" #tags>
+            <span v-for="tag in filterTags" :key="tag.key" class="users-tag" :data-key="tag.key">
+              <span class="users-tag__k">{{ tag.label }}：</span>
+              <span class="users-tag__v">{{ tag.text }}</span>
+              <button type="button" class="users-tag__x" :aria-label="t('common.table.removeFilter', { label: tag.label })" @click="removeFilterTag(tag.key)">
+                <Icon name="x" size="xs" />
+              </button>
+            </span>
+          </template>
+          <template v-if="phone" #info>
+            <span data-test="users-count">{{ t('common.table.count', { n: usersTotal.toLocaleString() }) }}</span>
+            <template v-if="sortHint">
+              <span class="table-toolbar__sep" aria-hidden="true">·</span>
+              <TableSortHint :label="sortHint.label" :order="sortHint.order" />
+            </template>
+          </template>
+
           <template #actions>
             <button
               type="button"
@@ -141,8 +205,8 @@
             >
               <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <!-- Filter Settings Dropdown -->
-            <div class="relative" ref="filterDropdownRef">
+            <!-- Filter Settings Dropdown (a phone has every filter in its sheet) -->
+            <div v-if="!phone" class="relative" ref="filterDropdownRef">
               <button
                 type="button"
                 @click="showFilterDropdown = !showFilterDropdown"
@@ -311,9 +375,11 @@
               </div>
             </div>
 
-            <button v-if="canManage" type="button" @click="showCreateModal = true" class="table-toolbar__btn table-toolbar__btn--primary">
+          </template>
+          <template v-if="canManage" #create>
+            <button type="button" class="table-toolbar__btn table-toolbar__btn--primary" :aria-label="t('admin.users.createUser')" data-test="users-create" @click="showCreateModal = true">
               <Icon name="plus" size="sm" />
-              {{ t('admin.users.createUser') }}
+              <span>{{ phone ? t('admin.users.createShort') : t('admin.users.createUser') }}</span>
             </button>
           </template>
         </TableToolbar>
@@ -901,6 +967,7 @@ import TableToolbar from '@/components/layout/TableToolbar.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
 import CellEmpty from '@/components/common/CellEmpty.vue'
+import TableSortHint from '@/components/common/TableSortHint.vue'
 import LiveStatusIndicator from '@/components/common/LiveStatusIndicator.vue'
 import PendingChangesPill from '@/components/common/PendingChangesPill.vue'
 import StatusDot from '@/components/common/StatusDot.vue'
@@ -1193,6 +1260,18 @@ const getUserGroups = (user: AdminUser) => {
   }
   return { exclusive, publicGroups }
 }
+
+const roleFilterOptions = computed(() => [
+  { value: '', label: t('admin.users.allRoles') },
+  { value: 'admin', label: t('admin.users.admin') },
+  { value: 'operator', label: t('admin.users.operator') },
+  { value: 'user', label: t('admin.users.user') }
+])
+const statusFilterOptions = computed(() => [
+  { value: '', label: t('admin.users.allStatus') },
+  { value: 'active', label: t('common.active') },
+  { value: 'disabled', label: t('admin.users.disabled') }
+])
 
 // Group filter options: "All Groups" + active exclusive groups (value = group name for fuzzy match)
 const groupFilterOptions = computed(() => {
@@ -1820,6 +1899,81 @@ const applyFilter = () => {
   void applyUserFilters()
 }
 
+// ---- A phone's filter sheet and tags (mobile list plan) ----
+type SheetFilterKey = 'role' | 'status' | 'group' | 'apiKeyGroup'
+/** A filter set from the sheet also shows from 768px, so a chosen filter is never hidden there. */
+const showFilter = (key: string) => {
+  if (visibleFilters.has(key)) return
+  visibleFilters.add(key)
+  if (key === 'group') loadAllGroups()
+  if (key === 'apiKeyGroup') loadAllGroupsForApiKeyFilter()
+}
+const setSheetFilter = (key: SheetFilterKey, value: string | number | boolean | null) => {
+  if (key === 'apiKeyGroup') filters.apiKeyGroup = value === '' || value === null || typeof value === 'boolean' ? null : Number(value)
+  else filters[key] = value === null || typeof value === 'boolean' ? '' : String(value)
+  showFilter(key)
+  pagination.page = 1
+  applyFilter()
+}
+const setSheetAttribute = (attrId: number, value: string, apply: boolean) => {
+  showFilter(`attr_${attrId}`)
+  updateAttributeFilter(attrId, value)
+  if (!apply) return
+  pagination.page = 1
+  applyFilter()
+}
+const optionLabel = (options: { value: unknown; label: string }[], value: unknown) =>
+  options.find((option) => option.value === value)?.label ?? String(value)
+/** The chosen filters: the "Filters n" count and the phone's removable tags. */
+const filterTags = computed(() => {
+  const tags: { key: string; label: string; text: string }[] = []
+  if (filters.role) tags.push({ key: 'role', label: t('admin.users.columns.role'), text: optionLabel(roleFilterOptions.value, filters.role) })
+  if (filters.status) tags.push({ key: 'status', label: t('admin.users.columns.status'), text: optionLabel(statusFilterOptions.value, filters.status) })
+  if (filters.group) tags.push({ key: 'group', label: t('admin.users.authorizedGroupFilter'), text: filters.group })
+  if (filters.apiKeyGroup !== null) tags.push({ key: 'apiKeyGroup', label: t('admin.users.apiKeyGroupFilter'), text: optionLabel(apiKeyGroupFilterOptions.value, filters.apiKeyGroup) })
+  for (const [id, value] of Object.entries(activeAttributeFilters)) {
+    if (!value) continue
+    const def = getAttributeDefinition(Number(id))
+    tags.push({ key: `attr_${id}`, label: getAttributeDefinitionName(Number(id)), text: def?.options ? optionLabel(def.options, value) : value })
+  }
+  return tags
+})
+const clearFilterValue = (key: string) => {
+  if (key === 'apiKeyGroup') filters.apiKeyGroup = null
+  else if (key === 'role' || key === 'status' || key === 'group') filters[key] = ''
+  else if (key.startsWith('attr_')) activeAttributeFilters[Number(key.slice(5))] = ''
+}
+const removeFilterTag = (key: string) => {
+  clearFilterValue(key)
+  pagination.page = 1
+  applyFilter()
+}
+/** The sheet's "Clear all": every chosen value goes, the filters stay where they are shown. */
+const clearAllFilters = () => {
+  for (const tag of filterTags.value) clearFilterValue(tag.key)
+  pagination.page = 1
+  applyFilter()
+}
+const columnLabel = (key: string) => allColumns.value.find((column) => column.key === key)?.label ?? key
+/**
+ * The sort, in the toolbar while its column is hidden (a phone's defaults hide "created"): the page's own usage sort
+ * when it is on, else the server's.
+ */
+const sortHint = computed(() => {
+  const usage = usageSort.value
+  if (usage) {
+    if (isColumnVisible(usage.key)) return null
+    return { label: `${columnLabel(usage.key)} · ${usage.metric === 'today' ? t('admin.users.today') : t('admin.users.total')}`, order: usage.order }
+  }
+  return columns.value.some((column) => column.key === sortState.sort_by) ? null : { label: columnLabel(sortState.sort_by), order: sortState.sort_order }
+})
+// A phone's sheet offers the group filters: their options load once the phone toolbar shows.
+watch(phone, (on) => {
+  if (!on) return
+  if (!allGroups.value.length) loadAllGroups()
+  if (!allGroupsForApiKeyFilter.value.length) loadAllGroupsForApiKeyFilter()
+}, { immediate: true })
+
 const handleEdit = (user: AdminUser) => {
   editingUser.value = user
   showEditModal.value = true
@@ -2039,6 +2193,58 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* A phone's filter sheet: one field per filter, its name above it. */
+.users-sheet__field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.users-sheet__k {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-medium);
+}
+/* The chosen filters as tags on a phone, removed with their "x". */
+.users-tag {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 2px;
+  padding-left: 10px;
+  border: 1px solid var(--color-line-control);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-control);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-small);
+}
+.users-tag__k {
+  color: var(--color-text-secondary);
+}
+.users-tag__v {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.users-tag__x {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+}
+@media (pointer: coarse) {
+  .users-tag {
+    min-height: 40px;
+  }
+  .users-tag__x {
+    width: 40px;
+    height: 40px;
+  }
+}
 /* A phone's column settings: one row per column, 44px to hit. */
 .users-colsheet {
   display: grid;

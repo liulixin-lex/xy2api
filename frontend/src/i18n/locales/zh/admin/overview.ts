@@ -512,6 +512,7 @@ export default {
       description: '管理用户账户和权限',
       liveDetail: '余额与并发 10 秒、用量 30 秒',
       createUser: '创建用户',
+      createShort: '添加',
       bulkDelete: {
         title: '删除已选用户',
         confirm: '确定删除已选的 {count} 个用户吗？此操作无法撤销。管理员账号无法删除。',

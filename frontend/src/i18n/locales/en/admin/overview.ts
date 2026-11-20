@@ -512,6 +512,7 @@ export default {
       description: 'Manage users and their permissions',
       liveDetail: 'balance and concurrency every 10 s, usage every 30 s',
       createUser: 'Create User',
+      createShort: 'Add',
       bulkDelete: {
         title: 'Delete selected users',
         confirm: 'Delete the {count} selected users? This action cannot be undone. Administrator accounts cannot be deleted.',

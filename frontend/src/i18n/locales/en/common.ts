@@ -22,6 +22,7 @@ export default {
       columns: 'Columns',
       columnsTitle: 'Shown columns',
       resetColumns: 'Restore default columns',
+      removeFilter: 'Remove filter {label}',
       resetColumnOrder: 'Restore default order',
       sortedBy: 'Sorted by {label}',
       ascending: 'ascending',
