@@ -1,6 +1,7 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <!-- A phone: the whole page scrolls (the toolbar is tall; a table region under it would show about three rows). -->
+    <TablePageLayout table-layout :page-scroll="phone">
       <template #filters>
         <div class="flex flex-col gap-3">
           <div class="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
@@ -76,50 +77,67 @@
 
       <template #table>
         <DataTable
+          layout="table"
+          class="batch-jobs-table"
+          :scroll-label="t('batchImageGuide.title')"
           :columns="columns"
           :data="visibleBatchJobs"
           :loading="loadingKeys || loadingJobs"
           :expandable-actions="false"
+          :sticky-actions-column="!phone"
           row-key="id"
         >
+          <!-- The check box column is 44px with no padding (--select-col-width below), the task name frozen right after
+               it; each box sits in a label as wide as the column and 40px high. -->
           <template #header-select>
-            <input
-              type="checkbox"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              :checked="allVisibleSelected"
-              :indeterminate="someVisibleSelected"
-              @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
-            />
+            <label class="batch-check">
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                :checked="allVisibleSelected"
+                :indeterminate="someVisibleSelected"
+                :aria-label="t('common.selectAll')"
+                @change="toggleAllVisible(($event.target as HTMLInputElement).checked)"
+              />
+            </label>
           </template>
 
           <template #cell-select="{ row }">
-            <input
-              type="checkbox"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              :checked="selectedJobIds.has(row.id)"
-              @change="toggleJobSelection(row.id, ($event.target as HTMLInputElement).checked)"
-              @click.stop
-            />
+            <label class="batch-check" @click.stop>
+              <input
+                type="checkbox"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                :checked="selectedJobIds.has(row.id)"
+                :aria-label="row.task_name || defaultTaskName(row.created_at)"
+                @change="toggleJobSelection(row.id, ($event.target as HTMLInputElement).checked)"
+                @click.stop
+              />
+            </label>
           </template>
 
           <template #cell-id="{ row }">
-	            <div class="flex w-[220px] items-start gap-1" :class="row.is_child ? 'pl-6' : ''">
+	            <!-- The frozen identity column: 220px wide, as narrow as the column on a phone (the name cut with "…"; the
+	                 job's detail shows it whole). Touch: the expander is 28px with a 40px area reaching into the cell's
+	                 padding, 8px from the name. -->
+	            <div class="flex w-[220px] max-w-full items-start gap-1 [@media(pointer:coarse)]:gap-2" :class="row.is_child ? 'pl-6' : ''">
 	              <button
 	                v-if="row.child_count > 0 && !row.is_child"
 	                type="button"
-	                class="mt-1 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-white"
+	                class="relative mt-1 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-white [@media(pointer:coarse)]:w-7 [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:-inset-y-2 [@media(pointer:coarse)]:before:-left-3 [@media(pointer:coarse)]:before:right-0 [@media(pointer:coarse)]:before:content-['']"
 	                :title="expandedParentIds.has(row.id) ? t('batchImage.list.collapseChildren') : t('batchImage.list.expandChildren', { n: row.child_count }, row.child_count)"
+	                :aria-label="expandedParentIds.has(row.id) ? t('batchImage.list.collapseChildren') : t('batchImage.list.expandChildren', { n: row.child_count }, row.child_count)"
+	                :aria-expanded="expandedParentIds.has(row.id) ? 'true' : 'false'"
 	                @click.stop="toggleChildRows(row.id)"
 	              >
 	                <Icon :name="expandedParentIds.has(row.id) ? 'chevronDown' : 'chevronRight'" size="xs" />
 	              </button>
-	              <span v-else class="w-6 flex-shrink-0" />
+	              <span v-else-if="listHasParents" class="w-6 flex-shrink-0 [@media(pointer:coarse)]:w-7" />
 	              <button type="button" class="min-w-0 flex-1 rounded-lg py-1 text-left transition-colors hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:hover:bg-dark-700" @click="selectJob(row.id)">
 	                <span
 	                  class="flex min-w-0 items-center gap-2 text-sm font-medium"
 	                  :class="row.task_name ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
                 >
-                  <span class="min-w-0 truncate">{{ row.task_name || defaultTaskName(row.created_at) }}</span>
+                  <span class="min-w-0 truncate" :title="row.task_name || defaultTaskName(row.created_at)">{{ row.task_name || defaultTaskName(row.created_at) }}</span>
                   <span v-if="row.child_count > 0 && !row.is_child" class="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-600 dark:bg-dark-700 dark:text-gray-300">
                     {{ t('batchImage.list.childCount', { n: row.child_count }, row.child_count) }}
                   </span>
@@ -128,7 +146,7 @@
                   </span>
 	                </span>
 	                <span class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-	                  <span>{{ formatDate(row.created_at) }}</span>
+	                  <span>{{ formatListDateTime(row.created_at * 1000) }}</span>
 	                </span>
 	              </button>
 	            </div>
@@ -171,12 +189,13 @@
 
           <template #cell-downloaded="{ row }">
             <span class="block text-center text-sm" :class="row.downloaded_at ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-500 dark:text-gray-400'">
-              {{ row.downloaded_at ? formatDate(row.downloaded_at) : t('batchImage.list.notDownloaded') }}
+              {{ row.downloaded_at ? formatListDateTime(row.downloaded_at * 1000) : t('batchImage.list.notDownloaded') }}
             </span>
           </template>
 
 	          <template #cell-actions="{ row }">
-	            <div class="flex items-center justify-center gap-1">
+	            <!-- Touch: 8px apart. On a phone the column scrolls with the row (three buttons do not fit its 44px). -->
+	            <div class="flex items-center justify-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2">
               <button
                 type="button"
                 class="batch-row-action flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:hover:bg-dark-700 dark:hover:text-primary-400"
@@ -257,7 +276,7 @@
           <div class="flex items-center justify-end gap-2">
             <button
               type="button"
-              class="btn btn-secondary btn-sm"
+              class="btn btn-secondary btn-sm [@media(pointer:coarse)]:min-h-10"
               :disabled="pagination.page <= 1 || loadingJobs"
               @click="handlePageChange(pagination.page - 1)"
             >
@@ -266,7 +285,7 @@
             </button>
             <button
               type="button"
-              class="btn btn-secondary btn-sm"
+              class="btn btn-secondary btn-sm [@media(pointer:coarse)]:min-h-10"
               :disabled="!pagination.has_more || loadingJobs"
               @click="handlePageChange(pagination.page + 1)"
             >
@@ -339,6 +358,11 @@
 
     <BaseDialog :show="!!currentJob" :title="t('batchImage.detail.title')" width="extra-wide" @close="closeDetail">
       <div v-if="currentJob" class="space-y-4">
+        <!-- The task name whole: the list's frozen name column cuts it on a phone. -->
+        <p class="break-words text-sm text-gray-900 dark:text-white" data-test="batch-detail-name">
+          <span class="text-gray-500 dark:text-gray-400">{{ t('batchImage.columns.taskName') }}</span>
+          <span class="ml-2 font-medium">{{ currentJob.task_name || defaultTaskName(currentJob.created_at) }}</span>
+        </p>
         <div class="rounded-lg border border-gray-200 bg-gray-50/70 px-4 py-3 dark:border-dark-700 dark:bg-dark-900/40">
           <div class="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
             <div class="min-w-0 text-center">
@@ -758,6 +782,8 @@ import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
+import { usePhoneViewport } from '@/composables/useTableViewport'
+import { formatListDateTime } from '@/utils/format'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -840,9 +866,10 @@ const batchPageSizeOptions: SelectOption[] = [20, 50, 100].map(size => ({ value:
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 const { t, locale } = useI18n()
+const phone = usePhoneViewport()
 
 const columns = computed<Column[]>(() => [
-  { key: 'select', label: '', sortable: false, class: 'w-12 text-center' },
+  { key: 'select', label: '', sortable: false, class: 'w-11 min-w-11 max-w-11 !px-0 text-center' },
   { key: 'id', label: t('batchImage.columns.taskName'), sortable: false, class: 'w-[240px] max-w-[240px]' },
   { key: 'model', label: t('batchImage.columns.model'), sortable: false, class: 'w-[180px] max-w-[180px] text-center' },
   { key: 'api_key_name', label: t('batchImage.columns.apiKey'), sortable: false, class: 'w-40 max-w-40 text-center' },
@@ -994,6 +1021,8 @@ const visibleBatchJobs = computed(() => {
   }
   return rows
 })
+/** Whether a row on the page has children: only then do the other rows keep the expander's space before their names. */
+const listHasParents = computed(() => visibleBatchJobs.value.some(job => job.child_count > 0 && !job.is_child))
 
 const selectedDownloadableRows = computed(() =>
   selectedRows.value.filter(job => canDownload(job)),
@@ -2658,6 +2687,18 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* The page's own check box column (mobile list plan): exactly 44px, so the frozen task name starts right after it. */
+.batch-jobs-table {
+  --select-col-width: 44px;
+}
+.batch-check {
+  display: flex;
+  width: 44px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
 .batch-row-action {
   display: flex !important;
   flex-direction: column !important;

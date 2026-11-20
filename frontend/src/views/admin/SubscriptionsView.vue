@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
         <TableToolbar>
           <template #search>
@@ -170,6 +170,7 @@
               v-for="action in permittedBulkActions"
               :key="action"
               type="button"
+              class="[@media(pointer:coarse)]:min-h-10"
               :class="action === 'revoke' ? 'btn btn-danger btn-sm' : 'btn btn-secondary btn-sm'"
               :data-test="`bulk-${action}`"
               :disabled="loading || bulkTargets[action].length === 0"
@@ -177,7 +178,7 @@
             >
               {{ t(`admin.subscriptions.bulk.${action}`) }} ({{ bulkTargets[action].length }})
             </button>
-            <button type="button" class="btn btn-secondary btn-sm" @click="clearSelection">
+            <button type="button" class="btn btn-secondary btn-sm [@media(pointer:coarse)]:min-h-10" @click="clearSelection">
               {{ t('admin.subscriptions.bulk.clearSelection') }}
             </button>
           </div>
@@ -188,11 +189,14 @@
       <!-- Subscriptions Table -->
       <template #table>
         <DataTable
+          layout="table"
+          :scroll-label="t('admin.subscriptions.title')"
           :columns="columns"
           :data="subscriptions"
           :loading="loading"
           row-key="id"
           selectable
+          :sticky-actions-column="!phone"
           :selected-keys="selectedIds"
           :selection-label="getSubscriptionSelectionLabel"
           :server-side-sort="true"
@@ -202,9 +206,11 @@
           @update:selected-keys="handleSelectedKeysUpdate"
         >
           <template #cell-user="{ row }">
-            <div class="flex items-center gap-2">
+            <!-- The frozen identity column: at most 240px, the name cut with "…" (whole in its tip, and on the usage records
+                 it links to, which a tap opens; 40px to hit on touch); the initial's 32px badge only on a desktop. -->
+            <div class="flex max-w-[240px] items-center gap-2">
               <div
-                class="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
+                class="hidden h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30 lg:flex"
               >
                 <span class="text-sm font-medium text-primary-700 dark:text-primary-300">
                   {{ userColumnMode === 'email'
@@ -215,13 +221,10 @@
               </div>
               <RouterLink
                 :to="{ path: '/admin/usage', query: { user_id: row.user_id } }"
-                class="rounded font-medium text-gray-900 hover:text-primary-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:text-white dark:hover:text-primary-400 dark:focus-visible:ring-offset-dark-800"
-              >
-                {{ userColumnMode === 'email'
-                  ? (row.user?.email || t('admin.redeem.userPrefix', { id: row.user_id }))
-                  : (row.user?.username || t('admin.redeem.userPrefix', { id: row.user_id }))
-                }}
-              </RouterLink>
+                class="relative block min-w-0 rounded font-medium text-gray-900 hover:text-primary-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:text-white dark:hover:text-primary-400 dark:focus-visible:ring-offset-dark-800 [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:inset-x-0 [@media(pointer:coarse)]:before:-inset-y-3 [@media(pointer:coarse)]:before:content-['']"
+                :title="subscriptionUserName(row)"
+                data-test="subscription-user-link"
+              ><span class="block truncate">{{ subscriptionUserName(row) }}</span></RouterLink>
             </div>
           </template>
 
@@ -234,12 +237,12 @@
               :rate-multiplier="row.group.rate_multiplier"
               :show-rate="false"
             />
-            <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-usage="{ row }">
-            <!-- The fixed 280px only in the wide table: a narrow card's field is narrower (7j-1). -->
-            <div class="space-y-2 lg:min-w-[280px]">
+            <!-- The progress bars need room: 240px below 1024px (the column scrolls sideways there), 280px wider. -->
+            <div class="min-w-[240px] space-y-2 lg:min-w-[280px]">
               <!-- Daily Usage -->
               <div v-if="row.group?.daily_limit_usd" class="usage-row">
                 <div class="flex items-center gap-2">
@@ -378,7 +381,7 @@
                     : 'text-gray-700 dark:text-gray-300'
                 "
               >
-                {{ formatDateTimeToMinute(value) }}
+                {{ formatListDateTime(value, { seconds: false }) }}
               </span>
               <template
                 v-for="remainingExpiry in [formatRemainingExpiry(value)]"
@@ -410,11 +413,12 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <!-- Touch: 40px buttons 8px apart. On a phone the column scrolls with the row (its buttons do not fit 44px). -->
+            <div class="flex items-center gap-1 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:gap-2">
               <button
                 v-if="canAdjustBalance && (row.status === 'active' || row.status === 'expired')"
                 @click="handleExtend(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
               >
                 <Icon name="calendar" size="sm" />
                 <span class="text-xs">{{ t('admin.subscriptions.adjust') }}</span>
@@ -423,7 +427,7 @@
                 v-if="canAdjustBalance && row.status === 'active'"
                 @click="handleResetQuota(row)"
                 :disabled="resettingQuota && resettingSubscription?.id === row.id"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20 dark:hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20 dark:hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Icon name="refresh" size="sm" />
                 <span class="text-xs">{{ t('admin.subscriptions.resetQuota') }}</span>
@@ -431,7 +435,7 @@
               <button
                 v-if="canManage && row.status === 'active'"
                 @click="handleRevoke(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
                 <Icon name="ban" size="sm" />
                 <span class="text-xs">{{ t('admin.subscriptions.revoke') }}</span>
@@ -439,7 +443,7 @@
               <button
                 v-if="canAdjustBalance && row.status === 'revoked'"
                 @click="handleRestore(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
               >
                 <Icon name="refresh" size="sm" />
                 <span class="text-xs">{{ t('admin.subscriptions.restore') }}</span>
@@ -844,7 +848,7 @@ import type { SubscriptionBulkAction, SubscriptionBulkActionResult, BulkAssignSu
 import { useTableSelection } from '@/composables/useTableSelection'
 import BulkSubscriptionActionDialog from '@/components/admin/subscription/BulkSubscriptionActionDialog.vue'
 import type { Column } from '@/components/common/types'
-import { formatDateTimeToMinute } from '@/utils/format'
+import { formatDateTimeToMinute, formatListDateTime } from '@/utils/format'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -858,6 +862,8 @@ import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Icon from '@/components/icons/Icon.vue'
+import CellEmpty from '@/components/common/CellEmpty.vue'
+import { usePhoneViewport } from '@/composables/useTableViewport'
 import { vTip } from '@/utils/tip'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import {
@@ -869,6 +875,7 @@ import {
 import { GROUP_PLATFORM_OPTIONS } from '@/constants/platforms'
 
 const { t } = useI18n()
+const phone = usePhoneViewport()
 const appStore = useAppStore()
 const { canManage, has } = useAdminPermission('subscriptions')
 // 发放、延期、重置额度和恢复订阅需要“加减余额”权限；撤销只需管理权限
@@ -915,6 +922,10 @@ const saveUserColumnMode = () => {
   }
 }
 
+/** The user column's text: the email or the username (as the column is set), else "User #id". */
+const subscriptionUserName = (row: UserSubscription) =>
+  (userColumnMode.value === 'email' ? row.user?.email : row.user?.username) || t('admin.redeem.userPrefix', { id: row.user_id })
+
 const setUserColumnMode = (mode: 'email' | 'username') => {
   userColumnMode.value = mode
   saveUserColumnMode()
@@ -930,8 +941,7 @@ const allColumns = computed<Column[]>(() => [
     sortable: false
   },
   { key: 'group', label: t('admin.subscriptions.columns.group'), sortable: false },
-  // Its progress bars need the card's width (7r-6).
-  { key: 'usage', label: t('admin.subscriptions.columns.usage'), sortable: false, cardFullRow: true },
+  { key: 'usage', label: t('admin.subscriptions.columns.usage'), sortable: false },
   { key: 'expires_at', label: t('admin.subscriptions.columns.expires'), sortable: true },
   { key: 'status', label: t('admin.subscriptions.columns.status'), sortable: true },
   { key: 'actions', label: t('admin.subscriptions.columns.actions'), sortable: false }
@@ -1648,6 +1658,6 @@ const guideLayer = useOverlayLayer(() => showGuideModal.value, { root: guideRef,
 }
 
 .reset-info {
-  @apply flex items-center gap-1 pl-12 text-[10px] text-blue-600 dark:text-blue-400;
+  @apply flex items-center gap-1 pl-12 text-xs text-blue-600 dark:text-blue-400;
 }
 </style>

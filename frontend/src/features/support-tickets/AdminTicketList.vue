@@ -1,5 +1,5 @@
 <template>
-  <TablePageLayout data-testid="admin-ticket-list">
+  <TablePageLayout table-layout data-testid="admin-ticket-list">
     <template v-if="$slots.actions" #actions>
       <slot name="actions" />
     </template>
@@ -33,10 +33,21 @@
     </template>
 
     <template #table>
-      <DataTable :columns="columns" :data="tickets" :loading="loading" row-key="id" clickable-rows @row-click="openTicket">
+      <DataTable
+        layout="table"
+        :scroll-label="t('supportTickets.title')"
+        :columns="columns"
+        :data="tickets"
+        :loading="loading"
+        row-key="id"
+        clickable-rows
+        @row-click="openTicket"
+      >
+        <!-- The frozen identity column: at most 240px below 1024px (448px from there, as before), both lines cut with
+             "…"; the whole row opens the ticket, its title in full; on touch the title link's hit area is 40px high. -->
         <template #cell-title="{ row }">
-          <div class="min-w-0 max-w-md">
-            <div class="flex items-center gap-2">
+          <div class="min-w-0 max-w-[240px] lg:max-w-md">
+            <div class="flex min-w-0 items-center gap-2">
               <span
                 v-if="row.admin_unread"
                 class="h-2 w-2 shrink-0 rounded-full bg-red-500"
@@ -45,13 +56,14 @@
               ></span>
               <router-link
                 :to="`/admin/support-tickets/${row.id}`"
-                class="truncate font-medium text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400"
+                class="relative min-w-0 truncate font-medium text-gray-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400 [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:inset-x-0 [@media(pointer:coarse)]:before:-inset-y-2.5 [@media(pointer:coarse)]:before:content-['']"
+                :title="row.title"
                 @click.stop
               >{{ row.title }}</router-link>
             </div>
-            <div class="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-dark-400">
-              <span>#{{ row.id }}</span>
-              <span>{{ row.category || t('supportTickets.noCategory') }}</span>
+            <div class="mt-1 flex min-w-0 items-center gap-2 text-xs text-gray-500 dark:text-dark-400">
+              <span class="flex-none">#{{ row.id }}</span>
+              <span class="min-w-0 truncate">{{ row.category || t('supportTickets.noCategory') }}</span>
             </div>
           </div>
         </template>
