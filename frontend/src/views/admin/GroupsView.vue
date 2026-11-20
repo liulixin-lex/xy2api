@@ -10,7 +10,9 @@
             <TableSortHint v-if="!phone && sortHint" :label="sortHint.label" :order="sortHint.order" />
             <LiveStatusIndicator :status="liveStatus" :pause="liveGroups.pause" :resume="liveGroups.resume" :detail="t('admin.groups.liveDetail')" />
           </template>
-          <template v-if="phone" #sheet>
+          <!-- The toolbar renders each slot in its own form (sheet, tags, info on a phone; filters in the row): not gated on
+               the page's width here, whose media query may flip before the toolbar's and remove a focused field first. -->
+          <template #sheet>
             <div class="grid gap-4">
               <label class="grid gap-1.5" data-filter="platform">
                 <span class="input-label !mb-0">{{ t('admin.groups.columns.platform') }}</span>
@@ -30,10 +32,10 @@
               </label>
             </div>
           </template>
-          <template v-if="phone" #tags>
+          <template #tags>
             <UsageFilterTags :tags="filterTags" @remove="removeGroupFilter" />
           </template>
-          <template v-if="phone" #info>
+          <template #info>
             <span data-test="groups-count">{{ t('common.table.count', { n: groupsTotal.toLocaleString() }) }}</span>
             <template v-if="sortHint">
               <span class="table-toolbar__sep" aria-hidden="true">·</span>
@@ -53,7 +55,7 @@
               />
             </label>
           </template>
-          <template v-if="!phone" #filters>
+          <template #filters>
             <Select
               v-model="filters.platform"
               size="sm"
