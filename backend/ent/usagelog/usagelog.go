@@ -48,6 +48,8 @@ const (
 	FieldDegradations = "degradations"
 	// FieldPricingSource holds the string denoting the pricing_source field in the database.
 	FieldPricingSource = "pricing_source"
+	// FieldServiceTierDetails holds the string denoting the service_tier_details field in the database.
+	FieldServiceTierDetails = "service_tier_details"
 	// FieldProfitBasis holds the string denoting the profit_basis field in the database.
 	FieldProfitBasis = "profit_basis"
 	// FieldDispatchPhases holds the string denoting the dispatch_phases field in the database.
@@ -251,6 +253,7 @@ var Columns = []string{
 	FieldResponseBodyType,
 	FieldDegradations,
 	FieldPricingSource,
+	FieldServiceTierDetails,
 	FieldProfitBasis,
 	FieldDispatchPhases,
 	FieldModel,

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/handler/dto"
 	"github.com/liulixin-lex/xy2api/internal/pkg/adminaccess"
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/pkg/response"
 	"github.com/liulixin-lex/xy2api/internal/pkg/timezone"
@@ -136,6 +137,9 @@ func adminUsageRequestResponses(c *gin.Context, records []service.AdminUsageReco
 			continue
 		}
 		base := dto.UsageLogFromServiceAdmin(&r.Log)
+		if operatoraccess.ScopeFrom(c.Request.Context()) != nil {
+			base.ServiceTierDetails = usagestats.PublicServiceTierDetails(base.ServiceTierDetails)
+		}
 		v := adminUsageRequestResponse{AdminUsageLog: *base, adminRequestFields: fields, Account: base.Account,
 			InputTokens: r.InputTokens, OutputTokens: r.OutputTokens, CacheReadTokens: r.CacheReadTokens, CacheCreationTokens: r.CacheCreationTokens}
 		if r.Log.AccountID != 0 {

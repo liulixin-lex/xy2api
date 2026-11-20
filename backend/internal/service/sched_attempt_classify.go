@@ -161,6 +161,9 @@ func classifyUpstreamCapabilityFailure(status int, body []byte, allowModel401 bo
 		}
 		return UpstreamCapabilityNone
 	}
+	if isOpenAITierRefusal(status, body, "") {
+		return UpstreamCapabilityRequestFeature
+	}
 	fields := schedErrorFields(body)
 	modelBody := body
 	if fields.IsObject() {

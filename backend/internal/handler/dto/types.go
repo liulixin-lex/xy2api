@@ -176,7 +176,12 @@ type AdminGroup struct {
 	// ForceOpenAIFast 是管理端请求策略，用户侧分组 DTO 无需暴露。
 	ForceOpenAIFast bool `json:"force_openai_fast"`
 	// FreeOpenAIFast 是管理端计费策略，用户侧分组 DTO 无需暴露。
-	FreeOpenAIFast bool `json:"free_openai_fast"`
+	FreeOpenAIFast          bool   `json:"free_openai_fast"`
+	OpenAIFastMode          string `json:"openai_fast_mode"`
+	OpenAIUltrafastMode     string `json:"openai_ultrafast_mode"`
+	OpenAITierPolicyVersion int    `json:"openai_tier_policy_version"`
+	FreeOpenAIUltrafast     bool   `json:"free_openai_ultrafast"`
+	Revision                string `json:"revision"`
 	// AvailabilityFallbackGroupID is the availability fallback group (xy2api
 	// gateway resilience). It is internal routing: users never see it.
 	AvailabilityFallbackGroupID *int64 `json:"availability_fallback_group_id"`
@@ -611,7 +616,8 @@ type UsageLog struct {
 	RequestID string `json:"request_id"`
 	Model     string `json:"model"`
 	// ServiceTier records the OpenAI service tier used for billing, e.g. "priority" / "flex".
-	ServiceTier *string `json:"service_tier,omitempty"`
+	ServiceTier        *string         `json:"service_tier,omitempty"`
+	ServiceTierDetails json.RawMessage `json:"service_tier_details,omitempty"`
 	// ReasoningEffort is the client-requested effort (mapping-hidden, like Model).
 	// OpenAI: "low"/"medium"/"high"/"xhigh"; Claude: "low"/"medium"/"high"/"max".
 	// Historical rows without requested_reasoning_effort fall back to the stored effective value.

@@ -142,6 +142,7 @@ type openAIProfitControlGate struct {
 func (s *OpenAIGatewayService) WithOpenAIRequestPricingContext(ctx context.Context, groupID *int64) (context.Context, time.Time) {
 	pricingAt := timezone.Now()
 	ctx = context.WithValue(ctx, openAIPricingAtCtxKey{}, pricingAt)
+	ctx = context.WithValue(ctx, openAITierPriceStoreKey{}, &openAITierPriceStore{})
 	return s.withOpenAIProfitControlGate(ctx, groupID), pricingAt
 }
 
@@ -160,6 +161,7 @@ func WithOpenAIProfitControlSuppressed(ctx context.Context) context.Context {
 func (s *OpenAIGatewayService) WithOpenAITurnPricingContext(ctx context.Context, groupID *int64) (context.Context, time.Time) {
 	pricingAt := timezone.Now()
 	ctx = context.WithValue(ctx, openAIPricingAtCtxKey{}, pricingAt)
+	ctx = context.WithValue(ctx, openAITierPriceStoreKey{}, &openAITierPriceStore{})
 	if existing, _ := ctx.Value(openAISelectionContextKey{}).(*openAISelectionContext); existing != nil {
 		gid := existing.groupID
 		ctx = s.withOpenAISelectionContext(ctx, &gid)
@@ -266,9 +268,10 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 	if billingGroup == nil {
 		billingGroup = group
 	}
+	billingGroup = freezeOpenAITierGroup(ctx, billingGroup)
 	downstream := billingGroup.RateMultiplier
-	if userID, _ := ctx.Value(ctxkey.UserID).(int64); userID > 0 {
-		downstream = s.ResolveUserGroupRateMultiplier(ctx, userID, billingGroup.ID, billingGroup.RateMultiplier)
+	if rate := s.tierGroupRate(ctx, billingGroup); rate != nil {
+		downstream = *rate
 	}
 	downstream *= billingGroup.PeakMultiplierAt(pricingAt)
 
@@ -337,6 +340,14 @@ func openAIProfitControlVetoReason(ctx context.Context, account *Account) (bool,
 	gate, _ := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate)
 	if gate == nil || account == nil {
 		return false, ""
+	}
+	if state, _ := ctx.Value(openAITierProfitKey{}).(*openAITierProfitInput); state != nil {
+		if quote, found := state.quotes.Load(openAITierProfitCandidate{gate, account.ID}); found {
+			if cached, ok := quote.(openAITierProfitQuote); ok {
+				reason := openAITierProfitVerdict(ctx, gate, account, cached)
+				return reason != "", reason
+			}
+		}
 	}
 	upstream, source, ok := openAIProfitGateCostSource(account, gate.pricingAt)
 	var ceiling *float64

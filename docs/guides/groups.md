@@ -1,6 +1,6 @@
 # 分组
 
-分组决定 API Key 能用哪些账号、按什么价格计费。本文介绍分组上的几项功能：组合分组（按请求模型自动选择供应商）、分组分类（在管理端整理大量分组）、专属标识与分组系统提示词、OpenAI 分组的 Fast 优先级与计费。面向配置分组与套餐的管理员。选号规则与 OpenAI 分组的会话接管见 [调度](scheduling.md)，无号兜底分组见 [罚则与选号](gateway-resilience-routing.md#无号兜底分组)，OpenAI 分组的质量门槛与分组看板见 [分组质量门槛](group-quality-gate.md)。
+分组决定 API Key 能用哪些账号、按什么价格计费。本文介绍分组上的几项功能：组合分组（按请求模型自动选择供应商）、分组分类（在管理端整理大量分组）、专属标识与分组系统提示词、OpenAI 分组的 Fast、Ultrafast 策略与计费。面向配置分组与套餐的管理员。选号规则与 OpenAI 分组的会话接管见 [调度](scheduling.md)，无号兜底分组见 [罚则与选号](gateway-resilience-routing.md#无号兜底分组)，OpenAI 分组的质量门槛与分组看板见 [分组质量门槛](group-quality-gate.md)。
 
 ## 倍率区间与固定号
 
@@ -197,49 +197,49 @@ JSON 请求体的入口在转发前把 `model` 改写为路由的 `upstream_mode
 
 ## OpenAI 分组 Fast
 
-OpenAI 分组与组合分组的编辑页有“OpenAI Fast 模式”设置，两个开关默认都关闭，其他平台的分组不保存它们：
+OpenAI 分组和组合分组可以分别设置 Fast（出站 `priority`）和 Ultrafast。组合分组按最终账号、映射模型和入口决定是否应用策略。它覆盖 OpenAI GPT 文本请求，包括 GPT 的视觉输入和工具调用。独立图片、视频、音频及其他平台继续按各自规则处理。
 
-- **强制使用 Fast（priority）**（`force_openai_fast`）：只在请求实际由 OpenAI 账号服务时生效，组合分组中其他平台的请求不受影响。
-- **免费 Fast**（`free_openai_fast`）：Fast 请求按普通档价格向用户收费。
+| 模式 | 行为 |
+|---|---|
+| 跟随（`inherit`） | 先查用户专属 Fast/Flex 规则，再查全局规则，各取第一条匹配。未命中时保留客户档位。 |
+| 强制打开（`force_on`） | 对适用请求写固定档位，即使客户省略档位或请求另一档。Fast 与 Ultrafast 只能强开一个。 |
+| 强制关闭（`force_off`） | 将客户明确点选的禁用档改写为 `default`。最终规则结果仍为禁用档，或为缺省、`null`、`auto`、`scale` 时，也明确发送 `default`。允许另一档及规则放行的 Flex。 |
 
-### 优先级
+用户专属和全局规则在**系统设置 → 网关服务 → OpenAI Fast/Flex 策略**配置，仍支持 `pass`、`filter`、`force_priority` 和 `block`。强制关闭只针对加速档。另一个档位的阻止规则仍可返回 403。
 
-**分组强制 Fast > 用户专属 Fast/Flex 规则 > 全局 Fast/Flex 规则。**
+配置在每个 HTTP 请求和 Responses WebSocket 的每条 `response.create` 上判定。组策略的修改经缓存失效后应用到下一轮，正在执行的轮次沿用派发时的配置。在客户端重试或 fallback 组选了新账号时，系统按实际账号与模型核对档位支持；第三方账号需要近期同步的档位元数据。没有合格账号时，请求可能以 503 返回。
 
-全局与用户专属规则在 **系统设置 → 网关服务 → OpenAI Fast/Flex 策略**（设置键 `openai_fast_policy_settings`）中配置：按 `service_tier`（全部 tier 值、省略 tier、priority、ultrafast、flex）、账号范围与目标模型匹配，处理方式为透传（`pass`）、过滤（`filter`，移除 `service_tier`）、强制 priority（`force_priority`）或拦截（`block`，返回 403 `permission_error`）。填写了“指定用户”的规则即用户专属规则，选中用户的请求先匹配它们；同层按配置顺序首条命中。
+### 旧套餐与管理接口
 
-- 分组强制 Fast 开启：最终请求固定为 `service_tier=priority`。客户端未指定档位，或指定 default、flex、ultrafast 等，都使用 priority；全局与用户专属规则不再覆盖它。
-- 分组强制 Fast 关闭：完整沿用上述规则。
-- 该优先级只涉及 Fast/Flex 策略，不绕过认证、分组状态、模型白名单或其他请求校验。
-- HTTP 原生 Responses、Chat 与 Messages 转换、透传和 WebSocket（只处理 `response.create`）使用同一策略。
+升级后的已有组为策略版本 1。旧字段 `force_openai_fast=true` 显示为强制打开 Fast，原来的 priority 出站与结算语义继续适用。旧布尔值为 `false` 的组显示为跟随。组名等普通修改会保留版本 1。
 
-### 只为一个分组开启 Fast
+在管理端选择升级到新策略后保存，或先使用 `GET /api/v1/admin/groups/{id}` 读取最新 `revision`，再用 `PUT /api/v1/admin/groups/{id}` 提交。以下示例在一次写入中禁用 Fast、强制 Ultrafast、取消免费 Fast 并开启免费 Ultrafast。
 
-1. 全局 OpenAI Fast/Flex 策略保留“全部 tier 值 / 过滤 / 全部账号”，它已覆盖 Fast 与 Flex。
-2. 只在目标分组开启“强制使用 Fast”。
-3. 要按 Fast 单价收费时关闭“免费 Fast”；分组倍率按原业务设置。
-4. 保存后新请求生效；已建立的 WebSocket 会话重新连接后使用新配置。
-
-“过滤”只删除转发的参数，不能控制第三方上游自身强制的档位；请求不含 `service_tier` 也不能证明上游实际使用普通档。只应为确认支持或强制提供 Fast 的上游开启分组强制 Fast。
-
-### 计费
-
-分组倍率与服务档位单价分开计算：
-
-```text
-total_cost  = Σ 各类 Token 用量 × 对应的 Fast 单价
-actual_cost = total_cost × 分组倍率
+```json
+{
+  "revision": "2026-11-20T18:30:00.123456Z",
+  "openai_tier_policy_version": 2,
+  "openai_fast_mode": "force_off",
+  "openai_ultrafast_mode": "force_on",
+  "free_openai_fast": false,
+  "free_openai_ultrafast": true
+}
 ```
 
-例如某次请求普通档费用为 1 USD，模型 Fast 单价为普通档的 2 倍，分组倍率 0.2：`total_cost=2`、`rate_multiplier=0.2`、`actual_cost=0.4`。不要用把分组倍率改成 0.4 的方式代替档位计费。Fast 价按模型目录或分组、渠道的明确配置选取，不会对已有的 Fast 费用再乘一次档位系数。
+- `revision` 使用 GET 返回的原字符串。过期保存返回 409，重新读取后再编辑。两档同时强开返回 400 `OPENAI_TIER_FORCE_CONFLICT`，整次修改不写入。
+- 更新时字段省略即保留，明确的 `false` 关闭对应赠免。已有组必须明确发送 `openai_tier_policy_version: 2` 才能切换到新版契约。需要回到旧契约时，使用当前 revision 同时提交版本 1、可由旧客户端表示的 Fast 模式、跟随 Ultra 和关闭免费 Ultra。
+- 旧端可重复保存同一 `force_openai_fast` 值。对版本 2 的组，旧布尔值的实质改档返回 409，使用新模式字段并带新 revision。请求同时提交新旧 Fast 字段且含义冲突时返回 400。
+- 切到不支持的分组平台时，档位模式恢复为跟随，赠免清除。复制分组会复制策略版本、档位模式、赠免和价卡。
 
-- 强制 Fast 分组以最终发往 OpenAI 的 priority 作为结算档位：兼容上游即使回报 default，也按 priority 计费；上游原始档位保留在转发结果中，不改写上游响应。
-- 未开启强制 Fast 时保留原有结算规则：API Key 上游可以声明降档，但不能通过响应提高请求的计费档位。最终请求没有 priority 时，不会凭空补记 Fast 费用。
-- 免费 Fast：保留 priority 档位与对应的 `total_cost`，但 `actual_cost` 按同一请求的普通档费用乘分组倍率（含用户的分组专属倍率与高峰系数）计算。
-- 长上下文规则仍按现有阈值与输入、输出系数叠加，与 Fast 档位独立。
-- 核对账单时同时检查最终转发参数、`service_tier`、`total_cost`、`rate_multiplier` 与 `actual_cost`，而不只比较实扣金额。
+### 价卡、赠免与账单
 
-如果以前通过提高分组倍率来代替 Fast 收费，开启分组强制 Fast 后要把倍率恢复为业务原值，避免重复加价。
+OpenAI Token 渠道价卡和分组模型价卡都支持 `ultrafast_multiplier`。OpenAI Token 卡的 Fast 与 Ultra 显式倍率为最多六位小数的有限正数，最大 `999999.999999`。例如 4.5 表示标准档 Token 价的 4.5 倍，1 同价，0.5 打折；`null` 恢复模型默认倍率。Fast 与 Ultrafast 可用不同倍率。分组价卡命中时，如果未配置 Ultra 倍率，则按该模型默认值。
+
+更新 `PUT /api/v1/admin/channels/{id}` 或分组的 `model_pricing` 时，先读取完整列表与 `revision`。提交整张列表，保留原条目 ID（渠道返回时）和精确的平台、模型及计费模式。旧客户端未提交 Ultra 倍率时，服务按可唯一匹配的价卡保留它。价卡改名、合并或移除而旧客户端无法匹配时，保存返回 409。显式清除某条倍率时在该条目提交 `"ultrafast_multiplier": null`；有当前 revision 的整表保存可删除对应条目。
+
+开启免费 Fast 或免费 Ultrafast 后，实扣最多是同一请求按 Standard 复算的金额；如果档位本来更便宜，使用较低金额。其他共同计价参数继续生效，包括用户专属倍率、分时价和长上下文。以同一请求标准价 1 USD、Ultra 倍率 4.5、组倍率 0.2 为例，Ultra 原额为 4.5 USD，正常实扣 0.90 USD，开启赠免时实扣 0.20 USD。
+
+新版会记录客户输入、实际出站、可信上游声明和结算档位。扣费以已冻结的出站报价为上限；如有更便宜的可信结果，按结算规则下调。核对记录中的 `service_tier`、`total_cost`、`actual_cost`、计价来源和赠免信息。账号侧成本单独计算。[用量指标与导出](usage.md#openai-服务档位)
 
 ## 推理档位策略
 

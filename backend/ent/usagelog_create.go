@@ -218,6 +218,12 @@ func (_c *UsageLogCreate) SetPricingSource(v jsontext.Value) *UsageLogCreate {
 	return _c
 }
 
+// SetServiceTierDetails sets the "service_tier_details" field.
+func (_c *UsageLogCreate) SetServiceTierDetails(v jsontext.Value) *UsageLogCreate {
+	_c.mutation.SetServiceTierDetails(v)
+	return _c
+}
+
 // SetProfitBasis sets the "profit_basis" field.
 func (_c *UsageLogCreate) SetProfitBasis(v jsontext.Value) *UsageLogCreate {
 	_c.mutation.SetProfitBasis(v)
@@ -1515,6 +1521,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldPricingSource, field.TypeJSON, value)
 		_node.PricingSource = value
 	}
+	if value, ok := _c.mutation.ServiceTierDetails(); ok {
+		_spec.SetField(usagelog.FieldServiceTierDetails, field.TypeJSON, value)
+		_node.ServiceTierDetails = value
+	}
 	if value, ok := _c.mutation.ProfitBasis(); ok {
 		_spec.SetField(usagelog.FieldProfitBasis, field.TypeJSON, value)
 		_node.ProfitBasis = value
@@ -2203,6 +2213,24 @@ func (u *UsageLogUpsert) UpdatePricingSource() *UsageLogUpsert {
 // ClearPricingSource clears the value of the "pricing_source" field.
 func (u *UsageLogUpsert) ClearPricingSource() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldPricingSource)
+	return u
+}
+
+// SetServiceTierDetails sets the "service_tier_details" field.
+func (u *UsageLogUpsert) SetServiceTierDetails(v jsontext.Value) *UsageLogUpsert {
+	u.Set(usagelog.FieldServiceTierDetails, v)
+	return u
+}
+
+// UpdateServiceTierDetails sets the "service_tier_details" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateServiceTierDetails() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldServiceTierDetails)
+	return u
+}
+
+// ClearServiceTierDetails clears the value of the "service_tier_details" field.
+func (u *UsageLogUpsert) ClearServiceTierDetails() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldServiceTierDetails)
 	return u
 }
 
@@ -3869,6 +3897,27 @@ func (u *UsageLogUpsertOne) UpdatePricingSource() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearPricingSource() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearPricingSource()
+	})
+}
+
+// SetServiceTierDetails sets the "service_tier_details" field.
+func (u *UsageLogUpsertOne) SetServiceTierDetails(v jsontext.Value) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetServiceTierDetails(v)
+	})
+}
+
+// UpdateServiceTierDetails sets the "service_tier_details" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateServiceTierDetails() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateServiceTierDetails()
+	})
+}
+
+// ClearServiceTierDetails clears the value of the "service_tier_details" field.
+func (u *UsageLogUpsertOne) ClearServiceTierDetails() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearServiceTierDetails()
 	})
 }
 
@@ -5914,6 +5963,27 @@ func (u *UsageLogUpsertBulk) UpdatePricingSource() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearPricingSource() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearPricingSource()
+	})
+}
+
+// SetServiceTierDetails sets the "service_tier_details" field.
+func (u *UsageLogUpsertBulk) SetServiceTierDetails(v jsontext.Value) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetServiceTierDetails(v)
+	})
+}
+
+// UpdateServiceTierDetails sets the "service_tier_details" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateServiceTierDetails() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateServiceTierDetails()
+	})
+}
+
+// ClearServiceTierDetails clears the value of the "service_tier_details" field.
+func (u *UsageLogUpsertBulk) ClearServiceTierDetails() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearServiceTierDetails()
 	})
 }
 

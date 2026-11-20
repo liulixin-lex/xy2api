@@ -319,6 +319,42 @@ describe('admin UsageTable tooltip', () => {
     wrapper.unmount()
   })
 
+  it.each([true, false])('opens keyboard-accessible tier evidence, admin fields=%s', async admin => {
+    const details = {
+      version: 1, client_presence: 'null', outbound_tier: 'ultrafast', observed_tier: 'priority', settled_tier: 'priority',
+      price_source: 'channel', price_revision: 'card-12', tier_multiplier: 2.5, free_tier: 'ultrafast',
+      standard_actual_cost: 0.2, actual_cost: 0, cap_reason: 'outbound_quote', origin_group_id: 34, serving_group_id: 56,
+    }
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, service_tier_details: details }], columns: [], showFallbackOrigin: admin },
+      global: { stubs: { DataTable: DataTableStub, Icon: true, Teleport: true,
+        BaseDialog: { template: '<div role="dialog"><slot /></div>' } } },
+    })
+    const button = wrapper.get('[data-testid="usage-tier-details"]')
+    expect(button.element.tagName).toBe('BUTTON')
+    await button.trigger('click')
+    const text = wrapper.get('[role="dialog"]').text()
+    expect(text).toContain('usage.tierDetails.explicitNull')
+    expect(text).toContain('Ultrafast')
+    expect(text).toContain('card-12')
+    expect(text).toContain('$0.00000000')
+    expect(text.includes('usage.tierDetails.origin_group_id')).toBe(admin)
+    expect(text.includes('usage.tierDetails.serving_group_id')).toBe(admin)
+    wrapper.unmount()
+  })
+
+  it('shows a missing historical tier as unrecorded', async () => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, service_tier: null }], columns: [] },
+      global: { stubs: { DataTable: DataTableStub, Icon: true, Teleport: true,
+        BaseDialog: { template: '<div role="dialog"><slot /></div>' } } },
+    })
+    await wrapper.get('[data-testid="usage-tier-details"]').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('usage.tierDetails.notRecorded')
+    expect(wrapper.get('[role="dialog"]').text()).not.toContain('Standard')
+    wrapper.unmount()
+  })
+
   it('shows service tier and billing breakdown in cost tooltip', async () => {
     const row = {
       request_id: 'req-admin-1',

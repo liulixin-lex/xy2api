@@ -29,17 +29,21 @@ const (
 // separate from the final outbound request tier until usage recording resolves
 // the billable tier for the selected credential protocol.
 type upstreamResponseModelObserver struct {
-	quality  func(string)
-	first    string
-	terminal string
-	conflict bool
+	learnTierRefusal   func([]byte)
+	pendingTierRefusal []byte
+	quality            func(string)
+	first              string
+	terminal           string
+	conflict           bool
 
 	// firstTier holds the first non-terminal tier declaration; it is discarded
 	// when later non-terminal declarations disagree. terminalTier comes from a
 	// terminal event and always wins.
-	firstTier         string
-	firstTierConflict bool
-	terminalTier      string
+	firstTier            string
+	firstTierConflict    bool
+	terminalTier         string
+	terminalTierConflict bool
+	tierEvidence         []string
 }
 
 func (o *upstreamResponseModelObserver) Observe(model string, terminal bool) {
@@ -77,21 +81,30 @@ func (o *upstreamResponseModelObserver) ObserveOpenAI(payload []byte, eventType 
 	if model != "" {
 		o.inspectQualityDeclaration(payload, "response.model", "model")
 	}
+	if eventType == "" {
+		eventType = gjson.GetBytes(payload, "type").String()
+	}
 	terminal := isUpstreamResponseModelTerminalEvent(eventType)
 	o.Observe(model, terminal)
-	// Every payload that declares a service tier also declares a model, so
-	// model-free delta frames skip the extra lookups entirely.
-	if model == "" {
-		return
+	if o.learnTierRefusal != nil && (eventType == "error" || terminal) {
+		end := ClassifyOpenAIResponsesTerminal(eventType, payload)
+		if end.Valid && end.Success {
+			o.pendingTierRefusal = nil
+		} else if end.QualityFailure() && isOpenAITierRefusal(UpstreamErrorEventStatus(payload), payload, "") {
+			o.pendingTierRefusal = append(o.pendingTierRefusal[:0], payload...)
+		}
 	}
-	// Non-terminal Responses API events echo the requested tier rather than the
-	// tier actually used. Only terminal events and untyped payloads (chat
-	// completions chunks, non-streaming bodies) report the processing tier.
 	if !terminal && strings.TrimSpace(eventType) != "" {
 		return
 	}
-	tier := normalizeObservedOpenAIServiceTier(firstValidTrimmedGJSONString(payload, "response.service_tier", "service_tier"))
-	o.ObserveServiceTier(tier, terminal)
+	// A terminal declaration without a model must still identify its response.
+	if model == "" && (!terminal || firstValidTrimmedGJSONString(payload, "response.id", "response_id", "id") == "") {
+		return
+	}
+	for _, path := range []string{"response.service_tier", "service_tier"} {
+		o.observeOpenAITier(firstValidTrimmedGJSONString(payload, path), terminal)
+	}
+
 }
 
 func (o *upstreamResponseModelObserver) ObserveAnthropic(payload []byte) {
@@ -109,6 +122,30 @@ func (o *upstreamResponseModelObserver) ObserveAnthropic(payload []byte) {
 	o.ObserveServiceTier(tier, false)
 }
 
+func (o *upstreamResponseModelObserver) observeOpenAITier(raw string, terminal bool) {
+	if o == nil || raw == "" {
+		return
+	}
+	raw = boundInvalidOpenAIServiceTierValue(raw)
+	if len(o.tierEvidence) < 8 && !stringSliceContains(o.tierEvidence, raw) {
+		o.tierEvidence = append(o.tierEvidence, raw)
+	}
+	tier := normalizeObservedOpenAIServiceTier(raw)
+	if tier == "" {
+		tier = raw
+	} // unknown evidence must still conflict with a different declaration
+	o.ObserveServiceTier(tier, terminal)
+}
+
+func (o *upstreamResponseModelObserver) attachTierEvidence(r *OpenAIForwardResult) {
+	if o == nil || r == nil || len(o.tierEvidence) == 0 {
+		return
+	}
+	r.ResponseTierEvidence = append([]string(nil), o.tierEvidence...)
+	r.ResponseTierConflict = o.terminalTierConflict || o.terminalTier == "" && o.firstTierConflict
+	r.UpstreamResponseServiceTier = normalizeObservedOpenAIServiceTier(o.ServiceTier())
+}
+
 // ObserveServiceTier records a tier declared by the upstream response. A
 // terminal declaration always wins; non-terminal declarations are only trusted
 // when they agree with each other.
@@ -117,6 +154,9 @@ func (o *upstreamResponseModelObserver) ObserveServiceTier(tier string, terminal
 		return
 	}
 	if terminal {
+		if o.terminalTier != "" && o.terminalTier != tier {
+			o.terminalTierConflict = true
+		}
 		o.terminalTier = tier
 		return
 	}
@@ -135,13 +175,23 @@ func (o *upstreamResponseModelObserver) ServiceTier() string {
 	if o == nil {
 		return ""
 	}
+	if o.terminalTierConflict {
+		return ""
+	}
 	if o.terminalTier != "" {
-		return o.terminalTier
+		return observedTierValue(o.terminalTier)
 	}
 	if o.firstTierConflict {
 		return ""
 	}
-	return o.firstTier
+	return observedTierValue(o.firstTier)
+}
+
+func observedTierValue(tier string) string {
+	if tier == "standard" || tier == "fast" {
+		return tier
+	}
+	return normalizeObservedOpenAIServiceTier(tier)
 }
 
 // normalizeObservedOpenAIServiceTier maps a tier reported by an OpenAI response
@@ -151,7 +201,7 @@ func normalizeObservedOpenAIServiceTier(raw string) string {
 	switch value := strings.ToLower(strings.TrimSpace(raw)); value {
 	case "priority", "fast":
 		return OpenAIFastTierPriority
-	case "default", "flex", "scale":
+	case "default", "flex", "scale", "ultrafast", "standard":
 		return value
 	default:
 		return ""

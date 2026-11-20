@@ -12,6 +12,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/domain"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
+	"github.com/liulixin-lex/xy2api/internal/pkg/operatoraccess"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -187,6 +188,9 @@ func NewChannelService(repo ChannelRepository, groupRepo GroupRepository, authCa
 
 // loadCache 加载或返回缓存的渠道数据
 func (s *ChannelService) loadCache(ctx context.Context) (*channelCache, error) {
+	if prices := openAITierPricesFromContext(ctx); prices != nil && prices.channels != nil {
+		return prices.channels, nil
+	}
 	if cached, ok := s.cache.Load().(*channelCache); ok && cached != nil {
 		if time.Since(cached.loadedAt) < channelCacheTTL {
 			return cached, nil
@@ -779,6 +783,9 @@ func checkBillingModeRequirements(p ChannelModelPricing) error {
 }
 
 func checkPricesNotNegative(p ChannelModelPricing) error {
+	if err := ValidateOpenAITierMultipliers(p); err != nil {
+		return err
+	}
 	checks := []struct {
 		field string
 		val   *float64
@@ -905,6 +912,12 @@ func (s *ChannelService) Update(ctx context.Context, id int64, input *UpdateChan
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
 
+	if err := checkConfigurationRevision(input.Revision, channel.UpdatedAt); err != nil {
+		return nil, err
+	}
+	expectedUpdatedAt := channel.UpdatedAt
+	channel.ExpectedUpdatedAt = &expectedUpdatedAt
+
 	if err := s.applyUpdateInput(ctx, channel, input); err != nil {
 		return nil, err
 	}
@@ -964,7 +977,15 @@ func (s *ChannelService) applyUpdateInput(ctx context.Context, channel *Channel,
 		channel.GroupIDs = *input.GroupIDs
 	}
 	if input.ModelPricing != nil {
-		channel.ModelPricing = *input.ModelPricing
+		pricing, err := mergeUltrafastPricing(channel.ModelPricing, *input.ModelPricing, input.Revision != nil)
+		if err != nil {
+			return err
+		}
+		if scope := operatoraccess.ScopeFrom(ctx); scope != nil && !scope.Has(operatoraccess.FlagUsersBalanceAdjust) &&
+			len(channel.GroupIDs) > 0 && ultrafastPricingChanged(channel.ModelPricing, pricing) {
+			return operatorFieldError("model_pricing")
+		}
+		channel.ModelPricing = pricing
 	}
 	if input.ModelMapping != nil {
 		channel.ModelMapping = input.ModelMapping
@@ -1180,6 +1201,7 @@ type CreateChannelInput struct {
 
 // UpdateChannelInput 更新渠道输入
 type UpdateChannelInput struct {
+	Revision                   *string
 	Name                       string
 	Description                *string
 	Status                     string

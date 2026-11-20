@@ -320,6 +320,26 @@ func FreeOpenaiFast(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFreeOpenaiFast, v))
 }
 
+// OpenaiFastMode applies equality check predicate on the "openai_fast_mode" field. It's identical to OpenaiFastModeEQ.
+func OpenaiFastMode(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiFastMode, v))
+}
+
+// OpenaiUltrafastMode applies equality check predicate on the "openai_ultrafast_mode" field. It's identical to OpenaiUltrafastModeEQ.
+func OpenaiUltrafastMode(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiTierPolicyVersion applies equality check predicate on the "openai_tier_policy_version" field. It's identical to OpenaiTierPolicyVersionEQ.
+func OpenaiTierPolicyVersion(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiTierPolicyVersion, v))
+}
+
+// FreeOpenaiUltrafast applies equality check predicate on the "free_openai_ultrafast" field. It's identical to FreeOpenaiUltrafastEQ.
+func FreeOpenaiUltrafast(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldFreeOpenaiUltrafast, v))
+}
+
 // RequireOauthOnly applies equality check predicate on the "require_oauth_only" field. It's identical to RequireOauthOnlyEQ.
 func RequireOauthOnly(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldRequireOauthOnly, v))
@@ -2518,6 +2538,186 @@ func FreeOpenaiFastEQ(v bool) predicate.Group {
 // FreeOpenaiFastNEQ applies the NEQ predicate on the "free_openai_fast" field.
 func FreeOpenaiFastNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldFreeOpenaiFast, v))
+}
+
+// OpenaiFastModeEQ applies the EQ predicate on the "openai_fast_mode" field.
+func OpenaiFastModeEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiFastMode, v))
+}
+
+// OpenaiFastModeNEQ applies the NEQ predicate on the "openai_fast_mode" field.
+func OpenaiFastModeNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldOpenaiFastMode, v))
+}
+
+// OpenaiFastModeIn applies the In predicate on the "openai_fast_mode" field.
+func OpenaiFastModeIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldOpenaiFastMode, vs...))
+}
+
+// OpenaiFastModeNotIn applies the NotIn predicate on the "openai_fast_mode" field.
+func OpenaiFastModeNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldOpenaiFastMode, vs...))
+}
+
+// OpenaiFastModeGT applies the GT predicate on the "openai_fast_mode" field.
+func OpenaiFastModeGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldOpenaiFastMode, v))
+}
+
+// OpenaiFastModeGTE applies the GTE predicate on the "openai_fast_mode" field.
+func OpenaiFastModeGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldOpenaiFastMode, v))
+}
+
+// OpenaiFastModeLT applies the LT predicate on the "openai_fast_mode" field.
+func OpenaiFastModeLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldOpenaiFastMode, v))
+}
+
+// OpenaiFastModeLTE applies the LTE predicate on the "openai_fast_mode" field.
+func OpenaiFastModeLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldOpenaiFastMode, v))
+}
+
+// OpenaiFastModeContains applies the Contains predicate on the "openai_fast_mode" field.
+func OpenaiFastModeContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldOpenaiFastMode, v))
+}
+
+// OpenaiFastModeHasPrefix applies the HasPrefix predicate on the "openai_fast_mode" field.
+func OpenaiFastModeHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldOpenaiFastMode, v))
+}
+
+// OpenaiFastModeHasSuffix applies the HasSuffix predicate on the "openai_fast_mode" field.
+func OpenaiFastModeHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldOpenaiFastMode, v))
+}
+
+// OpenaiFastModeEqualFold applies the EqualFold predicate on the "openai_fast_mode" field.
+func OpenaiFastModeEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldOpenaiFastMode, v))
+}
+
+// OpenaiFastModeContainsFold applies the ContainsFold predicate on the "openai_fast_mode" field.
+func OpenaiFastModeContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldOpenaiFastMode, v))
+}
+
+// OpenaiUltrafastModeEQ applies the EQ predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiUltrafastModeNEQ applies the NEQ predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiUltrafastModeIn applies the In predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldOpenaiUltrafastMode, vs...))
+}
+
+// OpenaiUltrafastModeNotIn applies the NotIn predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldOpenaiUltrafastMode, vs...))
+}
+
+// OpenaiUltrafastModeGT applies the GT predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiUltrafastModeGTE applies the GTE predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiUltrafastModeLT applies the LT predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiUltrafastModeLTE applies the LTE predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiUltrafastModeContains applies the Contains predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiUltrafastModeHasPrefix applies the HasPrefix predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiUltrafastModeHasSuffix applies the HasSuffix predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiUltrafastModeEqualFold applies the EqualFold predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiUltrafastModeContainsFold applies the ContainsFold predicate on the "openai_ultrafast_mode" field.
+func OpenaiUltrafastModeContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldOpenaiUltrafastMode, v))
+}
+
+// OpenaiTierPolicyVersionEQ applies the EQ predicate on the "openai_tier_policy_version" field.
+func OpenaiTierPolicyVersionEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiTierPolicyVersion, v))
+}
+
+// OpenaiTierPolicyVersionNEQ applies the NEQ predicate on the "openai_tier_policy_version" field.
+func OpenaiTierPolicyVersionNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldOpenaiTierPolicyVersion, v))
+}
+
+// OpenaiTierPolicyVersionIn applies the In predicate on the "openai_tier_policy_version" field.
+func OpenaiTierPolicyVersionIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldOpenaiTierPolicyVersion, vs...))
+}
+
+// OpenaiTierPolicyVersionNotIn applies the NotIn predicate on the "openai_tier_policy_version" field.
+func OpenaiTierPolicyVersionNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldOpenaiTierPolicyVersion, vs...))
+}
+
+// OpenaiTierPolicyVersionGT applies the GT predicate on the "openai_tier_policy_version" field.
+func OpenaiTierPolicyVersionGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldOpenaiTierPolicyVersion, v))
+}
+
+// OpenaiTierPolicyVersionGTE applies the GTE predicate on the "openai_tier_policy_version" field.
+func OpenaiTierPolicyVersionGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldOpenaiTierPolicyVersion, v))
+}
+
+// OpenaiTierPolicyVersionLT applies the LT predicate on the "openai_tier_policy_version" field.
+func OpenaiTierPolicyVersionLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldOpenaiTierPolicyVersion, v))
+}
+
+// OpenaiTierPolicyVersionLTE applies the LTE predicate on the "openai_tier_policy_version" field.
+func OpenaiTierPolicyVersionLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldOpenaiTierPolicyVersion, v))
+}
+
+// FreeOpenaiUltrafastEQ applies the EQ predicate on the "free_openai_ultrafast" field.
+func FreeOpenaiUltrafastEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldFreeOpenaiUltrafast, v))
+}
+
+// FreeOpenaiUltrafastNEQ applies the NEQ predicate on the "free_openai_ultrafast" field.
+func FreeOpenaiUltrafastNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldFreeOpenaiUltrafast, v))
 }
 
 // RequireOauthOnlyEQ applies the EQ predicate on the "require_oauth_only" field.

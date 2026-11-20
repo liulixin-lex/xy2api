@@ -650,13 +650,20 @@ export interface Group {
   updated_at: string
 }
 
+export type OpenAITierMode = 'inherit' | 'force_on' | 'force_off'
+
 export interface AdminGroup extends Group {
+  revision?: string
   /** The short name on the accounts table's group pills (at most 2 Chinese characters or 3 other characters); empty: none. */
   alias?: string
   system_prompt_config?: GroupSystemPromptConfig
   // 无号兜底分组（网关韧性，仅管理员可见）：兜底只是内部路由，用户侧接口不再下发。
   availability_fallback_group_id?: number | null
   force_openai_fast: boolean
+  openai_tier_policy_version?: 1 | 2
+  openai_fast_mode?: OpenAITierMode
+  openai_ultrafast_mode?: OpenAITierMode
+  free_openai_ultrafast?: boolean
   free_openai_fast: boolean
   model_pricing: import('@/api/admin/channels').ChannelModelPricing[]
   // 分组利润控制（openai/anthropic/gemini/grok/antigravity 分组可启用；margin/buffer 为小数存储）。
@@ -844,6 +851,10 @@ export interface CreateGroupRequest {
   long_context_pricing_enabled?: boolean
   long_context_pricing_scope?: LongContextPricingScope
   long_context_pricing_models?: string[]
+  openai_tier_policy_version?: 1 | 2
+  openai_fast_mode?: OpenAITierMode
+  openai_ultrafast_mode?: OpenAITierMode
+  free_openai_ultrafast?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
   model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
@@ -902,6 +913,7 @@ export interface CreateGroupRequest {
 }
 
 export interface UpdateGroupRequest {
+  revision?: string
   show_exclusive_badge?: boolean
   system_prompt_config?: GroupSystemPromptConfig
   name?: string
@@ -919,6 +931,10 @@ export interface UpdateGroupRequest {
   long_context_pricing_enabled?: boolean
   long_context_pricing_scope?: LongContextPricingScope
   long_context_pricing_models?: string[]
+  openai_tier_policy_version?: 1 | 2
+  openai_fast_mode?: OpenAITierMode
+  openai_ultrafast_mode?: OpenAITierMode
+  free_openai_ultrafast?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
   model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
@@ -1806,6 +1822,32 @@ export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2' | 'cyber'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
+export interface UsageServiceTierDetails {
+  version: number
+  client_presence?: string
+  client_tier?: string | null
+  outbound_tier?: string | null
+  observed_tier?: string | null
+  settled_tier?: string | null
+  source?: string
+  reason?: string
+  policy_version?: number
+  origin_group_id?: number
+  serving_group_id?: number
+  price_source?: string
+  price_revision?: string
+  multiplier_source?: string
+  billing_model?: string
+  tier_multiplier?: number | null
+  free_tier?: string | null
+  standard_actual_cost?: number
+  outbound_actual_cost?: number
+  actual_cost?: number
+  cap_reason?: string
+  response_tier_evidence?: string[]
+  response_tier_conflict?: boolean
+}
+
 export interface UsageLog {
   id: number
   user_id: number
@@ -1814,6 +1856,7 @@ export interface UsageLog {
   request_id: string
   model: string
   service_tier?: string | null
+  service_tier_details?: UsageServiceTierDetails | null
   reasoning_effort?: string | null
   inbound_endpoint?: string | null
   upstream_endpoint?: string | null

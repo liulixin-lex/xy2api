@@ -8,24 +8,46 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
 )
 
 var csvHeaders = []string{"Time", "API Key Name", "Model", "Reasoning Effort", "Inbound Endpoint", "IP Address", "Type", "Billing Mode", "Input Tokens", "Output Tokens", "Cache Read Tokens", "Cache Creation Tokens", "Rate Multiplier", "Billed Cost", "Original Cost", "First Token (ms)", "Duration (ms)"}
 var xlsxHeaders = []string{"Time", "User", "API Key", "Account", "Requested", "Sent upstream", "Upstream response", "Response model mismatch", "Requested reasoning effort", "Reasoning Effort", "Group", "Inbound Endpoint", "Upstream Endpoint", "Type", "Input Tokens", "Output Tokens", "Cache Read Tokens", "Cache Creation Tokens", "Input Cost", "Output Cost", "Cache Read Cost", "Cache Creation Cost", "Rate", "Account rate", "Original", "User billed", "Account billed", "First Token", "Duration", "Request ID", "Upstream ID", "User-Agent", "IP"}
 var xlsxHeadersZH = []string{"时间", "用户", "API 密钥", "账户", "请求", "发往上游", "上游响应", "上游响应模型不一致", "请求推理强度", "推理强度", "分组", "入站端点", "上游端点", "类型", "输入 Token", "输出 Token", "缓存读取 Token", "缓存创建 Token", "输入费用", "输出费用", "缓存读取费用", "缓存创建费用", "倍率", "账号倍率", "原始", "用户扣费", "账号计费", "首 Token", "耗时", "请求ID", "上游ID", "User-Agent", "IP"}
 
+const ServiceTierFormatVersion = 2
+
 func Headers(o Options) []string {
-	if o.Format == "csv" {
-		return csvHeaders
+	headers := xlsxHeaders
+	fields := []string{"Service Tier", "Service Tier Details"}
+	switch {
+	case o.Format == "csv":
+		headers = csvHeaders
+	case strings.HasPrefix(o.Language, "zh"):
+		headers = xlsxHeadersZH
+		fields = []string{"服务档位", "服务档位详情"}
 	}
-	if strings.HasPrefix(o.Language, "zh") {
-		return xlsxHeadersZH
+	if o.Version >= ServiceTierFormatVersion {
+		return append(headers[:len(headers):len(headers)], fields...)
 	}
-	return xlsxHeaders
+	return headers
 }
+
+func appendServiceTierFields(row []string, r Record, o Options) []string {
+	if o.Version < ServiceTierFormatVersion {
+		return row
+	}
+	details := r.s("service_tier_details")
+	if !o.IncludeInternalTierDetails {
+		details = string(usagestats.PublicServiceTierDetails(r["service_tier_details"]))
+	}
+	return append(row, r.s("service_tier"), details)
+}
+
 func numericColumn(o Options, i int) bool {
 	if o.Format == "csv" {
-		return i >= 8
+		return i >= 8 && i <= 16
 	}
 	return i >= 14 && i <= 28
 }
@@ -119,7 +141,7 @@ func Project(r Record, o Options) ([]string, error) {
 		billing = map[string]string{"Image": "按次(图片)", "Video": "按次(视频)", "Per Request": "按次", "Token": "按量"}[billing]
 	}
 	if o.Format == "csv" {
-		return []string{when, r.s("key_name"), model, effort(requested), r.s("inbound_endpoint"), r.s("ip_address"), kind, billing, r.s("input_tokens"), r.s("output_tokens"), r.s("cache_read_tokens"), r.s("cache_creation_tokens"), r.s("rate_multiplier"), r.n("actual_cost").StringFixed(8), r.n("total_cost").StringFixed(8), r.s("first_token_ms"), r.s("duration_ms")}, nil
+		return appendServiceTierFields([]string{when, r.s("key_name"), model, effort(requested), r.s("inbound_endpoint"), r.s("ip_address"), kind, billing, r.s("input_tokens"), r.s("output_tokens"), r.s("cache_read_tokens"), r.s("cache_creation_tokens"), r.s("rate_multiplier"), r.n("actual_cost").StringFixed(8), r.n("total_cost").StringFixed(8), r.s("first_token_ms"), r.s("duration_ms")}, r, o), nil
 	}
 	upstream := r.s("upstream_model")
 	if upstream == "" {
@@ -165,7 +187,7 @@ func Project(r Record, o Options) ([]string, error) {
 	if r.s("rate_multiplier") != "" {
 		rate = fourSignificant(r.n("rate_multiplier"))
 	}
-	return []string{when, r.s("user_email"), r.s("key_name"), r.s("account_name"), model, upstream, r.s("upstream_response_model"), mismatch, effort(requested), effort(r.s("reasoning_effort")), r.s("group_name"), r.s("inbound_endpoint"), r.s("upstream_endpoint"), kind, r.s("input_tokens"), r.s("output_tokens"), r.s("cache_read_tokens"), r.s("cache_creation_tokens"), r.n("input_cost").StringFixed(6), r.n("output_cost").StringFixed(6), r.n("cache_read_cost").StringFixed(6), r.n("cache_creation_cost").StringFixed(6), rate, fourSignificant(multiplier), r.n("total_cost").StringFixed(6), r.n("actual_cost").StringFixed(6), accountCost.Mul(multiplier).StringFixed(6), r.s("first_token_ms"), r.s("duration_ms"), r.s("request_id"), r.s("upstream_request_id"), r.s("user_agent"), r.s("ip_address")}, nil
+	return appendServiceTierFields([]string{when, r.s("user_email"), r.s("key_name"), r.s("account_name"), model, upstream, r.s("upstream_response_model"), mismatch, effort(requested), effort(r.s("reasoning_effort")), r.s("group_name"), r.s("inbound_endpoint"), r.s("upstream_endpoint"), kind, r.s("input_tokens"), r.s("output_tokens"), r.s("cache_read_tokens"), r.s("cache_creation_tokens"), r.n("input_cost").StringFixed(6), r.n("output_cost").StringFixed(6), r.n("cache_read_cost").StringFixed(6), r.n("cache_creation_cost").StringFixed(6), rate, fourSignificant(multiplier), r.n("total_cost").StringFixed(6), r.n("actual_cost").StringFixed(6), accountCost.Mul(multiplier).StringFixed(6), r.s("first_token_ms"), r.s("duration_ms"), r.s("request_id"), r.s("upstream_request_id"), r.s("user_agent"), r.s("ip_address")}, r, o), nil
 }
 
 // Match the existing administrator export's four significant digit rate strings.

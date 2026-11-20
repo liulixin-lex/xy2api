@@ -60,6 +60,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (result *OpenAIForwardResult, forwardErr error) {
+	ctx, tierAttempt := withOpenAITierAttempt(ctx, body)
+	defer func() {
+		tierAttempt.finish(result)
+		observer := upstreamResponseModelObserverFromContext(c)
+		observer.finishTierRefusal()
+		observer.attachTierEvidence(result)
+	}()
 	defer func() { s.finishCacheDiagnostic(c, body, result) }()
 	if c != nil {
 		c.Set("openai_cache_diagnostic", nil)
@@ -400,7 +407,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if err != nil {
 		return nil, err
 	}
-	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
+	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(context.WithValue(ctx, openAITierEndpointKey{}, APIProtocolResponses), account, upstreamModel, responsesBody)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
 		if errors.As(policyErr, &blocked) {
@@ -716,7 +723,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	observer.Observe(finalResponse.Model, true)
-	observer.ObserveServiceTier(finalResponse.ServiceTier, true)
+	observer.observeOpenAITier(finalResponse.ServiceTier, true)
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
 		payload := outcome.payload
 		code := openAIStreamErrorField(payload, "code").String()

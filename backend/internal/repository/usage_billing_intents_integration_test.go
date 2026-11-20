@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -271,4 +273,91 @@ func TestBillingIntent_RecoveryIgnoresRetiredSchedulingAttempt(t *testing.T) {
 		return !pending
 	}, 10*time.Second, 20*time.Millisecond)
 	assertBillingIntentMoney(t, c, 98.75, 1)
+}
+
+func TestBillingIntent_LegacyWorkerCannotClaimOrSettleTierEvidence(t *testing.T) {
+	ctx := context.Background()
+	repo, upgraded := newBillingIntentFixture(t)
+	_, legacy := newBillingIntentFixture(t)
+	upgraded.Usage.ServiceTierDetails = json.RawMessage(`{"version":1,"outbound_tier":"ultrafast","settled_tier":"ultrafast"}`)
+	for _, cmd := range []*service.UsageBillingCommand{upgraded, legacy} {
+		cmd.Normalize()
+		_, err := repo.prepareBillingIntent(ctx, cmd)
+		require.NoError(t, err)
+	}
+	require.NoError(t, repo.withTierBillingProtocol(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE usage_billing_intents SET next_attempt_at = NOW()
+			WHERE request_id = ANY($1)`, pq.Array([]string{upgraded.RequestID, legacy.RequestID}))
+		return err
+	}))
+
+	// Separate connections represent the previous release and a worker that
+	// understands the evidence. The old query is unchanged from that release.
+	oldWorker, err := integrationDB.Conn(ctx)
+	require.NoError(t, err)
+	defer func() { _ = oldWorker.Close() }()
+	rows, err := oldWorker.QueryContext(ctx, `WITH candidates AS (
+		SELECT request_id, api_key_id FROM usage_billing_intents
+		WHERE (state = 'pending' OR (state = 'settled' AND cache_pending)) AND next_attempt_at <= NOW()
+		ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED
+	) UPDATE usage_billing_intents i SET attempts = attempts + 1,
+		next_attempt_at = NOW() + INTERVAL '60 seconds', updated_at = NOW()
+	FROM candidates c WHERE i.request_id = c.request_id AND i.api_key_id = c.api_key_id
+	RETURNING i.command`, 100)
+	require.NoError(t, err)
+	var claimedLegacy bool
+	for rows.Next() {
+		var raw []byte
+		var cmd service.UsageBillingCommand
+		require.NoError(t, rows.Scan(&raw))
+		require.NoError(t, json.Unmarshal(raw, &cmd))
+		require.NotEqual(t, upgraded.RequestID, cmd.RequestID)
+		claimedLegacy = claimedLegacy || cmd.RequestID == legacy.RequestID
+	}
+	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
+	require.True(t, claimedLegacy)
+
+	oldTx, err := oldWorker.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = oldTx.Rollback() }()
+	_, err = oldTx.ExecContext(ctx, `UPDATE users SET balance = balance - $2 WHERE id = $1`, upgraded.UserID, upgraded.BalanceCost)
+	require.NoError(t, err)
+	_, err = oldTx.ExecContext(ctx, `UPDATE usage_billing_intents SET state = 'settled'
+		WHERE request_id = $1 AND api_key_id = $2`, upgraded.RequestID, upgraded.APIKeyID)
+	var pgError *pq.Error
+	require.ErrorAs(t, err, &pgError)
+	require.Equal(t, pq.ErrorCode("23514"), pgError.Code)
+	require.NoError(t, oldTx.Rollback())
+	assertBillingIntentMoney(t, upgraded, 100, 0)
+	var attempts int
+	require.NoError(t, oldWorker.QueryRowContext(ctx, `SELECT attempts FROM usage_billing_intents
+		WHERE request_id = $1 AND api_key_id = $2`, upgraded.RequestID, upgraded.APIKeyID).Scan(&attempts))
+	require.Zero(t, attempts)
+
+	commands, err := repo.ClaimBillingRecovery(ctx, 100)
+	require.NoError(t, err)
+	var recovered bool
+	for i := range commands {
+		if commands[i].RequestID != upgraded.RequestID {
+			continue
+		}
+		require.JSONEq(t, string(upgraded.Usage.ServiceTierDetails), string(commands[i].Usage.ServiceTierDetails))
+		result, err := repo.Apply(ctx, &commands[i])
+		require.NoError(t, err)
+		require.True(t, result.Applied)
+		require.NoError(t, repo.CompleteBillingCacheInvalidation(ctx, &commands[i]))
+		recovered = true
+	}
+	require.True(t, recovered)
+	assertBillingIntentMoney(t, upgraded, 98.75, 1)
+	result, err := repo.Apply(ctx, upgraded)
+	require.NoError(t, err)
+	require.False(t, result.Applied)
+	assertBillingIntentMoney(t, upgraded, 98.75, 1)
+
+	var details []byte
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT service_tier_details FROM usage_logs
+		WHERE request_id = $1 AND api_key_id = $2`, upgraded.RequestID, upgraded.APIKeyID).Scan(&details))
+	require.JSONEq(t, string(upgraded.Usage.ServiceTierDetails), string(details))
 }

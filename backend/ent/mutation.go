@@ -22327,6 +22327,11 @@ type GroupMutation struct {
 	allow_live                              *bool
 	force_openai_fast                       *bool
 	free_openai_fast                        *bool
+	openai_fast_mode                        *string
+	openai_ultrafast_mode                   *string
+	openai_tier_policy_version              *int
+	addopenai_tier_policy_version           *int
+	free_openai_ultrafast                   *bool
 	require_oauth_only                      *bool
 	require_privacy_set                     *bool
 	default_mapped_model                    *string
@@ -25454,6 +25459,170 @@ func (m *GroupMutation) ResetFreeOpenaiFast() {
 	m.free_openai_fast = nil
 }
 
+// SetOpenaiFastMode sets the "openai_fast_mode" field.
+func (m *GroupMutation) SetOpenaiFastMode(s string) {
+	m.openai_fast_mode = &s
+}
+
+// OpenaiFastMode returns the value of the "openai_fast_mode" field in the mutation.
+func (m *GroupMutation) OpenaiFastMode() (r string, exists bool) {
+	v := m.openai_fast_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiFastMode returns the old "openai_fast_mode" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOpenaiFastMode(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiFastMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiFastMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiFastMode: %w", err)
+	}
+	return oldValue.OpenaiFastMode, nil
+}
+
+// ResetOpenaiFastMode resets all changes to the "openai_fast_mode" field.
+func (m *GroupMutation) ResetOpenaiFastMode() {
+	m.openai_fast_mode = nil
+}
+
+// SetOpenaiUltrafastMode sets the "openai_ultrafast_mode" field.
+func (m *GroupMutation) SetOpenaiUltrafastMode(s string) {
+	m.openai_ultrafast_mode = &s
+}
+
+// OpenaiUltrafastMode returns the value of the "openai_ultrafast_mode" field in the mutation.
+func (m *GroupMutation) OpenaiUltrafastMode() (r string, exists bool) {
+	v := m.openai_ultrafast_mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiUltrafastMode returns the old "openai_ultrafast_mode" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOpenaiUltrafastMode(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiUltrafastMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiUltrafastMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiUltrafastMode: %w", err)
+	}
+	return oldValue.OpenaiUltrafastMode, nil
+}
+
+// ResetOpenaiUltrafastMode resets all changes to the "openai_ultrafast_mode" field.
+func (m *GroupMutation) ResetOpenaiUltrafastMode() {
+	m.openai_ultrafast_mode = nil
+}
+
+// SetOpenaiTierPolicyVersion sets the "openai_tier_policy_version" field.
+func (m *GroupMutation) SetOpenaiTierPolicyVersion(i int) {
+	m.openai_tier_policy_version = &i
+	m.addopenai_tier_policy_version = nil
+}
+
+// OpenaiTierPolicyVersion returns the value of the "openai_tier_policy_version" field in the mutation.
+func (m *GroupMutation) OpenaiTierPolicyVersion() (r int, exists bool) {
+	v := m.openai_tier_policy_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiTierPolicyVersion returns the old "openai_tier_policy_version" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOpenaiTierPolicyVersion(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiTierPolicyVersion is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiTierPolicyVersion requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiTierPolicyVersion: %w", err)
+	}
+	return oldValue.OpenaiTierPolicyVersion, nil
+}
+
+// AddOpenaiTierPolicyVersion adds i to the "openai_tier_policy_version" field.
+func (m *GroupMutation) AddOpenaiTierPolicyVersion(i int) {
+	if m.addopenai_tier_policy_version != nil {
+		*m.addopenai_tier_policy_version += i
+	} else {
+		m.addopenai_tier_policy_version = &i
+	}
+}
+
+// AddedOpenaiTierPolicyVersion returns the value that was added to the "openai_tier_policy_version" field in this mutation.
+func (m *GroupMutation) AddedOpenaiTierPolicyVersion() (r int, exists bool) {
+	v := m.addopenai_tier_policy_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetOpenaiTierPolicyVersion resets all changes to the "openai_tier_policy_version" field.
+func (m *GroupMutation) ResetOpenaiTierPolicyVersion() {
+	m.openai_tier_policy_version = nil
+	m.addopenai_tier_policy_version = nil
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (m *GroupMutation) SetFreeOpenaiUltrafast(b bool) {
+	m.free_openai_ultrafast = &b
+}
+
+// FreeOpenaiUltrafast returns the value of the "free_openai_ultrafast" field in the mutation.
+func (m *GroupMutation) FreeOpenaiUltrafast() (r bool, exists bool) {
+	v := m.free_openai_ultrafast
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFreeOpenaiUltrafast returns the old "free_openai_ultrafast" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldFreeOpenaiUltrafast(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFreeOpenaiUltrafast is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFreeOpenaiUltrafast requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFreeOpenaiUltrafast: %w", err)
+	}
+	return oldValue.FreeOpenaiUltrafast, nil
+}
+
+// ResetFreeOpenaiUltrafast resets all changes to the "free_openai_ultrafast" field.
+func (m *GroupMutation) ResetFreeOpenaiUltrafast() {
+	m.free_openai_ultrafast = nil
+}
+
 // SetRequireOauthOnly sets the "require_oauth_only" field.
 func (m *GroupMutation) SetRequireOauthOnly(b bool) {
 	m.require_oauth_only = &b
@@ -26425,7 +26594,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 73)
+	fields := make([]string, 0, 77)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26603,6 +26772,18 @@ func (m *GroupMutation) Fields() []string {
 	if m.free_openai_fast != nil {
 		fields = append(fields, group.FieldFreeOpenaiFast)
 	}
+	if m.openai_fast_mode != nil {
+		fields = append(fields, group.FieldOpenaiFastMode)
+	}
+	if m.openai_ultrafast_mode != nil {
+		fields = append(fields, group.FieldOpenaiUltrafastMode)
+	}
+	if m.openai_tier_policy_version != nil {
+		fields = append(fields, group.FieldOpenaiTierPolicyVersion)
+	}
+	if m.free_openai_ultrafast != nil {
+		fields = append(fields, group.FieldFreeOpenaiUltrafast)
+	}
 	if m.require_oauth_only != nil {
 		fields = append(fields, group.FieldRequireOauthOnly)
 	}
@@ -26771,6 +26952,14 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.ForceOpenaiFast()
 	case group.FieldFreeOpenaiFast:
 		return m.FreeOpenaiFast()
+	case group.FieldOpenaiFastMode:
+		return m.OpenaiFastMode()
+	case group.FieldOpenaiUltrafastMode:
+		return m.OpenaiUltrafastMode()
+	case group.FieldOpenaiTierPolicyVersion:
+		return m.OpenaiTierPolicyVersion()
+	case group.FieldFreeOpenaiUltrafast:
+		return m.FreeOpenaiUltrafast()
 	case group.FieldRequireOauthOnly:
 		return m.RequireOauthOnly()
 	case group.FieldRequirePrivacySet:
@@ -26926,6 +27115,14 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldForceOpenaiFast(ctx)
 	case group.FieldFreeOpenaiFast:
 		return m.OldFreeOpenaiFast(ctx)
+	case group.FieldOpenaiFastMode:
+		return m.OldOpenaiFastMode(ctx)
+	case group.FieldOpenaiUltrafastMode:
+		return m.OldOpenaiUltrafastMode(ctx)
+	case group.FieldOpenaiTierPolicyVersion:
+		return m.OldOpenaiTierPolicyVersion(ctx)
+	case group.FieldFreeOpenaiUltrafast:
+		return m.OldFreeOpenaiUltrafast(ctx)
 	case group.FieldRequireOauthOnly:
 		return m.OldRequireOauthOnly(ctx)
 	case group.FieldRequirePrivacySet:
@@ -27376,6 +27573,34 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetFreeOpenaiFast(v)
 		return nil
+	case group.FieldOpenaiFastMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiFastMode(v)
+		return nil
+	case group.FieldOpenaiUltrafastMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiUltrafastMode(v)
+		return nil
+	case group.FieldOpenaiTierPolicyVersion:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiTierPolicyVersion(v)
+		return nil
+	case group.FieldFreeOpenaiUltrafast:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFreeOpenaiUltrafast(v)
+		return nil
 	case group.FieldRequireOauthOnly:
 		v, ok := value.(bool)
 		if !ok {
@@ -27557,6 +27782,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addsort_order != nil {
 		fields = append(fields, group.FieldSortOrder)
 	}
+	if m.addopenai_tier_policy_version != nil {
+		fields = append(fields, group.FieldOpenaiTierPolicyVersion)
+	}
 	if m.addrpm_limit != nil {
 		fields = append(fields, group.FieldRpmLimit)
 	}
@@ -27627,6 +27855,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedFallbackGroupIDOnInvalidRequest()
 	case group.FieldSortOrder:
 		return m.AddedSortOrder()
+	case group.FieldOpenaiTierPolicyVersion:
+		return m.AddedOpenaiTierPolicyVersion()
 	case group.FieldRpmLimit:
 		return m.AddedRpmLimit()
 	case group.FieldProfitMinMargin:
@@ -27818,6 +28048,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddSortOrder(v)
+		return nil
+	case group.FieldOpenaiTierPolicyVersion:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddOpenaiTierPolicyVersion(v)
 		return nil
 	case group.FieldRpmLimit:
 		v, ok := value.(int)
@@ -28197,6 +28434,18 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldFreeOpenaiFast:
 		m.ResetFreeOpenaiFast()
+		return nil
+	case group.FieldOpenaiFastMode:
+		m.ResetOpenaiFastMode()
+		return nil
+	case group.FieldOpenaiUltrafastMode:
+		m.ResetOpenaiUltrafastMode()
+		return nil
+	case group.FieldOpenaiTierPolicyVersion:
+		m.ResetOpenaiTierPolicyVersion()
+		return nil
+	case group.FieldFreeOpenaiUltrafast:
+		m.ResetFreeOpenaiUltrafast()
 		return nil
 	case group.FieldRequireOauthOnly:
 		m.ResetRequireOauthOnly()
@@ -45367,6 +45616,8 @@ type UsageLogMutation struct {
 	appenddegradations            jsontext.Value
 	pricing_source                *jsontext.Value
 	appendpricing_source          jsontext.Value
+	service_tier_details          *jsontext.Value
+	appendservice_tier_details    jsontext.Value
 	profit_basis                  *jsontext.Value
 	appendprofit_basis            jsontext.Value
 	dispatch_phases               *jsontext.Value
@@ -46436,6 +46687,71 @@ func (m *UsageLogMutation) ResetPricingSource() {
 	m.pricing_source = nil
 	m.appendpricing_source = nil
 	delete(m.clearedFields, usagelog.FieldPricingSource)
+}
+
+// SetServiceTierDetails sets the "service_tier_details" field.
+func (m *UsageLogMutation) SetServiceTierDetails(j jsontext.Value) {
+	m.service_tier_details = &j
+	m.appendservice_tier_details = nil
+}
+
+// ServiceTierDetails returns the value of the "service_tier_details" field in the mutation.
+func (m *UsageLogMutation) ServiceTierDetails() (r jsontext.Value, exists bool) {
+	v := m.service_tier_details
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldServiceTierDetails returns the old "service_tier_details" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldServiceTierDetails(ctx context.Context) (v jsontext.Value, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldServiceTierDetails is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldServiceTierDetails requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldServiceTierDetails: %w", err)
+	}
+	return oldValue.ServiceTierDetails, nil
+}
+
+// AppendServiceTierDetails adds j to the "service_tier_details" field.
+func (m *UsageLogMutation) AppendServiceTierDetails(j jsontext.Value) {
+	m.appendservice_tier_details = append(m.appendservice_tier_details, j...)
+}
+
+// AppendedServiceTierDetails returns the list of values that were appended to the "service_tier_details" field in this mutation.
+func (m *UsageLogMutation) AppendedServiceTierDetails() (jsontext.Value, bool) {
+	if len(m.appendservice_tier_details) == 0 {
+		return nil, false
+	}
+	return m.appendservice_tier_details, true
+}
+
+// ClearServiceTierDetails clears the value of the "service_tier_details" field.
+func (m *UsageLogMutation) ClearServiceTierDetails() {
+	m.service_tier_details = nil
+	m.appendservice_tier_details = nil
+	m.clearedFields[usagelog.FieldServiceTierDetails] = struct{}{}
+}
+
+// ServiceTierDetailsCleared returns if the "service_tier_details" field was cleared in this mutation.
+func (m *UsageLogMutation) ServiceTierDetailsCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldServiceTierDetails]
+	return ok
+}
+
+// ResetServiceTierDetails resets all changes to the "service_tier_details" field.
+func (m *UsageLogMutation) ResetServiceTierDetails() {
+	m.service_tier_details = nil
+	m.appendservice_tier_details = nil
+	delete(m.clearedFields, usagelog.FieldServiceTierDetails)
 }
 
 // SetProfitBasis sets the "profit_basis" field.
@@ -50368,7 +50684,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 84)
+	fields := make([]string, 0, 85)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -50419,6 +50735,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.pricing_source != nil {
 		fields = append(fields, usagelog.FieldPricingSource)
+	}
+	if m.service_tier_details != nil {
+		fields = append(fields, usagelog.FieldServiceTierDetails)
 	}
 	if m.profit_basis != nil {
 		fields = append(fields, usagelog.FieldProfitBasis)
@@ -50663,6 +50982,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.Degradations()
 	case usagelog.FieldPricingSource:
 		return m.PricingSource()
+	case usagelog.FieldServiceTierDetails:
+		return m.ServiceTierDetails()
 	case usagelog.FieldProfitBasis:
 		return m.ProfitBasis()
 	case usagelog.FieldDispatchPhases:
@@ -50840,6 +51161,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldDegradations(ctx)
 	case usagelog.FieldPricingSource:
 		return m.OldPricingSource(ctx)
+	case usagelog.FieldServiceTierDetails:
+		return m.OldServiceTierDetails(ctx)
 	case usagelog.FieldProfitBasis:
 		return m.OldProfitBasis(ctx)
 	case usagelog.FieldDispatchPhases:
@@ -51101,6 +51424,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPricingSource(v)
+		return nil
+	case usagelog.FieldServiceTierDetails:
+		v, ok := value.(jsontext.Value)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetServiceTierDetails(v)
 		return nil
 	case usagelog.FieldProfitBasis:
 		v, ok := value.(jsontext.Value)
@@ -52087,6 +52417,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldPricingSource) {
 		fields = append(fields, usagelog.FieldPricingSource)
 	}
+	if m.FieldCleared(usagelog.FieldServiceTierDetails) {
+		fields = append(fields, usagelog.FieldServiceTierDetails)
+	}
 	if m.FieldCleared(usagelog.FieldProfitBasis) {
 		fields = append(fields, usagelog.FieldProfitBasis)
 	}
@@ -52277,6 +52610,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldPricingSource:
 		m.ClearPricingSource()
+		return nil
+	case usagelog.FieldServiceTierDetails:
+		m.ClearServiceTierDetails()
 		return nil
 	case usagelog.FieldProfitBasis:
 		m.ClearProfitBasis()
@@ -52474,6 +52810,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldPricingSource:
 		m.ResetPricingSource()
+		return nil
+	case usagelog.FieldServiceTierDetails:
+		m.ResetServiceTierDetails()
 		return nil
 	case usagelog.FieldProfitBasis:
 		m.ResetProfitBasis()
