@@ -23,11 +23,13 @@
         </template>
 
         <template #cell-key_name="{ row }">
-          <div class="text-sm">
-            <span class="text-gray-900 dark:text-white">{{ row.key_name || '-' }}</span>
+          <!-- At most 240px (the frozen first column on tablets and phones): the name cut with "…", whole in its tip and
+               in the error's detail (the row opens it). -->
+          <div class="flex max-w-[240px] items-center text-sm" data-testid="error-key-cell">
+            <span class="min-w-0 truncate text-gray-900 dark:text-white" :title="row.key_name || undefined">{{ row.key_name || '-' }}</span>
             <span
               v-if="row.key_deleted"
-              class="ml-1 inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30"
+              class="ml-1 inline-flex flex-none items-center rounded px-1 py-px text-xs font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30"
             >{{ t('usage.errors.keyDeleted') }}</span>
           </div>
         </template>

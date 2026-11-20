@@ -68,17 +68,20 @@
         </template>
 
         <template #cell-user="{ row }">
-          <div v-if="row.user_id" class="text-sm">
+          <!-- At most 240px (it is the frozen first column on tablets and phones): the email cut with "…", whole in its tip
+               and in the error's detail; a click on it still opens the balance history. -->
+          <div v-if="row.user_id" class="flex max-w-[240px] items-center text-sm" data-testid="error-user-cell">
             <button
               v-if="userClickable && row.user_email"
-              class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-              :title="t('admin.usage.clickToViewBalance')"
+              type="button"
+              class="relative min-w-0 text-left font-medium text-primary-600 transition-colors before:absolute before:inset-x-0 before:-inset-y-3 before:content-[''] hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+              :title="`${row.user_email}\n${t('admin.usage.clickToViewBalance')}`"
               @click.stop="emit('userClick', row.user_id, row.user_email)"
             >
-              {{ row.user_email }}
+              <span class="block truncate underline decoration-dashed underline-offset-2">{{ row.user_email }}</span>
             </button>
-            <span v-else class="font-medium text-gray-900 dark:text-white">{{ row.user_email || '-' }}</span>
-            <span class="ml-1 text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
+            <span v-else class="min-w-0 truncate font-medium text-gray-900 dark:text-white" :title="row.user_email || undefined">{{ row.user_email || '-' }}</span>
+            <span class="ml-1 flex-none text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
           </div>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>

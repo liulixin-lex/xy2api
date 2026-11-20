@@ -136,3 +136,21 @@ describe('OpsErrorLogTable layout', () => {
     expect(mountWith().findComponent(DataTableStub).props('layout')).toBeUndefined()
   })
 })
+
+// Re-review item 1: the user is the frozen first column on tablets and phones; a long email must not cover the table.
+describe('OpsErrorLogTable user cell width', () => {
+  it('caps the user cell at 240px, cutting the email with its whole text in the tip and the balance entry kept', async () => {
+    const email = `${'very-long-mailbox-'.repeat(4)}@example.com`
+    const wrapper = mount(OpsErrorLogTable, {
+      props: { rows: [{ id: 1, created_at: '2026-06-05T23:59:50Z', user_id: 12, user_email: email } as OpsErrorLog], total: 1, loading: false, page: 1, pageSize: 20, userClickable: true },
+      global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub } },
+    })
+    const cell = wrapper.get('[data-testid="error-user-cell"]')
+    expect(cell.classes()).toContain('max-w-[240px]')
+    const button = cell.get('button')
+    expect(button.get('span').classes()).toContain('truncate')
+    expect(button.attributes('title')).toContain(email)
+    await button.trigger('click')
+    expect(wrapper.emitted('userClick')).toEqual([[12, email]])
+  })
+})
