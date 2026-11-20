@@ -508,6 +508,9 @@ export default {
     // Users Management
     users: {
       bulkActions: '批量操作',
+      moreActions: '更多操作',
+      bulkSelected: '批量操作 · 已选 {count} 个',
+      bulkNoneSelected: '勾选用户后可批量操作',
       title: '用户管理',
       description: '管理用户账户和权限',
       liveDetail: '余额与并发 10 秒、用量 30 秒',
@@ -553,6 +556,7 @@ export default {
       deleteConfirmMessage: "确定要删除用户 '{email}' 吗？此操作无法撤销。",
       searchPlaceholder: '邮箱/用户名/备注/API Key 模糊搜索...',
       searchUsers: '搜索邮箱、用户名、备注或 API Key',
+      searchUsersShort: '邮箱、用户名、备注或 Key',
       roleFilter: '角色筛选',
       allRoles: '全部角色',
       allStatus: '全部状态',

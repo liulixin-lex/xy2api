@@ -851,6 +851,63 @@ describe('admin UsersView', () => {
     }
   })
 
+  // Follow-ups after #96: the full hint did not fit the field at any width; the short one shows, the full text names it.
+  it('shows the short search hint at every width, the full text as the field\'s name', async () => {
+    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    const box = wrapper.get('.table-toolbar__search-box')
+    expect(box.get('input').attributes('placeholder')).toBe('admin.users.searchUsersShort')
+    expect(box.get('.sr-only').text()).toBe('admin.users.searchUsers')
+    wrapper.unmount()
+  })
+
+  // Follow-ups after #96 (package A): the phone info row is "N 条 · ● 实时 [刷新][列][⋯]"; "⋯" holds the attributes
+  // config and the bulk actions with their text, and the search shows a short hint.
+  it('puts the attributes config and the bulk actions behind the phone toolbar\'s "⋯", with a short search hint', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 768px)' && query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    try {
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42 })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      expect(wrapper.get('.table-toolbar__input').attributes('placeholder')).toBe('admin.users.searchUsersShort')
+      expect(wrapper.find('[data-test="bulk-actions"]').exists()).toBe(false)
+      expect(wrapper.find('button[aria-label="admin.users.attributes.configButton"]').exists()).toBe(false)
+
+      // Nothing ticked: "⋯" opens anyway; the attributes config works, the bulk items are there but disabled.
+      const tools = wrapper.get('[data-test="users-tools"]')
+      expect(tools.attributes('aria-label')).toBe('admin.users.moreActions')
+      expect(tools.attributes('disabled')).toBeUndefined()
+      await tools.trigger('click')
+      const items = () => wrapper.findAll('[data-test="bulk-menu"] [role="menuitem"]')
+      expect(items().map((item) => item.attributes('data-test')))
+        .toEqual(['tools-attributes', 'bulk-edit-limits', 'bulk-enable-users', 'bulk-disable-users', 'bulk-delete-users'])
+      expect(items().map((item) => item.attributes('disabled') !== undefined)).toEqual([false, true, true, true, true])
+      expect(wrapper.get('[data-test="tools-bulk-caption"]').text()).toBe('admin.users.bulkNoneSelected')
+      await wrapper.get('[data-test="tools-attributes"]').trigger('click')
+      expect(wrapper.find('[data-test="bulk-menu"]').exists()).toBe(false)
+      expect(wrapper.get('user-attributes-config-modal-stub').attributes('show')).toBe('true')
+
+      // A row ticked: the count on "⋯" and in the menu, the bulk items enabled.
+      await wrapper.get('[data-test="select-42"]').trigger('click')
+      expect(wrapper.get('[data-test="bulk-count"]').text()).toBe('1')
+      await tools.trigger('click')
+      expect(items().map((item) => item.attributes('disabled') !== undefined)).toEqual([false, false, false, false, false])
+      expect(wrapper.get('[data-test="tools-bulk-caption"]').text()).toBe('admin.users.bulkSelected:1')
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+    }
+  })
+
   // Astra review: the page's own usage sort, on while its column is hidden (a phone), still fetches and orders.
   it('fetches usage and orders by it while the usage sort is on and its column hidden', async () => {
     const matchMedia = window.matchMedia
