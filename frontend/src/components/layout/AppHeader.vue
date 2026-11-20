@@ -130,6 +130,7 @@
         <!-- User Dropdown -->
         <div v-if="user" class="relative" ref="dropdownRef">
           <button
+            ref="userMenuButtonRef"
             @click="toggleDropdown"
             class="flex items-center gap-2 rounded-xl p-1.5 transition-colors hover:bg-gray-100 dark:hover:bg-dark-800"
             :aria-label="t('common.userMenu')"
@@ -182,7 +183,7 @@
               <div class="user-menu__list py-1">
                 <!-- Below 768px the header has no room for every entry and the page's name with each button its own 40px:
                      the search, the model plaza and the subscriptions sit here, and the docs below 640px. -->
-                <button type="button" class="dropdown-item w-full md:hidden" data-test="menu-search" @click="closeDropdown(); openPalette()">
+                <button type="button" class="dropdown-item w-full md:hidden" data-test="menu-search" @click="openPaletteFromMenu">
                   <Icon name="search" size="sm" />
                   {{ t('commandPalette.open') }}
                 </button>
@@ -440,6 +441,17 @@ function toggleDropdown() {
 
 function closeDropdown() {
   dropdownOpen.value = false
+}
+
+const userMenuButtonRef = ref<HTMLButtonElement | null>(null)
+/**
+ * The search from the user menu (below 768px): the menu item goes with the menu, so the palette is opened from the
+ * menu's button and gives focus back to it on closing, as it does to the header's search button.
+ */
+function openPaletteFromMenu() {
+  userMenuButtonRef.value?.focus()
+  closeDropdown()
+  openPalette()
 }
 
 async function handleLogout() {

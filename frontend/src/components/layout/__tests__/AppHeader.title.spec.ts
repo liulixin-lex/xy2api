@@ -52,9 +52,17 @@ describe('AppHeader page title on narrow screens', () => {
     expect(source).toMatch(/class="header-hit hidden [^"]* md:flex"\s*:title="`\$\{t\('commandPalette\.open'\)\}/)
     expect(source).toMatch(/:aria-label="t\('nav\.modelPlaza'\)"\s*class="header-hit hidden [^"]* md:flex"/)
     expect(source).toContain('<SubscriptionProgressMini v-if="user && subscriptionFeatureEnabled" class="hidden md:block" />')
-    expect(source).toContain('class="dropdown-item w-full md:hidden" data-test="menu-search" @click="closeDropdown(); openPalette()"')
+    expect(source).toContain('class="dropdown-item w-full md:hidden" data-test="menu-search" @click="openPaletteFromMenu"')
     expect(source).toMatch(/v-if="modelPlazaEnabled"[^>]*class="dropdown-item md:hidden" data-test="menu-model-plaza"/)
     expect(source).toMatch(/v-if="subscriptionFeatureEnabled && hasActiveSubscriptions" to="\/subscriptions" class="dropdown-item md:hidden"/)
     expect(source).toMatch(/v-if="docUrl"[^>]*class="dropdown-item sm:hidden" data-test="menu-docs"/)
+  })
+
+  // Astra re-review: the menu's search item goes with the menu, and Escape in the palette dropped focus to the body.
+  it("opens the palette from the user menu's button, so closing it gives focus back there", () => {
+    const handler = /function openPaletteFromMenu\(\) \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? ''
+    expect(handler.indexOf('userMenuButtonRef.value?.focus()')).toBeGreaterThan(-1)
+    expect(handler.indexOf('userMenuButtonRef.value?.focus()')).toBeLessThan(handler.indexOf('openPalette()'))
+    expect(source).toMatch(/ref="userMenuButtonRef"\s*@click="toggleDropdown"/)
   })
 })
