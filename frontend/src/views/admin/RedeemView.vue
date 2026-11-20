@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
         <TableToolbar>
           <template #search>
@@ -68,6 +68,8 @@
 
       <template #table>
         <DataTable
+          layout="table"
+          :scroll-label="t('admin.redeem.title')"
           :columns="columns"
           :data="codes"
           :loading="loading"
@@ -76,40 +78,52 @@
           default-sort-order="desc"
           @sort="handleSort"
         >
+          <!-- The check boxes sit in labels as wide as their 52px column (the frozen code column starts right after it)
+               and 40px high on touch. -->
           <template #header-select>
-            <input
-              data-test="select-all-codes"
-              type="checkbox"
-              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              :checked="allVisibleSelected"
-              @click.stop
-              @change="toggleSelectAllVisible($event)"
-            />
+            <label class="redeem-check">
+              <input
+                data-test="select-all-codes"
+                type="checkbox"
+                class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                :checked="allVisibleSelected"
+                :aria-label="t('common.selectAll')"
+                @click.stop
+                @change="toggleSelectAllVisible($event)"
+              />
+            </label>
           </template>
 
           <template #cell-select="{ row }">
-            <input
-              data-test="select-code"
-              type="checkbox"
-              class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-              :checked="selectedCodeIds.has(row.id)"
-              @click.stop
-              @change="toggleSelectRow(row.id, $event)"
-            />
+            <label class="redeem-check" @click.stop>
+              <input
+                data-test="select-code"
+                type="checkbox"
+                class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                :checked="selectedCodeIds.has(row.id)"
+                :aria-label="row.code"
+                @click.stop
+                @change="toggleSelectRow(row.id, $event)"
+              />
+            </label>
           </template>
 
           <template #cell-code="{ value }">
-            <div class="flex items-center space-x-2">
-              <code class="font-mono text-sm text-gray-900 dark:text-gray-100">{{ value }}</code>
+            <!-- The frozen identity column: at most 240px, the code cut with "…" and whole on a tap; the copy button stays,
+                 a 16px icon with a 40px touch area. -->
+            <div class="flex max-w-[240px] items-center gap-2">
+              <TableIdentityCell class="font-mono" :primary="value" />
               <button
+                type="button"
                 @click="copyToClipboard(value)"
+                class="relative flex flex-none items-center justify-center transition-colors [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:-inset-3 [@media(pointer:coarse)]:before:content-['']"
                 :class="[
-                  'flex items-center transition-colors',
                   copiedCode === value
                     ? 'text-green-500'
                     : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
                 ]"
                 :title="copiedCode === value ? t('admin.redeem.copied') : t('keys.copyToClipboard')"
+                :aria-label="copiedCode === value ? t('admin.redeem.copied') : t('keys.copyToClipboard')"
               >
                 <Icon v-if="copiedCode !== value" name="copy" size="sm" :stroke-width="2" />
                 <svg v-else class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -168,15 +182,15 @@
           </template>
 
           <template #cell-used_by="{ value, row }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">
-              {{ row.user?.email || (value ? t('admin.redeem.userPrefix', { id: value }) : '-') }}
+            <span v-if="row.user?.email || value" class="text-sm text-gray-500 dark:text-dark-400">
+              {{ row.user?.email || t('admin.redeem.userPrefix', { id: value }) }}
             </span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-used_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{
-              value ? formatDateTime(value) : '-'
-            }}</span>
+            <span v-if="value" class="text-sm text-gray-500 dark:text-dark-400">{{ formatListDateTime(value) }}</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-expires_at="{ value, row }">
@@ -188,16 +202,17 @@
                   : 'text-gray-500 dark:text-dark-400'
               ]"
             >
-              {{ value ? formatDateTime(value) : t('admin.redeem.neverExpires') }}
+              {{ value ? formatListDateTime(value) : t('admin.redeem.neverExpires') }}
             </span>
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center space-x-2">
+            <!-- One 40px button on touch; on a phone its label goes (read by screen readers) so it fits the frozen 44px. -->
+            <div class="flex items-center space-x-2 [@media(pointer:coarse)]:-my-1.5">
               <button
                 v-if="canManage && row.status === 'unused'"
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="flex flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:min-w-10 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
@@ -207,9 +222,9 @@
                     d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
                   />
                 </svg>
-                <span class="text-xs">{{ t('common.delete') }}</span>
+                <span class="text-xs max-md:sr-only">{{ t('common.delete') }}</span>
               </button>
-              <span v-else class="text-gray-400 dark:text-dark-500">-</span>
+              <CellEmpty v-else />
             </div>
           </template>
         </DataTable>
@@ -637,7 +652,7 @@ import { useTableSelection } from '@/composables/useTableSelection'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { adminAPI } from '@/api/admin'
 import {
-  formatDateTime,
+  formatListDateTime,
   getBrowserTimeZone,
   parseDateTimeLocalInput
 } from '@/utils/format'
@@ -660,6 +675,8 @@ import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Icon from '@/components/icons/Icon.vue'
+import CellEmpty from '@/components/common/CellEmpty.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
 import { vTip } from '@/utils/tip'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 
@@ -753,7 +770,8 @@ const downloadGeneratedCodes = () => {
 }
 
 const columns = computed<Column[]>(() => [
-  { key: 'select', label: '' },
+  // Exactly the table's --select-col-width (52px), where the frozen code column starts; its label fills it.
+  { key: 'select', label: '', class: '!w-[52px] !min-w-[52px] !max-w-[52px] !px-0' },
   { key: 'code', label: t('admin.redeem.columns.code') },
   { key: 'type', label: t('admin.redeem.columns.type'), sortable: true },
   { key: 'value', label: t('admin.redeem.columns.value'), sortable: true },
@@ -1231,3 +1249,21 @@ const batchUpdateLayer = useOverlayLayer(() => !!showBatchUpdateDialog.value, { 
 const resultRef = ref<HTMLElement | null>(null)
 const resultLayer = useOverlayLayer(() => !!showResultDialog.value, { root: resultRef, floor: 50, onEscape: () => closeResultDialog() })
 </script>
+
+<style scoped>
+/* A check box's label fills its 52px column; on touch it is 40px high, its extra height taken from the cell's padding
+   so the row keeps its height. */
+.redeem-check {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+@media (pointer: coarse) {
+  .redeem-check {
+    min-height: 40px;
+    margin-block: -12px;
+  }
+}
+</style>
