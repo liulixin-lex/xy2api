@@ -920,6 +920,13 @@ const handleSort = (key: string) => {
     newOrder = sortOrder.value === 'asc' ? 'desc' : 'asc'
   }
 
+  // A page that owns the sort only hears the choice: the arrows and aria-sort follow the sort it passes back, and the
+  // choice is stored once it does (it may wait, or refuse).
+  if (pageOwnsSort.value) {
+    requestedSort = { key, order: newOrder }
+    emit('sort', key, newOrder)
+    return
+  }
   // A header click is the user's choice: the one place the sort is stored.
   writePersistedSortState({ key, order: newOrder })
   if (props.serverSideSort) {
@@ -1241,12 +1248,16 @@ const stickyColumnClasses = computed(() => props.columns.map((column, index) => 
 // Init + keep the sort consistent with the current columns (a sort the table owns)
 /** The page owns the sort: the headers follow it, whatever columns are shown. */
 const pageOwnsSort = computed(() => props.sort !== undefined)
+/** The header click a page that owns the sort has not answered yet: stored when the page's sort becomes it. */
+let requestedSort: PersistedSortState | null = null
 watch(
   () => props.sort,
   (sort) => {
     if (!pageOwnsSort.value) return
     sortKey.value = sort?.key ?? ''
     sortOrder.value = sort?.order ?? 'asc'
+    if (requestedSort && sort?.key === requestedSort.key && sort.order === requestedSort.order) writePersistedSortState(requestedSort)
+    requestedSort = null
   },
   { immediate: true, deep: true }
 )

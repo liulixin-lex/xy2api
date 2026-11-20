@@ -123,11 +123,31 @@ describe('DataTable layout="table" below 1024px', () => {
     expect(JSON.parse(localStorage.getItem('table-sort')!)).toEqual({ key: 'id', order: 'asc' })
     await wrapper.setProps({ columns: both })
     expect(ariaSort()).toEqual({ ID: 'ascending', 'Last used': 'none' })
-    // A header click is the user's choice: emitted and stored.
+    // A header click is the user's choice: emitted; the arrows wait for the page (Astra re-review #2), and the choice is
+    // stored once the page takes it.
     await wrapper.get('[data-test="sort-last_used_at"]').trigger('click')
     expect(wrapper.emitted('sort')).toEqual([['last_used_at', 'asc']])
+    expect(ariaSort()).toEqual({ ID: 'ascending', 'Last used': 'none' })
+    expect(JSON.parse(localStorage.getItem('table-sort')!)).toEqual({ key: 'id', order: 'asc' })
+    await wrapper.setProps({ sort: { key: 'last_used_at', order: 'asc' } })
+    expect(ariaSort()).toEqual({ ID: 'none', 'Last used': 'ascending' })
     expect(JSON.parse(localStorage.getItem('table-sort')!)).toEqual({ key: 'last_used_at', order: 'asc' })
     localStorage.clear()
+  })
+
+  it('leaves the arrows as the page has them when the page keeps its sort after a header click', async () => {
+    stubPhone()
+    const wrapper = mount(DataTable, {
+      props: { layout: 'table', columns, data: rows(1), rowKey: 'id', serverSideSort: true, sort: { key: 'name', order: 'asc' }, sortStorageKey: 'table-sort' }
+    })
+    const th = wrapper.get('thead th')
+    await th.get('button.dt-sort').trigger('click')
+    expect(wrapper.emitted('sort')).toEqual([['name', 'desc']])
+    // The page refuses (its sort stays name/asc): nothing changes, nothing is stored.
+    await wrapper.setProps({ sort: { key: 'name', order: 'asc' } })
+    expect(th.attributes('aria-sort')).toBe('ascending')
+    expect(th.find('.sort-indicator svg').classes()).toContain('text-primary-600')
+    expect(localStorage.getItem('table-sort')).toBeNull()
   })
 
   // Astra review #3: keyboard focus under a frozen column. The wrapper's scroll padding is the frozen widths and the
