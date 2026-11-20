@@ -71,13 +71,14 @@
             </button>
             <div
               v-if="showColumnDropdown"
-              class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+              class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800 [@media(pointer:coarse)]:space-y-2 [@media(pointer:coarse)]:py-2"
             >
+              <!-- Touch: every item 40px high and 8px from the next. -->
               <button
                 v-for="col in toggleableColumns"
                 :key="col.key"
                 @click="toggleColumn(col.key)"
-                class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700 [@media(pointer:coarse)]:min-h-10"
               >
                 <span>{{ col.label }}</span>
                 <Icon
@@ -110,8 +111,7 @@
           @update:selected-keys="handleSelectionChange"
           :server-side-sort="true"
           :sticky-actions-column="desktop"
-          default-sort-key="created_at"
-          default-sort-order="desc"
+          :sort="tableSort"
           @sort="handleSort"
         >
           <template #cell-id="{ value }">
@@ -1408,6 +1408,8 @@ const sortState = ref({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
 })
+// The table's arrows follow the sort the list is requested with, also while its column is hidden.
+const tableSort = computed(() => ({ key: sortState.value.sort_by, order: sortState.value.sort_order }))
 
 // Filter state
 const filterSearch = ref('')

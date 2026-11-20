@@ -19,7 +19,7 @@
         </p>
         <div class="mt-4 border-t border-gray-100 pt-4 dark:border-dark-700">
           <div
-            class="tabs inline-flex w-full max-w-xl flex-wrap sm:w-auto"
+            class="tabs inline-flex w-full max-w-xl flex-wrap sm:w-auto [@media(pointer:coarse)]:gap-2"
             v-roving-tabs role="tablist"
             :aria-label="t('channelMonitorV2.admin.tabAria')"
           >

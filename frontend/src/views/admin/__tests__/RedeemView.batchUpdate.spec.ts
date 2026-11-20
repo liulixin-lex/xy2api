@@ -145,6 +145,39 @@ describe('admin RedeemView batch update', () => {
     getAllGroups.mockResolvedValue([])
   })
 
+  it('shows the header box half checked while some of the page is ticked', async () => {
+    const wrapper = mount(RedeemView, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: {
+            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          Select: SelectStub,
+          GroupBadge: true,
+          GroupOptionItem: true,
+          Icon: true,
+          Teleport: true
+        }
+      }
+    })
+
+    await flushPromises()
+    const header = () => wrapper.get('[data-test="select-all-codes"]').element as HTMLInputElement
+    expect(header().indeterminate).toBe(false)
+    await wrapper.findAll('[data-test="select-code"]')[0].setValue(true)
+    expect(header().checked).toBe(false)
+    expect(header().indeterminate).toBe(true)
+    await wrapper.findAll('[data-test="select-code"]')[1].setValue(true)
+    expect(header().checked).toBe(true)
+    expect(header().indeterminate).toBe(false)
+    wrapper.unmount()
+  })
+
   it('submits only checked fields for selected redeem codes', async () => {
     const wrapper = mount(RedeemView, {
       attachTo: document.body,

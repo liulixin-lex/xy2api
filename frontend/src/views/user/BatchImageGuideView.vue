@@ -5,7 +5,9 @@
       <template #filters>
         <div class="flex flex-col gap-3">
           <div class="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
-            <div class="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[260px_160px_144px_152px] 2xl:w-auto">
+            <!-- The four filters take up to their widths and give way together when the sidebar leaves less room (no
+                 page overflow at 1024px with the sidebar open). -->
+            <div class="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,260px)_minmax(0,160px)_minmax(0,144px)_minmax(0,152px)] 2xl:w-auto">
               <div class="min-w-0">
                 <SearchInput
                   v-model="filters.taskName"
@@ -22,7 +24,7 @@
               <button type="button" class="btn btn-secondary" :disabled="loadingJobs" @click="resetFilters">
                 {{ t('common.reset') }}
               </button>
-              <button type="button" class="btn btn-secondary" :disabled="loadingKeys || loadingJobs" :title="t('common.refresh')" @click="refreshPage">
+              <button type="button" class="btn btn-secondary" :disabled="loadingKeys || loadingJobs" :title="t('common.refresh')" :aria-label="t('common.refresh')" @click="refreshPage">
                 <Icon name="refresh" size="md" :class="loadingKeys || loadingJobs ? 'animate-spin' : ''" />
               </button>
               <button type="button" class="btn btn-secondary" @click="showGuideModal = true">
@@ -117,8 +119,9 @@
           <template #cell-id="{ row }">
 	            <!-- The frozen identity column: 220px wide, as narrow as the column on a phone (the name cut with "…"; the
 	                 job's detail shows it whole). Touch: the expander is 28px with a 40px area reaching into the cell's
-	                 padding, 8px from the name. -->
-	            <div class="flex w-[220px] max-w-full items-start gap-1 [@media(pointer:coarse)]:gap-2" :class="row.is_child ? 'pl-6' : ''">
+	                 padding, 8px from the name. A phone does not indent child rows (their badge marks them): the name
+	                 keeps its width. -->
+	            <div class="flex w-[220px] max-w-full items-start gap-1 [@media(pointer:coarse)]:gap-2" :class="row.is_child ? 'md:pl-6' : ''">
 	              <button
 	                v-if="row.child_count > 0 && !row.is_child"
 	                type="button"
@@ -137,15 +140,17 @@
 	                  :class="row.task_name ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
                 >
                   <span class="min-w-0 truncate" :title="row.task_name || defaultTaskName(row.created_at)">{{ row.task_name || defaultTaskName(row.created_at) }}</span>
-                  <span v-if="row.child_count > 0 && !row.is_child" class="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-600 dark:bg-dark-700 dark:text-gray-300">
-                    {{ t('batchImage.list.childCount', { n: row.child_count }, row.child_count) }}
-                  </span>
-                  <span v-if="row.is_child" class="flex-shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-normal text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-                    {{ t('batchImage.list.childBadge') }}
-                  </span>
 	                </span>
+	                <!-- The child count or child badge sits on this line, after the time: on the name's line it took the name's
+	                     width (0px on a phone). -->
 	                <span class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
 	                  <span>{{ formatListDateTime(row.created_at * 1000) }}</span>
+	                  <span v-if="row.child_count > 0 && !row.is_child" class="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+	                    {{ t('batchImage.list.childCount', { n: row.child_count }, row.child_count) }}
+	                  </span>
+	                  <span v-if="row.is_child" class="flex-shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-normal text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+	                    {{ t('batchImage.list.childBadge') }}
+	                  </span>
 	                </span>
 	              </button>
 	            </div>

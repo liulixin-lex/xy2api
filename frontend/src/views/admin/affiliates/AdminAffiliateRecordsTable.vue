@@ -393,14 +393,16 @@ const UserCell = defineComponent({
     // opens the user's overview, which shows both whole; on touch its hit area is 40px high.
     return () => h('div', { class: 'min-w-0 max-w-56 space-y-0.5' }, [
       h('div', { class: 'font-mono text-sm text-gray-900 dark:text-white' }, `#${cellProps.id}`),
-      h(cellProps.clickable ? 'button' : 'div', {
-        class: cellProps.clickable
-          ? "relative block max-w-full truncate text-left text-sm font-medium text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300 [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:inset-x-0 [@media(pointer:coarse)]:before:-inset-y-2.5 [@media(pointer:coarse)]:before:content-['']"
-          : 'max-w-full truncate text-sm text-gray-700 dark:text-gray-300',
-        type: cellProps.clickable ? 'button' : undefined,
-        title: cellProps.email || undefined,
-        onClick: cellProps.clickable ? () => emit('open', cellProps.id) : undefined,
-      }, cellProps.email || h(CellEmpty)),
+      cellProps.clickable
+        // The button itself is 40px high on touch (its negative margins keep the line's height); the email inside it
+        // is what is cut, so nothing clips the button's area.
+        ? h('button', {
+            class: 'relative flex max-w-full items-center text-left text-sm font-medium text-primary-600 hover:text-primary-700 hover:underline dark:text-primary-400 dark:hover:text-primary-300 [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:min-h-10',
+            type: 'button',
+            title: cellProps.email || undefined,
+            onClick: () => emit('open', cellProps.id),
+          }, [h('span', { class: 'min-w-0 truncate' }, cellProps.email || h(CellEmpty))])
+        : h('div', { class: 'max-w-full truncate text-sm text-gray-700 dark:text-gray-300', title: cellProps.email || undefined }, cellProps.email || h(CellEmpty)),
       h('div', { class: 'max-w-full truncate text-sm text-gray-500 dark:text-dark-400', title: cellProps.username || undefined }, cellProps.username || h(CellEmpty)),
     ])
   },

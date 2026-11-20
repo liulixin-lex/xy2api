@@ -86,6 +86,7 @@
                 type="checkbox"
                 class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                 :checked="allVisibleSelected"
+                :indeterminate="someVisibleSelected"
                 :aria-label="t('common.selectAll')"
                 @click.stop
                 @change="toggleSelectAllVisible($event)"
@@ -109,13 +110,13 @@
 
           <template #cell-code="{ value }">
             <!-- The frozen identity column: at most 240px, the code cut with "…" and whole on a tap; the copy button stays,
-                 a 16px icon with a 40px touch area. -->
+                 on touch a 40px square of its own, 8px from the code (it reaches into the cell's right padding). -->
             <div class="flex max-w-[240px] items-center gap-2">
               <TableIdentityCell class="font-mono" :primary="value" />
               <button
                 type="button"
                 @click="copyToClipboard(value)"
-                class="relative flex flex-none items-center justify-center transition-colors [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:-inset-3 [@media(pointer:coarse)]:before:content-['']"
+                class="flex flex-none items-center justify-center rounded-lg transition-colors [@media(pointer:coarse)]:-my-3 [@media(pointer:coarse)]:-mr-3 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10"
                 :class="[
                   copiedCode === value
                     ? 'text-green-500'
@@ -240,14 +241,14 @@
           <div class="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              class="text-xs font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200"
+              class="text-xs font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200 [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:px-2"
               @click="clearSelectedCodes"
             >
               {{ t('admin.redeem.clearSelection') }}
             </button>
             <button
               type="button"
-              class="btn btn-primary btn-sm"
+              class="btn btn-primary btn-sm [@media(pointer:coarse)]:min-h-10"
               @click="openBatchUpdateDialog"
             >
               {{ t('admin.redeem.batchUpdate') }}
@@ -855,6 +856,10 @@ const {
   rows: codes,
   getId: (code) => code.id
 })
+/** Some but not all of this page's rows ticked: the header box shows half checked. */
+const someVisibleSelected = computed(
+  () => !allVisibleSelected.value && codes.value.some((code) => selectedCodeIds.value.has(code.id))
+)
 
 const batchUpdateForm = reactive({
   update_status: false,

@@ -215,13 +215,15 @@ describe('admin subscription users', () => {
     }
   })
 
-  it('renders the user email as a link to that user filtered usage records', async () => {
+  it('shows the user email beside a link to that user filtered usage records', async () => {
     const wrapper = mountView()
 
     await flushPromises()
 
+    // The name is its own tap target (the whole text on a tap); the link is the button beside it, named after it.
+    expect(wrapper.get('[data-test="subscription-user-name"]').text()).toBe('reader@example.com')
     const link = wrapper.getComponent(RouterLinkStub)
-    expect(link.text()).toBe('reader@example.com')
+    expect(link.attributes('aria-label')).toBe('admin.usage.title · reader@example.com')
     expect(link.props('to')).toEqual({ path: '/admin/usage', query: { user_id: 42 } })
   })
 
@@ -252,8 +254,9 @@ describe('admin subscription users', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    expect(wrapper.get('[data-test="subscription-user-name"]').text()).toBe('User #42')
     const link = wrapper.getComponent(RouterLinkStub)
-    expect(link.text()).toBe('User #42')
+    expect(link.attributes('aria-label')).toBe('admin.usage.title · User #42')
     expect(link.props('to')).toEqual({ path: '/admin/usage', query: { user_id: 42 } })
   })
 })

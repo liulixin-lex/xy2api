@@ -52,13 +52,13 @@
         >
           <template #cell-code="{ value }">
             <!-- The frozen identity column: at most 240px, the code cut with "…" and whole on a tap; the copy button stays,
-                 a 16px icon with a 40px touch area. -->
+                 on touch a 40px square of its own, 8px from the code (it reaches into the cell's right padding). -->
             <div class="flex max-w-[240px] items-center gap-2">
               <TableIdentityCell class="font-mono" :primary="value" />
               <button
                 type="button"
                 @click="copyToClipboard(value)"
-                class="relative flex flex-none items-center justify-center transition-colors [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:-inset-3 [@media(pointer:coarse)]:before:content-['']"
+                class="flex flex-none items-center justify-center rounded-lg transition-colors [@media(pointer:coarse)]:-my-3 [@media(pointer:coarse)]:-mr-3 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10"
                 :class="[
                   copiedCode === value
                     ? 'text-green-500'

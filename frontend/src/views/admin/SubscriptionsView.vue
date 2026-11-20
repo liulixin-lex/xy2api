@@ -109,22 +109,23 @@
                 v-if="showColumnDropdown"
                 class="absolute right-0 z-50 mt-2 w-48 origin-top-right rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-800"
               >
-                <div class="p-2">
+                <!-- Touch: every item 40px high and 8px from the next. -->
+                <div class="p-2 [@media(pointer:coarse)]:space-y-2">
                   <!-- User column mode selection -->
-                  <div class="mb-2 border-b border-gray-200 pb-2 dark:border-dark-700">
+                  <div class="mb-2 border-b border-gray-200 pb-2 dark:border-dark-700 [@media(pointer:coarse)]:space-y-2">
                     <div class="px-3 py-1 text-xs font-medium text-gray-500 dark:text-gray-400">
                       {{ t('admin.subscriptions.columns.user') }}
                     </div>
                     <button
                       @click="setUserColumnMode('email')"
-                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
+                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700 [@media(pointer:coarse)]:min-h-10"
                     >
                       <span>{{ t('admin.users.columns.email') }}</span>
                       <Icon v-if="userColumnMode === 'email'" name="check" size="sm" class="text-primary-500" />
                     </button>
                     <button
                       @click="setUserColumnMode('username')"
-                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
+                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700 [@media(pointer:coarse)]:min-h-10"
                     >
                       <span>{{ t('admin.users.columns.username') }}</span>
                       <Icon v-if="userColumnMode === 'username'" name="check" size="sm" class="text-primary-500" />
@@ -135,7 +136,7 @@
                     v-for="col in toggleableColumns"
                     :key="col.key"
                     @click="toggleColumn(col.key)"
-                    class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
+                    class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700 [@media(pointer:coarse)]:min-h-10"
                   >
                     <span>{{ col.label }}</span>
                     <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
@@ -199,14 +200,14 @@
           :selected-keys="selectedIds"
           :selection-label="getSubscriptionSelectionLabel"
           :server-side-sort="true"
-          default-sort-key="created_at"
-          default-sort-order="desc"
+          :sort="tableSort"
           @sort="handleSort"
           @update:selected-keys="handleSelectedKeysUpdate"
         >
           <template #cell-user="{ row }">
-            <!-- The frozen identity column: at most 240px, the name cut with "…" (whole in its tip, and on the usage records
-                 it links to, which a tap opens; 40px to hit on touch); the initial's 32px badge only on a desktop. -->
+            <!-- The frozen identity column: at most 240px. The name is cut with "…" and shows whole on a tap or hover; the
+                 usage records link is a button of its own beside it (32px, 40px on touch, 8px away), so a tap on the
+                 name reads it and does not navigate. The initial's 32px badge only on a desktop. -->
             <div class="flex max-w-[240px] items-center gap-2">
               <div
                 class="hidden h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30 lg:flex"
@@ -218,12 +219,14 @@
                   }}
                 </span>
               </div>
+              <TableIdentityCell :primary="subscriptionUserName(row)" data-test="subscription-user-name" />
               <RouterLink
                 :to="{ path: '/admin/usage', query: { user_id: row.user_id } }"
-                class="relative block min-w-0 rounded font-medium text-gray-900 hover:text-primary-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:text-white dark:hover:text-primary-400 dark:focus-visible:ring-offset-dark-800 [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:inset-x-0 [@media(pointer:coarse)]:before:-inset-y-3 [@media(pointer:coarse)]:before:content-['']"
-                :title="subscriptionUserName(row)"
+                class="inline-flex h-8 w-8 flex-none items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-700 dark:hover:text-primary-400 [@media(pointer:coarse)]:-my-1 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10"
+                :aria-label="`${t('admin.usage.title')} · ${subscriptionUserName(row)}`"
+                v-tip="t('admin.usage.title')"
                 data-test="subscription-user-link"
-              ><span class="block truncate">{{ subscriptionUserName(row) }}</span></RouterLink>
+              ><Icon name="chartBar" size="sm" /></RouterLink>
             </div>
           </template>
 
@@ -861,6 +864,7 @@ import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Icon from '@/components/icons/Icon.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
 import CellEmpty from '@/components/common/CellEmpty.vue'
 import { usePhoneViewport } from '@/composables/useTableViewport'
 import { vTip } from '@/utils/tip'
@@ -1086,6 +1090,8 @@ const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
 })
+// The table's arrows follow the sort the list is requested with, also while its column is hidden.
+const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }))
 
 const pagination = reactive({
   page: 1,
