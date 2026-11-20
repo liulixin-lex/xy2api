@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout table-layout>
       <template #filters>
         <!-- The compact toolbar (12.9): live, refresh, filter and column settings, a rule, then attributes, the bulk
              menu and create. -->
@@ -314,6 +314,8 @@
         <DataTable
           ref="usersTableRef"
           class="dense-cells"
+          layout="table"
+          :scroll-label="t('admin.users.title')"
           :columns="columns"
           :data="users"
           :loading="loading"
@@ -325,29 +327,20 @@
           :row-selectable="canSelectUser"
           :actions-count="7"
           :server-side-sort="true"
-          default-sort-key="created_at"
-          default-sort-order="desc"
+          :sort="tableSort"
           :sort-storage-key="USER_SORT_STORAGE_KEY"
           @sort="handleSort"
           @update:selected-keys="handleSelectedKeysUpdate"
         >
-          <!-- One line: a long address ends in "…", in a narrow card's head and past 240px in the wide table, where it would
-               widen the table (7r-7); hovered or tapped, the tip has it whole (7o-5). -->
-          <template #cell-email="{ value }">
-            <div class="flex min-w-0 items-center gap-2">
-              <div
-                class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
-              >
-                <span class="text-sm font-medium text-primary-700 dark:text-primary-300">
-                  {{ value.charAt(0).toUpperCase() }}
-                </span>
-              </div>
-              <span class="min-w-0 truncate font-medium text-gray-900 dark:text-white lg:max-w-60" v-tip="value" data-test="user-email" @click="showTipNow($event.currentTarget)">{{ value }}</span>
-            </div>
+          <!-- The frozen identity (mobile list plan): the address, the user name under it, each cut with "…" at the column's
+               width (on a phone clamp(120px, 36vw, 160px), from 768px 240px); hovered or tapped, the tip has both whole. -->
+          <template #cell-email="{ value, row }">
+            <TableIdentityCell class="users-identity" :primary="value" :secondary="row.username || undefined" data-test="user-email" />
           </template>
 
           <template #cell-username="{ value }">
-            <span class="text-sm text-gray-700 dark:text-gray-300">{{ value || '-' }}</span>
+            <span v-if="value" class="text-sm text-gray-700 dark:text-gray-300">{{ value }}</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-notes="{ value }">
@@ -359,7 +352,7 @@
               >
                 {{ value.length > 30 ? value.substring(0, 25) + '...' : value }}
               </span>
-              <span v-else class="text-sm text-gray-400">-</span>
+              <CellEmpty v-else />
             </div>
           </template>
 
@@ -371,11 +364,13 @@
           >
             <div class="max-w-xs">
               <span
+                v-if="getAttributeValue(row, def.id)"
                 class="block truncate text-sm text-gray-700 dark:text-gray-300"
                 :title="getAttributeValue(row, def.id)"
               >
                 {{ getAttributeValue(row, def.id) }}
               </span>
+              <CellEmpty v-else />
             </div>
           </template>
 
@@ -411,7 +406,7 @@
                   v-if="expandedGroupUserId === row.id"
                   class="absolute left-0 top-full z-50 mt-1.5 min-w-[160px] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-xs shadow-xl dark:border-dark-600 dark:bg-dark-700"
                 >
-                  <div class="border-b border-gray-100 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-gray-400 dark:border-dark-600 dark:text-dark-400">
+                  <div class="border-b border-gray-100 px-3 py-1.5 text-xs font-medium uppercase tracking-wider text-gray-400 dark:border-dark-600 dark:text-dark-400">
                     {{ t('admin.users.clickToReplace') }}
                   </div>
                   <div
@@ -442,12 +437,9 @@
                 </div>
               </span>
               <!-- 都没有 -->
-              <span
-                v-if="getUserGroups(row).exclusive.length === 0 && getUserGroups(row).publicGroups.length === 0"
-                class="text-xs text-gray-400 dark:text-dark-500"
-              >-</span>
+              <CellEmpty v-if="getUserGroups(row).exclusive.length === 0 && getUserGroups(row).publicGroups.length === 0" />
             </div>
-            <span v-else class="text-xs text-gray-400 dark:text-dark-500">-</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-subscriptions="{ row }">
@@ -537,7 +529,7 @@
                 >
                   <span
                     v-if="usageSort && usageSort.key === usageKey"
-                    class="text-[10px] normal-case font-medium tracking-normal"
+                    class="text-xs normal-case font-medium tracking-normal"
                   >{{ usageSort.metric === 'today' ? t('admin.users.today') : t('admin.users.total') }}</span>
                   <svg
                     v-if="usageSort && usageSort.key === usageKey"
@@ -587,7 +579,7 @@
                       />
                     </svg>
                   </button>
-                  <div class="mt-1 border-t border-gray-100 px-3 py-1 text-[10px] normal-case tracking-normal text-gray-400 dark:border-dark-700 dark:text-dark-500">
+                  <div class="mt-1 border-t border-gray-100 px-3 py-1 text-xs normal-case tracking-normal text-gray-400 dark:border-dark-700 dark:text-dark-500">
                     {{ t('admin.users.sortCurrentPageOnly') }}
                   </div>
                 </div>
@@ -634,19 +626,17 @@
           </template>
 
           <template #cell-created_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatDateTime(value) }}</span>
+            <span class="text-sm tabular-nums text-gray-500 dark:text-dark-400">{{ formatListDateTime(value) }}</span>
           </template>
 
           <template #cell-last_used_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">
-              {{ value ? formatDateTime(value) : '-' }}
-            </span>
+            <span v-if="value" class="text-sm tabular-nums text-gray-500 dark:text-dark-400">{{ formatListDateTime(value) }}</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-last_active_at="{ value }">
-            <span class="text-sm text-gray-500 dark:text-dark-400">
-              {{ value ? formatDateTime(value) : '-' }}
-            </span>
+            <span v-if="value" class="text-sm tabular-nums text-gray-500 dark:text-dark-400">{{ formatListDateTime(value) }}</span>
+            <CellEmpty v-else />
           </template>
 
           <template #cell-actions="{ row }">
@@ -857,10 +847,10 @@ import { useAuthStore } from '@/stores/auth'
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useTableSelection } from '@/composables/useTableSelection'
-import { formatDateTime } from '@/utils/format'
+import { formatDateTime, formatListDateTime } from '@/utils/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import Icon from '@/components/icons/Icon.vue'
-import { showTipNow, vTip } from '@/utils/tip'
+import { vTip } from '@/utils/tip'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
@@ -875,6 +865,8 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import TableToolbar from '@/components/layout/TableToolbar.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
+import CellEmpty from '@/components/common/CellEmpty.vue'
 import LiveStatusIndicator from '@/components/common/LiveStatusIndicator.vue'
 import PendingChangesPill from '@/components/common/PendingChangesPill.vue'
 import StatusDot from '@/components/common/StatusDot.vue'
@@ -925,11 +917,12 @@ const attributeColumns = computed<Column[]>(() =>
 )
 
 // Get formatted attribute value for display in table
+/** The attribute's text in a row, '' when it has none (the cell then shows the empty "—"). */
 const getAttributeValue = (row: LiveUser, attrId: number): string => {
   const userAttrs = row.attribute_values
-  if (!userAttrs) return '-'
+  if (!userAttrs) return ''
   const value = userAttrs[attrId]
-  if (!value) return '-'
+  if (!value) return ''
 
   // Find definition for this attribute
   const def = attributeDefinitions.value.find(d => d.id === attrId)
@@ -1140,6 +1133,8 @@ const loadInitialSortState = (): { sort_by: string; sort_order: 'asc' | 'desc' }
   }
 }
 const sortState = reactive(loadInitialSortState())
+/** The page's sort, as the table shows it (it owns the sort: the headers follow this). */
+const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }))
 
 // Groups data for the groups column and the existing "authorised group" filter (active only)
 const allGroups = ref<AdminGroup[]>([])
@@ -2026,6 +2021,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* The identity column from 768px: 240px at most (a phone has the shared clamp). */
+@media (min-width: 768px) {
+  .users-identity {
+    max-width: 15rem;
+  }
+}
 /* Cells 12px from their column's edges, as on the accounts page (--cell-pad-x, 20px elsewhere): at 1920 the columns fit
    beside the open navigation and a classic scrollbar, nothing under the frozen actions column (7o-4). */
 .dense-cells :deep(thead th),
@@ -2045,7 +2046,7 @@ onUnmounted(() => {
   border-radius: var(--radius-full);
   background: var(--color-bg-pill-hover);
   color: var(--color-text-primary);
-  font-size: var(--font-size-micro);
+  font-size: var(--font-size-small);
   font-variant-numeric: tabular-nums;
   line-height: 18px;
   text-align: center;

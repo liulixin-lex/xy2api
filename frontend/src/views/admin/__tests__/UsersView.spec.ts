@@ -417,16 +417,22 @@ describe('admin UsersView', () => {
     wrapper.unmount()
   })
 
-  it('keeps a long email to one line, whole in the tip a tap shows (7o-5)', async () => {
+  // Mobile list plan: the frozen identity is the address with the user name under it, no avatar; a cut line shows
+  // whole in the tip a tap opens (7o-5).
+  it('shows the address and the user name in the identity, whole in the tip a tap shows when cut (7o-5)', async () => {
     const email = 'a-very-long-address-for-acceptance@example.test'
-    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42, email })], total: 1, page: 1, page_size: 20, pages: 1 })
+    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42, email, username: 'acceptance' })], total: 1, page: 1, page_size: 20, pages: 1 })
     const wrapper = mountBulkDeleteView()
     await flushPromises()
     document.body.appendChild(wrapper.element)
     const cell = wrapper.get('[data-test="user-email"]')
-    expect(cell.classes()).toContain('truncate')
+    const primary = cell.get('.table-identity__primary')
+    expect(primary.text()).toBe(email)
+    expect(cell.get('.table-identity__secondary').text()).toBe('acceptance')
+    Object.defineProperty(primary.element, 'scrollWidth', { configurable: true, value: 400 })
+    Object.defineProperty(primary.element, 'clientWidth', { configurable: true, value: 160 })
     await cell.trigger('click')
-    expect(document.getElementById('sq-tip')!.textContent).toBe(email)
+    expect(document.getElementById('sq-tip')!.textContent).toBe(`${email}\nacceptance`)
     wrapper.unmount()
   })
 
