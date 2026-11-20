@@ -393,10 +393,12 @@ describe('UsageTable after the re-review', () => {
     const wrapper = mount(UsageTable, { props: { data: [row] as never, ...ADMIN }, global: { stubs: { DataTable: ColumnsStub, Icon: true, Teleport: true } } })
     const actions = wrapper.findComponent(ColumnsStub).props('columns').find((c: { key: string }) => c.key === 'actions')
     expect(actions.class.split(' ')).toEqual(expect.arrayContaining(['w-11', 'min-w-11', '!px-0']))
-    // The header's words never widen the column: read aloud, not shown.
-    const header = wrapper.get('[data-test="actions-header"]')
-    expect(header.get('span').classes()).toEqual(['sr-only'])
-    expect(header.text()).toBe('usage.requestDetail.button')
+    // The header's words never widen or clip in the column: its icon, named by aria-label for screen readers.
+    const header = wrapper.get('[data-test="actions-header"] [data-testid="usage-detail-header"]')
+    expect(header.attributes('role')).toBe('img')
+    expect(header.attributes('aria-label')).toBe('usage.requestDetail.button')
+    expect(header.text()).toBe('')
+    expect(wrapper.find('[data-test="actions-header"] .sr-only').exists()).toBe(false)
   })
 
   it('gives the tablet\'s email a 40px-high target too', () => {

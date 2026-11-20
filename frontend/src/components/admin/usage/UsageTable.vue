@@ -306,8 +306,11 @@
           </div>
         </template>
 
+        <!-- The 44px column's header is the buttons' icon, named for screen readers by aria-label (no clipped text). -->
         <template #header-actions>
-          <span class="sr-only">{{ t('usage.requestDetail.button') }}</span>
+          <span role="img" class="inline-flex w-full justify-center text-gray-400 dark:text-gray-500" :aria-label="t('usage.requestDetail.button')" data-testid="usage-detail-header">
+            <Icon name="document" size="sm" aria-hidden="true" />
+          </span>
         </template>
         <template #cell-actions="{ row }">
           <!-- A 40px button in a block whose negative margins give back 20px: the row stays one text line high. -->
