@@ -589,12 +589,14 @@ describe('admin GroupsView column settings', () => {
   // Mobile list plan, copy: the rate as "1.0x"; the accounts as "available / total", rate-limited ones after it.
   it('writes the rate as 1.5x and the accounts as available / total', async () => {
     listGroups.mockResolvedValue({
-      items: [{ id: 1, name: 'g', platform: 'anthropic', rate_multiplier: 1.5, status: 'active', active_account_count: 2, account_count: 3, rate_limited_account_count: 1, subscription_type: 'standard', is_exclusive: false, sort_order: 0 }],
+      items: [{ id: 1, name: 'g', platform: 'anthropic', rate_multiplier: 1.5, status: 'active', active_account_count: 1234, account_count: 2234, rate_limited_account_count: 1, subscription_type: 'standard', is_exclusive: false, sort_order: 0 }],
       total: 1, page: 1, page_size: 20, pages: 1,
     })
     const wrapper = await mountView()
     expect(wrapper.get('[data-test="rate-cell"]').text()).toBe('1.5x')
     const accounts = wrapper.get('[data-test="group-account-count"]')
-    expect(accounts.findAll(':scope > span').map((el) => el.text())).toEqual(['2', '/', '3', 'admin.groups.accountsLimitedShort'])
+    // Astra review 6: thousands separators, and a right-aligned number column.
+    expect(accounts.findAll(':scope > span').map((el) => el.text())).toEqual(['1,234', '/', '2,234', 'admin.groups.accountsLimitedShort'])
+    expect((wrapper.vm as any).columns.find((col: { key: string }) => col.key === 'account_count').class).toBe('text-right')
   })
 })

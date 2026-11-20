@@ -294,11 +294,11 @@
           <!-- "available / total" on one line (mobile list plan, copy); rate-limited accounts after it when there are any. -->
           <template #cell-account_count="{ row }">
             <span class="whitespace-nowrap text-sm tabular-nums" data-test="group-account-count">
-              <span class="font-medium text-emerald-600 dark:text-emerald-400">{{ row.active_account_count || 0 }}</span>
+              <span class="font-medium text-emerald-600 dark:text-emerald-400">{{ (row.active_account_count || 0).toLocaleString() }}</span>
               <span class="text-gray-400 dark:text-gray-500"> / </span>
-              <span class="text-gray-700 dark:text-gray-300">{{ row.account_count || 0 }}</span>
+              <span class="text-gray-700 dark:text-gray-300">{{ (row.account_count || 0).toLocaleString() }}</span>
               <span v-if="row.rate_limited_account_count" class="ml-1.5 text-xs text-amber-600 dark:text-amber-400">{{
-                t("admin.groups.accountsLimitedShort", { n: row.rate_limited_account_count })
+                t("admin.groups.accountsLimitedShort", { n: row.rate_limited_account_count.toLocaleString() })
               }}</span>
             </span>
           </template>
@@ -4732,7 +4732,8 @@ const allColumns = computed<Column[]>(() => {
     { key: "name", label: t("admin.groups.columns.name"), sortable: true },
     { key: "id", label: t("admin.groups.columns.id"), sortable: true },
     { key: "platform", label: t("admin.groups.columns.platform"), sortable: true },
-    { key: "account_count", label: t("admin.groups.columns.accounts"), sortable: true },
+    // A number column: right-aligned, thousands separators (mobile list plan item 19).
+    { key: "account_count", label: t("admin.groups.columns.accounts"), sortable: true, class: "text-right" },
     { key: "status", label: t("admin.groups.columns.status"), sortable: true, cardHeadEnd: true },
     { key: "actions", label: t("admin.groups.columns.actions"), sortable: false },
   ];
