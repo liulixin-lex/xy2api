@@ -42,7 +42,9 @@
       </div>
     </div>
 
-    <DataTable :columns="columns" :data="orders" :loading="loading">
+    <!-- The table at every width (mobile list plan): on a phone the actions (one to four buttons with text) scroll with
+         the row, as on the orders page's OrderTable, since they do not fit a 44px frozen column. -->
+    <DataTable :columns="columns" :data="orders" :loading="loading" :sticky-actions-column="!phone">
       <template #cell-id="{ value }">
         <span class="font-mono text-sm">#{{ value }}</span>
       </template>
@@ -89,7 +91,7 @@
       </template>
 
       <template #cell-actions="{ row }">
-        <div class="flex items-center gap-2">
+        <div class="order-ops flex items-center gap-2">
           <button
             @click="emit('detail', row)"
             class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700 dark:hover:bg-gray-800/50 dark:hover:text-gray-300"
@@ -145,10 +147,12 @@ import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { usePhoneViewport } from '@/composables/useTableViewport'
 import { statusBadgeClass, canRefund, formatOrderDateTime } from '@/components/payment/orderUtils'
 import { currencySymbol } from '@/components/payment/currency'
 
 const { t } = useI18n()
+const phone = usePhoneViewport()
 
 defineProps<{
   orders: PaymentOrder[]
@@ -239,3 +243,15 @@ function formatDateTime(dateStr: string): string {
   return formatOrderDateTime(dateStr)
 }
 </script>
+
+<style scoped>
+/* Touch (pointer: coarse, mobile list plan): each action 40px to hit, 8px apart (gap-2). */
+@media (pointer: coarse) {
+  .order-ops > button {
+    min-width: 40px;
+    min-height: 40px;
+    justify-content: center;
+  }
+}
+</style>
+

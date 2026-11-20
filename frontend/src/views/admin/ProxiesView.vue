@@ -147,7 +147,6 @@
       <template #table>
         <div ref="proxyTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <DataTable
-          layout="table"
           :scroll-label="t('admin.proxies.title')"
           :columns="columns"
           :data="proxies"

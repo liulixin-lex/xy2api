@@ -176,7 +176,6 @@
         <DataTable
           ref="groupsTableRef"
           class="dense-cells"
-          layout="table"
           :scroll-label="t('admin.groups.title')"
           :columns="columns"
           :data="groups"
@@ -191,7 +190,7 @@
           <!-- The pill inside the cell, so the whole name area opens the full name; on touch 40px high (Astra review 2), its
                negative margins keeping the row's height. -->
           <template #cell-name="{ row, value }">
-            <TableIdentityCell class="max-w-[240px] [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:py-2.5" :primary="value" data-test="group-name">
+            <TableIdentityCell class="!max-w-[240px] [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:py-2.5" :primary="value" data-test="group-name">
               <template #primary><GroupAliasPill :group="row" class="mr-2 align-middle" />{{ value }}</template>
             </TableIdentityCell>
           </template>
@@ -4735,7 +4734,7 @@ const allColumns = computed<Column[]>(() => {
     { key: "platform", label: t("admin.groups.columns.platform"), sortable: true },
     // A number column: right-aligned, thousands separators (mobile list plan item 19).
     { key: "account_count", label: t("admin.groups.columns.accounts"), sortable: true, class: "text-right" },
-    { key: "status", label: t("admin.groups.columns.status"), sortable: true, cardHeadEnd: true },
+    { key: "status", label: t("admin.groups.columns.status"), sortable: true },
     { key: "actions", label: t("admin.groups.columns.actions"), sortable: false },
   ];
   if (authStore.isSimpleMode) return basic;

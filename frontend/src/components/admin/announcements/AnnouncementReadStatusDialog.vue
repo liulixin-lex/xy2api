@@ -24,7 +24,6 @@
       <!-- The same table at every width, framed in the dialog; it scrolls sideways inside, the email frozen. -->
       <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
         <DataTable
-          layout="table"
           :scroll-label="t('admin.announcements.readStatus')"
           :columns="columns"
           :data="items"

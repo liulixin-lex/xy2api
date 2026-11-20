@@ -40,7 +40,6 @@
 
       <template #table>
         <DataTable
-          layout="table"
           :scroll-label="t('admin.announcements.title')"
           :columns="columns"
           :data="announcements"

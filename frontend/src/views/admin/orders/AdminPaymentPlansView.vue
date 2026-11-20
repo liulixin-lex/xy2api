@@ -13,7 +13,6 @@
       <!-- The table at every width (mobile list plan): the ID freezes as the identity; edit and delete scroll with the row
            on a phone, where two do not fit its 44px frozen column. -->
       <DataTable
-        layout="table"
         :scroll-label="t('nav.paymentPlans')"
         :columns="planColumns"
         :data="plans"

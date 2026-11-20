@@ -123,20 +123,6 @@ describe('OpsErrorLogTable i18n keys exist in the errorLog namespace', () => {
   }
 })
 
-// Mobile list plan (step 1): the usage page's errors tab switches to the table at every width; the ops modal keeps its
-// layout until step 2.
-describe('OpsErrorLogTable layout', () => {
-  const DataTableStub = { name: 'DataTable', props: ['layout'], template: '<div />' }
-  const mountWith = (layout?: 'table') => mount(OpsErrorLogTable, {
-    props: { rows: [], total: 0, loading: false, page: 1, pageSize: 20, ...(layout ? { layout } : {}) },
-    global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub, DataTable: DataTableStub } },
-  })
-  it('passes the layout the page asks for, and none otherwise', () => {
-    expect(mountWith('table').findComponent(DataTableStub).props('layout')).toBe('table')
-    expect(mountWith().findComponent(DataTableStub).props('layout')).toBeUndefined()
-  })
-})
-
 // Re-review item 1: the user is the frozen first column on tablets and phones; a long email must not cover the table.
 describe('OpsErrorLogTable user cell width', () => {
   it('caps the user cell at 240px, cutting the email with its whole text in the tip and the balance entry kept', async () => {
@@ -156,15 +142,15 @@ describe('OpsErrorLogTable user cell width', () => {
 })
 
 // Browser acceptance (step 1), items 2 and 5: the details column is 44px with an icon header named for screen readers,
-// its button 40×40; in the table layout the button's block gives back the extra height, in cards it does not.
+// its button 40×40, its block giving back the extra height.
 describe('OpsErrorLogTable details column', () => {
-  const mountWith = (layout: 'table' | 'cards') => mount(OpsErrorLogTable, {
-    props: { rows: [{ id: 9, created_at: '2026-06-05T23:59:50Z' } as OpsErrorLog], total: 1, loading: false, page: 1, pageSize: 20, layout },
+  const mountWith = () => mount(OpsErrorLogTable, {
+    props: { rows: [{ id: 9, created_at: '2026-06-05T23:59:50Z' } as OpsErrorLog], total: 1, loading: false, page: 1, pageSize: 20 },
     global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub, Icon: true } },
   })
 
   it('is a 44px column whose header is an icon, its button 40px and named with the time', async () => {
-    const wrapper = mountWith('table')
+    const wrapper = mountWith()
     const th = wrapper.findAll('th').at(-1)!
     expect(th.classes()).toEqual(expect.arrayContaining(['w-11', 'min-w-11', '!px-0']))
     const header = th.get('[data-testid="error-detail-header"]')
@@ -178,18 +164,13 @@ describe('OpsErrorLogTable details column', () => {
     await button.trigger('click')
     expect(wrapper.emitted('openErrorDetail')).toEqual([[9]])
   })
-
-  it('keeps the cards\' spacing (no negative margin there)', () => {
-    const button = mountWith('cards').get('[data-testid="error-detail-open"]')
-    expect(button.element.parentElement!.classList.contains('-my-2.5')).toBe(false)
-  })
 })
 
 // Acceptance recheck: the status column is a phone default now, so its priority badge is on the first screen: 12px.
 describe('OpsErrorLogTable badges', () => {
   it('draws the priority and the deleted key at 12px', () => {
     const wrapper = mount(OpsErrorLogTable, {
-      props: { rows: [{ id: 1, created_at: '2026-06-05T23:59:50Z', severity: 'P1', status_code: 502, api_key_id: 3, api_key_deleted: true } as OpsErrorLog], total: 1, loading: false, page: 1, pageSize: 20, layout: 'table' },
+      props: { rows: [{ id: 1, created_at: '2026-06-05T23:59:50Z', severity: 'P1', status_code: 502, api_key_id: 3, api_key_deleted: true } as OpsErrorLog], total: 1, loading: false, page: 1, pageSize: 20 },
       global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub, Icon: true } },
     })
     const badge = wrapper.findAll('span').find((el) => el.text() === 'P1')!

@@ -25,7 +25,6 @@
     <div class="overflow-auto">
       <DataTable
         ref="tableRef"
-        layout="table"
         :columns="tableColumns"
         :data="data"
         :row-key="rowKey"

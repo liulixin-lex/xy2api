@@ -189,7 +189,6 @@
       <!-- Subscriptions Table -->
       <template #table>
         <DataTable
-          layout="table"
           :scroll-label="t('admin.subscriptions.title')"
           :columns="columns"
           :data="subscriptions"

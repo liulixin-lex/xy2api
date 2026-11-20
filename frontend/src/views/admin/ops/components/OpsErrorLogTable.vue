@@ -4,7 +4,6 @@
       <IpGeoBatchToolbar :ips="rows.map((r) => r.client_ip)" @failed="emit('ipGeoBatchFailed')" />
 
       <DataTable
-        :layout="layout"
         :columns="columns"
         :data="rows"
         :loading="loading"
@@ -164,7 +163,7 @@
         </template>
         <template #cell-actions="{ row }">
           <!-- A 40px button; in the table its block's negative margins give back 20px, so the row keeps its height. -->
-          <div class="flex justify-center" :class="{ '-my-2.5': layout === 'table' }">
+          <div class="-my-2.5 flex justify-center">
             <button
               type="button"
               class="inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:bg-dark-600 dark:hover:text-primary-400"
@@ -318,8 +317,6 @@ interface Props {
   summaryFirst?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
-  /** DataTable's layout: the usage page's errors tab uses the table at every width (mobile list plan, step 1). */
-  layout?: 'cards' | 'table'
   /** The page's sort as it requests it (API keys): the headers follow it, also while its column is hidden. */
   sortBy?: string
   sortOrder?: 'asc' | 'desc'

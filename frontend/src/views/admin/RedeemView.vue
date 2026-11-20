@@ -68,7 +68,6 @@
 
       <template #table>
         <DataTable
-          layout="table"
           :scroll-label="t('admin.redeem.title')"
           :columns="columns"
           :data="codes"

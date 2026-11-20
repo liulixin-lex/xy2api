@@ -276,7 +276,6 @@ watch(
 
           <OpsErrorLogTable
             class="min-h-0 flex-1"
-            layout="table"
             :scroll-label="modalTitle"
             summary-first
             :rows="rows"

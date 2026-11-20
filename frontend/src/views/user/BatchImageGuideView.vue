@@ -77,7 +77,6 @@
 
       <template #table>
         <DataTable
-          layout="table"
           class="batch-jobs-table"
           :scroll-label="t('batchImageGuide.title')"
           :columns="columns"
