@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { h, nextTick, ref } from 'vue'
@@ -52,5 +55,26 @@ describe('AccountUsageFit', () => {
     expect(shown(wrapper)).toHaveLength(4)
     expect(wrapper.find('[data-test="usage-more"]').exists()).toBe(false)
     wrapper.unmount()
+  })
+
+  // Astra review #9: a single window's chips are in the tip too, and touch has no hover. A tap shows the tip at once
+  // (no hover delay), keyboard focus too; a tap on a control inside does that control's job only.
+  it('shows the details at once on a tap and on keyboard focus, with any number of windows', async () => {
+    const wrapper = mountWith(1)
+    await nextTick()
+    const box = wrapper.get('[data-test="usage-fit"]')
+    expect(box.attributes('tabindex')).toBe('0')
+    await box.trigger('click')
+    expect(document.getElementById('sq-tip')!.hidden).toBe(false)
+    expect(document.getElementById('sq-tip')!.textContent).toBe('W1 · 10%')
+    wrapper.unmount()
+    expect(mountWith(0).get('[data-test="usage-fit"]').attributes('tabindex')).toBeUndefined()
+  })
+
+  it('writes the windows at 12px in the table, each on one line', () => {
+    const file = '../AccountUsageFit.vue'
+    const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8')
+    expect(source).toMatch(/\.usage-fit__inner :deep\(\[class\*='text-\[9px\]'\]\),\s*\.usage-fit__inner :deep\(\[class\*='text-\[10px\]'\]\),\s*\.usage-fit__inner :deep\(\[class\*='text-\[11px\]'\]\) \{\s*font-size: var\(--font-size-small\);/)
+    expect(source).toMatch(/:deep\(\[data-usage-window\] \.w-\\\[32px\\\]\) \{\s*width: auto;\s*min-width: 32px;\s*white-space: nowrap;/)
   })
 })

@@ -1,5 +1,5 @@
 <template>
-  <div class="usage-fit" data-test="usage-fit" v-tip="allTip" @click="foldedCount && showTipNow($event.currentTarget)">
+  <div class="usage-fit sq-focus" data-test="usage-fit" v-tip="allTip" :tabindex="windows.length ? 0 : undefined" @click="reveal">
     <div class="usage-fit__inner"><slot /></div>
     <span v-if="foldedCount" class="usage-fit__more" data-test="usage-more">{{ t('admin.accounts.table.usageMore', { n: foldedCount }) }}</span>
   </div>
@@ -9,8 +9,9 @@
 /**
  * The usage windows column inside the accounts table's fixed 78px row (7e-6, 7g-3). Each window keeps to a single
  * line (its request / token / cost chips go to the tip), so the count decides: up to four windows all show; with more,
- * the first three show and "+N" counts the rest. Hovering the cell lists every window with its chips; with "+N" a tap
- * does too (touch has no hover).
+ * the first three show and "+N" counts the rest. Hovering the cell lists every window with its chips; so does a tap or
+ * click on it, or keyboard focus (touch has no hover; mobile list plan). Its text is 12px, whatever size the windows
+ * set for themselves elsewhere.
  *
  * The windows (UsageProgressBar) sign in through USAGE_WINDOW_FOLD as they mount and leave as they unmount; nothing is
  * measured or observed.
@@ -52,6 +53,12 @@ function windowText(el: HTMLElement): string {
   return parts.join(' · ')
 }
 const allTip = () => windows.value.map(windowText).filter(Boolean).join('\n')
+/** A tap or click shows every window at once; one on a control inside (a refresh) does that control's job only. */
+const reveal = (event: MouseEvent) => {
+  if (!windows.value.length) return
+  if (event.target instanceof Element && event.target.closest('button, a, input')) return
+  showTipNow(event.currentTarget)
+}
 </script>
 
 <style scoped>
@@ -65,7 +72,27 @@ const allTip = () => windows.value.map(windowText).filter(Boolean).join('\n')
 }
 .usage-fit__inner {
   min-height: 0;
+  font-size: var(--font-size-small);
   line-height: 15px;
+}
+/* No text under 12px in the accounts table (mobile list plan): the windows' own 9–11px sizes are raised here only. */
+.usage-fit__inner :deep([class*='text-[9px]']),
+.usage-fit__inner :deep([class*='text-[10px]']),
+.usage-fit__inner :deep([class*='text-[11px]']) {
+  font-size: var(--font-size-small);
+}
+/* At 12px a window keeps to one line: its 32px label and percentage grow instead of wrapping ("7d S", "100%"). */
+.usage-fit__inner :deep([data-usage-window] .w-\[32px\]) {
+  width: auto;
+  min-width: 32px;
+  white-space: nowrap;
+}
+.usage-fit__inner :deep([data-usage-window] span) {
+  white-space: nowrap;
+}
+/* The cell takes keyboard focus for its tip; the ring is drawn inside, the column clips what lies outside it. */
+.usage-fit.sq-focus:focus-visible {
+  outline-offset: -2px;
 }
 /* Compact: one line per window, small gaps, no chips (they are in the tip). */
 .usage-fit__inner :deep(.space-y-1 > :not([hidden]) ~ :not([hidden])),
