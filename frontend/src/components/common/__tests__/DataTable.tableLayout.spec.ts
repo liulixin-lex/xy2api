@@ -226,6 +226,21 @@ describe('DataTable layout="table" below 1024px', () => {
     localStorage.clear()
   })
 
+  // Astra third re-review #2: no `sort` (the table's own order) and `null` (the page's, with no order) differ.
+  it('clears the arrow when a page takes over the sort with no order', async () => {
+    stubPhone()
+    const wrapper = mount(DataTable, { props: { layout: 'table', columns, data: rows(1), rowKey: 'id' } })
+    await wrapper.get('[data-test="sort-name"]').trigger('click')
+    expect(wrapper.get('thead th').attributes('aria-sort')).toBe('ascending')
+    await wrapper.setProps({ sort: null })
+    expect(wrapper.get('thead th').attributes('aria-sort')).toBe('none')
+    await wrapper.setProps({ sort: { key: 'name', order: 'desc' } })
+    expect(wrapper.get('thead th').attributes('aria-sort')).toBe('descending')
+    await wrapper.setProps({ sort: null })
+    expect(wrapper.get('thead th').attributes('aria-sort')).toBe('none')
+    localStorage.clear()
+  })
+
   it('selects only eligible rows and keeps keys from other pages', async () => {
     stubPhone()
     const wrapper = mount(DataTable, {

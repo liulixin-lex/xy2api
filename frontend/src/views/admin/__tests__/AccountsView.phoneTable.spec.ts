@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
@@ -236,5 +239,12 @@ describe('AccountsView on a phone (mobile list plan)', () => {
     expect(document.querySelector('[data-test="menu-edit-groups"]')).toBeNull()
     expect(document.querySelector('[data-test="menu-edit"]')).toBeNull()
     wrapper.unmount()
+  })
+
+  // Astra third re-review #3: a tap on the today cell's padding showed nothing; the padding moves inside its target.
+  it('makes the whole today cell, its padding included, the tap target', () => {
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../AccountsView.vue'), 'utf8')
+    expect(source).toMatch(/:deep\(td\.acol-today_stats\) \{\s*padding: 0;\s*\}/)
+    expect(source).toMatch(/:deep\(td\.acol-today_stats \.today\) \{\s*flex: 1 1 auto;\s*align-content: center;\s*padding: 0 var\(--cell-pad-x\);/)
   })
 })
