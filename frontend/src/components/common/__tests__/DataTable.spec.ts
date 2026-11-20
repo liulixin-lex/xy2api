@@ -93,23 +93,21 @@ describe('DataTable', () => {
     expect(nameHeader.findAll('svg')[1].classes()).toContain('text-primary-600')
   })
 
-  it('renders every row with no virtual padding spacer for small datasets (virtualization off)', async () => {
-    const data = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
+  // In a bounded table region (the only place rows are windowed), up to the threshold every row renders; one more
+  // row turns windowing on (package D review).
+  it('renders every row, no spacer, up to virtualizeThreshold in a bounded region; windows one more', async () => {
+    const rowsOf = (n: number) => Array.from({ length: n }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
     const wrapper = mount(DataTable, {
-      props: {
-        columns: [{ key: 'name', label: 'Name' }],
-        data
-      }
+      props: { columns: [{ key: 'name', label: 'Name' }], data: rowsOf(8), rowKey: 'id', virtualizeThreshold: 8 },
+      global: { provide: { [TABLE_REGION_KEY as symbol]: ref(true) } }
     })
-
     await wrapper.vm.$nextTick()
-
-    // Virtualization is OFF for a small list…
     expect((wrapper.vm as any).shouldVirtualize).toBe(false)
-    // …every row is in the DOM…
-    expect(wrapper.findAll('tbody tr[data-index]')).toHaveLength(data.length)
-    // …and there are no aria-hidden virtual padding spacer rows.
+    expect(wrapper.findAll('tbody tr[data-index]')).toHaveLength(8)
     expect(wrapper.findAll('tbody tr[aria-hidden="true"]')).toHaveLength(0)
+
+    await wrapper.setProps({ data: rowsOf(9) })
+    expect((wrapper.vm as any).shouldVirtualize).toBe(true)
   })
 
   it('switches to windowed rendering once row count exceeds virtualizeThreshold (in a bounded table region)', async () => {
