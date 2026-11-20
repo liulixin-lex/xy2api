@@ -160,6 +160,24 @@ export function formatDateOnly(date: string | Date | null | undefined): string {
 }
 
 /**
+ * A date and time in a list (mobile list plan, copy): "11-20 06:54:11" within the current year, "2025-11-20 06:54:11"
+ * before it, the same digits in every language; `seconds: false` leaves the seconds out. Empty for no or a bad date.
+ */
+export function formatListDateTime(
+  date: string | number | Date | null | undefined,
+  options: { seconds?: boolean } = {},
+  now: Date = new Date()
+): string {
+  if (date === null || date === undefined || date === '') return ''
+  const d = new Date(date)
+  if (isNaN(d.getTime())) return ''
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}${options.seconds === false ? '' : `:${pad(d.getSeconds())}`}`
+  const day = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  return d.getFullYear() === now.getFullYear() ? `${day} ${time}` : `${d.getFullYear()}-${day} ${time}`
+}
+
+/**
  * 格式化日期时间（完整格式）
  * @param date 日期字符串或 Date 对象
  * @param options Intl.DateTimeFormatOptions

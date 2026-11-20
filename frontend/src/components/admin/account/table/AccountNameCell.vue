@@ -1,5 +1,5 @@
 <template>
-  <div class="account-name" :title="title">
+  <div class="account-name" v-tip="title" @click="reveal">
     <a
       v-if="homepage"
       :href="homepage"
@@ -14,12 +14,19 @@
 </template>
 
 <script setup lang="ts">
-/** Name column (prototype): the account name, and "platform · type" below it. Email and parent show on hover. */
+/**
+ * Name column (prototype): the account name, and "platform · type" below it, each cut with "…" at the column's width
+ * (on a phone the frozen identity column, mobile list plan). The whole name, email, parent and home page show in the
+ * tip on hover, or at once on a tap or click (touch has no hover). On a touch screen the first tap on a linked name
+ * shows the tip, the home page in it; a second tap, with the tip showing, opens the site.
+ */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import { platformLabel } from '@/utils/platformColors'
 import { sanitizeUrl } from '@/utils/url'
+import { usePointerCoarse } from '@/composables/usePointerCoarse'
+import { isTipShowing, showTipNow, vTip } from '@/utils/tip'
 import { accountTypeLabel } from './accountLabels'
 
 const props = defineProps<{ account: Account }>()
@@ -43,6 +50,14 @@ const email = computed(() => {
 const title = computed(() =>
   [props.account.name, email.value, props.account.parent_chatgpt_account_id, homepage.value].filter(Boolean).join('\n')
 )
+const coarse = usePointerCoarse()
+/** A tap or click shows the tip at once. A mouse click on the link opens the site; a tap does once the tip shows. */
+const reveal = (event: MouseEvent) => {
+  const onLink = event.target instanceof Element && !!event.target.closest('a')
+  if (onLink && (!coarse.value || isTipShowing(event.currentTarget))) return
+  if (onLink) event.preventDefault()
+  showTipNow(event.currentTarget)
+}
 </script>
 
 <style scoped>
@@ -68,6 +83,18 @@ const title = computed(() =>
 @media (hover: hover) {
   .account-name__link:hover {
     text-decoration: underline;
+  }
+}
+/* Touch: the link's hit area is the whole name block and 4px past it (44px with the two lines); the first tap shows
+   the tip, the next opens the site (reveal). */
+@media (pointer: coarse) {
+  .account-name {
+    position: relative;
+  }
+  .account-name__link::after {
+    position: absolute;
+    inset: -4px 0;
+    content: '';
   }
 }
 .account-name__sub {

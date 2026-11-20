@@ -106,6 +106,89 @@ describe('DataTable layout="table" below 1024px', () => {
     expect(th.attributes('aria-sort')).toBe('descending')
   })
 
+  // Astra review #2: a page's own sort stays the sort when its column is hidden; only a header click stores a choice.
+  it('follows the page\'s sort whatever columns are shown, and stores only a header click', async () => {
+    stubPhone()
+    const both = [{ key: 'id', label: 'ID', sortable: true }, { key: 'last_used_at', label: 'Last used', sortable: true }]
+    localStorage.setItem('table-sort', JSON.stringify({ key: 'id', order: 'asc' }))
+    const wrapper = mount(DataTable, {
+      props: { layout: 'table', columns: both, data: rows(1), rowKey: 'id', serverSideSort: true, sort: { key: 'id', order: 'asc' }, sortStorageKey: 'table-sort', defaultSortKey: 'last_used_at', defaultSortOrder: 'desc' }
+    })
+    const ariaSort = () => Object.fromEntries(wrapper.findAll('thead th').map((th) => [th.text(), th.attributes('aria-sort')]))
+    expect(ariaSort()).toEqual({ ID: 'ascending', 'Last used': 'none' })
+    // The other width hides the ID column: nothing else takes the arrow, nothing is emitted or stored.
+    await wrapper.setProps({ columns: [both[1]] })
+    expect(ariaSort()).toEqual({ 'Last used': 'none' })
+    expect(wrapper.emitted('sort')).toBeUndefined()
+    expect(JSON.parse(localStorage.getItem('table-sort')!)).toEqual({ key: 'id', order: 'asc' })
+    await wrapper.setProps({ columns: both })
+    expect(ariaSort()).toEqual({ ID: 'ascending', 'Last used': 'none' })
+    // A header click is the user's choice: emitted and stored.
+    await wrapper.get('[data-test="sort-last_used_at"]').trigger('click')
+    expect(wrapper.emitted('sort')).toEqual([['last_used_at', 'asc']])
+    expect(JSON.parse(localStorage.getItem('table-sort')!)).toEqual({ key: 'last_used_at', order: 'asc' })
+    localStorage.clear()
+  })
+
+  // Astra review #3: keyboard focus under a frozen column. The wrapper's scroll padding is the frozen widths and the
+  // header; a control the browser leaves partly covered is scrolled clear.
+  it('keeps keyboard focus clear of the frozen columns and the header', async () => {
+    stubPhone()
+    const rect = (left: number, width: number, top = 0, height = 40) => () => ({ left, width, right: left + width, top, height, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect
+    const wrapper = mount(DataTable, {
+      attachTo: document.body,
+      props: { layout: 'table', columns: [{ key: 'name', label: 'Name' }, { key: 'state', label: 'State' }, { key: 'actions', label: '' }], data: rows(1), rowKey: 'id', selectable: true },
+      slots: { 'cell-state': '<button data-test="switch">s</button>', 'cell-actions': '<button>⋯</button>' }
+    })
+    const box = wrapper.get('.table-wrapper').element as HTMLElement
+    const heads = box.querySelectorAll<HTMLElement>('thead th')
+    heads[0].getBoundingClientRect = rect(0, 44)
+    heads[1].getBoundingClientRect = rect(44, 140)
+    heads[3].getBoundingClientRect = rect(346, 44)
+    box.querySelector<HTMLElement>('thead')!.getBoundingClientRect = rect(0, 390, 0, 45)
+    box.getBoundingClientRect = rect(0, 390, 0, 600)
+    Object.defineProperty(box, 'clientWidth', { configurable: true, get: () => 390 })
+    Object.defineProperty(box, 'clientHeight', { configurable: true, get: () => 600 })
+    let left = 100
+    Object.defineProperty(box, 'scrollLeft', { configurable: true, get: () => left, set: (value: number) => { left = value } })
+    window.dispatchEvent(new Event('resize'))
+    await wrapper.setProps({ data: rows(1, 2) })
+    await nextTick()
+    await nextTick()
+    expect(box.style.scrollPaddingLeft).toBe('184px')
+    expect(box.style.scrollPaddingRight).toBe('44px')
+    expect(box.style.scrollPaddingTop).toBe('45px')
+
+    const control = box.querySelector<HTMLElement>('[data-test="switch"]')!
+    control.matches = ((selector: string) => selector === ':focus-visible') as typeof control.matches
+    // Under the frozen name column (184px): scrolled back by the covered part and a 4px gap.
+    control.getBoundingClientRect = rect(160, 28, 100, 28)
+    control.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    expect(left).toBe(100 - (184 - 160 + 4))
+    // Under the frozen "⋯" (from 346px): scrolled on by the covered part and the gap.
+    control.getBoundingClientRect = rect(330, 28, 100, 28)
+    control.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    expect(left).toBe(72 + (358 - 346 + 4))
+    wrapper.unmount()
+  })
+
+  // Opus review, suggestion 5: a table area that scrolls sideways is a named region that takes keyboard focus.
+  it('names its scroll area and lets it take keyboard focus while it scrolls sideways', async () => {
+    stubPhone()
+    const wrapper = mount(DataTable, { props: { layout: 'table', scrollLabel: 'Accounts', columns, data: rows(1), rowKey: 'id' } })
+    const box = wrapper.get('.table-wrapper')
+    expect(box.attributes('role')).toBe('region')
+    expect(box.attributes('aria-label')).toBe('Accounts')
+    expect(box.attributes('tabindex')).toBeUndefined()
+    Object.defineProperty(box.element, 'clientWidth', { configurable: true, get: () => 390 })
+    Object.defineProperty(box.element, 'scrollWidth', { configurable: true, get: () => 900 })
+    await wrapper.setProps({ data: rows(1, 2) })
+    await nextTick()
+    await nextTick()
+    expect(box.attributes('tabindex')).toBe('0')
+    expect(mount(DataTable, { props: { layout: 'table', columns, data: rows(1) } }).get('.table-wrapper').attributes('role')).toBeUndefined()
+  })
+
   it('selects only eligible rows and keeps keys from other pages', async () => {
     stubPhone()
     const wrapper = mount(DataTable, {
@@ -156,9 +239,15 @@ describe('DataTable layout="table" below 1024px', () => {
     await nextTick()
     expect((natural.findComponent(DataTable).vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(false)
     expect(natural.findAll('tbody tr[data-row-id]')).toHaveLength(12)
-    // Outside TablePageLayout below 1024px: the page scrolls, no windowing.
+    // Outside TablePageLayout the page scrolls, no windowing: on a phone and on a desktop alike (Astra review #8).
     const alone = mount(DataTable, { props: { layout: 'table', columns, data, rowKey: 'id', virtualizeThreshold: 3 } })
     expect((alone.vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(false)
+    Object.defineProperty(window, 'matchMedia', { writable: true, value: () => ({ matches: true, media: '', addEventListener: vi.fn(), removeEventListener: vi.fn() }) })
+    const wide = mount(DataTable, { props: { layout: 'table', columns, data, rowKey: 'id', virtualizeThreshold: 3 } })
+    expect((wide.vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(false)
+    // The cards layout keeps its desktop rule.
+    const legacy = mount(DataTable, { props: { columns, data, rowKey: 'id', virtualizeThreshold: 3 } })
+    expect((legacy.vm as unknown as { shouldVirtualize: boolean }).shouldVirtualize).toBe(true)
   })
 
   it('tracks its size while mounted: the frozen columns\' edge line follows the sideways scroll', async () => {
@@ -199,14 +288,24 @@ describe('touch and phone sizes', () => {
     const coarse = table.slice(table.indexOf('@media (pointer: coarse) {\n  .dt-layout-table'))
     expect(coarse).toMatch(/\.dt-layout-table :deep\(tbody td\) \{\s*height: 48px;/)
     expect(coarse).toMatch(/\.dt-layout-table \.sticky-header-cell \{\s*height: 40px;/)
-    expect(coarse).toMatch(/\.dt-layout-table :deep\(\.dt-check\) \{[^}]*width: 44px;[^}]*height: 48px;/)
+    expect(coarse).toMatch(/\.table-wrapper\.dt-builtin-select :deep\(tbody \.dt-check\) \{\s*min-height: 48px;/)
+    // The built-in check box column is exactly 44px whatever padding the page gives cells (Astra review #7).
+    expect(table).toMatch(/\.table-wrapper\.dt-builtin-select :deep\(\.dt-select\) \{\s*box-sizing: border-box;\s*width: 44px;\s*min-width: 44px;\s*max-width: 44px;\s*padding: 0;/)
+    expect(table).toMatch(/\.table-wrapper\.dt-builtin-select \{\s*--select-col-width: 44px;/)
     const phone = table.slice(table.indexOf('@media (max-width: 767px) {\n  .dt-layout-table'))
     expect(phone).toMatch(/--table-identity-width: clamp\(120px, 36vw, 160px\);/)
     expect(phone).toMatch(/:deep\(\.sticky-col-right\) \{\s*width: 44px;/)
   })
   it('gives the toolbar 16px fields on touch and 40px buttons on any coarse pointer', () => {
     const toolbar = read('../../layout/TableToolbar.vue')
-    expect(toolbar).toMatch(/@media \(pointer: coarse\) \{\s*\.table-toolbar--compact :deep\(\.table-toolbar__input\) \{\s*font-size: 16px;/)
+    expect(toolbar).toMatch(/@media \(pointer: coarse\) \{\s*\.table-toolbar--compact :deep\(\.table-toolbar__input\) \{\s*height: 40px;\s*font-size: 16px;/)
+    // The shared Select: the sm trigger 40px on touch, the dropdown's search box 16px (no zoom on focus), sm options 40px.
+    const select = read('../Select.vue')
+    expect(select).toMatch(/@media \(pointer: coarse\) \{\s*\.select-trigger\.select-trigger--sm \{\s*height: 40px;/)
+    const portal = select.slice(select.lastIndexOf('@media (pointer: coarse) {'))
+    expect(portal).toMatch(/^@media \(pointer: coarse\) \{\s*\.select-dropdown-portal \.select-search-input \{\s*font-size: 16px;\s*\}\s*\.select-dropdown-portal--sm \.select-option \{\s*min-height: 40px;/)
+    // Last in the sheet: nothing after it sets the search box's size again.
+    expect(portal.slice(portal.indexOf('}\n}'))).not.toContain('.select-search-input {')
     expect(toolbar).toMatch(/@media \(any-pointer: coarse\) \{\s*\.table-toolbar--compact :deep\(\.table-toolbar__btn\) \{\s*min-height: 40px;/)
   })
 })

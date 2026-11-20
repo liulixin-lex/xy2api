@@ -52,15 +52,24 @@ describe('AccountColumnSettings', () => {
     expect(rowLabels(wrapper)).toEqual(['Status', 'Last used', 'ID'])
   })
 
-  it('toggles visibility from the label and only offers "restore default columns" when visibility or order differs from the default', async () => {
+  // Two memories (mobile list plan): "restore default columns" restores this width's shown columns only, the shared
+  // order has its own "restore default order"; each shows only when there is something to restore.
+  it('toggles visibility from the label; offers each reset only when its part differs from the default', async () => {
     const wrapper = mountSettings()
     await wrapper.findAll('[data-test="column-setting"] button')[1].trigger('click')
     expect(wrapper.emitted('toggle')).toEqual([['status']])
     expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="reset-column-order"]').exists()).toBe(false)
 
-    await wrapper.setProps({ customized: true })
+    await wrapper.setProps({ columnsCustomized: true })
+    expect(wrapper.find('[data-test="reset-column-order"]').exists()).toBe(false)
     await wrapper.get('[data-test="reset-columns"]').trigger('click')
     expect(wrapper.emitted('reset')).toEqual([[]])
+
+    await wrapper.setProps({ columnsCustomized: false, orderCustomized: true })
+    expect(wrapper.find('[data-test="reset-columns"]').exists()).toBe(false)
+    await wrapper.get('[data-test="reset-column-order"]').trigger('click')
+    expect(wrapper.emitted('reset-order')).toEqual([[]])
   })
 
   it('follows a new order from the parent, for example after a reset', async () => {

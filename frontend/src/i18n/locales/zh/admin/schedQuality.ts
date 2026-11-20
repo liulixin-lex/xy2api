@@ -64,7 +64,7 @@ export default {
       proxy: '代理',
     },
     goto: {
-      iq: '智商检测',
+      iq: 'IQ 检测',
       parent: '母账号',
       edit: '编辑',
     },

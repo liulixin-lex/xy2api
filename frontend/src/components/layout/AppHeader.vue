@@ -24,7 +24,9 @@
         </div>
       </div>
 
-      <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
+      <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown. They keep their size; below
+           1280px (a tablet, or a desktop beside the open navigation) the docs and model plaza links, the frozen amount
+           and the user's name fold to their icons, the balance and the avatar, so the page's name keeps its room. -->
       <div class="flex shrink-0 items-center gap-1 sm:gap-3">
         <!-- Page search (Ctrl/⌘K) -->
         <button
@@ -37,7 +39,7 @@
           @click="openPalette"
         >
           <Icon name="search" size="sm" />
-          <kbd class="hidden rounded border border-gray-200 px-1.5 text-[11px] font-medium leading-5 dark:border-dark-600 xl:inline">{{ commandShortcut }}</kbd>
+          <kbd class="hidden rounded border border-gray-200 px-1.5 text-xs font-medium leading-5 dark:border-dark-600 xl:inline">{{ commandShortcut }}</kbd>
         </button>
 
         <!-- Announcement Bell -->
@@ -52,7 +54,7 @@
           class="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
         >
           <Icon name="book" size="sm" />
-          <span class="hidden sm:inline">{{ t('nav.docs') }}</span>
+          <span class="hidden xl:inline">{{ t('nav.docs') }}</span>
         </a>
 
         <!-- Model Plaza Entry (icon only below sm) -->
@@ -64,7 +66,7 @@
           class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
         >
           <Icon name="grid" size="sm" />
-          <span class="hidden sm:inline">{{ t('nav.modelPlaza') }}</span>
+          <span class="hidden xl:inline">{{ t('nav.modelPlaza') }}</span>
         </router-link>
 
         <!-- Language Switcher -->
@@ -96,7 +98,7 @@
           </span>
           <span
             v-if="frozenBalance > 0"
-            class="rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
+            class="hidden rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200 xl:inline"
           >
             {{ balanceFrozenLabel }}
           </span>
@@ -136,15 +138,15 @@
               >
               <span v-else>{{ userInitials }}</span>
             </div>
-            <div class="hidden text-left md:block">
-              <div class="text-sm font-medium text-gray-900 dark:text-white">
+            <div class="hidden min-w-0 max-w-[10rem] text-left xl:block">
+              <div class="truncate text-sm font-medium text-gray-900 dark:text-white">
                 {{ displayName }}
               </div>
-              <div class="text-xs text-gray-500 dark:text-dark-400">
+              <div class="truncate text-xs text-gray-500 dark:text-dark-400">
                 {{ t('admin.users.roles.' + user.role) }}
               </div>
             </div>
-            <Icon name="chevronDown" size="sm" class="hidden text-gray-400 md:block" />
+            <Icon name="chevronDown" size="sm" class="hidden text-gray-400 xl:block" />
           </button>
 
           <!-- Dropdown Menu -->

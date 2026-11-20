@@ -154,6 +154,11 @@
       'dt-layout-table': layout === 'table',
       'dt-builtin-select': layout === 'table' && selectable
     }"
+    :style="freezePadding"
+    :tabindex="scrollLabel && isScrollable ? 0 : undefined"
+    :role="scrollLabel ? 'region' : undefined"
+    :aria-label="scrollLabel || undefined"
+    @focusin="revealFocused"
     :aria-busy="loading ? 'true' : undefined"
   >
     <!-- Reload with rows on screen: a thin bar on the top edge of the table; it takes no layout space. -->
@@ -167,7 +172,7 @@
             v-if="selectable && rowIndex === 0"
             scope="col"
             :rowspan="headerRows.length"
-            :class="['sticky-header-cell w-11 min-w-11 px-3 py-3 text-center', builtinSelectStickyClass]"
+            :class="['dt-select sticky-header-cell w-11 min-w-11 px-3 py-3 text-center', builtinSelectStickyClass]"
           >
             <label class="dt-check">
               <input
@@ -255,7 +260,7 @@
       <tbody class="table-body bg-surface">
         <!-- Loading skeleton: only while there is nothing to show yet -->
         <tr v-if="showSkeleton" v-for="i in 5" :key="i" class="table-row-border">
-          <td v-if="selectable" :class="['w-11 min-w-11 px-3 py-4', builtinSelectStickyClass]">
+          <td v-if="selectable" :class="['dt-select w-11 min-w-11 px-3 py-4', builtinSelectStickyClass]">
             <div class="mx-auto h-4 w-4 animate-pulse rounded bg-surface-pill"></div>
           </td>
           <td v-for="column in columns" :key="column.key" :class="['whitespace-nowrap py-4', getAdaptivePaddingClass()]">
@@ -379,10 +384,60 @@ const observeElementRectNonZero = (
   if (rect.height > 0) cb(rect)
 })
 
+/**
+ * What the frozen parts cover of the scroll area: the left frozen columns, the right one and the sticky header. The
+ * wrapper's scroll padding keeps them out of the area a focused cell is scrolled into, so keyboard focus never sits
+ * under a frozen column or the header (mobile list plan; Astra review #3).
+ */
+const freezeInsets = ref({ left: 0, right: 0, top: 0 })
+const freezePadding = computed(() => ({
+  scrollPaddingLeft: `${freezeInsets.value.left}px`,
+  scrollPaddingRight: `${freezeInsets.value.right}px`,
+  scrollPaddingTop: `${freezeInsets.value.top}px`
+}))
+const measureFreeze = (wrapper: HTMLElement) => {
+  const firstRow = wrapper.querySelector<HTMLElement>(':scope > table > thead > tr')
+  const width = (el: Element) => el.getBoundingClientRect().width
+  const left = Array.from(firstRow?.querySelectorAll('.sticky-col-left, .sticky-col-left-first, .sticky-col-left-second') ?? []).reduce((sum, th) => sum + width(th), 0)
+  const rightCell = firstRow?.querySelector('.sticky-col-right')
+  const next = {
+    left: Math.round(left),
+    right: Math.round(rightCell ? width(rightCell) : 0),
+    top: Math.round(wrapper.querySelector<HTMLElement>(':scope > table > thead')?.getBoundingClientRect().height ?? 0)
+  }
+  const now = freezeInsets.value
+  if (now.left !== next.left || now.right !== next.right || now.top !== next.top) freezeInsets.value = next
+}
+
+/**
+ * Keyboard focus on a control in an unfrozen cell: when the browser's own scroll leaves part of it under a frozen
+ * column or the header, the wrapper scrolls by the rest, so the ring and the control are whole in view.
+ */
+const REVEAL_GAP = 4
+function revealFocused(event: FocusEvent) {
+  const wrapper = tableWrapperRef.value
+  const target = event.target
+  if (!wrapper || !(target instanceof HTMLElement) || !target.matches(':focus-visible')) return
+  const cell = target.closest('td, th')
+  if (!cell || cell.classList.contains('sticky-col') || cell.classList.contains('sticky-header-cell')) return
+  const box = wrapper.getBoundingClientRect()
+  const rect = target.getBoundingClientRect()
+  const insets = freezeInsets.value
+  const left = box.left + insets.left
+  const right = box.left + wrapper.clientWidth - insets.right
+  if (rect.left < left) wrapper.scrollLeft -= left - rect.left + REVEAL_GAP
+  else if (rect.right > right) wrapper.scrollLeft += Math.min(rect.right - right + REVEAL_GAP, rect.left - left)
+  const top = box.top + insets.top
+  const bottom = box.top + wrapper.clientHeight
+  if (rect.top < top) wrapper.scrollTop -= top - rect.top + REVEAL_GAP
+  else if (rect.bottom > bottom) wrapper.scrollTop += rect.bottom - bottom + REVEAL_GAP
+}
+
 // 检查是否可滚动
 const checkScrollable = () => {
   if (tableWrapperRef.value) {
     isScrollable.value = tableWrapperRef.value.scrollWidth > tableWrapperRef.value.clientWidth
+    measureFreeze(tableWrapperRef.value)
   }
 }
 
@@ -514,6 +569,11 @@ interface Props {
    * column 44px. `cards` is the old narrow layout, kept only until every page has moved (then it and this prop go).
    */
   layout?: 'cards' | 'table'
+  /**
+   * The table's name for a screen reader (mobile list plan): the scroll area is a named region, and while it scrolls
+   * sideways it takes keyboard focus, so the arrow keys can scroll it.
+   */
+  scrollLabel?: string
   columns: Column[]
   data: any[]
   loading?: boolean
@@ -527,6 +587,12 @@ interface Props {
    */
   defaultSortKey?: string
   defaultSortOrder?: 'asc' | 'desc'
+  /**
+   * The page's own sort (server-side sorting, mobile list plan): the headers show it and the table keeps no sort of its
+   * own, so hiding the sorted column (another width's columns) changes no request, no stored preference and no other
+   * header; the column shows its arrow again when it is back. A header click still emits `sort` and stores the choice.
+   */
+  sort?: { key: string; order: 'asc' | 'desc' } | null
   /**
    * Persist sort state (key + order) to localStorage using this key.
    * If provided, DataTable will load the stored sort state on mount.
@@ -575,6 +641,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   layout: 'cards',
+  sort: undefined,
   loading: false,
   stickyFirstColumn: true,
   stickyActionsColumn: true,
@@ -589,9 +656,13 @@ const props = withDefaults(defineProps<Props>(), {
 
 /** The table is mounted: always in the table layout, from 1024px in the cards layout. */
 const showsTable = computed(() => props.layout === 'table' || isDesktopViewport.value)
-/** Below 1024px rows are windowed only inside a bounded table region (TablePageLayout); a page that scrolls renders them all. */
+/**
+ * Where rows may be windowed. The table layout: only inside a bounded table region, at every width (TablePageLayout's
+ * one decision, useTableRegion); a table outside it, or while the page scrolls, renders every row. The cards layout
+ * keeps its rule: from 1024px.
+ */
 const tableRegion = inject(TABLE_REGION_KEY, null)
-const windowedHere = computed(() => isDesktopViewport.value || (props.layout === 'table' && tableRegion?.value === true))
+const windowedHere = computed(() => (props.layout === 'table' ? tableRegion?.value === true : isDesktopViewport.value))
 
 // A reload keeps the rows it already has (same DOM nodes, same scroll position) and shows a thin progress bar; the
 // skeleton is only for a load with nothing on screen yet. The table stays clickable throughout (no inert).
@@ -849,6 +920,8 @@ const handleSort = (key: string) => {
     newOrder = sortOrder.value === 'asc' ? 'desc' : 'asc'
   }
 
+  // A header click is the user's choice: the one place the sort is stored.
+  writePersistedSortState({ key, order: newOrder })
   if (props.serverSideSort) {
     // Server-side sort mode: emit event and update internal state for UI feedback
     sortKey.value = key
@@ -1165,18 +1238,28 @@ const getAdaptivePaddingClass = () => {
 const adaptivePaddingClass = computed(() => getAdaptivePaddingClass())
 const stickyColumnClasses = computed(() => props.columns.map((column, index) => getStickyColumnClass(column, index)))
 
-// Init + keep persisted sort state consistent with current columns
-const didInitSort = ref(false)
+// Init + keep the sort consistent with the current columns (a sort the table owns)
+/** The page owns the sort: the headers follow it, whatever columns are shown. */
+const pageOwnsSort = computed(() => props.sort !== undefined)
+watch(
+  () => props.sort,
+  (sort) => {
+    if (!pageOwnsSort.value) return
+    sortKey.value = sort?.key ?? ''
+    sortOrder.value = sort?.order ?? 'asc'
+  },
+  { immediate: true, deep: true }
+)
 
 onMounted(() => {
-  const initial = resolveInitialSortState()
-  applySortState(initial)
-  didInitSort.value = true
+  if (!pageOwnsSort.value) applySortState(resolveInitialSortState())
 })
 
 watch(
   columnsSignature,
   () => {
+    // A column shown or hidden changes nothing in a sort the page owns (only whether its header shows the arrow).
+    if (pageOwnsSort.value) return
     // If current sort key is no longer sortable/visible, fall back to default/persisted.
     const normalized = normalizeSortKey(sortKey.value)
     if (!sortKey.value) {
@@ -1194,18 +1277,6 @@ watch(
         sortOrder.value = 'asc'
       }
     }
-  },
-  { flush: 'post' }
-)
-
-watch(
-  [sortKey, sortOrder],
-  ([nextKey, nextOrder]) => {
-    if (!didInitSort.value) return
-    if (!props.sortStorageKey) return
-    const key = normalizeSortKey(nextKey)
-    if (!key) return
-    writePersistedSortState({ key, order: normalizeSortOrder(nextOrder) })
   },
   { flush: 'post' }
 )
@@ -1329,10 +1400,32 @@ defineExpose({
 .is-scrollable :deep(.sticky-col-right) {
   box-shadow: inset 1px 0 0 var(--color-line-strong);
 }
+/* The scroll area itself takes keyboard focus while it scrolls sideways (scrollLabel): its ring is drawn inside. */
+.table-wrapper:focus-visible {
+  outline: 2px solid theme('colors.primary.500');
+  outline-offset: -2px;
+}
 /* ---- The table layout (mobile list plan) ---- */
-/* The built-in check box column is 44px (w-11): the first column freezes right after it. */
+/* The built-in check box column is exactly 44px, its border box whatever padding the page gives cells (TablePageLayout
+   has 20px): the first column freezes right after it, at --select-col-width, the two meeting without overlap. The
+   check box sits in a label as big as the cell. */
 .table-wrapper.dt-builtin-select {
   --select-col-width: 44px;
+}
+.table-wrapper.dt-builtin-select :deep(.dt-select) {
+  box-sizing: border-box;
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  padding: 0;
+}
+.table-wrapper.dt-builtin-select :deep(.dt-check) {
+  display: flex;
+  width: 44px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 /* A sortable header is one button across its cell: the button keeps the header's look, its ::after takes the whole
    cell (the th is sticky, so positioned), and keyboard focus rings the cell. */
@@ -1398,19 +1491,9 @@ defineExpose({
   .dt-layout-table .sticky-header-cell {
     height: 40px;
   }
-  /* The built-in check boxes sit in a label as big as their cell (44 x 48 in the body, 44 x 40 in the header). */
-  .dt-layout-table :deep(.dt-check) {
-    display: inline-flex;
-    width: 44px;
-    height: 48px;
-    margin: -16px -12px;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-  }
-  .dt-layout-table thead :deep(.dt-check) {
-    height: 40px;
-    margin: -12px;
+  /* The built-in check boxes' labels: 48px high in the body, 40px in the header. */
+  .table-wrapper.dt-builtin-select :deep(tbody .dt-check) {
+    min-height: 48px;
   }
 }
 /* Reload progress: a 2px bar on the top edge of the table or card list in the primary colour. It never takes layout
@@ -1607,6 +1690,25 @@ defineExpose({
 }
 .dark .table-wrapper::-webkit-scrollbar-thumb:hover {
   background-color: rgba(209, 213, 219, 0.9) !important;
+}
+
+/* The corner where the two scrollbars meet takes the table's surface, not the browser's white (both themes). */
+.table-wrapper::-webkit-scrollbar-corner {
+  background-color: var(--color-bg-surface) !important;
+}
+
+/* Touch (mobile list plan): a finger scrolls the table itself, so the bars are 6px hints, not 12px targets. */
+@media (pointer: coarse) {
+  .table-wrapper {
+    scrollbar-width: thin !important;
+  }
+  .table-wrapper::-webkit-scrollbar {
+    width: 6px !important;
+    height: 6px !important;
+  }
+  .table-wrapper::-webkit-scrollbar-thumb {
+    border-width: 1px !important;
+  }
 }
 
 /* 3. 仅给真正的 Firefox 留的后路 */

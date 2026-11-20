@@ -210,6 +210,8 @@ describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
 // 账号行展示
 const mountViewWithRow = () =>
   mount(AccountsView, {
+    // In the document, so a tapped cell's tip can show.
+    attachTo: document.body,
     global: {
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
@@ -291,8 +293,9 @@ describe('admin AccountsView — 账号行展示', () => {
     const wrapper = mountViewWithRow()
     await flushPromises()
 
-    // 1. 名称单元格的悬停提示通过 OR 兜底带上 parent_email 和母账号 ChatGPT ID（第二行是「平台 · 类型」）
-    const title = wrapper.get('[data-test="account-name"]').element.closest('.account-name')!.getAttribute('title')
+    // 1. 名称单元格的提示（悬停或点按即显）通过 OR 兜底带上 parent_email 和母账号 ChatGPT ID（第二行是「平台 · 类型」）
+    ;(wrapper.get('[data-test="account-name"]').element.closest('.account-name') as HTMLElement).click()
+    const title = document.querySelector('[role="tooltip"]')!.textContent
     expect(title).toContain('parent@example.com')
     expect(title).toContain('chatgpt-abc123')
 
@@ -332,7 +335,9 @@ describe('admin AccountsView — 账号行展示', () => {
       rel: 'noopener noreferrer',
     })
     expect(link.classes()).toContain('account-name__link')
-    expect(link.element.closest('.account-name')!.getAttribute('title')).toContain('https://relay.example.com')
+    // A tap beside the link (not on it) shows the tip with the site at once.
+    ;(link.element.closest('.account-name')!.querySelector('.account-name__sub') as HTMLElement).click()
+    expect(document.querySelector('[role="tooltip"]')!.textContent).toContain('https://relay.example.com')
     expect(wrapper.text()).toContain('oauth-account')
     expect(wrapper.text()).toContain('invalid-url')
 

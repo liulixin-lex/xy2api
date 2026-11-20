@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout class="accounts-layout">
+    <TablePageLayout class="accounts-layout" table-layout>
       <template #filters>
         <AccountsToolbar
           ref="toolbarRef"
@@ -12,10 +12,13 @@
           :resume="table.resume"
           :refreshing="loading"
           :can-create="canManage"
+          :total="total"
+          :sort-hint="sortHint"
           @update:search="onSearchInput"
           @change="applyFilters"
           @refresh="handleManualRefresh"
           @create="showCreate = true"
+          @columns="showColumnSheet = true"
         >
           <template #more-actions>
             <AccountToolsMenu
@@ -25,11 +28,14 @@
               :selected-count="selIds.length"
               :columns="orderedToggleableColumns"
               :is-visible="isColumnVisible"
-              :customized="!columnsAtDefault"
+              :columns-customized="!columnVisibility.atDefault.value"
+              :order-customized="columnOrderCustomized"
+              :show-columns="!phone"
               @action="handleToolAction"
               @toggle-column="toggleColumn"
               @reorder-columns="setColumnOrder"
               @reset-columns="resetColumns"
+              @reset-column-order="resetColumnOrder"
             />
           </template>
         </AccountsToolbar>
@@ -61,14 +67,15 @@
           <PendingChangesPill :count="pending" :label="changesText" :tip="t('common.pendingChanges.tip')" @merge="applyPending" />
           <DataTable
             ref="dataTableRef"
+            layout="table"
+            :scroll-label="t('admin.accounts.title')"
             :columns="cols"
             :data="rows"
             :loading="loading"
             row-key="id"
             :row-class="accountRowClass"
             :server-side-sort="true"
-            default-sort-key="last_used_at"
-            default-sort-order="desc"
+            :sort="tableSort"
             :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
             :estimate-row-height="78"
             :overscan="5"
@@ -76,74 +83,10 @@
             @sort="handleSort"
           >
             <template #header-select>
-              <input type="checkbox" class="acc-check" :checked="allVisibleSelected" :disabled="!canManage" :aria-label="t('common.selectAll')" @click.stop @change="toggleVisible(($event.target as HTMLInputElement).checked)" />
-            </template>
-            <!-- Below 1024px: the cards' sort bar takes the select-all box; each account is an AccountCard filled with the
-                 table's own cells (spec 4.6). -->
-            <template #mobile-sort-extra>
-              <label v-if="canManage" class="acard-all">
-                <span class="acard-hit"><input type="checkbox" class="acc-check" :checked="allVisibleSelected" @change="toggleVisible(($event.target as HTMLInputElement).checked)" /></span>
-                <span>{{ t('common.selectAll') }}</span>
-              </label>
-            </template>
-            <template #card="{ row, cell }">
-              <AccountCard
-                :rows="cardRows"
-                :expanded="expandedCards.has(row.id)"
-                :selected="isSelected(row.id)"
-                :groups-label="`${columnLabel('groups')} · ${groupsOf(row).length}`"
-                :recent-label="columnLabel('sq_recent')"
-                :sched-label="columnLabel('schedulable')"
-                @toggle="toggleCard(row.id)"
-              >
-                <template #check>
-                  <span class="acard-hit acard-check"><input type="checkbox" class="acc-check" :checked="isSelected(row.id)" :disabled="!canManage" :aria-label="row.name" @click="noteRowCheckShift" @change="handleRowCheck(row.id, $event)" /></span>
-                </template>
-                <template #name><AccountNameCell :account="row" /></template>
-                <template v-if="isColumnVisible('status')" #status>
-                  <AccountStatusCell :account="row" @show-temp-unsched="handleShowTempUnsched" />
-                  <AccountStreamOnlyBadge :account="row" @cleared="mergeAccount($event as Account)" />
-                </template>
-                <template v-if="isColumnVisible('schedulable')" #sched>
-                  <AccountSwitch :checked="row.schedulable" :label="t('admin.accounts.columns.schedulable') + ' · ' + row.name" :disabled="!canManage" :busy="togglingSchedulable.has(row.id)" @toggle="handleToggleSchedulable(row, $event)" />
-                </template>
-                <template #ops>
-                  <button v-if="canManage" type="button" :aria-label="`${t('common.edit')} ${row.name}`" class="acc-op sq-focus" data-test="row-edit" @click="handleEdit(row)">
-                    <Icon name="edit" size="sm" />
-                  </button>
-                  <button type="button" :aria-label="`${t('common.more')} ${row.name}`" aria-haspopup="menu" class="acc-op sq-focus" data-test="row-more" @click="openMenu(row, $event)">
-                    <Icon name="more" size="sm" />
-                  </button>
-                </template>
-                <template v-if="isColumnVisible('groups')" #groups>
-                  <AccountGroupPills
-                    card
-                    :account="row"
-                    :groups="groupsOf(row)"
-                    :quality="row.platform === 'openai' ? row.quality ?? null : null"
-                    :readonly="!canPlaceGroups"
-                    :gate-off="qualityMeta?.global_enabled === false && qualityMeta?.stale === false"
-                    @open-quality="(groupId: number) => openQuality(row, groupId)"
-                    @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
-                  />
-                </template>
-                <template v-if="isColumnVisible('groups') && canPlaceGroups" #groups-action>
-                  <button type="button" class="acard-edit sq-focus" :data-groups-opener="row.id" data-test="card-edit-groups" @click="openGroupsEditor(row, $event)">{{ t('admin.accounts.editGroups') }}</button>
-                </template>
-                <template v-if="isColumnVisible('sq_recent')" #recent>
-                  <AccountRecentCell card :quality="row.platform === 'openai' ? row.quality ?? null : null" />
-                </template>
-                <template #row="{ field }">
-                  <AccountIQCell v-if="field === 'iq_check'" detailed :account="row" :disabled="!canManage" :busy="togglingIQ.has(row.id)" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = { ...row }" />
-                  <AccountCapacityCell v-else-if="field === 'capacity'" :account="row" />
-                  <UpstreamBillingRateCell v-else-if="field === 'upstream_billing_rate'" detailed :account="row" :global-probe-enabled="upstreamBillingProbeGloballyEnabled" :now="now" :probing="probingUpstreamBilling.has(row.id)" @probe="handleProbeUpstreamBilling(row)" />
-                  <AccountTodayCell v-else-if="field === 'today_stats'" full :stats="row.today_stats" />
-                  <component :is="cell" v-else :column="field" :row="row" />
-                </template>
-              </AccountCard>
+              <label class="acc-hit"><input type="checkbox" class="acc-check" :checked="allVisibleSelected" :disabled="!canManage" :aria-label="t('common.selectAll')" @click.stop @change="toggleVisible(($event.target as HTMLInputElement).checked)" /></label>
             </template>
             <template #cell-select="{ row }">
-              <div class="acell acell--row"><input type="checkbox" class="acc-check" :checked="isSelected(row.id)" :disabled="!canManage" :aria-label="row.name" @click="noteRowCheckShift" @change="handleRowCheck(row.id, $event)" /></div>
+              <div class="acell acell--row"><label class="acc-hit"><input type="checkbox" class="acc-check" :checked="isSelected(row.id)" :disabled="!canManage" :aria-label="row.name" @click="noteRowCheckShift" @change="handleRowCheck(row.id, $event)" /></label></div>
             </template>
             <template #cell-name="{ row }">
               <div class="acell"><AccountNameCell :account="row" /></div>
@@ -172,11 +115,16 @@
                   :gate-off="qualityMeta?.global_enabled === false && qualityMeta?.stale === false"
                   @open-quality="(groupId: number) => openQuality(row, groupId)"
                   @edit-groups="(event: MouseEvent) => openGroupsEditor(row, event)"
+                  @edit-groups-at="(opener: HTMLElement) => openGroupsEditorAt(row, groupsAnchor(opener) ?? opener, false, opener)"
                 />
               </div>
             </template>
             <template #cell-sq_recent="{ row }">
-              <div class="acell"><AccountRecentCell :quality="row.platform === 'openai' ? row.quality ?? null : null" /></div>
+              <!-- Only OpenAI accounts are counted: any other shows one "—" that says so (mobile list plan, copy). -->
+              <div class="acell">
+                <AccountRecentCell v-if="row.platform === 'openai'" :quality="row.quality ?? null" />
+                <CellEmpty v-else :reason="t('admin.accounts.table.recent.openaiOnly')" />
+              </div>
             </template>
             <template #cell-iq_check="{ row }">
               <div class="acell"><AccountIQCell :account="row" :disabled="!canManage" :busy="togglingIQ.has(row.id)" @toggle="handleToggleIQCheck(row, $event)" @records="iqRecordsAccount = { ...row }" /></div>
@@ -189,7 +137,7 @@
               <span class="acol-head" v-tip="() => `${t('admin.accounts.columns.upstreamBillingRateFull')}\n${t('admin.accounts.upstreamBilling.trustWarning')}`" data-test="upstream-rate-head">{{ column.label }}</span>
             </template>
             <template #cell-upstream_billing_rate="{ row }">
-              <div class="acell">
+              <div class="acell acell--num">
                 <UpstreamBillingRateCell :account="row" :global-probe-enabled="upstreamBillingProbeGloballyEnabled" :now="now" :probing="probingUpstreamBilling.has(row.id)" @probe="handleProbeUpstreamBilling(row)" />
               </div>
             </template>
@@ -197,7 +145,7 @@
               <div class="acell"><AccountTodayCell :stats="row.today_stats" /></div>
             </template>
             <template #cell-id="{ value }">
-              <div class="acell"><span class="font-mono text-xs text-fg-secondary">#{{ value }}</span></div>
+              <div class="acell acell--num"><span class="acc-num text-fg-secondary">#{{ value }}</span></div>
             </template>
             <template #cell-platform_type="{ row }">
               <div class="acell">
@@ -210,16 +158,16 @@
                     :privacy-mode="row.extra?.privacy_mode || row.parent_privacy_mode"
                     :subscription-expires-at="row.credentials?.subscription_expires_at || row.parent_subscription_expires_at"
                   />
-                  <span v-if="antigravityTier(row)" :class="['inline-block rounded px-1.5 py-0.5 text-[10px] font-medium', antigravityTier(row)?.className]">{{ antigravityTier(row)?.label }}</span>
+                  <span v-if="antigravityTier(row)" :class="['inline-block rounded px-1.5 py-0.5 text-xs font-medium', antigravityTier(row)?.className]">{{ antigravityTier(row)?.label }}</span>
                 </div>
-                <div v-if="openAICompactMeta(row)" :class="['inline-flex items-center gap-1.5 pl-0.5 text-[11px] font-medium leading-4', openAICompactMeta(row)?.className]" :title="openAICompactTitle(row)">
+                <div v-if="openAICompactMeta(row)" :class="['inline-flex items-center gap-1.5 pl-0.5 text-xs font-medium leading-4', openAICompactMeta(row)?.className]" :title="openAICompactTitle(row)">
                   <span :class="['h-1.5 w-1.5 rounded-full', openAICompactMeta(row)?.dotClass]" />
                   <span>{{ openAICompactMeta(row)?.label }}</span>
                 </div>
               </div>
             </template>
             <template #cell-priority="{ row }">
-              <div class="acell acell--row">
+              <div class="acell acell--row acell--num">
                 <AccountPriorityCell :account="row" :save="(priority: number) => savePriority(row, priority)" @error="(message: string) => appStore.showError(message)" />
               </div>
             </template>
@@ -245,9 +193,9 @@
                   <span class="text-sm text-fg-primary">{{ row.proxy.name }}</span>
                   <span v-if="row.proxy.country_code" class="text-xs text-fg-secondary">({{ row.proxy.country_code }})</span>
                 </div>
-                <span v-else class="text-sm text-fg-muted">-</span>
+                <CellEmpty v-else />
                 <div v-if="row.proxy && row.proxy.expires_at" class="flex items-center gap-2 text-xs">
-                  <span class="text-fg-secondary">{{ formatDateTime(row.proxy.expires_at) }}</span>
+                  <span class="acc-num text-fg-secondary">{{ formatListDateTime(row.proxy.expires_at) }}</span>
                   <span :class="proxyExpiryBadgeClass(row.proxy.expires_at, row.proxy.status)">{{ proxyExpiryText(row.proxy) }}</span>
                 </div>
                 <div v-if="row.proxy_fallback_origin_id" class="flex items-center gap-1">
@@ -257,7 +205,7 @@
               </div>
             </template>
             <template #cell-rate_multiplier="{ row }">
-              <div class="acell acell--row">
+              <div class="acell acell--row acell--num">
                 <span class="acc-rate">
                   <!-- A value longer than "9.9999x" may be cut: the tip then has it whole (12.5). -->
                   <span class="acc-rate__v" v-tip="rateText(row).length > 7 ? rateText(row) : ''">{{ rateText(row) }}</span>
@@ -272,11 +220,15 @@
               <div class="acell"><span class="text-sm text-fg-secondary">{{ formatRelativeTime(value) }}</span></div>
             </template>
             <template #cell-created_at="{ value }">
-              <div class="acell"><span class="text-sm text-fg-secondary">{{ formatDateTime(value) }}</span></div>
+              <div class="acell">
+                <span v-if="formatListDateTime(value)" class="acc-num text-fg-secondary">{{ formatListDateTime(value) }}</span>
+                <CellEmpty v-else />
+              </div>
             </template>
             <template #cell-expires_at="{ row, value }">
               <div class="acell">
-                <span class="text-sm text-fg-secondary">{{ formatExpiresAt(value) }}</span>
+                <span v-if="value" class="acc-num text-fg-secondary">{{ formatExpiresAt(value) }}</span>
+                <CellEmpty v-else />
                 <div v-if="isExpired(value) || (row.auto_pause_on_expired && value)" class="flex items-center gap-1">
                   <span v-if="isExpired(value)" class="inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{{ t('admin.accounts.expired') }}</span>
                   <span v-if="row.auto_pause_on_expired && value" class="inline-flex items-center rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">{{ t('admin.accounts.autoPauseOnExpired') }}</span>
@@ -286,11 +238,17 @@
             <template #cell-notes="{ value }">
               <div class="acell">
                 <span v-if="value" :title="value" class="block max-w-xs truncate text-sm text-fg-secondary">{{ value }}</span>
-                <span v-else class="text-sm text-fg-muted">-</span>
+                <CellEmpty v-else />
               </div>
             </template>
             <template #cell-actions="{ row }">
-              <div class="acell acell--end">
+              <!-- A phone: only "⋯" in a 44px frozen column; editing is the menu's first item (mobile list plan). -->
+              <div v-if="phone" class="acell acell--end acell--more">
+                <button type="button" :aria-label="`${t('common.more')} ${row.name}`" aria-haspopup="menu" class="acc-op acc-op--phone sq-focus" data-test="row-more" @click="openMenu(row, $event)">
+                  <Icon name="more" size="sm" />
+                </button>
+              </div>
+              <div v-else class="acell acell--end">
                 <button v-if="canManage" type="button" v-tip="t('common.edit')" :aria-label="`${t('common.edit')} ${row.name}`" class="acc-op acc-op--edit sq-focus" data-test="row-edit" @click="handleEdit(row)">
                   <Icon name="edit" size="sm" />
                 </button>
@@ -325,7 +283,7 @@
       :save="saveGroups"
       @close="picker.account = null"
     />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :recoverable="menuRecoverable(menu.acc)" :recovering="!!menu.acc && isRecovering(menu.acc.id)" @close="menu.show = false" @edit-groups="openGroupsFromMenu" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="recoverOne" @delete="handleDelete" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :with-edit="phone" @edit="handleEdit" :recoverable="menuRecoverable(menu.acc)" :recovering="!!menu.acc && isRecovering(menu.acc.id)" @close="menu.show = false" @edit-groups="openGroupsFromMenu" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @iq-run="handleRunIQCheck" @iq-records="iqRecordsAccount = $event" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="recoverOne" @delete="handleDelete" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @manage-openai-totp="handleManageOpenAITotp" />
     <OpenAILoginImportDialog v-if="authStore.isAdmin && showOpenAILogin" :show="showOpenAILogin" :proxies="proxies" :groups="groups" @close="showOpenAILogin = false" @imported="handleDataImported" />
     <OpenAITotpDialog v-if="authStore.isAdmin && openAITotpAccount" :show="true" :account="openAITotpAccount" @close="openAITotpAccount = null" />
     <SyncFromCrsModal v-if="syncModalMounted" :show="showSync" @close="showSync = false" @synced="reload" />
@@ -363,6 +321,19 @@
     <ErrorPassthroughRulesModal v-if="errorPassthroughModalMounted" :show="showErrorPassthrough" :readonly="!canManage" @close="showErrorPassthrough = false" />
     <TLSFingerprintProfilesModal v-if="tlsProfilesModalMounted" :show="showTLSFingerprintProfiles" :readonly="!canManage" @close="showTLSFingerprintProfiles = false" />
     <TotpStepUpDialog :controller="accountExportStepUp" />
+    <!-- A phone's column settings: this width's own shown columns, the order shared with wider screens. -->
+    <BottomSheet :show="showColumnSheet" :title="t('common.table.columnsTitle')" test-id="column-sheet" @close="showColumnSheet = false">
+      <AccountColumnSettings
+        :columns="orderedToggleableColumns"
+        :is-visible="isColumnVisible"
+        :columns-customized="!columnVisibility.atDefault.value"
+        :order-customized="columnOrderCustomized"
+        @toggle="toggleColumn"
+        @reorder="setColumnOrder"
+        @reset="resetColumns"
+        @reset-order="resetColumnOrder"
+      />
+    </BottomSheet>
   </AppLayout>
 </template>
 
@@ -373,7 +344,7 @@
  * dialogs that edit them (each dialog gets its own snapshot or loads the account).
  */
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useDebounceFn, useEventListener, useMediaQuery, useResizeObserver } from '@vueuse/core'
+import { useDebounceFn, useEventListener, useResizeObserver } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import { IQ_RUN_BATCH_LIMIT } from '@/api/admin/accounts'
@@ -381,6 +352,9 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import BottomSheet from '@/components/common/BottomSheet.vue'
+import CellEmpty from '@/components/common/CellEmpty.vue'
+import AccountColumnSettings from '@/components/admin/account/AccountColumnSettings.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import PendingChangesPill from '@/components/common/PendingChangesPill.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
@@ -395,7 +369,6 @@ import SchedPauseMark from '@/components/admin/account/quality/SchedPauseMark.vu
 import SchedQualityLayers from '@/components/admin/account/quality/SchedQualityLayers.vue'
 import { useSchedLayerTasks } from '@/composables/useSchedLayerData'
 import AccountGroupPicker from '@/components/admin/account/table/AccountGroupPicker.vue'
-import AccountCard from '@/components/admin/account/table/AccountCard.vue'
 import AccountGroupPills from '@/components/admin/account/table/AccountGroupPills.vue'
 import AccountIQCell from '@/components/admin/account/table/AccountIQCell.vue'
 import AccountNameCell from '@/components/admin/account/table/AccountNameCell.vue'
@@ -418,6 +391,8 @@ import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCel
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { canRecover, isRecovering, useAccountRecovery } from '@/composables/useAccountRecovery'
 import { useColumnOrder } from '@/composables/useColumnOrder'
+import { useColumnVisibility } from '@/composables/useColumnVisibility'
+import { useTableViewport } from '@/composables/useTableViewport'
 import { defineLazyComponent, prefetchWhenIdle, useLazyMount } from '@/composables/useLazyMount'
 import { currentTime, useLiveClock } from '@/composables/useLiveClock'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
@@ -432,8 +407,8 @@ import type { Account, AccountListItem, AccountPlatform, AccountType, AccountUsa
 import type { SelectOption } from '@/components/common/Select.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { extractApiErrorMessage } from '@/utils/apiError'
-import { formatDateTime, formatRelativeTime } from '@/utils/format'
-import { formatMultiplier } from '@/utils/formatters'
+import { formatListDateTime, formatRelativeTime } from '@/utils/format'
+import { formatRate } from '@/utils/formatters'
 import { accountColumnLayout } from '@/components/admin/account/table/accountColumns'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { vTip } from '@/utils/tip'
@@ -474,29 +449,24 @@ const groupsById = computed(() => new Map(groups.value.map((group) => [group.id,
 const groupsOf = (row: Pick<AccountListItem, 'group_ids'>) =>
   orderGroups((row.group_ids ?? []).flatMap((id) => groupsById.value.get(id) ?? []))
 
-// ---- Columns: visibility and order (new storage keys: old settings start over, today's stats shown) ----
+// ---- Columns: which are shown, remembered for phones (<768) and wider screens apart; one order for both ----
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns-v2'
+const PHONE_HIDDEN_COLUMNS_KEY = 'account-hidden-columns-phone-v1'
 const ACCOUNT_COLUMN_ORDER_KEY = 'account-column-order-v2'
 const DEFAULT_HIDDEN_COLUMNS = ['id', 'platform_type', 'priority', 'usage', 'proxy', 'rate_multiplier', 'upstream_balance', 'last_used_at', 'created_at', 'expires_at', 'notes']
-const hiddenColumns = reactive(new Set<string>())
-const loadSavedColumns = () => {
-  try {
-    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
-    const keys = saved ? (JSON.parse(saved) as string[]) : DEFAULT_HIDDEN_COLUMNS
-    keys.forEach((key) => hiddenColumns.add(key))
-  } catch {
-    DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key))
-  }
-}
-loadSavedColumns()
-const saveColumns = () => {
-  try {
-    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
-  } catch (error) {
-    console.error('Failed to save columns:', error)
-  }
-}
-const isColumnVisible = (key: string) => !hiddenColumns.has(key)
+/** A phone shows check box, name, status, scheduling, groups and recent status by default (mobile list plan). */
+const PHONE_DEFAULT_HIDDEN_COLUMNS = [...DEFAULT_HIDDEN_COLUMNS, 'iq_check', 'capacity', 'upstream_billing_rate', 'today_stats']
+// A column that loads its own data asks for it once it is shown again.
+const COLUMN_SOURCES: Record<string, string> = { groups: 'quality', sq_recent: 'quality', today_stats: 'today', usage: 'usage', upstream_balance: 'balance' }
+const { phone, coarse } = useTableViewport()
+const toggleableColumnKeys = computed(() => toggleableColumns.value.map((column) => column.key))
+const columnVisibility = useColumnVisibility({
+  keys: toggleableColumnKeys,
+  wide: { storageKey: HIDDEN_COLUMNS_KEY, defaultHidden: DEFAULT_HIDDEN_COLUMNS },
+  narrow: { storageKey: PHONE_HIDDEN_COLUMNS_KEY, defaultHidden: PHONE_DEFAULT_HIDDEN_COLUMNS },
+  onShown: (keys) => new Set(keys.flatMap((key) => COLUMN_SOURCES[key] ?? [])).forEach((name) => void table.refresh(name))
+})
+const isColumnVisible = columnVisibility.isVisible
 
 // Sorting (kept from before: last use, newest first, unless a sort was chosen)
 const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort-v2'
@@ -513,6 +483,8 @@ const loadInitialSort = (): { sort_by: string; sort_order: SortOrder } => {
   }
 }
 const sortState = reactive(loadInitialSort())
+/** The sort the list is requested with: the table's headers show this one, whatever columns this width shows. */
+const tableSort = computed(() => ({ key: sortState.sort_by, order: sortState.sort_order }))
 
 // ---- Filters, search and the page ----
 const filters = reactive<Required<ToolbarFilters>>({ platform: '', status: '', group: '', sched_quality: '', type: '', privacy_mode: '', iq_status: '', group_category: '' })
@@ -548,11 +520,9 @@ const live = useAccountsLiveTable({
 const table = live.table
 schedLayers.bind(table, (id) => table.record(id))
 const { rows, loading, total, pending, status: liveStatus } = table
-// A ticked account reads in the shared table's selected background (12.1-3); the cards below 1024px mark it
-// themselves (AccountCard), so the row class leaves them alone.
-const wideTable = useMediaQuery('(min-width: 1024px)')
+// A ticked account reads in the shared table's selected background (12.1-3), at every width.
 const accountRowClass = (row: LiveAccount) => [
-  { 'opacity-60': table.transitioning.value || table.isDimmed(row.id), 'is-selected': wideTable.value && isSelected(row.id) }
+  { 'opacity-60': table.transitioning.value || table.isDimmed(row.id), 'is-selected': isSelected(row.id) }
 ]
 const changesText = (n: string) => t('common.pendingChanges.changes', { n })
 
@@ -609,7 +579,9 @@ const handleManualRefresh = () => {
 }
 
 // ---- Columns ----
-// The actions header sits at the right, over the icons (text-right also right-aligns the shared header's content; 7i-8).
+// The actions header sits at the right, over the icons (text-right also right-aligns the shared header's content; 7i-8);
+// so do the number columns, whose values are right-aligned in tabular digits (mobile list plan, typography).
+const RIGHT_ALIGNED = new Set(['actions', 'id', 'priority', 'rate_multiplier', 'upstream_billing_rate'])
 const allColumns = computed(() => [
   { key: 'select', label: '', sortable: false },
   { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
@@ -633,65 +605,42 @@ const allColumns = computed(() => [
   { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
   { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
   { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
-].map((column) => ({ ...column, class: `acol acol-${column.key}${column.key === 'actions' ? ' text-right' : ''}`, headerClass: `acol acol-${column.key}` })))
+].map((column) => ({ ...column, class: `acol acol-${column.key}${RIGHT_ALIGNED.has(column.key) ? ' text-right' : ''}`, headerClass: `acol acol-${column.key}` })))
 const PINNED = new Set(['select', 'name', 'actions'])
 const toggleableColumns = computed(() => allColumns.value.filter((column) => !PINNED.has(column.key)))
-const toggleableColumnKeys = computed(() => toggleableColumns.value.map((column) => column.key))
 const { orderedKeys: columnOrder, isCustomized: columnOrderCustomized, setOrder: setColumnOrder, resetOrder: resetColumnOrder } = useColumnOrder(ACCOUNT_COLUMN_ORDER_KEY, toggleableColumnKeys)
 const orderedToggleableColumns = computed(() => {
   const byKey = new Map(toggleableColumns.value.map((column) => [column.key, column]))
   return columnOrder.value.flatMap((key) => byKey.get(key) ?? [])
 })
-const columnsAtDefault = computed(() =>
-  !columnOrderCustomized.value && toggleableColumnKeys.value.every((key) => hiddenColumns.has(key) === DEFAULT_HIDDEN_COLUMNS.includes(key))
-)
 const cols = computed(() => {
   const pinned = (key: string) => allColumns.value.filter((column) => column.key === key)
-  return [...pinned('select'), ...pinned('name'), ...orderedToggleableColumns.value.filter((column) => !hiddenColumns.has(column.key)), ...pinned('actions')]
+  return [...pinned('select'), ...pinned('name'), ...orderedToggleableColumns.value.filter((column) => isColumnVisible(column.key)), ...pinned('actions')]
 })
 const columnLabel = (key: string) => allColumns.value.find((column) => column.key === key)!.label
 
-// ---- The narrow cards (spec 4.6) ----
-/** Columns the card's always-shown layer holds; every other shown column is a line of the expanded layer. */
-const CARD_FIXED = new Set(['select', 'name', 'status', 'schedulable', 'groups', 'sq_recent', 'actions'])
-const cardRows = computed(() => cols.value.filter((column) => !CARD_FIXED.has(column.key)).map(({ key, label }) => ({ key, label })))
-/** The accounts whose card is open; kept by id, so loads and refreshes leave them open. */
-const expandedCards = reactive(new Set<number>())
-const toggleCard = (id: number) => {
-  if (!expandedCards.delete(id)) expandedCards.add(id)
-}
-// A column that loads its own data asks for it once it is shown again.
-const COLUMN_SOURCES: Record<string, string> = { groups: 'quality', sq_recent: 'quality', today_stats: 'today', usage: 'usage', upstream_balance: 'balance' }
-const toggleColumn = (key: string) => {
-  const wasHidden = hiddenColumns.has(key)
-  if (wasHidden) hiddenColumns.delete(key)
-  else hiddenColumns.add(key)
-  saveColumns()
-  if (wasHidden && COLUMN_SOURCES[key]) void table.refresh(COLUMN_SOURCES[key])
-}
-const resetColumns = () => {
-  const shown = toggleableColumnKeys.value.filter((key) => hiddenColumns.has(key) && !DEFAULT_HIDDEN_COLUMNS.includes(key))
-  resetColumnOrder()
-  hiddenColumns.clear()
-  DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key))
-  try {
-    localStorage.removeItem(HIDDEN_COLUMNS_KEY)
-  } catch (error) {
-    console.error('Failed to reset columns:', error)
-  }
-  new Set(shown.flatMap((key) => COLUMN_SOURCES[key] ?? [])).forEach((name) => void table.refresh(name))
-}
+const toggleColumn = (key: string) => columnVisibility.toggle(key)
+/** This width's shown columns back to its defaults; the order has its own reset (resetColumnOrder). */
+const resetColumns = () => columnVisibility.reset()
+const showColumnSheet = ref(false)
+watch(phone, (on) => { if (!on) showColumnSheet.value = false })
+/** The sort while its column is hidden: the toolbar says it, as no header can (the default, last used, is hidden). */
+const sortHint = computed(() =>
+  cols.value.some((column) => column.key === sortState.sort_by)
+    ? null
+    : { label: columnLabel(sortState.sort_by), order: sortState.sort_order }
+)
 
 // The scroll container's own content width: what the table really has, a classic scrollbar's gutter left out (7m-1).
 const tableWidth = ref(0)
 useResizeObserver(() => dataTableRef.value?.tableWrapperEl ?? null, (entries) => {
   tableWidth.value = entries[0]?.contentRect.width ?? 0
 })
-const rateText = (row: Account) => `${formatMultiplier(row.rate_multiplier ?? 1)}x`
+const rateText = (row: Account) => formatRate(row.rate_multiplier ?? 1)
 // Column widths: see accountColumns.ts (12.5).
 const columnLayout = computed(() => {
-  const layout = accountColumnLayout(cols.value.map((column) => column.key).filter((key) => key !== 'name'), tableWidth.value)
-  const vars: Record<string, string> = { '--acc-min': `${layout.min}px` }
+  const layout = accountColumnLayout(cols.value.map((column) => column.key).filter((key) => key !== 'name'), tableWidth.value, { phone: phone.value, touch: coarse.value })
+  const vars: Record<string, string> = { '--acc-min': `${layout.min}px`, '--acc-cols': `${layout.columns}px` }
   for (const [key, width] of Object.entries(layout.widths)) vars[`--acc-w-${key}`] = `${width}px`
   return { roomy: layout.roomy, vars }
 })
@@ -1143,16 +1092,15 @@ const pickerRef = ref<{ requestClose: () => Promise<boolean> } | null>(null)
  * another account's it closes first and the new one opens once it has: after a save under way too (the latest click
  * wins), not when that save stops on a conflict to confirm.
  */
-/** Where the picker opens: the row's groups cell, or on a card the head of its groups section (the "edit groups" row). */
-const groupsAnchor = (el: Element | null | undefined) =>
-  el?.closest<HTMLElement>('td') ?? el?.closest('[data-groups-section]')?.querySelector<HTMLElement>('[data-groups-anchor]') ?? null
+/** Where the picker opens: the row's groups cell. */
+const groupsAnchor = (el: Element | null | undefined) => el?.closest<HTMLElement>('td') ?? null
 const openGroupsEditor = (row: LiveAccount, event: MouseEvent) => {
   const opener = event.currentTarget as HTMLElement | null
   return openGroupsEditorAt(row, groupsAnchor(opener) ?? opener, event.detail === 0, opener)
 }
 /**
- * The row menu's "edit groups" (any device): beside the row's groups (cell or card section, found from the pills, which
- * a touch screen draws without an editing zone), else its "more" button, which takes focus back (7l-4).
+ * The row menu's "edit groups" (any device): beside the row's groups cell (found from the pills, which a touch screen
+ * draws without an editing zone), else its "more" button, which takes focus back (7l-4).
  */
 const openGroupsFromMenu = (account: Account) => {
   const row = table.record(account.id)
@@ -1407,8 +1355,8 @@ const proxyExpiryText = (proxy: AccountProxy) => {
   const { key, params } = proxyExpiryLabelKey(proxy.expires_at, proxy.status)
   return params ? t(key, params) : t(key)
 }
-const formatExpiresAt = (value: number | null) =>
-  value ? formatDateTime(new Date(value * 1000), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }, 'sv-SE') : '-'
+/** An expiry to the minute, the year left out within this one ("12-31 23:59"). */
+const formatExpiresAt = (value: number | null) => (value ? formatListDateTime(value * 1000, { seconds: false }) : '')
 // An expiry already past is read without following the clock (7g-1); one still ahead follows it to the second.
 const isExpired = (value: number | null) => !!value && (value * 1000 <= currentTime() || value * 1000 <= now.value)
 
@@ -1465,7 +1413,7 @@ onUnmounted(() => cancelModalPrefetch?.())
 <style scoped>
 /* This page only (7e-15): toolbar, table card and pagination sit closer, so a 1080px-high window shows at least ten
    whole rows. The shared page layout and the other pages keep their spacing. */
-.accounts-layout.table-page-layout:not(.mobile-mode) {
+.accounts-layout.table-page-layout {
   gap: 12px;
 }
 .accounts-layout .accounts-pagination {
@@ -1506,7 +1454,8 @@ onUnmounted(() => cancelModalPrefetch?.())
   }
 }
 /* A header keeps to its column: a long label is cut, the tip has it whole. */
-.account-table :deep(thead th > div) {
+.account-table :deep(thead th > div),
+.account-table :deep(thead th > .dt-sort) {
   min-width: 0;
 }
 .account-table :deep(.acol-head) {
@@ -1522,7 +1471,7 @@ onUnmounted(() => cancelModalPrefetch?.())
 }
 /* The recent cell takes its column's size, not the viewport's: an optional column can keep a wide screen in the
    compact size, where 84px would not fit the 72px left (7q-5). */
-.account-table.is-roomy :deep(.recent:not(.recent--card)) {
+.account-table.is-roomy :deep(.recent) {
   width: 84px;
 }
 .account-table :deep(th.acol-select),
@@ -1552,7 +1501,7 @@ onUnmounted(() => cancelModalPrefetch?.())
   justify-content: center;
   gap: 2px;
 }
-/* The fixed row height is the table's; in a card's details a cell takes the height it needs. */
+/* The fixed row height is the table's. */
 .account-table :deep(.table-wrapper .acell) {
   height: calc(var(--row-height) - 1px);
   overflow: hidden;
@@ -1598,49 +1547,88 @@ onUnmounted(() => cancelModalPrefetch?.())
 .account-table :deep(th.acol-expires_at) { --acc-w: var(--acc-w-expires_at); }
 .account-table :deep(th.acol-notes) { --acc-w: var(--acc-w-notes); }
 
-/* A check box with a 40px hit area on the cards (touch); the box itself keeps its size. */
-.acard-hit {
+/* Row buttons: 28px icon squares with a mouse; the touch and phone rules below make them 40px. The base comes first so
+   those rules win (same specificity, later in the sheet). */
+.acc-op {
   display: inline-grid;
-  width: 40px;
-  height: 40px;
+  width: 28px;
+  height: 28px;
   flex: none;
   place-items: center;
-}
-.acard-check {
-  margin: -12px -8px -12px -12px;
-}
-/* The card's "edit groups" (prototype): a text button with a 44px hit area. */
-.acard-edit {
-  position: relative;
-  height: 32px;
-  margin: -4px -10px -4px 0;
-  padding: 0 10px;
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
-  color: var(--color-text-primary);
-  font-size: var(--font-size-small);
-  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
 }
-.acard-edit::after {
-  position: absolute;
-  inset: -6px 0;
-  content: '';
-}
+/* The icon takes the brand teal under the pointer (12.1-6). */
 @media (hover: hover) {
-  .acard-edit:hover {
+  .acc-op:hover {
     background: var(--color-bg-control-hover);
+    color: theme('colors.primary.500');
   }
 }
-.acard-all {
-  display: flex;
-  align-items: center;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-  font-weight: var(--font-weight-medium);
+/* The pencil at the prototype's 14px (7i-8). */
+.acc-op--edit svg {
+  width: 14px;
+  height: 14px;
 }
-.acard-all .acard-hit {
-  margin: -2px 0 -2px -8px;
+/* A check box in a label: on a touch screen the label is the 44px column's whole width and 44px high, the box itself
+   keeping its size (mobile list plan). */
+.acc-hit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+@media (pointer: coarse) {
+  .account-table :deep(th.acol-select),
+  .account-table :deep(td.acol-select) {
+    padding: 0;
+  }
+  .acc-hit {
+    width: 44px;
+    height: 44px;
+    cursor: pointer;
+  }
+  /* Edit and "⋯" at 40px, 8px apart. */
+  .account-table :deep(.acell--end) {
+    gap: 8px;
+  }
+  .acc-op {
+    width: 40px;
+    height: 40px;
+  }
+}
+/* Number columns: right-aligned, tabular digits, body size. */
+.account-table :deep(.acell--num) {
+  align-items: flex-end;
+}
+.account-table :deep(.acell--num.acell--row) {
+  justify-content: flex-end;
+}
+.acc-num {
+  font-size: var(--font-size-body);
+  font-variant-numeric: tabular-nums;
+}
+/* A phone (mobile list plan): the frozen name is the identity column's width, the table at least the other columns and
+   it; the frozen "⋯" sits in the middle of its 44px. */
+@media (max-width: 767px) {
+  .account-table :deep(.table-wrapper > table) {
+    min-width: calc(var(--acc-cols, 900px) + var(--table-identity-width, 140px));
+  }
+  .account-table :deep(th.acol-name) {
+    width: var(--table-identity-width);
+  }
+  .account-table :deep(th.acol-actions),
+  .account-table :deep(td.acol-actions) {
+    padding: 0;
+  }
+  .account-table :deep(.acell--more) {
+    justify-content: center;
+  }
+  .acc-op--phone {
+    width: 40px;
+    height: 40px;
+  }
 }
 /* The account rate: a value in the body text with tabular digits (12.1), cut with "…" past its column (12.5). */
 .acc-rate {
@@ -1671,27 +1659,5 @@ onUnmounted(() => cancelModalPrefetch?.())
 .acc-check:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-.acc-op {
-  display: inline-grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-secondary);
-}
-/* The icon takes the brand teal under the pointer (12.1-6). */
-@media (hover: hover) {
-  .acc-op:hover {
-    background: var(--color-bg-control-hover);
-    color: theme('colors.primary.500');
-  }
-}
-/* The pencil at the prototype's 14px (7i-8). */
-.acc-op--edit svg {
-  width: 14px;
-  height: 14px;
 }
 </style>

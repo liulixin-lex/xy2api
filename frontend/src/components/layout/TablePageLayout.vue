@@ -1,10 +1,11 @@
 <template>
   <div
+    ref="rootRef"
     class="table-page-layout"
     :class="{
       'mobile-mode': isMobile && !tableLayout,
       'table-page-layout--table': tableLayout,
-      'table-page-layout--region': tableLayout && isMobile && region
+      'table-page-layout--region': tableLayout && region
     }"
   >
     <!-- 固定区域：操作按钮 -->
@@ -32,28 +33,28 @@
 </template>
 
 <script setup lang="ts">
-import { computed, provide } from 'vue'
-import { useShortViewport, useTableViewport } from '@/composables/useTableViewport'
-import { TABLE_REGION_KEY } from './tableRegion'
+import { computed, provide, ref } from 'vue'
+import { useTableViewport } from '@/composables/useTableViewport'
+import { TABLE_REGION_KEY, useTableRegion } from './tableRegion'
 
 const props = defineProps<{
   /**
-   * The table layout below 1024px (mobile list plan; with DataTable `layout="table"`): the table keeps its card frame
-   * on a tablet and runs edge to edge on a phone, and the page fills the visible height, the toolbar and pagination
-   * at their own height and the table region the rest, scrolling both ways under its sticky header. Below 500px of
-   * visible height the whole page scrolls instead.
+   * The table layout (mobile list plan; with DataTable `layout="table"`): the table keeps its card frame on a tablet
+   * and a desktop and runs edge to edge on a phone. While the table region fits (useTableRegion: tall enough, room
+   * for the header and a row after the toolbar, tags, bulk bar and pagination) the page fills the visible height and
+   * only the region scrolls, both ways under its sticky header; otherwise the whole page scrolls. At every width.
    */
   tableLayout?: boolean
-  /** With `tableLayout`: the whole page scrolls below 1024px, never the table region on its own. */
+  /** With `tableLayout`: the whole page always scrolls, never the table region on its own. */
   pageScroll?: boolean
 }>()
 
+const rootRef = ref<HTMLElement | null>(null)
 const { desktop } = useTableViewport()
 const isMobile = computed(() => !desktop.value)
-const short = useShortViewport()
-/** Below 1024px the table region is bounded (and windows its rows) only in the table layout, on a tall enough screen. */
-const region = computed(() => !props.pageScroll && !short.value)
-provide(TABLE_REGION_KEY, computed(() => desktop.value || (!!props.tableLayout && region.value)))
+const { region } = useTableRegion(rootRef, () => !!props.tableLayout && !props.pageScroll)
+// The table layout windows rows only in the bounded region; the cards layout keeps its desktop rule (from 1024px).
+provide(TABLE_REGION_KEY, computed(() => (props.tableLayout ? region.value : desktop.value)))
 </script>
 
 <style scoped>
@@ -66,7 +67,7 @@ provide(TABLE_REGION_KEY, computed(() => desktop.value || (!!props.tableLayout &
    页头按实际高度计：64px 的一行加 1px 下边框共 65px，少算 1px 会让整页出现竖向滚动条、占掉表格宽度（7q-3）。
    1024 以下不定高：页面自然滚动，顶栏始终吸顶（7n-2） */
 @media (min-width: 1024px) {
-  .table-page-layout {
+  .table-page-layout:not(.table-page-layout--table) {
     height: calc(100vh - 65px - 4rem);
   }
 }
@@ -113,25 +114,32 @@ provide(TABLE_REGION_KEY, computed(() => desktop.value || (!!props.tableLayout &
   @apply px-5 py-4 text-sm text-fg-primary border-b border-line-row;
 }
 
-/* The table layout below 1024px (mobile list plan). Sections 12px apart. In the bounded region the page is the
-   visible height less the header (64px and its 1px border) and main's padding (16px, 24px from 768px): dvh follows
-   the browser's address bar, vh is the fallback. The table region alone scrolls; nothing outside it does. */
+/* The table layout (mobile list plan). Sections 12px apart below 1024px. In the bounded region the page is the visible
+   height less the header (64px and its 1px border) and main's padding (16px, 24px from 768px, 32px from 1024px): dvh
+   follows the browser's address bar, vh is the fallback. The table region alone scrolls; nothing outside it does.
+   Without the region (useTableRegion) the page scrolls as a whole and the table takes its content's height. */
+.table-page-layout--table:not(.table-page-layout--region) .layout-section-scrollable {
+  flex: none;
+}
+.table-page-layout--region {
+  height: calc(100vh - 65px - 2rem);
+  height: calc(100dvh - 65px - 2rem);
+}
 @media (max-width: 1023px) {
   .table-page-layout--table {
     gap: 12px;
   }
-  .table-page-layout--table:not(.table-page-layout--region) .layout-section-scrollable {
-    flex: none;
-  }
-  .table-page-layout--region {
-    height: calc(100vh - 65px - 2rem);
-    height: calc(100dvh - 65px - 2rem);
-  }
 }
-@media (min-width: 768px) and (max-width: 1023px) {
+@media (min-width: 768px) {
   .table-page-layout--region {
     height: calc(100vh - 65px - 3rem);
     height: calc(100dvh - 65px - 3rem);
+  }
+}
+@media (min-width: 1024px) {
+  .table-page-layout--region {
+    height: calc(100vh - 65px - 4rem);
+    height: calc(100dvh - 65px - 4rem);
   }
 }
 /* A phone: the table runs to the screen's edges, without the card's rounded frame. */

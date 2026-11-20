@@ -270,6 +270,11 @@ const keyboardFocus = (el: HTMLElement) => {
   }
 }
 
+/** Whether this element's tip is the one on screen (a first tap shows it, a second one acts). */
+export function isTipShowing(el: EventTarget | null): boolean {
+  return !!el && current === el && !!tipEl && !tipEl.hidden
+}
+
 /** Hides the tip that shows or is about to (a click that opens a layer from the element under it). */
 export function hideTip() {
   hide()
