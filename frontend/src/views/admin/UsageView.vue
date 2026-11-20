@@ -164,7 +164,7 @@
               </div>
             </template>
           </UsageTable>
-          <Pagination v-if="usageTotal > 0" :page="pagination.page" :total="usageTotal" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
+          <Pagination v-if="usageTotal > 0" :page="pagination.page" :total="usageTotal" :total-exact="usageTotalExact" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
         </div>
         <div v-show="activeTab === 'errors'" class="overflow-hidden rounded-b-2xl">
           <OpsErrorLogTable

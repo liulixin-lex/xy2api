@@ -421,11 +421,14 @@ describe('admin UsageView columns per width', () => {
     const w = mountView()
     await flushPromises()
     expect(w.find('[data-testid="usage-count"]').exists()).toBe(false)
+    // The pagination says "1–20", not "of 21", and keeps its next page.
+    expect(w.findComponent({ name: 'Pagination' }).props('totalExact')).toBe(false)
     list.mockResolvedValue({ items: rows.slice(0, 7), total: 7, pages: 1 })
     ;(w.vm as any).filters = { ...(w.vm as any).filters, model: 'gpt-6.1' }
     ;(w.vm as any).applyFilters()
     await flushPromises()
     expect(w.get('[data-testid="usage-count"]').text()).toBe('common.table.count')
+    expect(w.findComponent({ name: 'Pagination' }).props('totalExact')).toBe(true)
     list.mockResolvedValue({ items: rows, total: 1234, pages: 62 })
     ;(w.vm as any).filters = { ...(w.vm as any).filters, user_id: 7 }
     ;(w.vm as any).applyFilters()
