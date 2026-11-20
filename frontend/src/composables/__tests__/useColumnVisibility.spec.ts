@@ -120,4 +120,30 @@ describe('useColumnVisibility', () => {
     expect(migrate).toHaveBeenCalledTimes(1)
     stop()
   })
+
+  it('with defaultVisible shows only those by default, columns the page adds later hidden too', async () => {
+    setWidth(390)
+    const keys = ref([...KEYS])
+    const scope = effectScope()
+    const columns = scope.run(() => useColumnVisibility({
+      keys,
+      wide: { storageKey: 'page-hidden-columns', defaultHidden: ['notes'] },
+      narrow: { storageKey: 'page-hidden-columns-phone', defaultVisible: ['status'] }
+    }))!
+    expect(KEYS.filter(columns.isVisible)).toEqual(['status'])
+    keys.value = [...KEYS, 'attr_7']
+    await nextTick()
+    expect(columns.isVisible('attr_7')).toBe(false)
+    expect(columns.atDefault.value).toBe(true)
+    expect(localStorage.getItem('page-hidden-columns-phone')).toBeNull()
+
+    columns.toggle('groups')
+    expect(stored('page-hidden-columns-phone')).toEqual(['groups', 'iq_check', 'capacity', 'notes', 'attr_7'].filter((key) => key !== 'groups'))
+    expect(columns.isVisible('groups')).toBe(true)
+    expect(columns.atDefault.value).toBe(false)
+    columns.reset()
+    expect(localStorage.getItem('page-hidden-columns-phone')).toBeNull()
+    expect([...KEYS, 'attr_7'].filter(columns.isVisible)).toEqual(['status'])
+    scope.stop()
+  })
 })
