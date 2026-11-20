@@ -438,27 +438,43 @@ const detachDesktopTableTracking = () => {
   }
 }
 
+/**
+ * The sticky header's own height (both rows of a grouped header) as --table-head-h on the scroll box, which keeps
+ * that much at its top out of reach of focus scrolling and scrollIntoView (scroll-padding-top). Read when the header
+ * resizes, never per frame.
+ */
+const measureHead = () => {
+  const wrapper = tableWrapperRef.value
+  const head = wrapper?.querySelector<HTMLElement>(':scope > table > thead')
+  if (wrapper && head) wrapper.style.setProperty('--table-head-h', `${head.getBoundingClientRect().height}px`)
+}
+
 const attachDesktopTableTracking = () => {
   checkScrollable()
   checkActionsColumnWidth()
+  measureHead()
   if (tableWrapperRef.value && typeof ResizeObserver !== 'undefined') {
     const wrapper = tableWrapperRef.value
+    const head = wrapper.querySelector(':scope > table > thead')
     resizeObserver = new ResizeObserver((entries) => {
       checkScrollable()
       // Only the wrapper's own size changes the room of the actions column; a change of the table alone just
       // re-checks the sideways scroll (spec 7g-4).
       if (entries.some((entry) => entry.target === wrapper)) checkActionsColumnWidth()
+      if (head && entries.some((entry) => entry.target === head)) measureHead()
     })
     resizeObserver.observe(wrapper)
     // The table too: a page may narrow its columns after the wrapper's resize (the accounts page recomputes its column
     // widths from the new width), and only the table's own size change tells that it no longer scrolls sideways.
     const table = wrapper.querySelector(':scope > table')
     if (table) resizeObserver.observe(table)
+    if (head) resizeObserver.observe(head)
   } else {
     // 降级方案：不支持 ResizeObserver 时使用 window resize
     resizeHandler = () => {
       checkScrollable()
       checkActionsColumnWidth()
+      measureHead()
     }
     window.addEventListener('resize', resizeHandler)
   }
@@ -1187,9 +1203,11 @@ defineExpose({
 </script>
 
 <style scoped>
-/* 表格横向滚动 */
+/* 表格横向滚动。scroll-padding-top 让出吸顶表头（--table-head-h：表头实测高度，分组表头为两行之和，未测到前用
+   40px）：聚焦滚动和 scrollIntoView 不把行停在表头下面 */
 .table-wrapper {
   scroll-margin-top: var(--table-sticky-top, 4rem);
+  scroll-padding-top: var(--table-head-h, var(--header-height, 40px));
   --select-col-width: 52px; /* 勾选列宽度：px-6 (24px*2) + checkbox (16px) */
   position: relative;
   overflow-x: auto;

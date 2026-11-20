@@ -238,7 +238,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 			return a.Requests > b.Requests
 		})
 	}
-	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: evaluatedAt, GlobalEnabled: enabled, View: view, Accounts: accounts, GroupModels: models, GroupRows: groupRows, Members: members, Policies: cloneSchedPolicies(s.policies), Overrides: copied, ResetAt: cloneResetTimes(resets)})
+	s.snapshot.Store(&SchedQualitySnapshot{Version: version, At: evaluatedAt, summaryWindowEnd: d.now, GlobalEnabled: enabled, View: view, Accounts: accounts, GroupModels: models, GroupRows: groupRows, Members: members, Policies: cloneSchedPolicies(s.policies), Overrides: copied, ResetAt: cloneResetTimes(resets)})
 	newer := make(map[int64]time.Time)
 	for id, at := range resets {
 		if at.After(s.seenResets[id]) {

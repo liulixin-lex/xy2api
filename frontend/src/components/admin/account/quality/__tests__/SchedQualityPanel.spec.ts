@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h, shallowRef, withDirectives } from 'vue'
 
 import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
 import { basis, errorEvidence, groupModel, legacyBasis, legacyLine, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
@@ -12,6 +13,7 @@ import SchedEvidence from '../SchedEvidence.vue'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
+import { vTip } from '@/utils/tip'
 
 const { api, backendSummary } = vi.hoisted(() => ({
   api: { accountDetail: vi.fn(), accountDecisions: vi.fn(), accountPerformance: vi.fn(), setOverride: vi.fn(), clearOverride: vi.fn(), clearAutoState: vi.fn(), reset: vi.fn() },
@@ -360,6 +362,31 @@ describe('SchedQualityPanel', () => {
     expect(document.activeElement).toBe(dot)
   })
 
+  // The dot carries a v-tip: keyboard focus on it may scroll the page only when Tab brought it there, never when the
+  // closing panel gives it back (preventScroll), so the table stays where the user scrolled it.
+  it('gives focus back to an off-screen dot without scrolling the page, and its tip still shows', async () => {
+    mount(Panel, { attachTo: document.body })
+    const dot = mount(defineComponent({
+      setup: () => () => withDirectives(h('button', { type: 'button', 'data-quality-opener': '7:53' }, 'dot'), [[vTip, 'dot tip']])
+    }), { attachTo: document.body }).element as HTMLElement
+    vi.spyOn(dot, 'getBoundingClientRect').mockReturnValue({ top: -400, bottom: -380, left: 100, right: 124, width: 24, height: 20 } as DOMRect)
+    dot.scrollIntoView = vi.fn()
+    await openOn(7, { groupId: 53 })
+    tab('gpt-a').focus()
+    // The tip's two frames, driven here rather than left to jsdom's frame clock.
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] })
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await flushPromises()
+    expect([panel(), document.activeElement]).toEqual([null, dot])
+    vi.advanceTimersToNextFrame()
+    vi.advanceTimersToNextFrame()
+    expect(dot.scrollIntoView).not.toHaveBeenCalled()
+    expect(dot.getAttribute('aria-describedby')).toBe('sq-tip')
+  })
+
   it('lists every model\'s own recheck time in the automatic states', async () => {
     mount(Panel, { attachTo: document.body })
     await openOn()
@@ -439,30 +466,35 @@ describe('SchedQualityPanel', () => {
     alone.unmount()
     backendSummary.mockClear()
     const quality = {
-      account_id: 7, reset_at: null, stop: null, rear: [], exemptions: [],
-      ttfo: { first_event_p50_ms: 1100, first_output_p50_ms: 12_300, gap_p50_ms: 11_200, n: 40 },
-      error: { n: 40, short: false, red: false, rate: 0.01 },
-      cache: { ratio: 0.4, turns: 2, all_ratio: 0.7, all_requests: 90 }
+      account_id: 7, reset_at: null, stop: null, rear: [], exemptions: [], recent_since: null,
+      first_output: { n: 40, timeouts: 3, p50_ms: 980 },
+      slow_10s: { n: 38, slow: 21, timeouts: 1 },
+      error: { n: 40, short: true, red: false, rate: 0.025, failed: 1 },
+      cache: { ratio: 0.4, turns: 2 }
     }
-    const row = { id: 7, name: 'acc-7', platform: 'openai', type: 'oauth', quality } as never
-    mount(withSchedHost(SchedQualityPanel, { row: () => row }), { attachTo: document.body, props: { account: () => row } })
+    const row = shallowRef({ id: 7, name: 'acc-7', platform: 'openai', type: 'oauth', quality })
+    mount(withSchedHost(SchedQualityPanel, { row: () => row.value as never }), { attachTo: document.body, props: { account: () => row.value as never } })
     await openOn()
     expect(backendSummary).not.toHaveBeenCalled()
-    const value = (key: string) => document.querySelector(`[data-qp-recent="${key}"] .rrow__v`)!
-    // First token as the line judges it (first useful output), the first event and the gap under it; cache over the
-    // continuation turns (muted: under 20) and over every successful request (N14).
-    expect(value('ttfo').textContent).toBe('12.3s')
-    expect(value('ttfo_event').textContent).toBe('1.1s')
-    expect(document.querySelector('[data-qp-recent="ttfo_event"] .rrow__g')!.textContent).toBe('admin.schedQuality.panel.gap:{"value":"11.2s"}')
-    expect(value('cache').textContent).toBe('40%')
-    expect(value('cache').classList.contains('rrow__v--na')).toBe(true)
-    expect(value('cache_all').textContent).toBe('70%')
-    expect(value('cache_all').classList.contains('rrow__v--na')).toBe(false)
-    // The whole account's value beside the strictest groups' threshold: no "over the line", no amber, a note that the
-    // threshold judges per group and model (7k-1).
-    expect(value('ttfo').className).toBe('rrow__v')
-    expect(document.querySelector('[data-qp-recent="ttfo"] .rrow__g')!.textContent).toBe('admin.schedQuality.panel.threshold:{"value":"≤ 10.0s"}')
-    expect(document.querySelector('[data-test="qp-threshold-note"]')!.textContent).toBe('admin.schedQuality.panel.thresholdNote')
+    // The recent cell's four rows with their samples (muted under the sample minimum), and nothing beside them to
+    // compare with: no strictest threshold, no note on one (7k-1).
+    const rows = Array.from(document.querySelectorAll('[data-qp-section="recent"] .rrow:not([data-qp-recent="ratio"])'), (el) => [
+      el.getAttribute('data-qp-recent'), ...Array.from(el.children, (child) => `${child.textContent}${child.classList.contains('rrow__v--na') ? ' (muted)' : ''}`)
+    ])
+    const tooFew = (note: string) => `admin.accounts.table.tip.tooFew:${JSON.stringify({ note })}`
+    expect(rows).toEqual([
+      ['ttfo', 'admin.accounts.table.recent.firstOutput', '0.98s', 'admin.accounts.table.tip.count:{"n":40}'],
+      ['slow', 'admin.accounts.table.recent.slow', '55%', 'admin.accounts.table.tip.slowTimeouts:{"slow":21,"n":1}'],
+      ['error', 'admin.accounts.table.dims.error', '2.5% (muted)', tooFew('admin.accounts.table.tip.failed:{"failed":1,"n":40}')],
+      ['cache', 'admin.accounts.table.recent.cacheTurns', '40% (muted)', tooFew('admin.accounts.table.tip.turns:{"n":2}')]
+    ])
+    expect(document.querySelector('[data-test="qp-threshold-note"]')).toBeNull()
+    // The note by the heading is the tip card's title: the last hour, or since the backend's recent_since (local HH:MM).
+    const windowNote = () => document.querySelector('[data-qp-section="recent"] [data-qp-recent-window]')!.textContent
+    expect(windowNote()).toBe('admin.accounts.table.tip.recentTitle')
+    row.value = { ...row.value, quality: { ...quality, recent_since: new Date(2026, 10, 19, 23, 55).toISOString() } }
+    await flushPromises()
+    expect(windowNote()).toBe('admin.accounts.table.tip.recentSince:{"time":"23:55"}')
   })
 
   it('shows each line\'s identity: unknown in grey with 证据不够, trial with its time left, rear with its stay and end', async () => {

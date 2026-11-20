@@ -11,12 +11,11 @@ const pluralKeys = new Set([
   'batchImage.create.outputCountOption',
   'batchImage.create.referenceCount',
   'admin.accounts.table.tip.count',
-  'admin.accounts.table.tip.countShort',
+  'admin.accounts.table.tip.failed',
+  'admin.accounts.table.tip.slowTimeouts',
   'admin.groups.profitControl.floorBelow',
   'admin.groups.profitControl.pinnedCount',
   'admin.accounts.table.tip.turns',
-  'admin.accounts.table.tip.turnsShort',
-  'admin.schedQuality.panel.allRequests',
   'admin.schedQuality.board.summaryWaitRequests',
   'admin.schedQuality.perf.total',
   'admin.schedQuality.perf.turns',
@@ -50,8 +49,11 @@ describe.each([
         const branches = message.split('|').map(part => part.trim())
         expect(branches).toHaveLength(2)
         for (const count of [0, 1, 2]) {
-          const expected = branches[count === 1 ? 0 : 1].replace(/\{(?:n|count)\}/g, String(count))
-          expect(i18n.global.t(key, { n: count, count }, count)).toBe(expected)
+          // {n} or {count} is the count; any other number in the message (failed of n) reads 7.
+          const value = (name: string) => (name === 'n' || name === 'count' ? count : 7)
+          const params = Object.fromEntries(Array.from(message.matchAll(/\{(\w+)\}/g), ([, name]) => [name, value(name)]))
+          const expected = branches[count === 1 ? 0 : 1].replace(/\{(\w+)\}/g, (_, name: string) => String(value(name)))
+          expect(i18n.global.t(key, params, count)).toBe(expected)
         }
       } else {
         const expected = message.replaceAll("{'|'}", '|').replaceAll('{buffer}', '17')

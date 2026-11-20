@@ -96,16 +96,18 @@ const summaryOf = (id: number, patch: Partial<BackendAccountSummary> = {}): Back
   group_status: { 53: 'pass' },
   reset_at: null,
   stop: null,
-  ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 2800, gap_p50_ms: 1600, n: 30 },
-  error: { n: 100, short: false, red: false, rate: 0 },
-  cache: { ratio: 0.9, turns: 40, all_ratio: 0.7, all_requests: 120 },
+  first_output: { n: 30, timeouts: 0, p50_ms: 2800 },
+  slow_10s: { n: 30, slow: 0, timeouts: 0 },
+  error: { n: 100, short: false, red: false, rate: 0, failed: 0 },
+  cache: { ratio: 0.9, turns: 40 },
+  recent_since: null,
   rear: [],
   trial: [],
   exemptions: [],
   ...patch
 })
 const summaries = () => [
-  summaryOf(1, { group_status: { 53: 'rear' }, rear: [{ group_id: 53, model: 'gpt-6.1-sol', lines: ['ttfo'], until: '2026-11-14T12:00:00Z', exempt: false, effective: true }], ttfo: { first_event_p50_ms: 1200, first_output_p50_ms: 9100, gap_p50_ms: 7900, n: 30 } }),
+  summaryOf(1, { group_status: { 53: 'rear' }, rear: [{ group_id: 53, model: 'gpt-6.1-sol', lines: ['ttfo'], until: '2026-11-14T12:00:00Z', exempt: false, effective: true }], first_output: { n: 30, timeouts: 0, p50_ms: 9100 } }),
   summaryOf(2),
   summaryOf(3, { group_status: { 53: 'unknown' } }),
   summaryOf(4, { stop: { source: 'manual', reason: 'manual_off', until: null } })

@@ -104,14 +104,26 @@ func TestSchedAdminV2SummaryAndFiveFilters(t *testing.T) {
 	p.GroupRows[3] = []SchedGroupRow{{GroupID: 1, Model: "a", View: schedquality.StateView{Cache: schedquality.LineView{Trial: true, TrialUntil: now.Add(time.Minute)}}}}
 	p.Overrides = []SchedOverride{{AccountID: 5, Mode: schedquality.OverrideExempt}}
 	r.rows[6].Schedulable = false
-	p.Accounts[1] = schedquality.AccountSummary{FirstEventP50Ms: schedAdminInt(100), FirstOutputP50Ms: schedAdminInt(120), GapP50Ms: schedAdminInt(20), FirstOutputN: 7, CacheTurns: 21, CacheRatio: schedAdminFloat(.8), CacheAllRequests: 25, CacheAllRatio: schedAdminFloat(.9)}
+	p.Accounts[1] = schedquality.AccountSummary{
+		FirstOutput: schedquality.FirstOutputSummary{N: 7, Timeouts: 2, P50Ms: schedAdminInt(120)},
+		Slow10s:     schedquality.Slow10sSummary{N: 6, Slow: 2, Timeouts: 1},
+		ErrorN:      50, ErrorBad: 2, CacheTurns: 21, CacheRatio: schedAdminFloat(.8),
+	}
 	out, err := s.Summary(context.Background(), []int64{1, 2, 3, 4, 5, 6})
 	require.NoError(t, err)
 	item := schedAdminJSON(t, out.Accounts[0])
 	require.NotContains(t, item, "status")
 	require.NotContains(t, item, "substandard")
-	require.Equal(t, map[string]any{"first_event_p50_ms": float64(100), "first_output_p50_ms": float64(120), "gap_p50_ms": float64(20), "n": float64(7)}, item["ttfo"])
-	require.Equal(t, map[string]any{"ratio": .8, "turns": float64(21), "all_ratio": .9, "all_requests": float64(25)}, item["cache"])
+	require.NotContains(t, item, "ttfo")
+	require.Equal(t, map[string]any{"n": float64(7), "timeouts": float64(2), "p50_ms": float64(120)}, item["first_output"])
+	require.Equal(t, map[string]any{"n": float64(6), "slow": float64(2), "timeouts": float64(1)}, item["slow_10s"])
+	require.Equal(t, map[string]any{"failed": float64(2), "n": float64(50), "rate": .04, "short": false, "red": false}, item["error"])
+	require.Equal(t, map[string]any{"ratio": .8, "turns": float64(21)}, item["cache"])
+	empty := schedAdminJSON(t, out.Accounts[3])
+	require.Equal(t, map[string]any{"n": float64(0), "timeouts": float64(0), "p50_ms": nil}, empty["first_output"])
+	require.Equal(t, map[string]any{"n": float64(0), "slow": float64(0), "timeouts": float64(0)}, empty["slow_10s"])
+	require.Equal(t, map[string]any{"failed": float64(0), "n": float64(0), "rate": nil, "short": true, "red": false}, empty["error"])
+	require.Equal(t, map[string]any{"ratio": nil, "turns": float64(0)}, empty["cache"])
 	require.Equal(t, []any{}, item["rear"])
 	require.Equal(t, []any{}, item["trial"])
 	require.Equal(t, "rear", out.Accounts[1].GroupStatus["1"])
@@ -142,6 +154,74 @@ func TestSchedAdminV2SummaryAndFiveFilters(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "unknown", out.Accounts[0].GroupStatus["1"])
 	require.False(t, out.Accounts[0].Rear[0].Effective)
+}
+
+func TestSchedAdminSummaryRecentSince(t *testing.T) {
+	s, e, _ := schedAdminFixture()
+	// Even a stale summary describes the window at aggregation time.
+	end := s.d.Now().Add(-2 * time.Hour)
+	e.snapshot.At = end
+	for _, tc := range []struct {
+		name      string
+		reset     time.Time
+		shortened bool
+	}{
+		{"recent", end.Add(-time.Hour + time.Nanosecond), true},
+		{"exactly an hour", end.Add(-time.Hour), false},
+		{"older", end.Add(-2 * time.Hour), false},
+		{"no reset", time.Time{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e.snapshot.ResetAt = map[int64]time.Time{1: tc.reset}
+			e.snapshot.Accounts[1] = schedquality.SummarizeAccount(nil, 1, tc.reset, end)
+			out, err := s.Summary(context.Background(), []int64{1})
+			require.NoError(t, err)
+			item := schedAdminJSON(t, out.Accounts[0])
+			require.Contains(t, item, "recent_since")
+			if tc.shortened {
+				require.Equal(t, tc.reset.UTC().Format(time.RFC3339Nano), item["recent_since"])
+				require.Equal(t, item["reset_at"], item["recent_since"])
+			} else {
+				require.Nil(t, item["recent_since"])
+			}
+		})
+	}
+}
+
+func TestSchedAdminSummaryRecentSinceAfterRebuildWithoutAccountSamplesOrGroups(t *testing.T) {
+	f := newQualityFixture(t)
+	evaluatedAt := f.now
+	ctx := context.Background()
+	admin := NewSchedAdminService(SchedAdminDependencies{
+		Engine:   f.e,
+		Accounts: &schedAdminAccounts{rows: map[int64]*Account{2: {ID: 2, Platform: PlatformOpenAI}}},
+		Now:      func() time.Time { return f.now },
+	})
+
+	f.now = evaluatedAt.Add(-time.Hour + time.Second)
+	reset, err := f.e.Reset(ctx, 2)
+	require.NoError(t, err)
+	f.now = evaluatedAt
+	f.cycle()
+
+	// The reset only expires when the published aggregation window advances.
+	f.now = evaluatedAt.Add(2 * time.Second)
+	before, err := admin.Summary(ctx, []int64{2})
+	require.NoError(t, err)
+	require.Len(t, before.Accounts, 1)
+	require.Equal(t, schedAdminTime(reset), before.Accounts[0].RecentSince)
+
+	_, err = f.e.Reset(ctx, 1)
+	require.NoError(t, err)
+	snap := f.e.Snapshot()
+	require.NotContains(t, snap.Accounts, int64(2))
+	require.Equal(t, f.now, snap.Account(1).To)
+	require.Equal(t, evaluatedAt, snap.At)
+	after, err := admin.Summary(ctx, []int64{2})
+	require.NoError(t, err)
+	require.Len(t, after.Accounts, 1)
+	require.Equal(t, schedAdminTime(reset), after.Accounts[0].ResetAt)
+	require.Nil(t, after.Accounts[0].RecentSince)
 }
 
 type schedAdminStatsAccounts struct {

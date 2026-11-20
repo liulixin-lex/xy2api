@@ -85,11 +85,11 @@ func TestRequestUnitsSummaryResetUsesFirstStart(t *testing.T) {
 			retry.Outcome, retry.Class = OutcomeOK, ClassNone
 			rows := []AttemptSample{retry, first}
 			out := SummarizeAccount(rows, 1, reset, machineNow)
-			if out.ErrorN != 0 || out.ErrorBad != 0 || out.CacheAllRequests != 0 || out.CacheAllRatio != nil {
+			if out.ErrorN != 0 || out.ErrorBad != 0 {
 				t.Fatalf("pre-reset request returned through its retry: %+v", out)
 			}
 			out = SummarizeAccount(rows, 1, time.Time{}, machineNow)
-			if out.ErrorN != 1 || out.ErrorBad != 0 || out.CacheAllRequests != 1 {
+			if out.ErrorN != 1 || out.ErrorBad != 0 {
 				t.Fatalf("unreset summary lost final success: %+v", out)
 			}
 		})

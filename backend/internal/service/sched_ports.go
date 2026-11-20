@@ -123,6 +123,8 @@ type SchedQualitySnapshot struct {
 	Policies      map[int64]SchedPolicyRecord
 	Overrides     []SchedOverride
 	ResetAt       map[int64]time.Time
+
+	summaryWindowEnd time.Time // Aggregation time, including rebuilds between evaluations.
 }
 type SchedModelCount struct {
 	Model    string
