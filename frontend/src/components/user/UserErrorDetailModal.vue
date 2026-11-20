@@ -16,6 +16,16 @@
     <!-- Detail content -->
     <div v-else-if="detail" class="space-y-4 text-sm">
       <div class="grid grid-cols-2 gap-x-6 gap-y-3">
+        <!-- Key: the whole name, wrapped (the table cuts it at 240px; a tap on the row lands here) -->
+        <div class="col-span-2 min-w-0" data-testid="error-detail-key">
+          <span class="font-medium text-gray-500 dark:text-dark-400">{{ t('usage.errors.keyName') }}</span>
+          <p class="mt-0.5 text-gray-900 [overflow-wrap:anywhere] dark:text-dark-100">
+            {{ detail.key_name || '-' }}<span
+              v-if="detail.key_deleted"
+              class="ml-1.5 inline-flex items-center rounded px-1 py-px align-middle text-xs font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30"
+            >{{ t('usage.errors.keyDeleted') }}</span>
+          </p>
+        </div>
         <!-- Time -->
         <div>
           <span class="font-medium text-gray-500 dark:text-dark-400">{{ t('usage.errors.time') }}</span>
