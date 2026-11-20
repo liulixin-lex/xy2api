@@ -285,4 +285,22 @@ describe('UsageTable after review', () => {
     expect(cell(wrapper, 'latency').get('[data-testid="usage-latency-tip"]').classes()).toContain('[@media(hover:none)]:hidden')
   })
 
+
+  // Review item 5: buckets that cover part of the cache creation are listed under its known total.
+  it('keeps the cache-creation total when only part of it was reported by TTL bucket', async () => {
+    const partial = { ...row, cache_creation_tokens: 450, cache_creation_5m_tokens: 100, cache_creation_1h_tokens: 20, anthropic_cache_ttl_policy: '1h' }
+    const wrapper = mountTable(ADMIN, [partial])
+    await cell(wrapper, 'created_at').get('button').trigger('click')
+    const detail = wrapper.get('[data-testid="usage-request-detail"]')
+    expect(detail.get('[data-testid="usage-cache-creation-total"]').text()).toBe('admin.usage.cacheCreationTokens450')
+    expect(detail.get('[data-testid="usage-cache-creation-5m"]').text()).toContain('100')
+    expect(detail.get('[data-testid="usage-cache-creation-1h"]').text()).toContain('20')
+    expect(detail.get('[data-testid="usage-cache-creation-5m"]').classes()).toContain('pl-3')
+    expect(detail.text()).toContain('usage.anthropicCacheTTL.partialDetail')
+    // Fully reported: the two buckets alone, as before.
+    const full = mountTable(ADMIN, [{ ...partial, cache_creation_tokens: 120 }])
+    await cell(full, 'created_at').get('button').trigger('click')
+    expect(full.find('[data-testid="usage-cache-creation-total"]').exists()).toBe(false)
+    expect(full.get('[data-testid="usage-cache-creation-5m"]').classes()).not.toContain('pl-3')
+  })
 })

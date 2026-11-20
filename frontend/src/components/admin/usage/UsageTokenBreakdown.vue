@@ -27,16 +27,21 @@
         <span :class="tone.pink">{{ row.image_output_tokens.toLocaleString() }}</span>
       </div>
       <div v-if="row.cache_creation_tokens > 0">
+        <!-- 明细只报告了一部分时，先列已知总量，两个桶是其中的分项（未报告的部分由下面的说明注明） -->
+        <div v-if="partialBuckets" class="flex items-center justify-between gap-4" data-testid="usage-cache-creation-total">
+          <span :class="tone.label">{{ t('admin.usage.cacheCreationTokens') }}</span>
+          <span :class="tone.value">{{ row.cache_creation_tokens.toLocaleString() }}</span>
+        </div>
         <!-- 有 5m/1h 明细时，展开显示 -->
         <template v-if="row.cache_creation_5m_tokens > 0 || row.cache_creation_1h_tokens > 0">
-          <div v-if="row.cache_creation_5m_tokens > 0" class="flex items-center justify-between gap-4">
+          <div v-if="row.cache_creation_5m_tokens > 0" class="flex items-center justify-between gap-4" :class="{ 'pl-3': partialBuckets }" data-testid="usage-cache-creation-5m">
             <span class="flex items-center gap-1.5" :class="tone.label">
               {{ t('admin.usage.cacheCreation5mTokens') }}
               <span class="inline-flex items-center rounded px-1 py-px text-xs font-medium leading-tight ring-1 ring-inset" :class="tone.badge5m">5m</span>
             </span>
             <span :class="tone.value">{{ row.cache_creation_5m_tokens.toLocaleString() }}</span>
           </div>
-          <div v-if="row.cache_creation_1h_tokens > 0" class="flex items-center justify-between gap-4">
+          <div v-if="row.cache_creation_1h_tokens > 0" class="flex items-center justify-between gap-4" :class="{ 'pl-3': partialBuckets }" data-testid="usage-cache-creation-1h">
             <span class="flex items-center gap-1.5" :class="tone.label">
               {{ t('admin.usage.cacheCreation1hTokens') }}
               <span class="inline-flex items-center rounded px-1 py-px text-xs font-medium leading-tight ring-1 ring-inset" :class="tone.badge1h">1h</span>
@@ -130,4 +135,9 @@ const TONES = {
 } as const
 
 const tone = computed(() => TONES[props.variant])
+/** The 5m / 1h buckets cover only part of the cache creation: the known total leads, the buckets are within it. */
+const partialBuckets = computed(() => {
+  const known = (props.row.cache_creation_5m_tokens || 0) + (props.row.cache_creation_1h_tokens || 0)
+  return known > 0 && props.row.cache_creation_tokens > known
+})
 </script>
