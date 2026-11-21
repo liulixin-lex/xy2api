@@ -415,18 +415,26 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 			busy = append(busy, c)
 			continue
 		}
-		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
-			meta.addReason("session_limit")
-			result.ReleaseFunc()
-			resilience.StateFrom(ctx).MarkLastResortSessionLimited()
+		sessionLimited := false
+		sel, err := withOpenAISelectionSlotGuard(result.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
+			if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
+				sessionLimited = true
+				meta.addReason("session_limit")
+				resilience.StateFrom(ctx).MarkLastResortSessionLimited()
+				return nil, nil
+			}
+			s.noteLastResort(ctx, groupID, acc, c.recoverAt, avoided, meta)
+			return s.newSelectionResult(ctx, acc, true, release, nil)
+		})
+		if err != nil {
+			return nil
+		}
+		if sessionLimited {
 			continue
 		}
-		s.noteLastResort(ctx, groupID, acc, c.recoverAt, avoided, meta)
-		sel, err := s.newSelectionResult(ctx, acc, true, result.ReleaseFunc, nil)
-		if err != nil {
-			return nil // newSelectionResult already released the acquired slot.
+		if sel != nil {
+			return sel
 		}
-		return sel
 	}
 	cfg := s.schedulingConfig()
 	for _, c := range busy {

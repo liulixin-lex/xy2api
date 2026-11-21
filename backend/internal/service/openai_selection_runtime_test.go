@@ -267,6 +267,44 @@ func TestOpenAISelectionCandidateFilterRechecksAfterSlot(t *testing.T) {
 	require.Equal(t, []int64{postSlot.ID}, f.releases, "the slot that fails the post-acquisition predicate is released")
 }
 
+func TestOpenAISelectionSlotGuardReleasesOnFailureAndTransfersOnSuccess(t *testing.T) {
+	t.Run("panic releases once", func(t *testing.T) {
+		releases := 0
+		require.PanicsWithValue(t, "injected", func() {
+			_, _ = withOpenAISelectionSlotGuard(func() { releases++ }, func(func()) (*AccountSelectionResult, error) {
+				panic("injected")
+			})
+		})
+		require.Equal(t, 1, releases)
+	})
+
+	t.Run("cancellation releases once", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		releases := 0
+		selection, err := withOpenAISelectionSlotGuard(func() { releases++ }, func(func()) (*AccountSelectionResult, error) {
+			cancel()
+			return nil, ctx.Err()
+		})
+		require.ErrorIs(t, err, context.Canceled)
+		require.Nil(t, selection)
+		require.Equal(t, 1, releases)
+	})
+
+	t.Run("successful result transfers release ownership", func(t *testing.T) {
+		releases := 0
+		selection, err := withOpenAISelectionSlotGuard(func() { releases++ }, func(release func()) (*AccountSelectionResult, error) {
+			return &AccountSelectionResult{Acquired: true, ReleaseFunc: release}, nil
+		})
+		require.NoError(t, err)
+		require.NotNil(t, selection)
+		require.Zero(t, releases)
+		selection.ReleaseFunc()
+		selection.ReleaseFunc()
+		require.Equal(t, 1, releases)
+	})
+}
+
 func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
 	for _, mode := range []string{"immediate", "idle", "migration"} {
 		for _, legacy := range []bool{false, true} {

@@ -143,15 +143,18 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		return nil, false, acquireErr
 	}
 	if acquireErr == nil && result != nil && result.Acquired {
-		s.newSelectionTrial(ctx, req, account.ID).touch(ctx, account)
-		if !req.PreserveStickyBinding {
-			_ = s.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.openAIWSSessionStickyTTL(), accountID)
-		}
-		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
-			Account:     account,
-			Acquired:    true,
-			ReleaseFunc: result.ReleaseFunc,
-		}), false, nil
+		selection, err := withOpenAISelectionSlotGuard(result.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
+			s.newSelectionTrial(ctx, req, account.ID).touch(ctx, account)
+			if !req.PreserveStickyBinding {
+				_ = s.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.openAIWSSessionStickyTTL(), accountID)
+			}
+			return attachSelectionProfitGate(ctx, &AccountSelectionResult{
+				Account:     account,
+				Acquired:    true,
+				ReleaseFunc: release,
+			}), nil
+		})
+		return selection, false, err
 	}
 
 	if NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
