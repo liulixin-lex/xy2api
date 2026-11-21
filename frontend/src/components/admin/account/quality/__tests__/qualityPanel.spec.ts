@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import type { BackendDecision, BackendDetailGroup, BackendGroupModel } from '@/api/admin/schedQualityTypes'
-import { cacheEvidence, errorEvidence, groupModel, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
-import { evidenceCauses, groupPlace, lineEvidence, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeEnd } from '../qualityPanel'
+import { basis, cacheEvidence, errorEvidence, groupModel, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
+import { basisFigures, evidenceCauses, groupPlace, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeEnd } from '../qualityPanel'
 import { groupDotState } from '@/components/admin/account/table/accountGroups'
 
 const group = (id: number, rows: BackendGroupModel[], exempt = false): BackendDetailGroup => ({
@@ -80,26 +80,24 @@ describe('quality panel place', () => {
   })
 })
 
-describe('line evidence', () => {
-  it('lists the first-output evidence with discounted amounts, capped sessions, percentages and no peer numbers as "—"', () => {
-    const items = lineEvidence('ttfo', ttfoEvidence({ n: 19.96, k: 2, s: 5, d: 2, p_abs: 0.8, p_rel: null, u: null, z: null }))
-    expect(Object.fromEntries(items.map((item) => [item.key, item.value]))).toEqual({
-      limit_s: '10', n: '20.0', k: '2.0', x: '0.5', s: '≥3', d: '≥2', prior_mu: '8.0%', peer_nu: '9.0%',
-      p_abs: '80.0%', p_rel: '—', u: '—', z: '—'
+describe('decision figures', () => {
+  it('reads each line\'s figure against its measure, then the units counted; what a record lacks is left out', () => {
+    expect(basisFigures(basis('ttfo', { ttft: ttfoEvidence({ limit_s: 8, n: 40, k: 9, z: 0.103 }), samples_local: 11, samples_total: 30 }))).toEqual({
+      measure: [{ label: 'over', params: { s: 8 }, value: '22.5%' }, { label: 'bar', value: '10.3%' }],
+      samples: [{ label: 'samples', value: '30' }, { label: 'local', value: '11' }]
     })
-    expect(lineEvidence('ttfo', ttfoEvidence({ s: 2, d: 1 })).filter((item) => item.key === 's' || item.key === 'd').map((item) => item.value)).toEqual(['2', '1'])
-    expect(evidenceCauses('ttfo', ttfoEvidence({ causes: ['mass_insufficient', 'no_peers'] }))).toEqual(['mass_insufficient', 'no_peers'])
-  })
-
-  it('lists the error and cache evidence in their units; only the first-output line has unknown causes', () => {
-    expect(lineEvidence('error', errorEvidence()).map((item) => `${item.key}=${item.value}`)).toEqual([
-      'limit=5.0%', 'clear=80', 'failed=1', 'unknown=2', 'padded=82', 'lower_fail=0.2%', 'lower_pass=1.2%'
+    // No line drawn from the front peers: the peers' own share.
+    expect(basisFigures(basis('ttfo', { ttft: ttfoEvidence({ n: 40, k: 9, z: null, prior_mu: 0.146 }) })).measure![1]).toEqual({ label: 'peers', value: '14.6%' })
+    expect(basisFigures(basis('error', { error: errorEvidence({ failed: 6, padded: 80, limit: 0.025 }) })).measure).toEqual([
+      { label: 'failed', value: '7.5%' }, { label: 'limit', value: '2.5%' }
     ])
-    expect(lineEvidence('cache', cacheEvidence()).map((item) => `${item.key}=${item.value}`)).toEqual([
-      'min_ratio=80.0%', 'turns=30', 'ratio=91.0%', 'sessions=6', 'low_sessions=0'
+    expect(basisFigures(basis('cache', { cache: cacheEvidence({ ratio: 0.781, min_ratio: 0.85 }) })).measure).toEqual([
+      { label: 'hit', value: '78.1%' }, { label: 'min', value: '85%' }
     ])
+    // Nothing counted, nothing to measure; an older record without counts has no sample line.
+    expect(basisFigures(basis('ttfo', { ttft: ttfoEvidence({ n: 0, k: 0 }), samples_local: null, samples_total: null }))).toEqual({ measure: null, samples: [] })
+    expect(evidenceCauses('ttfo', ttfoEvidence({ causes: ['mass_insufficient'] }))).toEqual(['mass_insufficient'])
     expect(evidenceCauses('error', errorEvidence())).toEqual([])
-    expect(evidenceCauses('ttfo', undefined)).toEqual([])
   })
 })
 

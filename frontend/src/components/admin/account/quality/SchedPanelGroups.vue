@@ -27,7 +27,9 @@
     >
       <span class="gt__name" role="rowheader">
         <GroupAliasPill :group="item.info" />
-        <span class="gt__title">{{ item.group.name }}</span>
+        <!-- A name the pill already shows whole is not written twice. -->
+        <span v-if="!item.pillIsName" class="gt__title">{{ item.group.name }}</span>
+        <span v-else class="sr-only">{{ item.group.name }}</span>
       </span>
       <span class="gt__place" role="cell" data-test="qp-state" :data-qp-place="item.place">
         <!-- The place is the group's own control: it opens the group's exemption (or its removal) where it stands. -->
@@ -62,7 +64,7 @@
         v-for="cell in item.cells"
         :key="cell.col"
         class="gt__n"
-        :class="[`gt__n--${cell.col}`, cell.value === null ? 'is-none' : `is-${cell.identity}`]"
+        :class="[`gt__n--${cell.col}`, cell.value === null && !cell.held ? 'is-none' : `is-${cell.identity}`]"
         role="cell"
         :aria-label="cell.label"
         :data-qp-cell="cell.col"
@@ -79,7 +81,8 @@
 /**
  * The quality panel's groups table for the selected model; the layout carries the meaning, not labels:
  * - The first heading is the window ("近 12 小时", or what a filling window covers); when it was worked out is in its tip.
- * - Each group takes two lines: its alias and whole name, then its place and the four 12-hour figures. The place reads
+ * - Each group takes two lines: its alias and whole name (once, when the pill already reads it whole), then its place
+ *   and the four 12-hour figures. The place reads
  *   前排, 后排至 / 试用至 / 豁免至 the time it ends, 停调, or 门槛关; its dot and the figures share one set of colours
  *   (amber rear, blue trial, green front or pass, purple exempt, grey unknown or no figure), so the amber figure is the
  *   line that holds the group at the rear.
@@ -96,6 +99,7 @@ import type { BackendAccountDetail, BackendDetailGroup, BackendDim, BackendIdent
 import { SCHED_PANEL_PERF_TASK, useSchedLayerData } from '@/composables/useSchedLayerData'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { DASH, schedWord } from '@/utils/schedQualityFormat'
+import { groupPillText } from '@/utils/groupAlias'
 import { vTip } from '@/utils/tip'
 import SchedPauseMark from './SchedPauseMark.vue'
 import { gateOff, groupPlace, modelRow, placeEnd, type PanelPlace } from './qualityPanel'
@@ -147,6 +151,7 @@ function placeText(place: PanelPlace, group: BackendDetailGroup, end: string | n
 const rows = computed(() => {
   const data = perf.value
   return props.detail.groups.map((group) => {
+    const info = props.groupInfo(group.group_id) ?? { name: group.name }
     const place = groupPlace(props.detail, group, props.model)
     const row = modelRow(group, props.model)
     const off = place === 'front' && gateOff(props.detail, group) === 'group'
@@ -168,14 +173,16 @@ const rows = computed(() => {
       const identity: BackendIdentity | 'plain' = col === 'requests' ? 'plain' : (row?.lines[col].identity ?? 'unknown')
       const value = col === 'requests' ? (view ? view.row.requests : null) : shares[col]
       const text = value === null ? DASH : col === 'requests' ? fmtCount(value) : fmtPct(value)
-      const held = col !== 'requests' && value !== null && (identity === 'rear' || identity === 'trial')
-      const reference = held ? references[col as BackendDim] : null
+      // The line that holds the place keeps its colour even without a 12-hour figure (its evidence is other groups').
+      const held = col !== 'requests' && (identity === 'rear' || identity === 'trial')
+      const reference = held && value !== null ? references[col as BackendDim] : null
       const verdict = identity === 'plain' ? '' : schedWord('identity', identity, t, te)
-      return { col, identity, value, text, reference, label: [t(`admin.schedQuality.panel.col.${col}`), text, verdict, reference].filter(Boolean).join(' ') }
+      return { col, identity, value, held, text, reference, label: [t(`admin.schedQuality.panel.col.${col}`), text, verdict, reference].filter(Boolean).join(' ') }
     })
     return {
       group,
-      info: props.groupInfo(group.group_id) ?? { name: group.name },
+      info,
+      pillIsName: groupPillText(info) === group.name,
       place,
       tone: off ? ('off' as const) : PLACE_TONES[place],
       placeText: off ? t('admin.schedQuality.panel.gateOff') : placeText(place, group, placeEnd(row, place)),
@@ -349,7 +356,8 @@ const rows = computed(() => {
   font-size: 11px;
   line-height: 14px;
 }
-/* One set of colours with the place's dot: amber rear, blue trial, green pass, grey unknown; a dash stays grey. */
+/* One set of colours with the place's dot: amber rear, blue trial, green pass, grey unknown. A dash is grey, except on
+   the line that holds the group at the rear or on trial: it keeps that colour, so the row still shows which line. */
 .is-rear {
   color: var(--color-status-back-text);
 }

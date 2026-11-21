@@ -27,7 +27,7 @@
             </span>
             <span v-if="entry.line" class="drow__dim">{{ t(`admin.schedQuality.dim.${entry.line}`) }}</span>
             <span class="drow__meta">
-              <span class="drow__model" :title="entry.model">{{ entry.model }}</span>
+              <span v-if="entry.model !== model" class="drow__model" :title="entry.model" data-qp-decision-model>{{ entry.model }}</span>
               <span class="drow__groups" :title="entry.groups.map((id) => group(id).name).join(t('admin.schedQuality.evidence.joiner'))">
                 <GroupAliasPill v-for="id in entry.groups.slice(0, PILLS)" :key="id" :group="group(id)" />
                 <span v-if="entry.groups.length > PILLS" class="drow__more-groups" aria-hidden="true">{{ t('admin.schedQuality.more', { n: entry.groups.length - PILLS }) }}</span>
@@ -44,19 +44,15 @@
             :inert="!shown.has(entry.key) || undefined"
           >
             <div class="drow__open-inner">
-              <div v-for="item in entry.items" :key="item.id" class="drow__basis" :data-qp-decision-item="item.id">
-                <p v-if="entry.items.length > 1" class="drow__group">
-                  {{ group(item.group_id).name }}<span v-if="entry.endsDiffer && item.until" class="drow__group-end"> → {{ exactTime(item.until) }}</span>
+              <!-- Evidence alike across groups shows once; groups appear only where it differs between them. -->
+              <div v-for="block in entry.blocks" :key="block.key" class="drow__basis" :data-qp-decision-item="block.item.id">
+                <p v-if="entry.blocks.length > 1" class="drow__group">
+                  <GroupAliasPill v-for="id in block.groups" :key="id" :group="group(id)" />
+                  <span class="sr-only">{{ block.groups.map((id) => group(id).name).join(t('admin.schedQuality.evidence.joiner')) }}</span>
+                  <span v-if="entry.endsDiffer && block.item.until" class="drow__group-end"><Icon name="arrowRight" size="xs" :stroke-width="2.25" />{{ exactTime(block.item.until) }}</span>
                 </p>
-                <p v-if="item.line && item.action === 'trial_timeout'" class="drow__sub" :data-qp-trial-timeout="item.id">{{ timeoutReason(item) }}</p>
-                <SchedEvidence
-                  v-if="item.basis"
-                  :dim="item.basis.line"
-                  :evidence="basisEvidence(item.basis)"
-                  :samples="item.basis"
-                  :source-groups="item.basis.source_groups"
-                  :group-name="(id) => group(id).name"
-                />
+                <p v-if="block.item.line && block.item.action === 'trial_timeout'" class="drow__sub" :data-qp-trial-timeout="block.item.id">{{ timeoutReason(block.item) }}</p>
+                <SchedEvidence v-if="block.item.basis" :basis="block.item.basis" :tone="tone(entry)" />
               </div>
             </div>
           </div>
@@ -76,10 +72,11 @@
 /**
  * The quality panel's decision records (GET …/accounts/:id/decisions), newest first, 50 at a time, loaded with the
  * panel. One entry a line: the time, the action in its colour, where it ends ("→ 10:04"), the line, the model and the
- * groups as their pills. Records of one minute, action, model, line and end minute across groups are one entry
- * (mergeDecisions); the newest six show, "查看更多" shows the rest and then loads older pages. A line with evidence is
- * a button: it grows open to each record's evidence, its own end when the records' ends differ, and why a trial ended
- * without a verdict. Another account starts over; a quality change made from the page loads the first page again.
+ * groups as their pills; the model only when it is not the tab's. Records of one minute, action, model, line and end
+ * minute across groups are one entry (mergeDecisions); the newest six show, "查看更多" shows the rest and then loads
+ * older pages. A line with evidence is a button: it grows open to the figures the decision was taken on (SchedEvidence),
+ * once for the groups that share them and apart, with their pills and own ends, where they differ; and why a trial
+ * ended without a verdict. Another account starts over; a quality change made from the page loads the first page again.
  * Records of the previous rules have no evidence and read "旧规则 · <action>".
  */
 import { computed, reactive, ref, useId, watch } from 'vue'
@@ -87,12 +84,12 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import GroupAliasPill from '@/components/common/GroupAliasPill.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { BackendBasis, BackendDecision } from '@/api/admin/schedQualityTypes'
+import type { BackendDecision } from '@/api/admin/schedQualityTypes'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import { schedWord } from '@/utils/schedQualityFormat'
 import SchedEvidence from './SchedEvidence.vue'
-import { evidenceCauses, mergeDecisions, type MergedDecision } from './qualityPanel'
+import { basisFigures, evidenceCauses, mergeDecisions, type MergedDecision } from './qualityPanel'
 
 const PAGE = 50
 /** Entries shown before "查看更多". */
@@ -104,6 +101,8 @@ const props = defineProps<{
   accountId: number
   /** A group's name and alias by id. */
   group: (id: number) => { name: string; alias?: string | null }
+  /** The model of the panel's tab: entries of another model carry its name. */
+  model: string | null
 }>()
 const { t, te } = useI18n()
 const { changed } = useSchedLayers()
@@ -123,13 +122,37 @@ const GOOD = new Set(['release', 'trial_pass', 'clear', 'relax', 'reset'])
 const endOf = (entry: MergedDecision) =>
   entry.line && entry.until && (entry.action === 'trial' || BAD.has(entry.action)) ? formatShortTime(entry.until) : ''
 
+/** A record's evidence as shown, to tell alike records of different groups apart from ones that differ. */
+const shownOf = (item: BackendDecision) =>
+  JSON.stringify([item.basis ? basisFigures(item.basis) : null, item.action === 'trial_timeout' ? item.basis ?? null : null, item.until])
+
+/** The records of an entry by the evidence they show: one block per different one, with the groups it is for. */
+function blocksOf(entry: MergedDecision) {
+  const out = new Map<string, { key: string; item: BackendDecision; groups: number[] }>()
+  for (const item of entry.items) {
+    const key = shownOf(item)
+    const block = out.get(key)
+    if (!block) out.set(key, { key, item, groups: [item.group_id] })
+    else if (!block.groups.includes(item.group_id)) block.groups.push(item.group_id)
+  }
+  return [...out.values()]
+}
+
+const hasShown = (item: BackendDecision) => {
+  if (item.line && item.action === 'trial_timeout') return true
+  if (!item.basis) return false
+  const figures = basisFigures(item.basis)
+  return figures.measure !== null || figures.samples.length > 0
+}
+
 const entries = computed(() =>
   mergeDecisions(items.value).map((entry) => ({
     ...entry,
     end: endOf(entry),
     /** The records' own ends differ within the minute shown: each says its own when opened. */
     endsDiffer: new Set(entry.items.map((item) => item.until)).size > 1,
-    expandable: entry.items.some((item) => item.basis || (item.line && item.action === 'trial_timeout'))
+    blocks: blocksOf(entry),
+    expandable: entry.items.some(hasShown)
   }))
 )
 const visible = computed(() => (all.value ? entries.value : entries.value.slice(0, FIRST)))
@@ -201,8 +224,6 @@ function exactTime(value: string): string {
   const date = new Date(value)
   return `${formatShortTime(value)}:${String(date.getSeconds()).padStart(2, '0')}`
 }
-
-const basisEvidence = (basis: BackendBasis) => basis.ttft ?? basis.error ?? basis.cache ?? null
 
 /**
  * Why a trial ended without a verdict, from the basis as it is (the backend gives no reason code): no traffic of this
@@ -389,13 +410,13 @@ button.drow__line:focus-visible {
 .drow__open-inner {
   display: grid;
   min-height: 0;
-  gap: 8px;
+  gap: 6px;
   overflow: hidden;
   padding-left: 46px;
 }
 .drow.is-open .drow__open-inner {
-  padding-top: 6px;
-  padding-bottom: 10px;
+  padding-top: 4px;
+  padding-bottom: 8px;
 }
 .drow__basis {
   display: grid;
@@ -404,12 +425,17 @@ button.drow__line:focus-visible {
   overflow-wrap: anywhere;
 }
 .drow__group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin: 0;
-  color: var(--color-text-primary);
-  font-size: var(--font-size-small);
-  font-weight: var(--font-weight-medium);
 }
 .drow__group-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  font-size: var(--font-size-small);
   color: var(--color-text-secondary);
   font-weight: var(--font-weight-regular);
   font-variant-numeric: tabular-nums;
