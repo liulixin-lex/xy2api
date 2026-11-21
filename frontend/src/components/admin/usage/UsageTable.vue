@@ -129,16 +129,18 @@
           </span>
         </template>
 
-        <!-- 入站端点；管理端上游端点不同时同一行“入站 → 上游”，两者带名称的完整值在悬停和明细里 -->
+        <!-- 两行“入站: … / 上游: …”（上游只有管理端有） -->
         <template #cell-endpoint="{ row }">
-          <span class="block max-w-[280px] truncate text-xs" :title="endpointTitle(row)" data-testid="usage-endpoint">
-            <span v-if="endpointPair(row, showUpstreamEndpoint).inbound" class="text-gray-700 dark:text-gray-300">{{ endpointPair(row, showUpstreamEndpoint).inbound }}</span>
-            <CellEmpty v-else />
-            <template v-if="upstreamDiffers(row)">
-              <span class="mx-1 text-gray-400 dark:text-gray-500" aria-hidden="true">→</span>
-              <span class="text-gray-500 dark:text-gray-400">{{ endpointPair(row, showUpstreamEndpoint).upstream }}</span>
-            </template>
-          </span>
+          <div class="max-w-[320px] space-y-1 text-xs" data-testid="usage-endpoint">
+            <div class="break-all text-gray-700 dark:text-gray-300">
+              <span class="font-medium text-gray-500 dark:text-gray-400">{{ t('usage.inbound') }}:</span>
+              <span class="ml-1">{{ row.inbound_endpoint?.trim() || '—' }}</span>
+            </div>
+            <div v-if="showUpstreamEndpoint" class="break-all text-gray-700 dark:text-gray-300">
+              <span class="font-medium text-gray-500 dark:text-gray-400">{{ t('usage.upstream') }}:</span>
+              <span class="ml-1">{{ row.upstream_endpoint?.trim() || '—' }}</span>
+            </div>
+          </div>
         </template>
 
         <template #cell-group="{ row }">
@@ -179,32 +181,64 @@
           </span>
         </template>
 
-        <!-- 一行输入 / 输出；缓存、缓存读取占比、媒体 Token 在悬停和明细里 -->
+        <!-- 输入 / 输出一行，缓存读写、缓存读取占比、图片 Token 各占一行；右侧小图标悬停看 Token 明细 -->
         <template #cell-tokens="{ row }">
           <!-- 无账单请求未观测到用量：不编造 0 -->
-          <CellEmpty v-if="isUnbilled(row) && row.input_tokens == null && row.output_tokens == null" />
+          <span v-if="isUnbilled(row) && row.input_tokens == null && row.output_tokens == null" class="text-sm text-gray-400 dark:text-gray-500">—</span>
           <!-- 图片生成请求（仅按次计费时显示图片格式） -->
-          <div v-else-if="isImageUsage(row)" class="flex items-center justify-end gap-1.5 whitespace-nowrap text-sm">
+          <div v-else-if="isImageUsage(row)" class="flex items-center gap-1.5">
             <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
-            <span class="font-medium tabular-nums text-gray-900 dark:text-white">{{ row.image_count }}{{ t('usage.imageUnit') }}</span>
-            <span class="text-gray-500 dark:text-gray-400">({{ formatImageBillingSize(row, t) }})</span>
+            <span class="font-medium text-gray-900 dark:text-white">{{ row.image_count }}{{ t('usage.imageUnit') }}</span>
+            <span class="text-gray-400">({{ formatImageBillingSize(row, t) }})</span>
           </div>
           <!-- Token 请求 -->
-          <div v-else class="flex items-center justify-end gap-2 whitespace-nowrap text-sm" data-testid="usage-token-summary">
-            <span class="inline-flex items-center gap-1" :title="t('admin.usage.inputTokens')">
-              <Icon name="arrowDown" size="sm" class="h-3.5 w-3.5 text-emerald-500" />
-              <span class="font-medium tabular-nums text-gray-900 dark:text-white">{{ row.input_tokens?.toLocaleString() || 0 }}</span>
-            </span>
-            <span class="inline-flex items-center gap-1" :title="t('admin.usage.outputTokens')">
-              <Icon name="arrowUp" size="sm" class="h-3.5 w-3.5 text-violet-500" />
-              <span class="font-medium tabular-nums text-gray-900 dark:text-white">{{ row.output_tokens?.toLocaleString() || 0 }}</span>
-            </span>
-            <!-- Token Detail Tooltip（账单明细只有 usage 行才有） -->
+          <div v-else class="flex items-center gap-1.5" data-testid="usage-token-cell">
+            <div class="space-y-1 text-sm">
+              <div class="flex items-center gap-2">
+                <div class="inline-flex items-center gap-1">
+                  <Icon name="arrowDown" size="sm" class="h-3.5 w-3.5 text-emerald-500" />
+                  <span class="font-medium text-gray-900 dark:text-white">{{ row.input_tokens?.toLocaleString() || 0 }}</span>
+                </div>
+                <div class="inline-flex items-center gap-1">
+                  <Icon name="arrowUp" size="sm" class="h-3.5 w-3.5 text-violet-500" />
+                  <span class="font-medium text-gray-900 dark:text-white">{{ row.output_tokens?.toLocaleString() || 0 }}</span>
+                </div>
+              </div>
+              <div v-if="row.cache_read_tokens > 0 || row.cache_creation_tokens > 0" class="flex items-center gap-2">
+                <div v-if="row.cache_read_tokens > 0" class="inline-flex items-center gap-1" data-testid="usage-cache-read">
+                  <svg class="h-3.5 w-3.5 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
+                  <span class="font-medium text-sky-600 dark:text-sky-400">{{ formatCacheTokens(row.cache_read_tokens) }}</span>
+                </div>
+                <div v-if="row.cache_creation_tokens > 0" class="inline-flex items-center gap-1" data-testid="usage-cache-creation">
+                  <svg class="h-3.5 w-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                  <span class="font-medium text-amber-600 dark:text-amber-400">{{ formatCacheTokens(row.cache_creation_tokens) }}</span>
+                  <span v-if="row.cache_creation_1h_tokens > 0" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/30">1h</span>
+                  <span v-if="row.cache_ttl_overridden" :title="t('usage.cacheTtlOverriddenHint')" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">{{ t('usage.cacheTtlOverriddenLabel') }}</span>
+                </div>
+              </div>
+              <div v-if="props.showCacheHitRate && hasUsageTokenMetrics(row)" class="flex items-center gap-2 text-xs" :title="t('usage.cacheHitRateHint')">
+                <span data-testid="usage-cache-hit-rate" :aria-label="`${t('usage.cacheHitRate')}: ${formatCacheHitRate(row)}`" class="font-medium tabular-nums text-sky-600 dark:text-sky-400">{{ formatCacheHitRate(row) }}</span>
+              </div>
+              <div v-if="hasImageInputTokens(row)" class="flex items-center gap-2">
+                <div class="inline-flex items-center gap-1">
+                  <svg class="h-3.5 w-3.5 text-fuchsia-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                  <span class="font-medium text-fuchsia-600 dark:text-fuchsia-400">{{ row.image_input_tokens.toLocaleString() }}</span>
+                </div>
+              </div>
+              <div v-if="hasImageOutputTokens(row)" class="flex items-center gap-2">
+                <div class="inline-flex items-center gap-1">
+                  <svg class="h-3.5 w-3.5 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                  <span class="font-medium text-pink-600 dark:text-pink-400">{{ row.image_output_tokens.toLocaleString() }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- Token Detail Tooltip（账单明细只有 usage 行才有；触屏没有悬停，明细在“明细”里） -->
             <div
               v-if="!isUnbilled(row)"
               class="group relative [@media(hover:none)]:hidden"
+              data-testid="usage-token-tip"
               @mouseenter="showTokenTooltip($event, row)"
               @mouseleave="hideTokenTooltip"
             >
@@ -215,78 +249,74 @@
           </div>
         </template>
 
-        <!-- 一行实付（6 位小数）；管理端同一行跟着账号计费“A $…”；细项在悬停和明细里 -->
+        <!--
+          第一行实付（长上下文标记）和 16px 小图标：悬停看费用明细，点击开档位明细；主指针是触屏时可点区放大到 40px，图标不变。
+          第二行管理端的账号计费“A $…”。
+        -->
         <template #cell-cost="{ row }">
           <!-- 无账单请求没有费用：显示 —，失败 / 取消的标上结果 -->
           <div v-if="isUnbilled(row) && row.actual_cost == null" class="text-sm text-gray-400 dark:text-gray-500" data-testid="usage-unbilled">
             —<span v-if="unbilledWord(row, t)" class="ml-1.5 text-xs">{{ unbilledWord(row, t) }}</span>
           </div>
-          <div v-else class="flex items-center justify-end gap-1.5 whitespace-nowrap text-sm">
-            <span class="font-medium tabular-nums text-green-600 dark:text-green-400">{{ formatUsd(row.actual_cost, 6) }}</span>
-            <span
-              v-if="row.long_context_billing_applied"
-              data-testid="long-context-billing-marker"
-              :title="t('admin.usage.longContextPricingTooltip')"
-              class="inline-flex items-center rounded px-1 py-px text-xs font-semibold leading-tight bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30"
-            >{{ t('admin.usage.longContext') }}</span>
-            <span v-if="showAccountBilling && row.account_rate_multiplier != null" data-testid="usage-account-billed" class="text-xs tabular-nums text-orange-500 dark:text-orange-400">
+          <div v-else class="text-sm">
+            <div class="flex items-center gap-1.5">
+              <span class="font-medium text-green-600 dark:text-green-400">{{ formatUsd(row.actual_cost, 6) }}</span>
+              <span
+                v-if="row.long_context_billing_applied"
+                data-testid="long-context-billing-marker"
+                :title="t('admin.usage.longContextPricingTooltip')"
+                class="inline-flex items-center rounded px-1 py-px text-[10px] font-semibold leading-tight bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30"
+              >{{ t('admin.usage.longContext') }}</span>
+              <button
+                type="button"
+                class="group relative flex h-4 w-4 cursor-pointer items-center justify-center rounded-full bg-gray-100 transition-colors hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:bg-gray-700 dark:hover:bg-blue-900/50 [@media(pointer:coarse)]:before:absolute [@media(pointer:coarse)]:before:-inset-3 [@media(pointer:coarse)]:before:content-['']"
+                :aria-label="t('usage.tierDetails.title')"
+                aria-haspopup="dialog"
+                data-testid="usage-tier-details"
+                @mouseenter="showTooltip($event, row)"
+                @mouseleave="hideTooltip"
+                @click="hideTooltip(); tierDetailRow = row"
+              >
+                <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
+              </button>
+            </div>
+            <div v-if="showAccountBilling && row.account_rate_multiplier != null" data-testid="usage-account-billed" class="mt-0.5 text-[11px] text-orange-500 dark:text-orange-400">
               A {{ formatUsd(accountBilled(row), 6) }}
-            </span>
-            <button
-              type="button"
-              class="group relative inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100 hover:bg-blue-100 focus-visible:ring-2 dark:bg-gray-700 [@media(any-pointer:coarse)]:-my-2.5 [@media(any-pointer:coarse)]:h-10 [@media(any-pointer:coarse)]:w-10"
-              :aria-label="t('usage.tierDetails.title')"
-              aria-haspopup="dialog"
-              data-testid="usage-tier-details"
-              @mouseenter="showTooltip($event, row)"
-              @mouseleave="hideTooltip"
-              @click="hideTooltip(); tierDetailRow = row"
-            >
-              <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-400" />
-            </button>
+            </div>
           </div>
         </template>
 
         <!--
-          一行摘要。管理端“等待 X · 末次首字 Y”：用户等待（端到端首输出）中性色，末次首字按分档着色；用户端“首字 X · 耗时 Y”。
-          色条上端按首字分档，下端按耗时分档；末次耗时、平均 TPS 在电脑端悬停提示和明细里。
+          左侧色条上端按首字分档，下端按耗时分档。管理端四行：等待（端到端首输出，灰色）、首字、耗时（末次尝试，分档着色）、
+          TPS（不着色），标签悬停说明口径；用户端：首字、总耗时、平均 TPS。
         -->
         <template #cell-latency="{ row }">
-          <div class="flex items-center justify-end gap-2 whitespace-nowrap" data-testid="usage-latency-summary">
+          <div class="flex items-stretch gap-2" data-testid="usage-latency-cell">
             <span
-              class="h-4 w-1 shrink-0 rounded-full"
+              class="w-1 shrink-0 rounded-full"
               :class="latencyBarClasses(row)"
               aria-hidden="true"
             ></span>
-            <span class="flex items-baseline gap-1.5">
+            <div class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs">
               <template v-if="showEndToEnd">
-                <span class="text-xs text-gray-500 dark:text-gray-400" :title="t('usage.latencyEndToEndHint')">{{ t('usage.latencyWaitShort') }}</span>
-                <span v-if="row.end_to_end_first_output_ms != null" data-testid="usage-latency-e2e" class="text-sm font-medium tabular-nums text-gray-700 dark:text-gray-300">{{ formatLatency(row.end_to_end_first_output_ms) }}</span>
-                <span v-else data-testid="usage-latency-e2e" class="cursor-help text-sm text-gray-400 dark:text-gray-500" :title="t('usage.latencyEndToEndUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
-                <span class="text-gray-300 dark:text-gray-600" aria-hidden="true">·</span>
-                <span class="text-xs text-gray-500 dark:text-gray-400" :title="t('usage.latencyLastAttemptHint')">{{ t('usage.latencyLastAttempt') }}</span>
-                <span v-if="row.first_token_ms != null" data-testid="usage-latency-last-attempt" class="text-sm font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatLatency(row.first_token_ms) }}</span>
-                <span v-else data-testid="usage-latency-last-attempt" class="cursor-help text-sm text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
+                <span class="text-gray-500 dark:text-gray-400" :title="t('usage.latencyEndToEndHint')">{{ t('usage.latencyWaitShort') }}</span>
+                <span v-if="row.end_to_end_first_output_ms != null" data-testid="usage-latency-e2e" class="tabular-nums text-gray-500 dark:text-gray-400">{{ formatLatency(row.end_to_end_first_output_ms) }}</span>
+                <span v-else data-testid="usage-latency-e2e" class="cursor-help text-gray-400 dark:text-gray-500" :title="t('usage.latencyEndToEndUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
+                <span class="text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptHint')">{{ t('usage.latencyFirstToken') }}</span>
+                <span v-if="row.first_token_ms != null" data-testid="usage-latency-last-attempt" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatLatency(row.first_token_ms) }}</span>
+                <span v-else data-testid="usage-latency-last-attempt" class="cursor-help text-gray-400 dark:text-gray-500" :title="t('usage.latencyLastAttemptUnknownHint')">{{ t('usage.latencyUnknown') }}</span>
               </template>
               <template v-else>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.latencyFirstToken') }}</span>
-                <span v-if="row.first_token_ms != null" data-testid="usage-latency-first-token" class="text-sm font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatLatency(row.first_token_ms) }}</span>
-                <span v-else data-testid="usage-latency-first-token" class="text-sm text-gray-400 dark:text-gray-500">—</span>
-                <span class="text-gray-300 dark:text-gray-600" aria-hidden="true">·</span>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.duration') }}</span>
-                <span data-testid="usage-latency-duration" class="text-sm font-medium tabular-nums" :class="row.duration_ms == null ? 'text-gray-400 dark:text-gray-500' : LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms)]">{{ formatLatency(row.duration_ms) }}</span>
+                <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyFirstToken') }}</span>
+                <span v-if="row.first_token_ms != null" data-testid="usage-latency-first-token" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatLatency(row.first_token_ms) }}</span>
+                <span v-else data-testid="usage-latency-first-token" class="text-gray-400 dark:text-gray-500">—</span>
               </template>
-            </span>
-            <!-- Latency Detail Tooltip（与明细里的延迟同一组件：末次耗时、平均 TPS 等） -->
-            <div
-              class="group/latency relative [@media(hover:none)]:hidden"
-              data-testid="usage-latency-tip"
-              @mouseenter="showLatencyTooltip($event, row)"
-              @mouseleave="hideLatencyTooltip"
-            >
-              <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover/latency:bg-blue-100 dark:bg-gray-700 dark:group-hover/latency:bg-blue-900/50">
-                <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover/latency:text-blue-500 dark:text-gray-500 dark:group-hover/latency:text-blue-400" />
-              </div>
+              <span class="text-gray-400 dark:text-gray-500" :title="showEndToEnd ? t('usage.latencyLastAttemptDurationHint') : undefined">{{ showEndToEnd ? t('usage.duration') : t('usage.latencyDuration') }}</span>
+              <span data-testid="usage-latency-duration" class="font-medium tabular-nums" :class="row.duration_ms == null ? 'text-gray-400 dark:text-gray-500' : LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms)]">{{ formatLatency(row.duration_ms) }}</span>
+              <template v-if="props.showTokenSpeed && hasUsageTokenMetrics(row)">
+                <span class="text-gray-500 dark:text-gray-400" :title="showEndToEnd ? t('usage.outputTpsHint') : undefined">{{ showEndToEnd ? t('usage.outputTpsShort') : t('usage.outputTps') }}</span>
+                <span data-testid="usage-token-speed" class="whitespace-nowrap font-medium tabular-nums text-gray-700 dark:text-gray-300" :title="showEndToEnd ? t('usage.outputTpsHint') : undefined">{{ formatTokenSpeed(row) }}</span>
+              </template>
             </div>
           </div>
         </template>
@@ -401,7 +431,7 @@
       :style="{ left: tokenTip.x + 'px', top: tokenTip.y + 'px' }"
     >
       <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
-        <UsageTokenBreakdown v-if="tokenTooltipData" :row="tokenTooltipData" :show-cache-hit-rate="props.showCacheHitRate" />
+        <UsageTokenBreakdown v-if="tokenTooltipData" :row="tokenTooltipData" />
         <div v-if="tokenTip.side === 'right'" class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
         <div v-else class="absolute left-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-l-[6px] border-t-[6px] border-b-transparent border-l-gray-900 border-t-transparent dark:border-l-gray-800"></div>
       </div>
@@ -419,22 +449,6 @@
       <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
         <UsageCostBreakdown v-if="tooltipData" :row="tooltipData" :show-account-billing="showAccountBilling" />
         <div v-if="costTip.side === 'right'" class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
-        <div v-else class="absolute left-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-l-[6px] border-t-[6px] border-b-transparent border-l-gray-900 border-t-transparent dark:border-l-gray-800"></div>
-      </div>
-    </div>
-  </Teleport>
-
-  <!-- Latency Tooltip Portal -->
-  <Teleport to="body">
-    <div
-      v-if="latencyTooltipData"
-      ref="latencyTipEl"
-      class="fixed z-[9999] pointer-events-none -translate-y-1/2"
-      :style="{ left: latencyTip.x + 'px', top: latencyTip.y + 'px' }"
-    >
-      <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
-        <UsageLatencyBreakdown v-if="latencyTooltipData" :row="latencyTooltipData" :show-end-to-end="props.showEndToEnd" :show-token-speed="props.showTokenSpeed" />
-        <div v-if="latencyTip.side === 'right'" class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
         <div v-else class="absolute left-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-l-[6px] border-t-[6px] border-b-transparent border-l-gray-900 border-t-transparent dark:border-l-gray-800"></div>
       </div>
     </div>
@@ -474,7 +488,9 @@ import {
   isImageUsage,
   getDisplayBillingMode,
 } from '@/utils/billingMode'
-import { formatImageBillingSize } from '@/utils/imageUsage'
+import { formatImageBillingSize, hasImageInputTokens, hasImageOutputTokens } from '@/utils/imageUsage'
+import { formatCacheTokens } from '@/utils/formatters'
+import { formatCacheHitRate, formatTokenSpeed, hasUsageTokenMetrics } from '@/utils/usageMetrics'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -483,7 +499,6 @@ import CellEmpty from '@/components/common/CellEmpty.vue'
 import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
 import { useTableViewport } from '@/composables/useTableViewport'
 import Icon from '@/components/icons/Icon.vue'
-import UsageLatencyBreakdown from './UsageLatencyBreakdown.vue'
 import UsageTokenBreakdown from './UsageTokenBreakdown.vue'
 import UsageCostBreakdown from './UsageCostBreakdown.vue'
 import UsageRequestDetailDialog from './UsageRequestDetailDialog.vue'
@@ -491,7 +506,6 @@ import UsageTierDetailsDialog from './UsageTierDetailsDialog.vue'
 import {
   accountBilled,
   crossGroup,
-  endpointPair,
   formatLatency,
   groupLabel,
   hasModelAudit,
@@ -598,18 +612,6 @@ const tableColumns = computed<Column[]>(() =>
 const isAdmin = computed(() => props.viewer === 'admin')
 /** The model steps a page may show: the admin page the whole mapping, the user page the model asked for. */
 const shownModelSteps = (row: AdminUsageLog) => (isAdmin.value ? modelSteps(row) : [row.model])
-
-/** The upstream endpoint is shown on this page, known and not the inbound one. */
-const upstreamDiffers = (row: AdminUsageLog) => {
-  const { inbound, upstream } = endpointPair(row, showUpstreamEndpoint)
-  return !!upstream && upstream !== inbound
-}
-const endpointTitle = (row: AdminUsageLog) => {
-  const { inbound, upstream } = endpointPair(row, showUpstreamEndpoint)
-  const lines = [`${t('usage.inboundEndpoint')}: ${inbound || '—'}`]
-  if (upstream != null) lines.push(`${t('usage.upstreamEndpoint')}: ${upstream || '—'}`)
-  return lines.join('\n')
-}
 
 const currentPageIps = computed(() =>
   Array.from(new Set(props.data.map((row) => row.ip_address).filter((ip): ip is string => Boolean(ip))))
@@ -737,18 +739,5 @@ const showTokenTooltip = (event: MouseEvent, row: AdminUsageLog) => {
 const hideTokenTooltip = () => {
   tokenTooltipVisible.value = false
   tokenTooltipData.value = null
-}
-
-// Latency tooltip (desktop hover): the same lines as the detail dialog's latency
-const latencyTip = ref<TipPlace>({ x: 0, y: 0, side: 'right' })
-const latencyTipEl = ref<HTMLElement | null>(null)
-const latencyTooltipData = ref<AdminUsageLog | null>(null)
-const showLatencyTooltip = (event: MouseEvent, row: AdminUsageLog) => {
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  latencyTooltipData.value = row
-  void placeTip(rect, latencyTip, latencyTipEl)
-}
-const hideLatencyTooltip = () => {
-  latencyTooltipData.value = null
 }
 </script>

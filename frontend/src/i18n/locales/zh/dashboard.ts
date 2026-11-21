@@ -452,7 +452,6 @@ export default {
     latencyUnknown: '未知',
     latencyWaitShort: '等待',
     removeFilter: '移除筛选：{label}',
-    latencyDetails: '延迟明细',
     requestDetail: {
       button: '明细',
       open: '查看 {time} 的明细',
@@ -477,6 +476,7 @@ export default {
     e2eFirstOutputP50Missing: '基于 {n} 个请求，但返回里没有中位数',
     e2eFirstOutputHint: '端到端首输出的中位数：从请求进入网关到用户收到首个有效输出，含排队和之前失败的尝试。只算有这项记录的请求。',
     outputTps: '平均 TPS',
+    outputTpsShort: 'TPS',
     outputTpsHint: '平均 TPS = 输出 Token ÷ 请求总耗时（含首 Token 等待），单位 t/s（每秒输出 Token 数）。输出可能已包含推理 Token，不重复相加；无有效输出或耗时时显示 —。',
     time: '时间',
     ws: 'WS',
