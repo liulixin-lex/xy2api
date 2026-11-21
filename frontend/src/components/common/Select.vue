@@ -580,7 +580,7 @@ onUnmounted(() => {
   @apply border border-gray-200 dark:border-dark-600;
   @apply text-gray-900 dark:text-gray-100;
   @apply transition-all duration-200;
-  @apply focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30;
+  @apply focus:border-primary-500 focus:outline-hidden focus:ring-2 focus:ring-primary-500/30;
   @apply hover:border-gray-300 dark:hover:border-dark-500;
   @apply cursor-pointer;
 }
@@ -673,11 +673,11 @@ onUnmounted(() => {
   @apply flex-1 bg-transparent text-sm;
   @apply text-gray-900 dark:text-gray-100;
   @apply placeholder:text-gray-400 dark:placeholder:text-dark-400;
-  @apply focus:outline-none;
+  @apply focus:outline-hidden;
 }
 
 .select-dropdown-portal .select-options {
-  @apply max-h-80 overflow-y-auto py-1 outline-none;
+  @apply max-h-80 overflow-y-auto py-1 outline-hidden;
 }
 
 .select-dropdown-portal .select-option {

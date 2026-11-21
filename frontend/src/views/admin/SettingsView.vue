@@ -13307,7 +13307,7 @@ const affiliateBatchLayer = useOverlayLayer(() => affiliateBatchModal.open, { ro
 }
 
 .settings-tab {
-  @apply relative isolate flex h-10 min-w-[6.75rem] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-transparent px-3 text-sm font-medium text-gray-600 outline-none transition-colors duration-200 ease-out dark:text-gray-300;
+  @apply relative isolate flex h-10 min-w-[6.75rem] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-transparent px-3 text-sm font-medium text-gray-600 outline-hidden transition-colors duration-200 ease-out dark:text-gray-300;
 }
 
 @media (min-width: 768px) {
