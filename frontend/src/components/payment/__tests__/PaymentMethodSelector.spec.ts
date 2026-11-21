@@ -13,7 +13,7 @@ describe('PaymentMethodSelector', () => {
     const wrapper = mount(PaymentMethodSelector, { props: { selected: type, methods: [{ type, display_name: 'Stripe Hosted', fee_rate: 0, available: true }] } })
     const button = wrapper.get('button')
     expect(button.text()).toBe('Stripe')
-    expect(button.attributes('aria-pressed')).toBe('true')
+    expect(button.attributes('aria-checked')).toBe('true')
     await button.trigger('click')
     expect(wrapper.emitted('select')).toEqual([[type]])
   })
@@ -67,5 +67,23 @@ describe('PaymentMethodSelector', () => {
     const button = wrapper.get('button')
     expect(button.classes()).toContain('border-primary-500')
     expect(button.classes()).not.toContain('border-[#02A9F1]')
+  })
+})
+
+describe('PaymentMethodSelector keyboard', () => {
+  it('skips unusable methods with the arrow keys and keeps one Tab stop', async () => {
+    const methods = ['alipay', 'wxpay', 'stripe', 'airwallex'].map((type, index) => ({ type, fee_rate: 0, available: index !== 2 }))
+    const wrapper = mount(PaymentMethodSelector, { props: { selected: 'wxpay', methods }, attachTo: document.body })
+    const radios = wrapper.findAll('[role="radio"]')
+    expect(radios.map(r => r.attributes('tabindex'))).toEqual(['-1', '0', '-1', '-1'])
+    expect(radios.every(r => r.attributes('type') === 'button')).toBe(true)
+
+    ;(radios[1].element as HTMLElement).focus()
+    await wrapper.get('[role="radiogroup"]').trigger('keydown', { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(radios[3].element)
+    await wrapper.get('[role="radiogroup"]').trigger('keydown', { key: 'Home' })
+    expect(document.activeElement).toBe(radios[0].element)
+    expect(wrapper.emitted('select')).toEqual([['airwallex'], ['alipay']])
+    wrapper.unmount()
   })
 })
