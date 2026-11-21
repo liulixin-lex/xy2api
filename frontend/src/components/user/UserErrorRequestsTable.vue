@@ -24,7 +24,7 @@
         <template #cell-key_name="{ row }">
           <!-- At most 240px (the frozen first column on tablets and phones): the name cut with "…", whole in its tip and
                in the error's detail (the row opens it). -->
-          <div class="flex max-w-[240px] items-center text-sm" data-testid="error-key-cell">
+          <div class="flex max-lg:max-w-[240px] items-center text-sm" data-testid="error-key-cell">
             <span class="min-w-0 truncate text-gray-900 dark:text-white" :title="row.key_name || undefined">{{ row.key_name || '-' }}</span>
             <span
               v-if="row.key_deleted"

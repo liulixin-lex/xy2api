@@ -192,8 +192,8 @@
           <!-- On a phone the 120–160px column keeps its first line for the name: the alias pill (when the group has an
                alias) goes to the second line (browser acceptance, step 2). -->
           <template #cell-name="{ row, value }">
-            <TableIdentityCell class="!max-w-[240px] [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:py-2.5" :primary="value" data-test="group-name">
-              <template #primary><GroupAliasPill v-if="!phone" :group="row" class="mr-2 align-middle" />{{ value }}</template>
+            <TableIdentityCell class="max-lg:!max-w-[240px] [@media(pointer:coarse)]:-my-2.5 [@media(pointer:coarse)]:py-2.5" :primary="value" data-test="group-name">
+              <template #primary><GroupAliasPill v-if="!phone" :group="row" class="mr-2 align-top" />{{ value }}</template>
               <template v-if="phone && row.alias" #secondary><GroupAliasPill :group="row" /></template>
             </TableIdentityCell>
           </template>

@@ -205,10 +205,10 @@
           @update:selected-keys="handleSelectedKeysUpdate"
         >
           <template #cell-user="{ row }">
-            <!-- The frozen identity column: at most 240px. The name is cut with "…" and shows whole on a tap or hover; the
+            <!-- The frozen identity column: at most 240px below 1024px. The name is cut with "…" and shows whole on a tap or hover; the
                  usage records link is a button of its own beside it (32px, 40px on touch, 8px away), so a tap on the
                  name reads it and does not navigate. The initial's 32px badge only on a desktop. -->
-            <div class="flex max-w-[240px] items-center gap-2">
+            <div class="flex max-lg:max-w-[240px] items-center gap-2">
               <div
                 class="hidden h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30 lg:flex"
               >
