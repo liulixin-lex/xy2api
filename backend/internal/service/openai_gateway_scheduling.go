@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -1233,17 +1234,15 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 	cfg := s.schedulingConfig()
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
-	parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
-	req := OpenAIAccountScheduleRequest{baseExclusions: parent.baseExclusions, GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, RequirePrivacySet: s.openAIGroupRequiresPrivacySet(ctx, groupID)}
+	req := OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, RequirePrivacySet: s.openAIGroupRequiresPrivacySet(ctx, groupID)}
 	req.NoWait = openAISelectionNoWait(ctx)
 	if state, _ := ctx.Value(openAILegacyStickyCapacityKey{}).(*openAILegacyStickyCapacity); state != nil {
 		req.RequiredTransport, req.RequiredImageCapability = state.transport, state.image
 	}
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, req)
 	var stickyAccountID int64
-	var bindingMissing bool
 	if sessionHash != "" && s.cache != nil {
-		stickyAccountID, bindingMissing, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
+		stickyAccountID, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
 	}
 	trial := s.newSelectionTrial(ctx, req, stickyAccountID)
 	ctx = context.WithValue(ctx, selectionTrialContextKey{}, trial)
@@ -1370,21 +1369,13 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 	loadRequests := selectionLoadRequests(candidates)
 	checked := make(map[int64]*Account)
-	var triedForPick map[int64]bool
-	if bindingMissing && isFirstNewPickSelection(ctx) {
-		triedForPick = make(map[int64]bool)
-	}
 	tryAcquire := func(loads map[int64]*AccountLoadInfo) (*AccountSelectionResult, bool, error) {
 		available := s.selectionAvailable(ctx, candidates, loads)
 		s.sortSelectionAccounts(ctx, available, req, loads)
-		original := available
 		attempted := len(available) > 0
 		for len(available) > 0 {
 			a := available[0]
 			available = available[1:]
-			if triedForPick != nil {
-				triedForPick[a.ID] = true
-			}
 			if ctx.Err() != nil {
 				return nil, true, ctx.Err()
 			}
@@ -1393,17 +1384,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				continue
 			}
 			checked[fresh.ID] = fresh
-			slotConcurrency := fresh.Concurrency
-			slot, err := s.tryAcquireAccountSlot(ctx, fresh.ID, slotConcurrency)
+			slot, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 			if err != nil || slot == nil || !slot.Acquired {
 				continue
 			}
-			realBaseSlot := s.concurrencyService != nil && slotConcurrency > 0
-			var suffix []*Account
-			if realBaseSlot && triedForPick != nil && isFirstNewPickSelection(ctx) {
-				suffix = newPickSuffix(original, fresh.ID, triedForPick)
-			}
-			selected, retryTrial, err := s.finishSelectionSlot(ctx, req, fresh, slot, trial, suffix, loads, len(suffix) > 0)
+			selected, retryTrial, err := s.finishSelectionSlot(ctx, req, fresh, slot, trial, loads)
 			if err != nil {
 				return nil, true, err
 			}
@@ -1528,6 +1513,41 @@ func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accoun
 		s.selectionFullMarks.Mark(accountID, s.selectionNow())
 	}
 	return result, err
+}
+
+// finishSelectionSlot owns an acquired slot until admission, trial reservation,
+// and sticky binding have completed. A rejected trial row is returned to the
+// ordinary selector so the next pass can consider it in the same order.
+func (s *OpenAIGatewayService) finishSelectionSlot(ctx context.Context, req OpenAIAccountScheduleRequest, fresh *Account, slot *AcquireResult, trial *selectionTrial, loads map[int64]*AccountLoadInfo) (selected *AccountSelectionResult, retryTrial *Account, err error) {
+	releaseBase := sync.OnceFunc(slot.ReleaseFunc)
+	owned := releaseBase
+	defer func() {
+		if owned != nil {
+			owned()
+		}
+	}()
+	latest, vetoed, _ := s.SelectionAdmissionVeto(ctx, fresh)
+	if vetoed || latest == nil {
+		return nil, nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	full := buildSelectionKey(s.selectionView(), derefGroupID(req.GroupID), req.RequestedModel, latest, s.selectionRequest(ctx, req, loads), s.selectionNow()).Tier >= 1
+	reservation, accepted := trial.reserve(ctx, latest, full)
+	if !accepted {
+		return nil, latest, nil
+	}
+	trial.selected = reservation
+	selected, err = s.newAcquiredSelectionResult(ctx, latest, releaseBase)
+	if err != nil {
+		return nil, nil, err
+	}
+	if req.SessionHash != "" && (!trial.isTrial(latest) || !trial.borrowing(ctx)) && !gatewayProfitControlGateActive(ctx) {
+		_ = s.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, latest.ID)
+	}
+	owned = nil
+	return selected, nil, nil
 }
 
 func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {

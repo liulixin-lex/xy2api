@@ -3,8 +3,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"maps"
 	"testing"
 	"testing/synctest"
@@ -188,6 +190,20 @@ func TestOpenAISelectionRuntimeStandingPriorityRateAndBoard(t *testing.T) {
 		}
 		require.Equal(t, int64(1), f.selectNow(t, context.Background(), "", nil).Account.ID)
 	})
+}
+
+func TestOpenAIOrdinaryNewSessionUsesSortedPickAndBinds(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 1))
+	selected := f.selectNow(t, context.Background(), "ordinary-new-session", nil)
+	require.Equal(t, int64(1), selected.Account.ID)
+	require.Equal(t, int64(1), f.cache.sessionBindings["openai:ordinary-new-session"])
+	require.Equal(t, []int64{1}, f.attempts)
+	require.NotContains(t, logs.String(), "sched_quality.new_pick")
 }
 
 func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
