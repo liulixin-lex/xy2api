@@ -20,6 +20,8 @@ type schedQualityData struct {
 	samples       map[SchedAccountModel][]q.AttemptSample
 	globalEnabled bool
 	running       map[string]q.AttemptSample
+	previous      map[string]*q.AttemptSample
+	runningCache  schedPredecessorIndex
 	ruleSamples   map[SchedAccountModel][]q.RuleBSample
 	ruleGroups    map[schedGroupModel][]q.RuleBSample
 	peers         *peerBucket

@@ -223,7 +223,7 @@ func (s *SchedQualityEngineService) inputs(ctx context.Context, now time.Time, s
 	if err := s.refreshConfig(ctx, now); err != nil {
 		return nil, err
 	}
-	d := &schedQualityData{now: now, samples: samples, globalEnabled: true, running: s.window.running, peerBuckets: clonePeerBuckets(s.peerBuckets, now), ruleSamples: make(map[SchedAccountModel][]schedquality.RuleBSample), ruleGroups: make(map[schedGroupModel][]schedquality.RuleBSample)}
+	d := &schedQualityData{now: now, samples: samples, globalEnabled: true, running: s.window.running, previous: s.window.previous, runningCache: s.window.runningPredecessors(), peerBuckets: clonePeerBuckets(s.peerBuckets, now), ruleSamples: make(map[SchedAccountModel][]schedquality.RuleBSample), ruleGroups: make(map[schedGroupModel][]schedquality.RuleBSample)}
 	for pair, rows := range samples {
 		d.ruleSamples[pair] = ruleBSamples(rows)
 	}

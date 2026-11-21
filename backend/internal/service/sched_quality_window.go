@@ -184,6 +184,51 @@ func closerPredecessor(current, candidate q.AttemptSample, previous *q.AttemptSa
 	return previous == nil || candidate.StartedAt.After(previous.StartedAt) || candidate.StartedAt.Equal(previous.StartedAt) && candidate.AttemptID > previous.AttemptID
 }
 
+// runningPredecessors indexes only unfinished observations for this evaluation.
+// Completed predecessors are resolved separately from ledger evidence.
+func (w *schedQualityWindow) runningPredecessors() schedPredecessorIndex {
+	var index schedPredecessorIndex
+	for _, candidate := range w.running {
+		if !candidate.FinishedAt.IsZero() || candidate.SessionKey == "" {
+			continue
+		}
+		if index == nil {
+			index = make(schedPredecessorIndex)
+		}
+		index.add(candidate)
+	}
+	index.sort()
+	return index
+}
+
+// maskRunningCachePredecessors hides cache evidence whose cached predecessor
+// is superseded by a closer attempt that is still in flight. The copy is only
+// for the current assessment; the window never stores the in-flight row as a
+// predecessor.
+func maskRunningCachePredecessors(samples []q.AttemptSample, running schedPredecessorIndex, previous map[string]*q.AttemptSample) []q.AttemptSample {
+	if len(running) == 0 {
+		return samples
+	}
+	var masked []q.AttemptSample
+	for i, current := range samples {
+		if !current.Continuation {
+			continue
+		}
+		candidate := running.before(current)
+		if candidate == nil || !closerPredecessor(current, *candidate, previous[current.AttemptID]) {
+			continue
+		}
+		if masked == nil {
+			masked = append([]q.AttemptSample(nil), samples...)
+		}
+		masked[i].Continuation = false
+	}
+	if masked == nil {
+		return samples
+	}
+	return masked
+}
+
 // Completion-window neighbors cannot prove dispatch-order adjacency: an
 // intervening failed attempt may already have left the window. Resolve every
 // new session attempt against the ledger in one batch and cache that fact.

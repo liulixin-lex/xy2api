@@ -178,7 +178,8 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 		basis.AttemptIDs = result.AttemptIDs
 		verdict = result.Verdict
 	case q.DimensionCache:
-		result, local := q.AssessCacheForGroup(samples, p.MinCacheRatio, cut, at, r.GroupID)
+		cacheSamples := maskRunningCachePredecessors(samples, d.runningCache, d.previous)
+		result, local := q.AssessCacheForGroup(cacheSamples, p.MinCacheRatio, cut, at, r.GroupID)
 		basis.SampleCounts = q.NewSampleCounts(local, result.Turns)
 		basis.Threshold = p.MinCacheRatio
 		basis.Cache = &result
