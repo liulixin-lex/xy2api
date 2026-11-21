@@ -410,6 +410,8 @@ export default {
     amountTooLow: 'Minimum amount is {min}',
     amountTooHigh: 'Maximum amount is {max}',
     amountNoMethod: 'No payment method available for this amount',
+    payAmountTooLow: 'Minimum after discount is {min}',
+    payAmountTooHigh: 'Maximum after discount is {max}',
     rechargeRatePreview: 'Current rate: 1 {currency} = {usd} USD',
     refundReason: 'Refund Reason',
     refundReasonPlaceholder: 'Please describe your refund reason',

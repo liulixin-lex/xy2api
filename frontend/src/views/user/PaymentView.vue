@@ -319,6 +319,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import AmountInput from '@/components/payment/AmountInput.vue'
 import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
 import { useTweenedNumber } from '@/components/payment/useTweenedNumber'
+import { nearestPayableAmount } from '@/components/payment/payableAmount'
 import { METHOD_ORDER, getPaymentPopupFeatures } from '@/components/payment/providerConfig'
 import {
   PAYMENT_RECOVERY_STORAGE_KEY,
@@ -748,20 +749,43 @@ const canSubmit = computed(() =>
     && selectedLimit.value?.available !== false
 )
 
-// The note inside the amount field. When no method takes the amount because it is below every minimum or above every
-// maximum, name that bound (what to type instead); otherwise the same message as amountError.
+// The note inside the amount field. Method limits apply to the pay base, which a discount tier makes lower than the
+// typed amount, so a "too low / too high" note names the nearest amount the user can actually type and submit
+// (worked back through the same quote, to the cent). When that cannot be confirmed, the note names the limit on the
+// discounted amount instead. Only the note changes: the limit checks and the amounts are untouched.
 const amountHint = computed(() => {
   if (!amountError.value) return ''
   const base = payBaseAmount.value
-  if (!enabledMethods.value.some((m) => amountFitsMethod(base, m))) {
-    if (globalMinAmount.value > 0 && base < globalMinAmount.value) {
-      return t('payment.amountTooLow', { min: formatSelectedPaymentAmount(globalMinAmount.value) })
-    }
-    if (globalMaxAmount.value > 0 && base > globalMaxAmount.value) {
-      return t('payment.amountTooHigh', { max: formatSelectedPaymentAmount(globalMaxAmount.value) })
-    }
+  const usable = enabledMethods.value.some((m) => amountFitsMethod(base, m))
+  const considered = usable ? [selectedMethod.value] : enabledMethods.value
+  const ranges = considered
+    .map((m) => visibleMethods.value[m])
+    .filter((limit): limit is NonNullable<typeof limit> => !!limit)
+    .map((limit) => ({ min: limit.single_min, max: limit.single_max }))
+  if (ranges.length === 0) return amountError.value
+  const tooLow = ranges.every((r) => r.min > 0 && base < r.min)
+  const tooHigh = ranges.every((r) => r.max > 0 && base > r.max)
+  if (!tooLow && !tooHigh) return amountError.value
+  const quoteOptions = {
+    multiplier: balanceRechargeMultiplier.value,
+    mode: rechargeBonusMode.value,
+    currencyDigits: currencyFractionDigits(selectedCurrency.value),
   }
-  return amountError.value
+  const payable = nearestPayableAmount(
+    validAmount.value,
+    tooLow ? 'up' : 'down',
+    ranges,
+    (value) => quoteRechargeBonus(rechargeBonusTiers.value, value, quoteOptions).payBase,
+    rechargeBonusTiers.value.map((tier) => tier.min_amount),
+  )
+  if (payable !== null) {
+    return tooLow
+      ? t('payment.amountTooLow', { min: formatSelectedPaymentAmount(payable) })
+      : t('payment.amountTooHigh', { max: formatSelectedPaymentAmount(payable) })
+  }
+  return tooLow
+    ? t('payment.payAmountTooLow', { min: formatSelectedPaymentAmount(Math.min(...ranges.map((r) => r.min))) })
+    : t('payment.payAmountTooHigh', { max: formatSelectedPaymentAmount(Math.max(...ranges.map((r) => r.max))) })
 })
 
 // Display copies of the detail rows only: they glide to a new value instead of jumping. Never used for the button,

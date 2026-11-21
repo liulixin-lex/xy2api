@@ -928,6 +928,27 @@ describe('PaymentView recharge form details', () => {
     expect(input.props('error')).toBe('')
   })
 
+  it('names the amount that can actually be submitted when a discount lowers the pay base below the limit', async () => {
+    const wrapper = await mountRecharge({
+      methods: limited(100, 0),
+      recharge_bonus_mode: 'discount',
+      recharge_bonus_tiers: [{ min_amount: 1, bonus_percent: 10 }],
+    })
+    const input = wrapper.getComponent(AmountInput)
+
+    input.vm.$emit('update:modelValue', 100)
+    await flushPromises()
+    expect(input.props('error')).toBe('payment.amountTooLow')
+    expect(translate).toHaveBeenCalledWith('payment.amountTooLow', { min: formatPaymentAmount(111.11, 'CNY') })
+    expect(wrapper.get('[data-testid="recharge-submit"]').attributes('disabled')).toBeDefined()
+
+    // The amount the note names is payable: no note, button enabled.
+    input.vm.$emit('update:modelValue', 111.11)
+    await flushPromises()
+    expect(input.props('error')).toBe('')
+    expect(wrapper.get('[data-testid="recharge-submit"]').attributes('disabled')).toBeUndefined()
+  })
+
   it('names only the action on the disabled button until there is an amount, then Enter in the field submits', async () => {
     const wrapper = await mountRecharge()
     const button = wrapper.get('[data-testid="recharge-submit"]')
