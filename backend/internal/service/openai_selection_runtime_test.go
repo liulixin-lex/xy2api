@@ -234,6 +234,39 @@ func TestOpenAISelectionCandidateConstraintRechecksAfterSlot(t *testing.T) {
 	require.Equal(t, []int64{2}, f.releases, "the slot that fails the post-acquisition constraint is released")
 }
 
+func TestOpenAISelectionCandidateFilterRechecksAfterSlot(t *testing.T) {
+	original := selectionFixtureAccount(10, 1)
+	postSlot := selectionFixtureAccount(2, 1)
+	postSlot.Name = "allowed"
+	filtered := selectionFixtureAccount(3, 1)
+	filtered.Name = "blocked"
+	valid := selectionFixtureAccount(4, 1)
+	valid.Name = "allowed"
+	f := newSelectionRuntimeFixture(t, original, postSlot, filtered, valid)
+	f.loads.after = func(id int64) {
+		if id == postSlot.ID {
+			for i := range f.repo.accounts {
+				if f.repo.accounts[i].ID == id {
+					f.repo.accounts[i].Name = "blocked"
+				}
+			}
+		}
+	}
+
+	ctx := WithOpenAISelectionCandidateConstraint(
+		resilience.WithRequestState(context.Background(), resilience.NewRequestState()), 1, "m", original.ID,
+		func(account *Account) bool { return account.Name == "allowed" },
+	)
+	selected, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", "", "m", nil,
+		OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	defer selected.ReleaseFunc()
+	require.Equal(t, valid.ID, selected.Account.ID)
+	require.Equal(t, []int64{postSlot.ID, valid.ID}, f.attempts, "the predicate filters candidates and is repeated after slot acquisition")
+	require.Equal(t, []int64{postSlot.ID}, f.releases, "the slot that fails the post-acquisition predicate is released")
+}
+
 func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
 	for _, mode := range []string{"immediate", "idle", "migration"} {
 		for _, legacy := range []bool{false, true} {
