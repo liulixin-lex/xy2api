@@ -2,14 +2,15 @@
  * The accounts table's column widths (prototype, spec 12.5): each column has a fixed width in two sizes, [compact,
  * roomy]; the name column takes what is left, between NAME_MIN and NAME_MAX.
  *
- * Compact, the ten default columns take 1108px and the table at least 1284px with the name column. At 1440 with the
+ * Compact, the ten default columns take 1093px and the table at least 1269px with the name column. At 1440 with the
  * navigation folded the table's scroll container is 1302px wide, 1287px once a classic scrollbar (15px on Windows)
  * takes its reserved gutter, so nothing scrolls sideways (7i-2, 7m-1); at 1366 the table scrolls, the name and actions
- * frozen. Roomy, they take 1222px: from 1454px (1222 + NAME_MAX) the table switches to the roomy widths, which 1920
+ * frozen. Roomy, they take 1208px: from 1440px (1208 + NAME_MAX) the table switches to the roomy widths, which 1920
  * reaches with the navigation open (1583px with the gutter) or folded.
  *
- * - Capacity is 155px compact and 154px roomy, room for "label $999.99 / $999" (129px of chip, 24px of padding; 7i-1,
- *   7l-11, 7q-9).
+ * - Capacity is 140px in either size and takes no share of the room left over: its content and the standard 12px of
+ *   padding on each side (11-21). The widest real lines, "窗口 $105 / $100" and "总额 $120 / $100", are 112.6px of chip
+ *   with the system fonts; 3.4px more for other platforms' fonts. A wider line ends in "…" and its tip has it whole.
  * - The two rate columns are 88px compact and 96px roomy, with 8px of padding on the left and 6px on the right: the
  *   74px left take "9.9999x" (51.1px at 13px) with the 3px gap and the 18px refresh button (72.1px), or the account
  *   rate's sync mark (12px, 4px gap); longer values end in "…" and the tip has them whole.
@@ -18,7 +19,7 @@
  *   status "23h 59m 后恢复" (90.2px of 92px); the IQ check "Astra" and "检测中" with its spinner (123.4px of 125px).
  *
  * In either size, once the name column has reached NAME_MAX the room left over is shared evenly between the content
- * columns only: the check box, the scheduling switch, the two rate columns and the actions keep their width. The name
+ * columns only: the check box, the scheduling switch, capacity, the two rate columns and the actions keep their width. The name
  * column (auto in the table) takes what the others leave, so it stays between NAME_MIN and NAME_MAX at every width,
  * also between the compact minimum and the switch to the roomy widths (12.12-1).
  *
@@ -29,14 +30,14 @@
  */
 export const COLUMN_WIDTHS: Record<string, [number, number]> = {
   select: [36, 40], status: [128, 140], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [149, 164],
-  capacity: [155, 154], upstream_billing_rate: [88, 96], today_stats: [152, 168], actions: [76, 104], id: [80, 88],
+  capacity: [140, 140], upstream_billing_rate: [88, 96], today_stats: [152, 168], actions: [76, 104], id: [80, 88],
   platform_type: [168, 180], priority: [112, 120], usage: [220, 240], proxy: [160, 176], rate_multiplier: [88, 96],
   upstream_balance: [140, 152], last_used_at: [120, 132], created_at: [150, 160], expires_at: [150, 160], notes: [180, 200]
 }
 export const NAME_MIN = 176
 export const NAME_MAX = 232
-/** Columns that keep their own width on a wide table (12.5). */
-const FIXED = new Set(['select', 'schedulable', 'upstream_billing_rate', 'rate_multiplier', 'actions'])
+/** Columns that keep their own width on a wide table (12.5; capacity 11-21). */
+const FIXED = new Set(['select', 'schedulable', 'capacity', 'upstream_billing_rate', 'rate_multiplier', 'actions'])
 const DEFAULT_WIDTH = 120
 
 export interface AccountColumnLayout {
