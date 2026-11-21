@@ -1,7 +1,17 @@
-@import "tailwindcss" source(none);
+/* Tailwind 3 compatibility. The interface was drawn on Tailwind 3; ① to ⑥ restore the v3 behaviour that v4 changed.
+
+   ⑤ v3's cascade between this file's components and the utilities: one layer, components first, so a component's
+   state or dark rule (.input:disabled, .btn-secondary in dark mode) still outweighs a plain utility on the same
+   element and a utility wins ties. v4's own `components` layer sits below every utility whatever the specificity.
+   So the components block below is in the utilities layer and Tailwind's utilities are generated at the end of this
+   file, after it. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
 @config "../tailwind.config.js";
 
-/* Tailwind 3 compatibility. The interface was drawn on Tailwind 3; these restore the v3 defaults that v4 changed. */
+/* ⑥ v3's dark variant, :is(.dark *): it adds a class's weight, as on v3 (v4's :where() adds none). */
+@custom-variant dark (&:is(.dark *));
 
 /* ① v3's palette (sRGB hex). v4's oklch palette is more saturated: status reds, greens, blues and ambers shifted. */
 /* ② v3's sizes for the three steps v4 renamed (v4's shadow-sm, rounded-sm and blur-sm are v3's shadow, rounded, blur),
@@ -164,7 +174,8 @@
   @apply transition-[transform,border-color] duration-200 ease-out;
 }
 
-@layer components {
+/* The components (see ⑤ at the top: they share the utilities layer, before Tailwind's utilities). */
+@layer utilities {
   /* ============ 按钮样式 ============ */
   .btn {
     @apply inline-flex items-center justify-center gap-2;
@@ -889,4 +900,9 @@
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom);
   }
+}
+
+/* ⑤ Tailwind's utilities, after the components above. */
+@layer utilities {
+  @tailwind utilities source(none);
 }

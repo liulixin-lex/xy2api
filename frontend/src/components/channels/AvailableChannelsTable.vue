@@ -4,7 +4,7 @@
   <div class="table-wrapper">
     <table
       data-testid="desktop-channels"
-      class="!hidden w-full table-fixed border-collapse text-sm lg:!table"
+      class="table !hidden w-full table-fixed border-collapse text-sm lg:!table"
     >
       <thead>
         <tr class="border-b border-gray-100 bg-gray-50/50 text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-dark-700 dark:bg-dark-800/50 dark:text-gray-400">
