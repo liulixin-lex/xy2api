@@ -928,6 +928,30 @@ describe('PaymentView recharge form details', () => {
     expect(input.props('error')).toBe('')
   })
 
+  it('treats an out-of-range amount like no amount: details folded, the disabled button names only the action', async () => {
+    const wrapper = await mountRecharge({ methods: limited(50, 2000), recharge_fee_rate: 3 })
+    const input = wrapper.getComponent(AmountInput)
+    const summary = () => wrapper.get('[data-testid="recharge-summary"]')
+    const button = () => wrapper.get('[data-testid="recharge-submit"]')
+
+    for (const outOfRange of [30000, 20]) {
+      input.vm.$emit('update:modelValue', outOfRange)
+      await flushPromises()
+      expect(input.props('error')).not.toBe('')
+      expect(summary().attributes('inert')).toBeDefined()
+      expect(summary().classes()).toContain('grid-rows-[0fr]')
+      expect(button().text()).toBe('payment.createOrder')
+      expect(button().attributes('disabled')).toBeDefined()
+    }
+
+    input.vm.$emit('update:modelValue', 500)
+    await flushPromises()
+    expect(input.props('error')).toBe('')
+    expect(summary().attributes('inert')).toBeUndefined()
+    expect(button().text()).toBe(`payment.createOrder ${formatPaymentAmount(515, 'CNY')}`)
+    expect(button().attributes('disabled')).toBeUndefined()
+  })
+
   it('names the amount that can actually be submitted when a discount lowers the pay base below the limit', async () => {
     const wrapper = await mountRecharge({
       methods: limited(100, 0),
