@@ -368,7 +368,6 @@ export default {
       unknownDetail: 'TTL breakdown not reported',
       partialDetail: 'Partial TTL breakdown not reported'
     },
-    cacheTtlOverriddenHint: 'Cache write billing classification adjusted in the billing copy; does not measure actual cache efficiency',
     cacheTtlOverriddenLabel: 'Billing adjustment',
     cacheTtlOverridden5m: 'Billed as 5m',
     cacheTtlOverridden1h: 'Billed as 1h',

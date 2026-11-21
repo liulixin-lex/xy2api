@@ -373,7 +373,6 @@ export default {
       unknownDetail: 'TTL 明细未报告',
       partialDetail: '部分 TTL 明细未报告'
     },
-    cacheTtlOverriddenHint: '缓存写入计费分类已调整；仅影响结算副本，不代表真实缓存效率',
     cacheTtlOverriddenLabel: '计费调整',
     cacheTtlOverridden5m: '按 5m 计费',
     cacheTtlOverridden1h: '按 1h 计费',
