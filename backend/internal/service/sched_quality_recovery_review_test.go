@@ -171,6 +171,7 @@ func TestRecoveryRelaxPreservesRecentFailureClock(t *testing.T) {
 		for _, next := range []string{"fail_after_five", "quiet_clear", "reset"} {
 			t.Run(scope+"/"+next, func(t *testing.T) {
 				f := newQualityFixture(t)
+				f.now = f.now.Truncate(time.Minute)
 				f.badTTFT()
 				at := f.now
 				for i := range f.ledger.Rows {
@@ -203,13 +204,16 @@ func TestRecoveryRelaxPreservesRecentFailureClock(t *testing.T) {
 				}
 				switch next {
 				case "fail_after_five":
-					f.now = at.Add(5 * time.Minute)
+					f.now = at.Add(5*time.Minute + 10*time.Second)
 					old := len(f.ledger.Rows)
 					f.badTTFT()
 					for i := old; i < len(f.ledger.Rows); i++ {
 						// New sessions keep recurrence evidence eligible instead of
 						// looking like a switch from the preceding peer attempts.
 						f.ledger.Rows[i].SessionKey = "recurrence-" + f.ledger.Rows[i].SessionKey
+						f.ledger.Rows[i].AttemptID = "recurrence-" + f.ledger.Rows[i].AttemptID
+						f.ledger.Rows[i].RequestID = f.ledger.Rows[i].AttemptID
+						f.ledger.Rows[i].InsertedAt = f.ledger.Rows[i].FinishedAt
 						if f.ledger.Rows[i].AccountID == 1 {
 							f.ledger.Rows[i].TTFOMs = new(100000)
 						}
@@ -219,7 +223,7 @@ func TestRecoveryRelaxPreservesRecentFailureClock(t *testing.T) {
 					require.Equal(t, q.IdentityRear, failed.Identity)
 					require.Equal(t, 3, failed.Level)
 					require.Equal(t, 160*time.Minute, failed.Until.Sub(failed.Entry))
-					require.Equal(t, at.Add(5*time.Minute-10*time.Second), failed.Entry)
+					require.Equal(t, at.Add(5*time.Minute), failed.Entry)
 					require.Equal(t, 2, f.line(q.DimensionCache).Level)
 				case "quiet_clear":
 					deadline := last.Add(q.LevelClearQuiet)
