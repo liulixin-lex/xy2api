@@ -129,6 +129,25 @@ func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineStat
 	cut := schedQualitySince(r.Cut(kind), resets[r.AccountID])
 	p := s.policies[r.GroupID].Policy
 	basis := q.Basis{RuleVersion: q.RuleVersion, Line: r.Line, Cut: cut, Kind: []string{"regular", "trial", "review", "clock"}[kind]}
+	// A missing historical window cannot produce a new confirmed failure.
+	window := q.ErrorWindow
+	if r.Line == q.DimensionCache {
+		window = q.CacheWindow
+	}
+	if r.Line == q.DimensionTTFO {
+		window = 8 * q.RuleBHalfLife
+	}
+	if !d.evidenceSince.IsZero() && schedQualitySince(cut, at.Add(-window)).Before(d.evidenceSince) {
+		basis.HistoryMissing = true
+		return q.VerdictUnknown, basis
+	}
+	if kind == q.EventTrial && !r.Epoch.IsZero() {
+		check := r.Epoch.Add(q.TrialSampleCheck)
+		if !at.Before(check) && r.EvaluatedAt.Before(check) {
+			basis.OwnSampleAt60 = schedTrialOwnSample(d, r, check)
+			basis.HistoryMissing = basis.OwnSampleAt60 == nil
+		}
+	}
 	pair := SchedAccountModel{r.AccountID, r.Model}
 	var samples, running []q.AttemptSample
 	for _, a := range d.samples[pair] {
@@ -230,4 +249,53 @@ func schedSlow(a q.AttemptSample, limit float64) bool {
 		return float64(*a.TTFOMs)/1000 > limit
 	}
 	return a.Outcome == q.OutcomeTimeout && a.CensoredMs != nil && float64(*a.CensoredMs)/1000 >= limit
+}
+
+// schedTrialOwnSample examines the original 60-minute snapshot, across groups.
+// nil means incomplete history; it must never authorize the no-sample exit.
+func schedTrialOwnSample(d *schedQualityData, r q.LineState, check time.Time) *bool {
+	pair := SchedAccountModel{r.AccountID, r.Model}
+	eligibleStart := func(a q.AttemptSample) bool { return a.StartedAt.After(r.Epoch) && !a.StartedAt.After(check) }
+	for _, a := range d.running {
+		if a.AccountID == r.AccountID && a.Model == r.Model && eligibleStart(a) && (a.FinishedAt.IsZero() || a.FinishedAt.After(check)) {
+			return new(true)
+		}
+	}
+	var visible []q.AttemptSample
+	for _, a := range d.samples[pair] {
+		if !a.FinishedAt.IsZero() && !schedAvailableAt(a).After(check) {
+			visible = append(visible, a)
+		}
+		if !eligibleStart(a) {
+			continue
+		}
+		if a.FinishedAt.After(check) {
+			return new(true)
+		}
+		if a.FinishedAt.IsZero() || schedAvailableAt(a).After(check) {
+			continue
+		}
+		switch r.Line {
+		case q.DimensionTTFO:
+			if ruleBSample(a).Eligible(check, r.Epoch) {
+				return new(true)
+			}
+		case q.DimensionCache:
+			if _, _, ok := q.ContinuationTokens(a); ok {
+				return new(true)
+			}
+		}
+	}
+	if r.Line == q.DimensionError {
+		// Reconstruct this exact hour from raw attempts, including predecessors
+		// before Epoch, so a retry cannot disguise an older request's origin.
+		own := q.AssessError(visible, nil, q.ErrorRateFloor, r.Epoch, check)
+		if own.Clear+own.Unknown > 0 {
+			return new(true)
+		}
+	}
+	if d.observedSince.IsZero() || r.Epoch.Before(d.observedSince) || (!d.evidenceSince.IsZero() && r.Epoch.Before(d.evidenceSince)) {
+		return nil
+	}
+	return new(false)
 }

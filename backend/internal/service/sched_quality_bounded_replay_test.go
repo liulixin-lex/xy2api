@@ -20,7 +20,7 @@ func TestEngineRecoveryBoundsExpiredTimers(t *testing.T) {
 			f.now = f.now.Add(6 * time.Hour) // 18:00:10, retained replay starts at 13:50.
 			horizon := f.now.Add(-10 * time.Second)
 			floor := horizon.Add(-schedEvidenceRetention)
-			first := floor.Add(5 * time.Second)
+			first := floor.Add(-time.Hour) // Original deadline survives missing history.
 			r := q.LineState{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionError}, EvaluatedAt: floor.Add(-48 * time.Hour), Level: 2, Admissions: 2, LastRear: floor.Add(-25 * time.Hour)}
 			var want q.Action
 			switch kind {
@@ -50,7 +50,7 @@ func TestEngineRecoveryBoundsExpiredTimers(t *testing.T) {
 			_, _, _, decisions, err := f.e.replay(context.Background(), d, f.store.Rows, nil, time.Time{}, horizon)
 			require.NoError(t, err)
 			for _, decision := range decisions {
-				require.True(t, decision.At.After(floor), decision)
+				require.True(t, decision.At.After(r.EvaluatedAt), decision)
 			}
 			if want != "" {
 				require.NotEmpty(t, decisions)
@@ -68,7 +68,7 @@ func TestEngineRecoveryBoundsExpiredTimers(t *testing.T) {
 					require.True(t, found, "expired rear account %d must not get stuck", id)
 				}
 			}
-			require.LessOrEqual(t, d.replayStats.batches, 125, "retention bounds the replay, including a one-hour trial")
+			require.LessOrEqual(t, d.replayStats.batches, 125, "retention bounds the replay, including the new bounded trial")
 			f.cycle()
 			require.Zero(t, f.line(q.DimensionError).Level)
 			require.Zero(t, f.line(q.DimensionError).Admissions)

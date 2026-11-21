@@ -197,13 +197,20 @@ func StepGroup(prev []LineState, evaluations map[Dimension]Evaluation, at time.T
 			if (r.Level > 0 || r.Admissions > 0) && at.After(prev[i].EvaluatedAt) {
 				next[i].Level, next[i].Admissions = 0, 0
 				next[i].EvaluatedAt = at
+				if actions[i] != "" {
+					continue
+				} // Preserve a simultaneous release and its reason.
 				actions[i] = ActionClear
 				basis := Basis{RuleVersion: RuleVersion, Line: r.Line, Kind: "clock"}
 				if e, ok := evaluations[r.Line]; ok {
 					basis = e.Basis
 				}
 				next[i].Basis = &basis
-				next[i].LastAssessment = RecordAssessment(prev[i], at, EventClock, VerdictUnknown, ActionClear, basis)
+				if e, ok := evaluations[r.Line]; ok {
+					next[i].LastAssessment = RecordAssessment(prev[i], at, e.Kind, e.Verdict, ActionClear, basis)
+				} else {
+					next[i].LastAssessment = RecordAssessment(prev[i], at, EventClock, VerdictUnknown, ActionClear, basis)
+				}
 			}
 		}
 	}

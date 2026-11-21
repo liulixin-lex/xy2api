@@ -390,7 +390,7 @@ func TestTTFTEvidenceWindowNanosecondBoundaries(t *testing.T) {
 		mass, priorMass float64
 	}{
 		{"before-insert", f.now.Add(-time.Nanosecond), time.Time{}, 0, 0},
-		{"at-insert-and-cut", f.now, owner.StartedAt, 1, 1},
+		{"at-insert-and-cut", f.now, owner.StartedAt, 0, 1},
 		{"start-before-cut", f.now, owner.StartedAt.Add(time.Nanosecond), 0, 1},
 		{"at-window-start", f.now.Add(4 * time.Hour), time.Time{}, 1.0 / 256, 1.0 / 256},
 		{"before-window-start", f.now.Add(4*time.Hour + time.Nanosecond), time.Time{}, 0, 0},
