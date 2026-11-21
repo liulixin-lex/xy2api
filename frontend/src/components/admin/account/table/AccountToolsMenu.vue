@@ -207,9 +207,9 @@ defineExpose({ close: () => { open.value = false } })
     display: inline-block;
   }
 }
-/* Touch: a real 40px target at every width (mobile list plan), as the toolbar's other buttons are (TableToolbar, with
-   any-pointer too). A mouse keeps the 32px control. */
-@media (any-pointer: coarse) {
+/* Touch: a real 40px target at every width (mobile list plan). Only a touch primary pointer: a mouse, a touch screen
+   beside it included, keeps the 32px control. */
+@media (pointer: coarse) {
   .tools-btn {
     min-width: 40px;
     min-height: 40px;
