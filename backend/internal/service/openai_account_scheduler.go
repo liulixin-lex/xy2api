@@ -57,16 +57,21 @@ type openAIRequestCandidateConstraint struct {
 	originalPriority  int
 	actualModel       string
 	excludedAccountID int64
+	candidateFilter   func(*Account) bool
 }
 
 type openAIRequestCandidateConstraintKey struct{}
 
 // WithOpenAISelectionCandidateConstraint limits one scheduler request to
 // another account at the original priority and actual model, excluding the
-// account that produced the original response.
-func WithOpenAISelectionCandidateConstraint(ctx context.Context, originalPriority int, actualModel string, excludedAccountID int64) context.Context {
+// account that produced the original response. An optional candidate filter
+// can further restrict accounts before and after slot acquisition.
+func WithOpenAISelectionCandidateConstraint(ctx context.Context, originalPriority int, actualModel string, excludedAccountID int64, candidateFilter ...func(*Account) bool) context.Context {
 	constraint := openAIRequestCandidateConstraint{
 		originalPriority: originalPriority, actualModel: strings.TrimSpace(actualModel), excludedAccountID: excludedAccountID,
+	}
+	if len(candidateFilter) > 0 {
+		constraint.candidateFilter = candidateFilter[0]
 	}
 	return context.WithValue(ctx, openAIRequestCandidateConstraintKey{}, constraint)
 }
@@ -87,6 +92,9 @@ func requestCandidateConstraintFailure(req OpenAIAccountScheduleRequest, account
 	if account == nil || constraint.actualModel == "" || constraint.excludedAccountID <= 0 ||
 		account.ID == constraint.excludedAccountID || account.Priority != constraint.originalPriority ||
 		OpenAIAttemptModel(account, req.RequestedModel) != constraint.actualModel {
+		return "request_candidate_constraint"
+	}
+	if constraint.candidateFilter != nil && !constraint.candidateFilter(account) {
 		return "request_candidate_constraint"
 	}
 	return ""
