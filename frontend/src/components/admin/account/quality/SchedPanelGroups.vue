@@ -1,130 +1,119 @@
 <template>
-  <p v-if="!detail.groups.length" class="qp-note" data-test="qp-no-groups">{{ t('admin.schedQuality.panel.noGroups') }}</p>
-  <div v-else class="grows" role="table" :aria-label="t('admin.schedQuality.drawer.byGroup')">
-    <div class="grow grow--head" role="row">
-      <span role="columnheader">{{ t('admin.schedQuality.col.group') }}</span>
-      <span role="columnheader">{{ t('admin.schedQuality.col.place') }}</span>
-      <span v-for="dim in RECENT_DIMS" :key="dim" role="columnheader" class="grow__c">{{ t(`admin.schedQuality.dim.${dim}`) }}</span>
-      <span role="columnheader" class="grow__r">{{ t('admin.accounts.columns.actions') }}</span>
-    </div>
-    <template v-for="item in rows" :key="item.group.group_id">
+  <section class="qp-section" data-qp-section="groups">
+    <h3 class="qp-h">
+      <span class="inline-flex items-center gap-1.5">{{ t('admin.schedQuality.drawer.byGroup') }}<SchedPauseMark :global-enabled="detail.global_enabled" :stale="detail.stale" /></span>
+      <span class="qp-h-note" data-qp-perf-note>
+        {{ note }}<template v-if="perfFailed">
+          · <span class="qp-fail" data-qp-perf-failed>{{ t('admin.schedQuality.perf.refreshFailed') }}</span>
+          <button v-if="!perf" type="button" class="qp-text-btn ml-1.5" @click="retry(SCHED_PANEL_PERF_TASK)">{{ t('admin.schedQuality.action.retry') }}</button>
+        </template>
+      </span>
+    </h3>
+    <p v-if="!detail.groups.length" class="qp-note" data-test="qp-no-groups">{{ t('admin.schedQuality.panel.noGroups') }}</p>
+    <div v-else class="gt" role="table" :aria-label="t('admin.schedQuality.drawer.byGroup')">
+      <div class="gt__row gt__row--head" role="row">
+        <span role="columnheader" class="sr-only">{{ t('admin.schedQuality.col.group') }}</span>
+        <span role="columnheader" class="gt__place">{{ t('admin.schedQuality.col.place') }}</span>
+        <span v-for="col in COLS" :key="col" v-tip="t(`admin.schedQuality.panel.colTip.${col}`)" role="columnheader" class="gt__n" :class="`gt__n--${col}`">
+          {{ t(`admin.schedQuality.panel.col.${col}`) }}
+        </span>
+        <span role="columnheader" class="sr-only">{{ t('admin.accounts.columns.actions') }}</span>
+      </div>
       <div
-        class="grow"
-        :class="{ 'is-target': item.group.group_id === targetGroupId, 'is-open': expanded.has(item.group.group_id) }"
+        v-for="item in rows"
+        :key="item.group.group_id"
+        class="gt__row"
+        :class="{ 'is-target': item.group.group_id === targetGroupId }"
         role="row"
         :data-qp-group-row="item.group.group_id"
       >
-        <span class="grow__group" role="cell">
-          <button
-            type="button"
-            class="grow__toggle"
-            :aria-expanded="expanded.has(item.group.group_id)"
-            :aria-controls="`${detailIdPrefix}-${item.group.group_id}`"
-            :aria-label="t('admin.schedQuality.panel.evidenceToggle', { name: item.group.name })"
-            :data-qp-expand="item.group.group_id"
-            @click="toggle(item.group.group_id)"
-          >
-            <Icon name="chevronRight" size="xs" :stroke-width="2.5" />
-          </button>
+        <span class="gt__name" role="rowheader">
           <GroupAliasPill :group="item.info" />
-          <span class="grow__name" :title="item.group.name">{{ item.group.name }}</span>
+          <span class="gt__title">{{ item.group.name }}</span>
         </span>
-        <span class="grow__state" role="cell" data-test="qp-state" :data-qp-place="item.place">
-          <StatusDot :tone="PLACE_TONES[item.place]" />
-          <span :class="item.place === 'front' ? 'status-text-normal' : ''">{{ word('placement', item.place) }}</span>
-          <span v-if="item.extra" class="grow__extra">{{ item.extra }}</span>
-        </span>
-        <span class="grow__marks" role="none">
+        <span class="gt__place" role="cell" data-test="qp-state" :data-qp-place="item.place">
+          <StatusDot :tone="item.tone" />
           <span
-            v-for="mark in item.marks"
-            :key="mark.dim"
-            v-tip="mark.tip"
-            class="mk"
-            :class="`mk--${mark.identity}`"
-            role="cell"
+            v-if="item.gateOff"
+            v-tip="t('admin.schedQuality.identity.gateOffGroup')"
+            class="qp-muted"
             tabindex="0"
-            :aria-label="mark.tip"
-            :data-qp-mark="mark.dim"
-            :data-identity="mark.identity"
-          >
-            <span class="mk__l" aria-hidden="true">{{ t(`admin.schedQuality.dim.${mark.dim}`) }}</span>
-            <Icon v-if="mark.identity === 'pass'" name="check" size="xs" :stroke-width="3" />
-            <Icon v-else-if="mark.identity === 'rear'" name="x" size="xs" :stroke-width="3" />
-            <Icon v-else-if="mark.identity === 'trial'" name="clock" size="xs" :stroke-width="3" />
-            <span v-else class="mk__dash" aria-hidden="true" />
-          </span>
+            data-qp-gate-off
+          >{{ t('admin.schedQuality.panel.gateOff') }}</span>
+          <span v-else>{{ item.placeText }}</span>
         </span>
-        <span class="grow__ops" role="cell">
+        <span
+          v-for="cell in item.cells"
+          :key="cell.col"
+          class="gt__n"
+          :class="[`gt__n--${cell.col}`, cell.value === null ? 'is-none' : `is-${cell.identity}`]"
+          role="cell"
+          :aria-label="cell.label"
+          :data-qp-cell="cell.col"
+          :data-identity="cell.identity"
+        >{{ cell.text }}</span>
+        <span class="gt__op" role="cell">
           <span v-if="failedGroups.has(item.group.group_id)" class="qp-fail">{{ t('admin.schedQuality.result.failed') }}</span>
-          <template v-if="!canManage || item.place === 'stopped'"><span class="qp-muted">—</span></template>
-          <span v-else-if="item.group.exemption?.group_id === 0" class="qp-muted">{{ t('admin.schedQuality.panel.allExempt') }}</span>
-          <button
-            v-else-if="item.group.exemption"
-            type="button"
-            class="qp-text-btn"
-            :data-qp-trigger="`unexempt:${item.group.group_id}`"
-            @click="emit('unexempt', item.group)"
-          >{{ t('admin.schedQuality.action.undoExempt') }}</button>
-          <button
-            v-else
-            type="button"
-            class="qp-text-btn"
-            :data-qp-trigger="`exempt:${item.group.group_id}`"
-            @click="emit('exempt', item.group, $event.currentTarget as HTMLElement)"
-          >{{ t('admin.schedQuality.action.exempt') }}</button>
+          <template v-if="canManage && item.place !== 'stopped'">
+            <span v-if="item.group.exemption?.group_id === 0" class="qp-muted">{{ t('admin.schedQuality.panel.allExempt') }}</span>
+            <button
+              v-else-if="item.group.exemption"
+              type="button"
+              class="qp-text-btn"
+              :aria-label="`${t('admin.schedQuality.action.undoExempt')} ${item.group.name}`"
+              :data-qp-trigger="`unexempt:${item.group.group_id}`"
+              @click="emit('unexempt', item.group)"
+            >{{ t('admin.schedQuality.action.undoExempt') }}</button>
+            <button
+              v-else
+              type="button"
+              class="qp-text-btn"
+              :aria-label="`${t('admin.schedQuality.action.exempt')} ${item.group.name}`"
+              :data-qp-trigger="`exempt:${item.group.group_id}`"
+              @click="emit('exempt', item.group, $event.currentTarget as HTMLElement)"
+            >{{ t('admin.schedQuality.action.exempt') }}</button>
+          </template>
         </span>
+        <ul v-if="item.reasons.length" class="gt__why" role="cell">
+          <li v-for="reason in item.reasons" :key="reason.dim" :data-qp-why="reason.dim">
+            <span class="gt__why-k" :class="`is-${reason.identity}`">{{ t(`admin.schedQuality.dim.${reason.dim}`) }}</span>
+            <span>{{ reason.text }}</span>
+          </li>
+        </ul>
       </div>
-      <div v-if="expanded.has(item.group.group_id)" :id="`${detailIdPrefix}-${item.group.group_id}`" class="gdet" role="row" :data-qp-group-detail="item.group.group_id">
-        <div role="cell" class="gdet__cell">
-          <p v-if="!item.row" class="qp-note">{{ t('admin.schedQuality.panel.noData', { why: item.unknownWhy }) }}</p>
-          <div v-for="mark in item.marks" :key="mark.dim" class="gdet__line" :data-qp-line="mark.dim">
-            <div class="gdet__head">
-              <span class="gdet__k">{{ t(`admin.schedQuality.dim.${mark.dim}`) }}</span>
-              <span class="idw" :class="`idw--${mark.identity}`">{{ mark.word }}</span>
-              <span v-if="mark.status" class="gdet__t">{{ mark.status }}</span>
-            </div>
-            <SchedEvidence
-              v-if="item.row"
-              :dim="mark.dim"
-              :evidence="item.row.lines[mark.dim].evidence"
-              :samples="item.row.lines[mark.dim]"
-              :source-groups="item.row.lines[mark.dim].source_groups"
-              :group-name="groupName"
-              :gate-off="item.gateOff === 'group'"
-            />
-          </div>
-        </div>
-      </div>
-    </template>
-  </div>
+    </div>
+    <p v-if="detail.groups.length" class="gt__legend" data-qp-legend>
+      {{ t('admin.schedQuality.panel.legend') }}
+      <span v-for="identity in LEGEND" :key="identity" :class="`is-${identity}`">{{ t(`admin.schedQuality.identity.${identity}`) }}</span>
+    </p>
+  </section>
 </template>
 
 <script setup lang="ts">
 /**
- * The quality panel's "各分组" table: per group the alias pill and full name, the place the three lines add up to
- * for the selected model (front, trial, rear; or exempt, stopped), each line's identity (pass, unknown in grey with
- * "证据不够", trial with the time left, rear with when it ends) and the exemption action. A row opens to each line's
- * evidence. On a phone (under 440px) each group takes two lines, the pill and action over the place and the marks,
- * and each mark carries its line's name.
+ * The quality panel's groups table for the selected model: per group its name, its place (前排, 后排至 / 试用至 the
+ * time it ends, 豁免, 停调, or the gate off) and the last 12 hours' requests, slow first output share, error share and
+ * cache share; each share is coloured by its line's verdict now (red rear, blue trial, green pass, grey unknown), so
+ * the numbers say which line holds the group back (a dash, no figure, stays grey). A group at the rear or on trial says why in one line per line that
+ * holds it there: the figures that judgement was taken on (not the 12-hour ones beside them) and when it ends. The
+ * whole evidence is in the decision records. A group takes two lines, its name whole on the first.
  */
-import { computed, reactive, useId, watch } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Icon from '@/components/icons/Icon.vue'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
 import GroupAliasPill from '@/components/common/GroupAliasPill.vue'
-import type { BackendAccountDetail, BackendDetailGroup, BackendLine } from '@/api/admin/schedQualityTypes'
+import type { BackendAccountDetail, BackendDetailGroup, BackendDim, BackendIdentity } from '@/api/admin/schedQualityTypes'
+import { SCHED_PANEL_PERF_TASK, useSchedLayerData } from '@/composables/useSchedLayerData'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
-import { RECENT_DIMS } from '@/components/admin/account/table/accountRecent'
-import { fmtCountdown, schedWord } from '@/utils/schedQualityFormat'
+import { DASH, schedWord } from '@/utils/schedQualityFormat'
 import { vTip } from '@/utils/tip'
-import SchedEvidence from './SchedEvidence.vue'
-import { gateOff, groupPlace, lineIdentity, lineSecondsLeft, modelRow, type PanelPlace } from './qualityPanel'
-import { evidenceElsewhere, reasonLong } from './performance'
+import SchedPauseMark from './SchedPauseMark.vue'
+import { gateOff, groupPlace, modelRow, placeEnd, placeReasons, type LineReason, type PanelPlace } from './qualityPanel'
+import { fmtCount, fmtPct, MIN_ATTEMPTS, perfView } from './performance'
 
 const props = defineProps<{
   detail: BackendAccountDetail
   model: string | null
-  now: number
   targetGroupId: number | null
   /** Name and alias of a group by id (the groups store); the detail's name when unknown. */
   groupInfo: (id: number) => { name: string; alias?: string | null } | undefined
@@ -133,310 +122,241 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ exempt: [group: BackendDetailGroup, anchor: HTMLElement]; unexempt: [group: BackendDetailGroup] }>()
 const { t, te } = useI18n()
-const word = (table: string, value: string) => schedWord(table, value, t, te)
-const detailIdPrefix = `qp-gdet-${useId()}`
+const { panelPerf, retry } = useSchedLayerData()
 
-// An unknown line's words: a stale view says so (the panel cannot tell more), then the gate switched off, then evidence.
-const UNKNOWN_WHY = {
-  stale: 'admin.schedQuality.tip.stale',
-  global: 'admin.schedQuality.identity.gateOffGlobal',
-  group: 'admin.schedQuality.identity.gateOffGroup',
-  evidence: 'admin.schedQuality.identity.unknownWhy'
-} as const
+type Col = 'requests' | BackendDim
+const COLS: Col[] = ['requests', 'ttfo', 'error', 'cache']
+const LEGEND: BackendIdentity[] = ['pass', 'rear', 'trial', 'unknown']
 const PLACE_TONES: Record<PanelPlace, StatusDotTone> = { front: 'ok', trial: 'info', rear: 'back', exempt: 'exempt', stopped: 'off' }
-/** Rear stay of each level, minutes. */
-const STAY_MINUTES = [20, 40, 60, 90, 120]
 
-// Open rows stay open across refreshes; another account starts closed.
-const expanded = reactive(new Set<number>())
-watch(() => props.detail.account.id, () => expanded.clear())
-function toggle(groupId: number) {
-  if (expanded.has(groupId)) expanded.delete(groupId)
-  else expanded.add(groupId)
+const perf = computed(() => (panelPerf.id !== null && panelPerf.id === props.detail.account.id ? panelPerf.data : null))
+const perfFailed = computed(() => panelPerf.failedId !== null && panelPerf.failedId === props.detail.account.id)
+
+/** The 12-hour window and its freshness, by the heading; a window still filling says how much it covers. */
+const note = computed(() => {
+  const data = perf.value
+  if (!data) return perfFailed.value ? t('admin.schedQuality.panel.window') : t('admin.schedQuality.panel.windowLoading')
+  if (!data.at) return t('admin.schedQuality.panel.windowLoading')
+  const hours = Math.max(0, (Date.parse(data.at) - Date.parse(data.window_from)) / 3_600_000)
+  const window = data.complete ? t('admin.schedQuality.panel.window') : t('admin.schedQuality.panel.windowPartial', { hours: hours.toFixed(1) })
+  return `${window} · ${t('admin.schedQuality.perf.updated', { time: formatShortTime(data.at) })}`
+})
+
+/** The place in words, with the time it ends. */
+function placeText(place: PanelPlace, group: BackendDetailGroup, end: string | null): string {
+  if (place === 'rear' || place === 'trial') {
+    return end ? t(`admin.schedQuality.panel.placeUntil.${place}`, { time: formatShortTime(end) }) : schedWord('placement', place, t, te)
+  }
+  if (place === 'exempt') {
+    const expires = group.exemption?.expires_at
+    return expires ? t('admin.schedQuality.panel.placeUntil.exempt', { time: formatShortTime(expires) }) : t('admin.schedQuality.panel.exemptForever')
+  }
+  return schedWord('placement', place, t, te)
 }
 
-const groupName = (id: number) => props.groupInfo(id)?.name ?? props.detail.groups.find((group) => group.group_id === id)?.name
-
-/**
- * What follows the identity word: why it is unknown (a stale view or the gate switched off first; else the main reason
- * of its latest assessment, acted or not, with what held it up and for how long; else that none is on record), the
- * trial's time left, the rear stay and its end, and for a rear line without a sample of this group that its evidence
- * all came from other groups.
- */
-function lineStatus(line: BackendLine | undefined, left: number | null, unknownWhy: string, off: boolean): string {
-  const identity = line?.identity ?? 'unknown'
-  if (identity === 'unknown') {
-    if (off) return unknownWhy
-    const latest = line?.last_eval
-    return latest ? reasonLong(latest, t, te) : t('admin.schedQuality.noAction.none')
+function reasonText(reason: LineReason): string {
+  const parts: string[] = []
+  if (reason.identity === 'trial') parts.push(t('admin.schedQuality.panel.why.trial', { time: reason.end ? formatShortTime(reason.end) : DASH }))
+  else {
+    if (reason.figures) parts.push(t(`admin.schedQuality.panel.why.${reason.dim}`, reason.figures))
+    if (reason.elsewhere) parts.push(t('admin.schedQuality.panel.why.elsewhere'))
+    if (reason.end) parts.push(t('admin.schedQuality.panel.why.recheck', { time: formatShortTime(reason.end) }))
   }
-  if (identity === 'trial') return left === null ? '' : t('admin.schedQuality.identity.trialLeft', { time: fmtCountdown(left) })
-  if (identity === 'rear' && line) {
-    const minutes = STAY_MINUTES[Math.min(Math.max(line.level, 0), STAY_MINUTES.length - 1)]
-    const stay = line.until
-      ? t('admin.schedQuality.identity.rearUntil', { time: formatShortTime(line.until), minutes })
-      : t('admin.schedQuality.identity.rearStay', { minutes })
-    return evidenceElsewhere(identity, line) ? t('admin.schedQuality.perf.then', { a: stay, b: t('admin.schedQuality.perf.elsewhere') }) : stay
-  }
-  return ''
+  return parts.join(t('admin.schedQuality.panel.why.joiner'))
 }
 
-const rows = computed(() =>
-  props.detail.groups.map((group) => {
+const rows = computed(() => {
+  const data = perf.value
+  return props.detail.groups.map((group) => {
     const place = groupPlace(props.detail, group, props.model)
     const row = modelRow(group, props.model)
-    const off = gateOff(props.detail, group)
-    const unknownWhy = t(UNKNOWN_WHY[off ?? 'evidence'])
-    const marks = RECENT_DIMS.map((dim) => {
-      const line = row?.lines[dim]
-      const identity = lineIdentity(row, dim)
-      const left = lineSecondsLeft(line, props.now)
-      const status = lineStatus(line, left, unknownWhy, off !== null)
-      const name = word('identity', identity)
-      return { dim, identity, left, status, word: name, tip: [t(`admin.schedQuality.dim.${dim}`), name, status].filter(Boolean).join(' · ') }
-    })
-    let extra = ''
-    if (place === 'rear' || place === 'trial') {
-      // The place lasts as long as its longest line.
-      const lefts = marks.filter((mark) => mark.identity === place && mark.left !== null).map((mark) => mark.left as number)
-      extra = lefts.length ? fmtCountdown(Math.max(...lefts)) : ''
-    } else if (place === 'exempt' && group.exemption) {
-      extra = group.exemption.expires_at
-        ? t('admin.schedQuality.panel.exemptUntil', { time: formatShortTime(group.exemption.expires_at) })
-        : t('admin.schedQuality.panel.exemptForever')
+    const end = placeEnd(row, place)
+    const perfRow = data?.rows.find((item) => item.account_id === props.detail.account.id && item.group_id === group.group_id && item.model === props.model)
+    const view = perfRow ? perfView(perfRow, data?.groups.find((item) => item.group_id === group.group_id)) : null
+    const shares: Record<BackendDim, number | null> = {
+      ttfo: view?.slowRate ?? null,
+      error: view && view.row.attempts.n >= MIN_ATTEMPTS ? view.row.attempts.failures / view.row.attempts.n : null,
+      cache: view?.cacheRate ?? null
     }
-    return { group, row, info: props.groupInfo(group.group_id) ?? { name: group.name }, place, extra, marks, unknownWhy, gateOff: off }
+    const cells = COLS.map((col) => {
+      const identity: BackendIdentity | 'plain' = col === 'requests' ? 'plain' : (row?.lines[col].identity ?? 'unknown')
+      const value = col === 'requests' ? (view ? view.row.requests : null) : shares[col]
+      const text = value === null ? DASH : col === 'requests' ? fmtCount(value) : fmtPct(value)
+      const verdict = identity === 'plain' ? '' : schedWord('identity', identity, t, te)
+      return { col, identity, value, text, label: [t(`admin.schedQuality.panel.col.${col}`), text, verdict].filter(Boolean).join(' ') }
+    })
+    const reasons = placeReasons(row, place).map((reason) => ({ ...reason, text: reasonText(reason) }))
+    return {
+      group,
+      info: props.groupInfo(group.group_id) ?? { name: group.name },
+      place,
+      tone: PLACE_TONES[place],
+      placeText: placeText(place, group, end),
+      gateOff: place === 'front' && gateOff(props.detail, group) === 'group',
+      cells,
+      reasons
+    }
   })
-)
+})
 </script>
 
 <style scoped>
 @reference "../../../../style.css";
 
-.grows {
-  display: grid;
-}
-.grow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px 32px 32px 32px 72px;
-  align-items: center;
-  column-gap: 4px;
-  min-height: 40px;
-  margin: 0 -8px;
-  padding: 0 8px;
-  border-top: 1px solid var(--color-line-row);
-  border-radius: var(--radius-sm);
+/* The panel's heading rule is scoped to the panel and does not reach here: the title and its note stand apart and the
+   note wraps under the title on a narrow drawer. */
+.qp-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 8px;
   font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-body);
 }
-.grow > * {
+.qp-h-note {
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-regular);
+}
+
+/* A group: its name whole on the first line (the action at its end), the place and the four figures under it in the
+   heading's columns, then the reasons. */
+.gt {
+  display: grid;
+}
+.gt__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(4, 56px);
+  grid-template-areas:
+    'name name name name op'
+    'place requests ttfo error cache'
+    'why why why why why';
+  align-items: center;
+  column-gap: 8px;
+  margin: 0 -8px;
+  padding: 8px;
+  border-top: 1px solid var(--color-line-row);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.gt__row > * {
   min-width: 0;
 }
-.grow--head {
-  min-height: 28px;
+.gt__row--head {
+  grid-template-areas: 'place requests ttfo error cache';
+  padding-top: 0;
+  padding-bottom: 6px;
   border-top: 0;
   color: var(--color-text-secondary);
   font-size: var(--font-size-small);
 }
-.grow__c {
-  text-align: center;
-}
-.grow__r {
-  text-align: right;
-}
-.grow.is-target {
+.gt__row.is-target {
   border-top-color: transparent;
   background: var(--color-bg-target);
 }
-.grow.is-target + .grow {
+.gt__row.is-target + .gt__row {
   border-top-color: transparent;
 }
-.grow__group {
+.gt__name {
   display: flex;
-  min-width: 0;
+  grid-area: name;
   align-items: center;
   gap: 8px;
-}
-.grow__toggle {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  flex: none;
-  place-items: center;
-  margin-left: -4px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-secondary);
-}
-.grow__toggle svg {
-  transition: transform var(--motion-fast) ease-out;
-}
-.grow__toggle[aria-expanded='true'] svg {
-  transform: rotate(90deg);
-}
-.grow__toggle:focus-visible {
-  outline: 2px solid theme('colors.primary.500');
-  outline-offset: -2px;
-}
-@media (prefers-reduced-motion: reduce) {
-  .grow__toggle svg {
-    transition: none;
-  }
-}
-/* A row's evidence: under the row, the three lines one after another. */
-.gdet {
-  margin: 0 -8px;
-  padding: 4px 8px 12px 32px;
-}
-.gdet__cell {
-  display: grid;
-  gap: 10px;
-}
-.gdet__line {
-  display: grid;
-  gap: 4px;
-}
-.gdet__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 8px;
-}
-.gdet__k {
-  min-width: 32px;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-}
-.gdet__t {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-  font-variant-numeric: tabular-nums;
-}
-/* Identity words: pass green, rear red, trial blue, unknown grey. */
-.idw {
   font-weight: var(--font-weight-medium);
 }
-.idw--pass {
-  color: var(--color-mark-pass);
+.gt__title {
+  overflow-wrap: anywhere;
 }
-.idw--rear {
-  color: var(--color-mark-fail);
-}
-.idw--trial {
-  color: var(--color-status-info);
-}
-.idw--unknown {
-  color: var(--color-text-muted);
-}
-.grow__name {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.grow__state {
+.gt__op {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-.grow__extra {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-  font-variant-numeric: tabular-nums;
-}
-.mk {
-  display: flex;
-  height: 24px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-}
-.mk:focus-visible {
-  outline: 2px solid theme('colors.primary.500');
-  outline-offset: -2px;
-}
-/* Pass, rear and trial: a 16px filled circle, green, red or blue, with a white check, cross or clock drawn in its
-   middle 10px (12.8). Unknown is a grey dash. */
-.mk--pass svg,
-.mk--rear svg,
-.mk--trial svg {
-  box-sizing: border-box;
-  width: 16px;
-  height: 16px;
-  padding: 3px;
-  border-radius: 50%;
-  color: var(--color-mark-glyph);
-}
-.mk--pass svg {
-  background: var(--color-mark-pass);
-}
-.mk--rear svg {
-  background: var(--color-mark-fail);
-}
-.mk--trial svg {
-  background: var(--color-status-info);
-}
-.mk--unknown {
-  color: var(--color-text-muted);
-}
-.mk__dash {
-  display: block;
-  width: 9px;
-  height: 1.5px;
-  border-radius: 1px;
-  background: currentColor;
-}
-.grow__ops {
-  display: flex;
+  grid-area: op;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
   white-space: nowrap;
 }
-.grow__marks {
-  display: contents;
+.gt__place {
+  display: flex;
+  grid-area: place;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
-.mk__l {
-  display: none;
+.gt__row:not(.gt__row--head) .gt__place {
+  margin-top: 4px;
+}
+.gt__n {
+  text-align: right;
+  white-space: nowrap;
+}
+.gt__row:not(.gt__row--head) .gt__n {
+  margin-top: 4px;
+}
+.gt__n--requests {
+  grid-area: requests;
+}
+.gt__n--ttfo {
+  grid-area: ttfo;
+}
+.gt__n--error {
+  grid-area: error;
+}
+.gt__n--cache {
+  grid-area: cache;
+}
+/* A share takes its line's verdict: red rear, blue trial, green pass, grey unknown; requests stay plain. */
+.is-rear {
+  color: var(--color-status-error-text);
+}
+.is-trial {
+  color: var(--color-status-info-text);
+}
+.is-pass {
+  color: var(--color-status-ok-text);
+}
+.is-unknown {
   color: var(--color-text-secondary);
+}
+/* No figure, no colour: the dash reads the same whatever the verdict (the reason line says why). */
+.gt__n.is-none {
+  color: var(--color-text-muted);
+}
+.gt__why {
+  display: grid;
+  grid-area: why;
+  gap: 2px;
+  margin: 6px 0 0;
+  padding: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+  list-style: none;
+}
+.gt__why li {
+  display: flex;
+  gap: 8px;
+}
+.gt__why-k {
+  flex: none;
+  font-weight: var(--font-weight-medium);
+}
+.gt__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--color-text-muted);
   font-size: var(--font-size-small);
 }
 
-/* A phone (prototype): two lines per group, the header row gone, each mark named. */
+/* A phone: narrower figures, so the place keeps its words. */
 @media (max-width: 439px) {
-  .grow--head {
-    display: none;
-  }
-  .grow {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: 'group ops' 'state marks';
-    row-gap: 6px;
-    padding: 10px 8px;
-  }
-  .grow__group {
-    grid-area: group;
-  }
-  .grow__state {
-    grid-area: state;
-  }
-  .grow__ops {
-    grid-area: ops;
-  }
-  .grow__marks {
-    display: flex;
-    grid-area: marks;
-    justify-content: flex-end;
-    gap: 10px;
-  }
-  .mk {
-    gap: 4px;
-  }
-  .mk__l {
-    display: block;
+  .gt__row {
+    grid-template-columns: minmax(0, 1fr) repeat(4, 48px);
+    column-gap: 6px;
   }
 }
 </style>

@@ -9,15 +9,13 @@
  */
 import type {
   BackendAccountDetail,
+  BackendDecision,
   BackendDetailGroup,
   BackendDim,
   BackendEvidenceOf,
   BackendGroupModel,
-  BackendSampleCounts,
-  BackendIdentity,
-  BackendLine
+  BackendSampleCounts
 } from '@/api/admin/schedQualityTypes'
-import { secondsUntil } from '@/utils/schedQualityFormat'
 
 export type PanelPlace = 'stopped' | 'exempt' | 'rear' | 'trial' | 'front'
 
@@ -62,14 +60,101 @@ export function groupPlace(detail: PlaceDetail, group: BackendDetailGroup, model
   return row.placement
 }
 
-/** A line's identity; a group without a row for the model has no data, which is unknown. */
-export const lineIdentity = (row: BackendGroupModel | undefined, dim: BackendDim): BackendIdentity => row?.lines[dim].identity ?? 'unknown'
+const DIMS: BackendDim[] = ['ttfo', 'error', 'cache']
 
-/** Seconds left of a rear stay or a trial; null for the other identities or without an end. */
-export function lineSecondsLeft(line: Pick<BackendLine, 'identity' | 'until' | 'trial_until'> | undefined, now: number): number | null {
-  if (line?.identity === 'rear') return secondsUntil(line.until, now)
-  if (line?.identity === 'trial') return secondsUntil(line.trial_until, now)
-  return null
+/** The latest of some ISO times; null without any. */
+const latest = (times: (string | null)[]) =>
+  times.reduce<string | null>((max, time) => (time && (!max || Date.parse(time) > Date.parse(max)) ? time : max), null)
+
+/** When a rear or trial place ends: the latest end of the lines that hold it there; null for the other places. */
+export function placeEnd(row: BackendGroupModel | undefined, place: PanelPlace): string | null {
+  if (!row || (place !== 'rear' && place !== 'trial')) return null
+  return latest(DIMS.map((dim) => row.lines[dim]).filter((line) => line.identity === place).map((line) => (place === 'rear' ? line.until : line.trial_until)))
+}
+
+/** One line's reason for a rear or trial place: the figures its latest judgement was taken on, and when it ends. */
+export interface LineReason {
+  dim: BackendDim
+  identity: 'rear' | 'trial'
+  /** The judgement's own figures, formatted for the copy (admin.schedQuality.panel.why.<dim>); null when it had none. */
+  figures: Record<string, string> | null
+  /** The rear stay's or the trial's end. */
+  end: string | null
+  /** A rear line with no sample of this group: its evidence came from other groups. */
+  elsewhere: boolean
+}
+
+/** A threshold as set: 0.05 → "5%", 0.025 → "2.5%". */
+const limitPct = (ratio: number) => `${Number((ratio * 100).toFixed(1))}%`
+
+function lineFigures<D extends BackendDim>(dim: D, evidence: BackendEvidenceOf[D] | null | undefined): Record<string, string> | null {
+  if (!evidence) return null
+  if (dim === 'ttfo') {
+    const e = evidence as BackendEvidenceOf['ttfo']
+    return e.n > 0 ? { limit: String(e.limit_s), share: pct(e.k / e.n), peer: pct(e.prior_mu) } : null
+  }
+  if (dim === 'error') {
+    const e = evidence as BackendEvidenceOf['error']
+    return e.padded > 0 ? { n: String(e.padded), failed: String(e.failed), share: pct(e.failed / e.padded), limit: limitPct(e.limit) } : null
+  }
+  const e = evidence as BackendEvidenceOf['cache']
+  return e.turns > 0 ? { ratio: pct(e.ratio), min: limitPct(e.min_ratio) } : null
+}
+
+/** Why a group is at the rear or on trial for the model: each line that holds it there, in line order. */
+export function placeReasons(row: BackendGroupModel | undefined, place: PanelPlace): LineReason[] {
+  if (!row || (place !== 'rear' && place !== 'trial')) return []
+  return DIMS.flatMap((dim) => {
+    const line = row.lines[dim]
+    if (line.identity !== 'rear' && line.identity !== 'trial') return []
+    const rear = line.identity === 'rear'
+    return [{
+      dim,
+      identity: line.identity,
+      figures: rear ? lineFigures(dim, line.evidence) : null,
+      end: rear ? line.until : line.trial_until,
+      elsewhere: rear && line.samples_local === 0 && (line.samples_total ?? 0) > 0
+    }]
+  })
+}
+
+// ---- Decisions ----
+
+/** Records of one moment, one action and one model's line, across the groups it was taken in. */
+export interface MergedDecision {
+  key: string
+  at: string
+  action: string
+  model: string
+  line: BackendDim | ''
+  level: number
+  until: string | null
+  /** Group ids, each once, in record order. */
+  groups: number[]
+  /** One record per group (the newest), for the evidence. */
+  items: BackendDecision[]
+}
+
+const minuteOf = (time: string | null) => (time ? Math.floor(Date.parse(time) / 60_000) : '')
+
+/**
+ * The decision list as read: records of the same minute, action, model, line and end are one entry listing their
+ * groups (the engine judges a model's line in every group of the account at once); a record repeated for a group shows
+ * once. Newest first, as given.
+ */
+export function mergeDecisions(items: BackendDecision[]): MergedDecision[] {
+  const out = new Map<string, MergedDecision>()
+  for (const item of items) {
+    const key = [minuteOf(item.at), item.action, item.model, item.line, minuteOf(item.until)].join('|')
+    const entry = out.get(key)
+    if (!entry) {
+      out.set(key, { key, at: item.at, action: item.action, model: item.model, line: item.line, level: item.level, until: item.until, groups: [item.group_id], items: [item] })
+    } else if (!entry.groups.includes(item.group_id)) {
+      entry.groups.push(item.group_id)
+      entry.items.push(item)
+    }
+  }
+  return [...out.values()]
 }
 
 /** Models with a group at the rear (the amber mark on their tab). */

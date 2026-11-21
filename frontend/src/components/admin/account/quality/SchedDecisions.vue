@@ -1,62 +1,53 @@
 <template>
   <section class="qp-section" data-qp-section="decisions">
-    <h3 class="qp-h">
-      <button
-        type="button"
-        class="dec-toggle"
-        :aria-expanded="open"
-        :aria-controls="listId"
-        data-qp-decisions-toggle
-        @click="toggle"
-      >
-        <Icon name="chevronRight" size="xs" :stroke-width="2.5" />
-        <span>{{ t('admin.schedQuality.decisions.title') }}</span>
-      </button>{{ ' ' }}<span class="qp-h-note" data-qp-decisions-note>{{ t('admin.schedQuality.decisions.note') }}</span>
-    </h3>
-    <div v-if="open" :id="listId" class="dec" :aria-busy="state === 'loading'">
+    <h3 class="qp-h">{{ t('admin.schedQuality.decisions.title') }}</h3>
+    <div class="dec" :aria-busy="state === 'loading'">
       <div v-if="state === 'failed' && !items.length" class="dec__failed" data-qp-decisions-failed>
         <span class="qp-fail">{{ t('admin.schedQuality.result.failed') }}</span>
         <button type="button" class="qp-text-btn" @click="load(false)">{{ t('admin.schedQuality.action.retry') }}</button>
       </div>
-      <div v-else-if="state === 'loading' && !items.length" class="dec__loading">
+      <div v-else-if="state !== 'loaded' && state !== 'failed' && !items.length" class="dec__loading">
         <span v-for="i in 3" :key="i" class="skeleton block h-3.5 w-full" />
       </div>
       <p v-else-if="!items.length" class="qp-note" data-qp-decisions-empty>{{ t('admin.schedQuality.decisions.empty') }}</p>
       <template v-else>
         <ol class="dlist">
-          <li v-for="item in items" :key="item.id" class="drow" :data-qp-decision="item.id">
-            <span class="drow__time">{{ formatShortTime(item.at) }}</span>
-            <!-- Everything after the time, so the lines under the action start where it starts (design 6.5). -->
+          <li v-for="entry in visible" :key="entry.key" class="drow" :data-qp-decision="entry.items[0].id">
+            <span class="drow__time">{{ formatShortTime(entry.at) }}</span>
+            <!-- Everything after the time, so the lines under the action start where it starts. -->
             <div class="drow__body">
               <div class="drow__main">
-                <span class="drow__what" :class="`drow__what--${tone(item)}`">{{ actionWord(item) }}</span>
-                <span class="drow__where">{{ where(item) }}</span>
+                <span class="drow__what" :class="`drow__what--${tone(entry)}`">{{ actionWord(entry) }}</span>
+                <span v-if="endText(entry)" class="drow__end">{{ endText(entry) }}</span>
                 <button
-                  v-if="item.basis"
+                  v-if="entry.items.some((item) => item.basis)"
                   type="button"
                   class="qp-text-btn drow__ev"
-                  :aria-expanded="shown.has(item.id)"
-                  :data-qp-decision-evidence="item.id"
-                  @click="toggleEvidence(item.id)"
+                  :aria-expanded="shown.has(entry.key)"
+                  :data-qp-decision-evidence="entry.items[0].id"
+                  @click="toggleEvidence(entry.key)"
                 >{{ t('admin.schedQuality.decisions.evidence') }}</button>
               </div>
-              <p v-if="detailLine(item)" class="drow__sub">{{ detailLine(item) }}</p>
-              <p v-if="item.line && item.action === 'trial_timeout'" class="drow__sub" :data-qp-trial-timeout="item.id">{{ timeoutReason(item) }}</p>
-              <SchedEvidence
-                v-if="item.basis && shown.has(item.id)"
-                class="drow__basis"
-                :dim="item.basis.line"
-                :evidence="basisEvidence(item.basis)"
-                :samples="item.basis"
-                :source-groups="item.basis.source_groups"
-                :group-name="groupName"
-              />
+              <p class="drow__where">{{ where(entry) }}</p>
+              <p v-if="entry.line && entry.action === 'trial_timeout'" class="drow__sub" :data-qp-trial-timeout="entry.items[0].id">{{ timeoutReason(entry.items[0]) }}</p>
+              <template v-if="shown.has(entry.key)">
+                <div v-for="item in entry.items.filter((one) => one.basis)" :key="item.id" class="drow__basis">
+                  <p v-if="entry.groups.length > 1" class="drow__group">{{ groupLabel(item.group_id) }}</p>
+                  <SchedEvidence
+                    :dim="item.basis!.line"
+                    :evidence="basisEvidence(item.basis!)"
+                    :samples="item.basis"
+                    :source-groups="item.basis!.source_groups"
+                    :group-name="groupName"
+                  />
+                </div>
+              </template>
             </div>
           </li>
         </ol>
-        <div v-if="more || state === 'failed'" class="dec__more">
+        <div v-if="canMore || state === 'failed'" class="dec__more">
           <span v-if="state === 'failed'" class="qp-fail">{{ t('admin.schedQuality.result.failed') }}</span>
-          <button type="button" class="qp-text-btn" :disabled="state === 'loading'" data-qp-decisions-more @click="load(true)">
+          <button type="button" class="qp-text-btn" :disabled="state === 'loading'" data-qp-decisions-more @click="onMore">
             {{ t('admin.schedQuality.decisions.more') }}
           </button>
         </div>
@@ -68,22 +59,25 @@
 <script setup lang="ts">
 /**
  * The quality panel's "判定记录": each change of a line's identity for the account (GET …/accounts/:id/decisions),
- * newest first, 50 at a time. Closed by default; the first opening loads it, another account starts over, and a
- * quality change made from the page (a recovery, an exemption) loads the first page again. A record of the new rules
- * opens to the evidence it was taken on; records of the previous rules have none and read "旧规则 · <action>".
+ * newest first, 50 at a time, loaded with the panel. Records of one moment, action and model's line across groups read
+ * as one entry naming the groups (mergeDecisions); the newest six show, "查看更多" shows the rest and then loads older
+ * pages. Another account starts over, and a quality change made from the page (a recovery, an exemption) loads the
+ * first page again. An entry of the new rules opens to the evidence each group's record was taken on; records of the
+ * previous rules have none and read "旧规则 · <action>".
  */
-import { reactive, ref, useId, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Icon from '@/components/icons/Icon.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
 import type { BackendBasis, BackendDecision } from '@/api/admin/schedQualityTypes'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
 import { schedWord } from '@/utils/schedQualityFormat'
 import SchedEvidence from './SchedEvidence.vue'
-import { evidenceCauses } from './qualityPanel'
+import { evidenceCauses, mergeDecisions, type MergedDecision } from './qualityPanel'
 
 const PAGE = 50
+/** Entries shown before "查看更多". */
+const FIRST = 6
 /** Rear stay of each level, minutes. */
 const STAY_MINUTES = [20, 40, 60, 90, 120]
 
@@ -94,14 +88,18 @@ const props = defineProps<{
 }>()
 const { t, te } = useI18n()
 const { changed } = useSchedLayers()
-const listId = `qp-decisions-${useId()}`
 
-const open = ref(false)
 const state = ref<'idle' | 'loading' | 'loaded' | 'failed'>('idle')
 const items = ref<BackendDecision[]>([])
 const more = ref(false)
-const shown = reactive(new Set<number>())
+const all = ref(false)
+const shown = reactive(new Set<string>())
 let seq = 0
+
+const merged = computed(() => mergeDecisions(items.value))
+const visible = computed(() => (all.value ? merged.value : merged.value.slice(0, FIRST)))
+/** More to show: entries held back, then older pages. */
+const canMore = computed(() => (!all.value && merged.value.length > FIRST) || more.value)
 
 async function load(next: boolean) {
   const accountId = props.accountId
@@ -126,60 +124,60 @@ async function load(next: boolean) {
   }
 }
 
-function toggle() {
-  open.value = !open.value
-  if (open.value && state.value === 'idle') void load(false)
+function onMore() {
+  if (!all.value && merged.value.length > FIRST) all.value = true
+  else {
+    all.value = true
+    void load(true)
+  }
 }
 
 watch(() => props.accountId, () => {
   seq++
-  state.value = 'idle'
   items.value = []
   more.value = false
+  all.value = false
   shown.clear()
-  if (open.value) void load(false)
-})
+  void load(false)
+}, { immediate: true })
 
-// A recovery or an exemption writes records: an open list starts over from the newest; a collapsed one is out of date,
-// so its next opening does (an answer still on its way is dropped).
+// A recovery or an exemption writes records: the list starts over from the newest.
 watch(changed, () => {
   if (state.value === 'idle') return
-  if (open.value) {
-    trackSchedReload(load(false))
-    return
-  }
-  seq++
-  state.value = 'idle'
+  all.value = false
+  trackSchedReload(load(false))
 })
 
-function toggleEvidence(id: number) {
-  if (shown.has(id)) shown.delete(id)
-  else shown.add(id)
+function toggleEvidence(key: string) {
+  if (shown.has(key)) shown.delete(key)
+  else shown.add(key)
 }
 
 /** The action in words (其他 for one the copy does not know); records of the previous rules (no line) say so first. */
-function actionWord(item: BackendDecision): string {
-  const word = schedWord('decisions.action', item.action, t, te)
-  return item.line ? word : t('admin.schedQuality.decisions.legacy', { action: word })
+function actionWord(entry: MergedDecision): string {
+  const word = schedWord('decisions.action', entry.action, t, te)
+  return entry.line ? word : t('admin.schedQuality.decisions.legacy', { action: word })
 }
 
 const BAD = new Set(['enter', 'renew', 'trial_fail'])
 const GOOD = new Set(['release', 'trial_pass', 'clear', 'relax', 'reset'])
-const tone = (item: BackendDecision) => (!item.line ? 'muted' : BAD.has(item.action) ? 'rear' : GOOD.has(item.action) ? 'pass' : item.action === 'trial' ? 'trial' : 'muted')
+const tone = (entry: MergedDecision) => (!entry.line ? 'muted' : BAD.has(entry.action) ? 'rear' : GOOD.has(entry.action) ? 'pass' : entry.action === 'trial' ? 'trial' : 'muted')
 
-function where(item: BackendDecision): string {
-  const group = props.groupName(item.group_id) ?? `#${item.group_id}`
-  const line = item.line ? t(`admin.schedQuality.dim.${item.line}`) : ''
-  return [group, item.model, line].filter(Boolean).join(' · ')
+const groupLabel = (id: number) => props.groupName(id) ?? `#${id}`
+
+function where(entry: MergedDecision): string {
+  const line = entry.line ? t(`admin.schedQuality.dim.${entry.line}`) : ''
+  const groups = entry.groups.map(groupLabel).join(t('admin.schedQuality.evidence.joiner'))
+  return [entry.model, line, groups].filter(Boolean).join(' · ')
 }
 
 /** A rear stay's length and end, or a trial's end. */
-function detailLine(item: BackendDecision): string {
-  if (!item.line || !item.until) return ''
-  if (item.action === 'trial') return t('admin.schedQuality.decisions.trialUntil', { time: formatShortTime(item.until) })
-  if (BAD.has(item.action)) {
-    const minutes = STAY_MINUTES[Math.min(Math.max(item.level, 0), STAY_MINUTES.length - 1)]
-    return t('admin.schedQuality.identity.rearUntil', { time: formatShortTime(item.until), minutes })
+function endText(entry: MergedDecision): string {
+  if (!entry.line || !entry.until) return ''
+  if (entry.action === 'trial') return t('admin.schedQuality.decisions.trialUntil', { time: formatShortTime(entry.until) })
+  if (BAD.has(entry.action)) {
+    const minutes = STAY_MINUTES[Math.min(Math.max(entry.level, 0), STAY_MINUTES.length - 1)]
+    return t('admin.schedQuality.decisions.rearUntil', { time: formatShortTime(entry.until), minutes })
   }
   return ''
 }
@@ -219,52 +217,11 @@ function timeoutReason(item: BackendDecision): string {
 <style scoped>
 @reference "../../../../style.css";
 
-/* The panel's heading rule is scoped to the panel and does not reach this component's heading: a heading layout here,
-   so the title and the note stand apart (they ran together in English: "DecisionsOne record …"). The note is never
-   cut: it wraps, and on a narrow drawer (390 or 320 px) it moves under the title. */
+/* The panel's heading rule is scoped to the panel and does not reach this component's heading. */
 .qp-h {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 8px;
   font-size: var(--font-size-body);
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-body);
-}
-.qp-h-note {
-  min-width: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-  font-weight: var(--font-weight-regular);
-}
-.dec-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 -4px;
-  padding: 0 4px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: inherit;
-  font: inherit;
-}
-.dec-toggle svg {
-  color: var(--color-text-secondary);
-  transition: transform var(--motion-fast) ease-out;
-}
-.dec-toggle[aria-expanded='true'] svg {
-  transform: rotate(90deg);
-}
-.dec-toggle:focus-visible {
-  outline: 2px solid theme('colors.primary.500');
-  outline-offset: 2px;
-}
-@media (prefers-reduced-motion: reduce) {
-  .dec-toggle svg {
-    transition: none;
-  }
 }
 .dec {
   display: grid;
@@ -280,9 +237,7 @@ function timeoutReason(item: BackendDecision): string {
   align-items: center;
   gap: 10px;
 }
-/* The list is the container the rows lay out by: the drawer's width is not the viewport's. */
 .dlist {
-  container: sched-decisions / inline-size;
   display: grid;
   margin: 0;
   padding: 0;
@@ -309,8 +264,9 @@ function timeoutReason(item: BackendDecision): string {
 .drow__main {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 2px 8px;
 }
 .drow__time {
   color: var(--color-text-secondary);
@@ -326,65 +282,44 @@ function timeoutReason(item: BackendDecision): string {
   font-weight: var(--font-weight-medium);
 }
 .drow__what--rear {
-  color: var(--color-mark-fail);
+  color: var(--color-status-error-text);
 }
 .drow__what--pass {
-  color: var(--color-mark-pass);
+  color: var(--color-status-ok-text);
 }
 .drow__what--trial {
-  color: var(--color-status-info);
+  color: var(--color-status-info-text);
 }
 .drow__what--muted {
   color: var(--color-text-muted);
 }
-.drow__where {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.drow__ev {
-  flex: none;
-}
-/* A narrow list: one line cannot hold the time, the longest action and Evidence, and nothing in it gave way, so
-   Evidence ended up out of view. Here the action (wrapping, long words too) and Evidence share the first line beside
-   the time, Evidence keeping its whole width; the group, model and line go under the action. 454px is the widest list
-   measured to need it (English, a record of another day: "11-18 06:55 Not enough evidence at the review, trial
-   started", Evidence); the 500px drawer from 1280px (a 459px list) keeps the one-line row. */
-@container sched-decisions (max-width: 454px) {
-  .drow__main {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content;
-    grid-template-areas:
-      'what ev'
-      'where where';
-    row-gap: 2px;
-  }
-  .drow__what {
-    grid-area: what;
-    overflow-wrap: anywhere;
-  }
-  .drow__where {
-    grid-area: where;
-    overflow-wrap: anywhere;
-    white-space: normal;
-  }
-  .drow__ev {
-    grid-area: ev;
-  }
-}
-/* An opened evidence wraps anywhere: one long word in it (a source group's name) would otherwise widen the list's
-   column and take every row's Evidence out of view. */
-.drow__basis {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.drow__sub {
+.drow__end {
   color: var(--color-text-secondary);
   font-size: var(--font-size-small);
   font-variant-numeric: tabular-nums;
+}
+/* Evidence at the end of the line (the panel's text-button rule sets its margins: this one outranks it). */
+.drow .drow__main .drow__ev {
+  flex: none;
+  margin-left: auto;
+}
+.drow__where,
+.drow__sub,
+.drow__group {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.drow__group {
+  margin-top: 4px;
+  color: var(--color-text-primary);
+}
+/* An opened evidence wraps anywhere: one long word in it (a source group's name) would otherwise widen the list. */
+.drow__basis {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 </style>
