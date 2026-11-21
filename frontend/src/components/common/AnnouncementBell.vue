@@ -328,7 +328,7 @@ import { ref, computed, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { sanitizeHtml } from '@/utils/sanitize'
 import { useAppStore } from '@/stores/app'
 import { useAnnouncementStore } from '@/stores/announcements'
 import { formatRelativeTime, formatRelativeWithDateTime } from '@/utils/format'
@@ -360,7 +360,7 @@ const selectedAnnouncement = ref<UserAnnouncement | null>(null)
 function renderMarkdown(content: string): string {
   if (!content) return ''
   const html = marked.parse(content) as string
-  return DOMPurify.sanitize(html)
+  return sanitizeHtml(html)
 }
 
 function openModal() {

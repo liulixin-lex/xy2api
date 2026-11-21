@@ -283,7 +283,7 @@ import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { sanitizeHtml } from '@/utils/sanitize'
 import '@/styles/announcement-markdown.css'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -545,7 +545,7 @@ const checkout = ref<CheckoutInfoResponse>({
   recharge_bonus_tiers: [], recharge_bonus_mode: 'bonus', recharge_bonus_notice: '',
 })
 
-const renderedHelpText = computed(() => DOMPurify.sanitize(
+const renderedHelpText = computed(() => sanitizeHtml(
   marked.parse(checkout.value.help_text || '', { async: false, gfm: true, breaks: false }),
 ))
 
@@ -553,7 +553,7 @@ const renderedHelpText = computed(() => DOMPurify.sanitize(
 const renderedBonusNotice = computed(() => {
   const raw = (checkout.value.recharge_bonus_notice || '').trim()
   if (!raw) return ''
-  return DOMPurify.sanitize(marked.parse(raw, { async: false, gfm: true, breaks: true }))
+  return sanitizeHtml(marked.parse(raw, { async: false, gfm: true, breaks: true }))
 })
 
 // 订阅功能开关（public settings 的 subscription_enabled，opt-out）。关闭后购买页只保留充值：

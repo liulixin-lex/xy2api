@@ -66,7 +66,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { sanitizeHtml } from '@/utils/sanitize'
 import Icon from '@/components/icons/Icon.vue'
 import PlazaFilterBar from './PlazaFilterBar.vue'
 import PlazaGroupSection from './PlazaGroupSection.vue'
@@ -95,7 +95,7 @@ const searchActive = computed(() => searchQuery.value.trim() !== '')
 const descriptionHtml = computed(() => {
   const md = props.response?.description?.trim()
   if (!md) return ''
-  return DOMPurify.sanitize(marked.parse(md) as string)
+  return sanitizeHtml(marked.parse(md) as string)
 })
 
 /** 生效倍率 = 用户专属倍率 ?? 分组默认倍率。 */
