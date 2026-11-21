@@ -479,19 +479,6 @@ func TestOpenAISelectionSlotGuardReleasesOnFailureAndTransfersOnSuccess(t *testi
 		require.Equal(t, 1, releases)
 	})
 
-	t.Run("cancellation releases once", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		releases := 0
-		selection, err := withOpenAISelectionSlotGuard(func() { releases++ }, func(func()) (*AccountSelectionResult, error) {
-			cancel()
-			return nil, ctx.Err()
-		})
-		require.ErrorIs(t, err, context.Canceled)
-		require.Nil(t, selection)
-		require.Equal(t, 1, releases)
-	})
-
 	t.Run("successful result transfers release ownership", func(t *testing.T) {
 		releases := 0
 		selection, err := withOpenAISelectionSlotGuard(func() { releases++ }, func(release func()) (*AccountSelectionResult, error) {

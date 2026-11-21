@@ -2297,6 +2297,7 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 				acquires++
 				replacement, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 				if err != nil {
+					stopProbes = true // a backend error ends borrowing; keep the owner wait decision
 					return nil, ctx.Err()
 				}
 				if replacement == nil || !replacement.Acquired {
