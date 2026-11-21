@@ -436,10 +436,17 @@
           @sort="handleSort"
           @update:selected-keys="handleSelectedKeysUpdate"
         >
-          <!-- The frozen identity (mobile list plan): the address, the user name under it, each cut with "…" at the column's
-               width (on a phone clamp(120px, 36vw, 160px), from 768px 240px); hovered or tapped, the tip has both whole. -->
+          <!-- From 1024px the desktop's cell as before the mobile list plan: the initial's badge and the address (the user name
+               has its own column). Below, the frozen identity: the address, the user name under it, each cut with "…" at the
+               column's width (on a phone clamp(120px, 36vw, 160px), from 768px 240px); hovered or tapped, the tip has both. -->
           <template #cell-email="{ value, row }">
-            <TableIdentityCell class="users-identity" :primary="value" :secondary="row.username || undefined" data-test="user-email" />
+            <div v-if="desktop" class="flex min-w-0 items-center gap-2">
+              <div class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30">
+                <span class="text-sm font-medium text-primary-700 dark:text-primary-300">{{ value.charAt(0).toUpperCase() }}</span>
+              </div>
+              <span class="min-w-0 truncate font-medium text-gray-900 dark:text-white lg:max-w-60" v-tip="value" data-test="user-email" @click="showTipNow($event.currentTarget)">{{ value }}</span>
+            </div>
+            <TableIdentityCell v-else class="users-identity" :primary="value" :secondary="row.username || undefined" data-test="user-email" />
           </template>
 
           <template #cell-username="{ value }">
@@ -1014,7 +1021,7 @@ import { useTableViewport } from '@/composables/useTableViewport'
 import { formatDateTime, formatListDateTime } from '@/utils/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import Icon from '@/components/icons/Icon.vue'
-import { vTip } from '@/utils/tip'
+import { showTipNow, vTip } from '@/utils/tip'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
@@ -1149,13 +1156,14 @@ const toggleableColumns = computed(() =>
   allColumns.value.filter(col => col.key !== 'email' && col.key !== 'actions')
 )
 
-// Default hidden columns from 768px. The user name is the identity's second line, so its own column starts hidden
-// (a saved setting keeps its own).
+// Default hidden columns from 1024px, as before the mobile list plan. From 768 to 1023px the user name is the identity's
+// second line, so its own column starts hidden there too. One saved setting serves both widths and keeps its own.
 const DEFAULT_HIDDEN_COLUMNS = [
-  'username', 'notes', 'groups', 'subscriptions', 'usage', 'concurrency',
+  'notes', 'groups', 'subscriptions', 'usage', 'concurrency',
   'usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity',
   'balance_platform_quota'
 ]
+const TABLET_DEFAULT_HIDDEN_COLUMNS = ['username', ...DEFAULT_HIDDEN_COLUMNS]
 const REMOVED_COLUMNS = new Set(['last_login_at'])
 // 强制可见列：加载时会被移出隐藏集，并在列设置 UI 上 disabled。
 // 当前没有列需要强制可见 —— last_active_at 已改为可被用户隐藏。
@@ -1204,9 +1212,14 @@ const migrateWideColumns = (hidden: Set<string>) => {
   return mutated
 }
 
+const { phone, desktop } = useTableViewport()
 const columnVisibility = useColumnVisibility({
   keys: computed(() => toggleableColumns.value.map((col) => col.key)),
-  wide: { storageKey: HIDDEN_COLUMNS_KEY, defaultHidden: DEFAULT_HIDDEN_COLUMNS, migrate: migrateWideColumns },
+  wide: {
+    storageKey: HIDDEN_COLUMNS_KEY,
+    defaultHidden: () => (desktop.value ? DEFAULT_HIDDEN_COLUMNS : TABLET_DEFAULT_HIDDEN_COLUMNS),
+    migrate: migrateWideColumns
+  },
   narrow: { storageKey: PHONE_HIDDEN_COLUMNS_KEY, defaultVisible: PHONE_DEFAULT_COLUMNS },
   onShown: (keys) => loadShownColumns(keys)
 })
@@ -1231,7 +1244,6 @@ const toggleColumn = (key: string) => {
 const resetColumns = () => columnVisibility.reset()
 
 const isColumnVisible = columnVisibility.isVisible
-const { phone } = useTableViewport()
 const showColumnSheet = ref(false)
 // The sheet belongs to a phone: crossing 768px closes it.
 watch(phone, (on) => { if (!on) showColumnSheet.value = false })
