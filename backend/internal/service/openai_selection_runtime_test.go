@@ -206,6 +206,34 @@ func TestOpenAIOrdinaryNewSessionUsesSortedPickAndBinds(t *testing.T) {
 	require.NotContains(t, logs.String(), "sched_quality.new_pick")
 }
 
+func TestOpenAISelectionCandidateConstraintRechecksAfterSlot(t *testing.T) {
+	original := selectionFixtureAccount(10, 1)
+	wrongPriority := selectionFixtureAccount(5, 2)
+	wrongModel := selectionFixtureAccount(3, 1)
+	wrongModel.Credentials = map[string]any{"model_mapping": map[string]any{"m": "other-model"}}
+	f := newSelectionRuntimeFixture(t, original, wrongPriority, wrongModel, selectionFixtureAccount(2, 1), selectionFixtureAccount(4, 1))
+	f.loads.after = func(id int64) {
+		if id == 2 {
+			for i := range f.repo.accounts {
+				if f.repo.accounts[i].ID == id {
+					f.repo.accounts[i].Priority = 2
+				}
+			}
+		}
+	}
+
+	ctx := WithOpenAISelectionCandidateConstraint(
+		resilience.WithRequestState(context.Background(), resilience.NewRequestState()), 1, "m", original.ID)
+	selected, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", "", "m", nil,
+		OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true, PlatformOpenAI)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	defer selected.ReleaseFunc()
+	require.Equal(t, int64(4), selected.Account.ID)
+	require.Equal(t, []int64{2, 4}, f.attempts, "wrong priority/model and original account must be filtered before slot acquisition")
+	require.Equal(t, []int64{2}, f.releases, "the slot that fails the post-acquisition constraint is released")
+}
+
 func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
 	for _, mode := range []string{"immediate", "idle", "migration"} {
 		for _, legacy := range []bool{false, true} {

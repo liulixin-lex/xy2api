@@ -47,9 +47,49 @@ type OpenAIAccountScheduleRequest struct {
 	RequiredImageCapability OpenAIImagesCapability
 	// RequireCompact is only for legacy /responses/compact capability filtering
 	// and compact_model_mapping; native remote compaction v2 leaves it false.
-	RequireCompact     bool
-	ExcludedIDs        map[int64]struct{}
-	firstOutputAvoided map[int64]struct{} // Source attribution for the last-resort event.
+	RequireCompact      bool
+	ExcludedIDs         map[int64]struct{}
+	candidateConstraint *openAIRequestCandidateConstraint
+	firstOutputAvoided  map[int64]struct{} // Source attribution for the last-resort event.
+}
+
+type openAIRequestCandidateConstraint struct {
+	originalPriority  int
+	actualModel       string
+	excludedAccountID int64
+}
+
+type openAIRequestCandidateConstraintKey struct{}
+
+// WithOpenAISelectionCandidateConstraint limits one scheduler request to
+// another account at the original priority and actual model, excluding the
+// account that produced the original response.
+func WithOpenAISelectionCandidateConstraint(ctx context.Context, originalPriority int, actualModel string, excludedAccountID int64) context.Context {
+	constraint := openAIRequestCandidateConstraint{
+		originalPriority: originalPriority, actualModel: strings.TrimSpace(actualModel), excludedAccountID: excludedAccountID,
+	}
+	return context.WithValue(ctx, openAIRequestCandidateConstraintKey{}, constraint)
+}
+
+func openAIRequestCandidateConstraintFrom(ctx context.Context) *openAIRequestCandidateConstraint {
+	constraint, ok := ctx.Value(openAIRequestCandidateConstraintKey{}).(openAIRequestCandidateConstraint)
+	if !ok {
+		return nil
+	}
+	return &constraint
+}
+
+func requestCandidateConstraintFailure(req OpenAIAccountScheduleRequest, account *Account) string {
+	constraint := req.candidateConstraint
+	if constraint == nil {
+		return ""
+	}
+	if account == nil || constraint.actualModel == "" || constraint.excludedAccountID <= 0 ||
+		account.ID == constraint.excludedAccountID || account.Priority != constraint.originalPriority ||
+		OpenAIAttemptModel(account, req.RequestedModel) != constraint.actualModel {
+		return "request_candidate_constraint"
+	}
+	return ""
 }
 
 type OpenAIAccountScheduleDecision struct {
@@ -223,6 +263,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), RequestedModel: requestedModel,
 		RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 		RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: excludedIDs,
+		candidateConstraint: openAIRequestCandidateConstraintFrom(ctx),
 	}
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, request)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
@@ -344,7 +385,8 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 			RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded, firstOutputAvoided: firstOutputAvoided,
-			RequirePrivacySet: s.openAIGroupRequiresPrivacySet(lrCtx, groupID), UseUpstreamTokenCost: useUpstreamTokenCost,
+			candidateConstraint: request.candidateConstraint,
+			RequirePrivacySet:   s.openAIGroupRequiresPrivacySet(lrCtx, groupID), UseUpstreamTokenCost: useUpstreamTokenCost,
 		}, avoided); lr != nil {
 			selection, err = lr, nil
 			decision.SelectedAccountID = lr.Account.ID
@@ -488,10 +530,12 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, OpenAIAccountScheduleRequest{
 		GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 		RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 		RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: excludedIDs,
+		candidateConstraint: parent.candidateConstraint,
 	})
 	resilience.StateFrom(ctx).ResetStickyBypassReason()
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
@@ -540,6 +584,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 			RequiredImageCapability: requiredImageCapability,
 			RequireCompact:          requireCompact,
 			ExcludedIDs:             excludedIDs,
+			candidateConstraint:     openAIRequestCandidateConstraintFrom(ctx),
 			RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
 		})
 		if err != nil {
