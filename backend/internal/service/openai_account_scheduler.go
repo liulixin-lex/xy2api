@@ -51,6 +51,7 @@ type OpenAIAccountScheduleRequest struct {
 	ExcludedIDs         map[int64]struct{}
 	baseExclusions      map[int64]struct{} // Independent exclusions for owner-guard opportunity checks.
 	candidateConstraint *openAIRequestCandidateConstraint
+	newSessionOutcome   *openAINewSessionOutcome
 	firstOutputAvoided  map[int64]struct{} // Source attribution for the last-resort event.
 }
 
@@ -268,6 +269,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
 	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
 	ctx = withSelectionFailureEvidence(ctx)
+	newSessionLogState := &openAINewSessionLogState{}
+	firstSelection := resilience.StateFrom(ctx).BeginAccountSelection()
+	ctx = context.WithValue(ctx, openAINewSessionLogStateKey{}, newSessionLogState)
 	request := OpenAIAccountScheduleRequest{
 		GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), RequestedModel: requestedModel,
 		RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
@@ -279,6 +283,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
 	ordinary := NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx)
 	defer func() {
+		newSessionLogState.log(ctx, selection, err)
 		s.freezeOpenAITransferEligibility(ctx, groupID, sessionHash, selection, ordinary && err == nil)
 		s.planOpenAIFollow(ctx, groupID, sessionHash, requestedModel, selection, ordinary && err == nil)
 		s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection)
@@ -293,9 +298,14 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		guard.Store(false)
 	}
 	stickyOwner := state.StickyOwner()
+	missingBinding := sessionHash == ""
 	if stickyOwner <= 0 && sessionHash != "" && s != nil {
-		stickyOwner, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
+		stickyOwner, missingBinding, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
 		state.NoteStickyOwner(stickyOwner)
+	}
+	if firstSelection && ordinary && stickyOwner == 0 && missingBinding && (s.openAILegacySessionCacheKey(ctx, sessionHash) == "" || s.openAISessionHashReadOldFallbackEnabled()) && strings.TrimSpace(previousResponseID) == "" && request.candidateConstraint == nil && len(excludedIDs) == 0 &&
+		!preserveOpenAIGuardianParentBinding(ctx, sessionHash) && !preserveOpenAIRejectionBinding(ctx, sessionHash) {
+		newSessionLogState.outcome = newOpenAINewSessionOutcome(ctx, request)
 	}
 	_, ownerExcluded := excludedIDs[stickyOwner]
 	ownerFailedInRequest := ownerExcluded && (state.AccountFailed(stickyOwner) || state.StateRepairAvoided(stickyOwner))
@@ -401,8 +411,8 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 			RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded, firstOutputAvoided: firstOutputAvoided,
-			candidateConstraint: request.candidateConstraint,
-			RequirePrivacySet:   s.openAIGroupRequiresPrivacySet(lrCtx, groupID), UseUpstreamTokenCost: useUpstreamTokenCost,
+			candidateConstraint: request.candidateConstraint, newSessionOutcome: newSessionLogState.outcome,
+			RequirePrivacySet: s.openAIGroupRequiresPrivacySet(lrCtx, groupID), UseUpstreamTokenCost: useUpstreamTokenCost,
 		}, avoided); lr != nil {
 			selection, err = lr, nil
 			decision.SelectedAccountID = lr.Account.ID

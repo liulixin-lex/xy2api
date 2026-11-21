@@ -49,6 +49,7 @@ type RequestState struct {
 	requestID             string
 	gatewayRecord         *gatewayRequestTrace
 	gatewayAdmissionScope GatewayRequestScope
+	selectionRequestID    string // last logical request to enter public account selection
 	firstOutput           time.Time
 	// firstOutputNoted is set once firstOutput is; later writes skip mu.
 	firstOutputNoted atomic.Bool
@@ -639,6 +640,18 @@ func (s *RequestState) GatewayRequestID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.requestID
+}
+
+// BeginAccountSelection claims the first selection of a logical gateway turn.
+func (s *RequestState) BeginAccountSelection() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	first := s.selectionRequestID != s.requestID && s.upstreamSendSeq == s.turnStartSendSeq && !s.turnFailed && len(s.failedAccounts) == 0
+	s.selectionRequestID = s.requestID
+	return first
 }
 
 // NoteFirstOutput records the first successful content write, once. Opening

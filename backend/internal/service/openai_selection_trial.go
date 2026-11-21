@@ -24,9 +24,11 @@ type selectionTrial struct {
 	manual        bool
 	member        string
 	requestMember string
-	rooms         map[SchedAccountModel]bool
+	rooms         map[SchedAccountModel]selectionTrialRoom
 	selected      *selectionTrialReservation
 }
+
+type selectionTrialRoom struct{ available, known bool }
 
 type selectionTrialReservation struct {
 	leases         SchedTrialLeases
@@ -115,25 +117,24 @@ func (s *OpenAIGatewayService) newSelectionTrial(ctx context.Context, req OpenAI
 	if req.SessionHash == "" {
 		member = requestMember
 	}
-	return &selectionTrial{service: s, leases: s.selectionTrialLeases(), request: req, owner: owner, manual: openAISelectionManualOnly(ctx), member: member, requestMember: requestMember, rooms: make(map[SchedAccountModel]bool)}
+	return &selectionTrial{service: s, leases: s.selectionTrialLeases(), request: req, owner: owner, manual: openAISelectionManualOnly(ctx), member: member, requestMember: requestMember, rooms: make(map[SchedAccountModel]selectionTrialRoom)}
 }
 
 func (t *selectionTrial) room(ctx context.Context, account int64, model string) bool {
 	key := SchedAccountModel{AccountID: account, Model: model}
 	if room, ok := t.rooms[key]; ok {
-		return room
+		return room.available
 	}
-	room := false
+	var result selectionTrialRoom
 	if t.leases != nil {
-		var err error
-		room, err = t.leases.Room(ctx, account, model, derefGroupID(t.request.GroupID), t.memberFor(ctx, account), t.service.selectionNow())
+		room, err := t.leases.Room(ctx, account, model, derefGroupID(t.request.GroupID), t.memberFor(ctx, account), t.service.selectionNow())
+		result = selectionTrialRoom{available: room && err == nil, known: err == nil}
 		if err != nil {
-			room = false
 			slog.WarnContext(ctx, "sched_quality.trial_room_failed", "component", "sched_quality", "account_id", account, "error", err)
 		}
 	}
-	t.rooms[key] = room
-	return room
+	t.rooms[key] = result
+	return result.available
 }
 
 func (t *selectionTrial) isTrial(account *Account) bool {
@@ -193,8 +194,10 @@ func (t *selectionTrial) reserve(ctx context.Context, account *Account, full boo
 	}
 	model, gid := OpenAIAttemptModel(account, t.request.RequestedModel), derefGroupID(t.request.GroupID)
 	member := t.memberFor(ctx, account.ID)
+	known := false
 	if t.leases != nil {
 		acquired, generation, err := t.leases.Acquire(ctx, account.ID, model, gid, member, observedAt)
+		known = err == nil
 		if err == nil && acquired {
 			r := &selectionTrialReservation{leases: t.leases, account: account.ID, group: gid, model: model, member: member, request: t.request.SessionHash == "" || t.borrowing(ctx), session: TrialLeaseSessionMember(t.request.SessionHash), now: t.service.selectionNow}
 			r.rememberRound(view, generation)
@@ -204,7 +207,8 @@ func (t *selectionTrial) reserve(ctx context.Context, account *Account, full boo
 			slog.WarnContext(ctx, "sched_quality.trial_acquire_failed", "component", "sched_quality", "account_id", account.ID, "error", err)
 		}
 	}
-	t.rooms[SchedAccountModel{AccountID: account.ID, Model: model}] = false
+	key := SchedAccountModel{AccountID: account.ID, Model: model}
+	t.rooms[key] = selectionTrialRoom{known: known}
 	return nil, full
 }
 

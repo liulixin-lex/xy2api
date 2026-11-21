@@ -5,9 +5,11 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -204,6 +206,205 @@ func TestOpenAIOrdinaryNewSessionUsesSortedPickAndBinds(t *testing.T) {
 	require.Equal(t, int64(1), f.cache.sessionBindings["openai:ordinary-new-session"])
 	require.Equal(t, []int64{1}, f.attempts)
 	require.NotContains(t, logs.String(), "sched_quality.new_pick")
+	require.Len(t, selectionNewSessionEvents(t, logs.String()), 1)
+}
+
+func selectionNewSessionEvents(t *testing.T, output string) []map[string]any {
+	t.Helper()
+	var events []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line == "" {
+			continue
+		}
+		var fields map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &fields))
+		if fields["msg"] == "sched_quality.new_session" {
+			events = append(events, fields)
+		}
+	}
+	return events
+}
+
+func captureSelectionNewSessionLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &logs
+}
+
+func selectOrdinaryNewSessionForTest(t *testing.T, f *selectionRuntimeFixture, ctx context.Context, session string, excluded map[int64]struct{}, useUpstreamTokenCost bool) (*AccountSelectionResult, error) {
+	t.Helper()
+	if resilience.StateFrom(ctx) == nil {
+		ctx = resilience.WithRequestState(ctx, resilience.NewRequestState())
+	}
+	selected, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", session, "m", excluded,
+		OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, useUpstreamTokenCost, PlatformOpenAI)
+	return selected, err
+}
+
+func TestOpenAINewSessionSelectionLogUsesObservedCandidates(t *testing.T) {
+	t.Run("cheapest downgraded account and next price", func(t *testing.T) {
+		logs := captureSelectionNewSessionLog(t)
+		rear, front := selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 1)
+		rear.RateMultiplier, front.RateMultiplier = floatPtr(.2), floatPtr(.8)
+		pinned := selectionFixtureAccount(3, 1)
+		pinned.AccountGroups = []AccountGroup{{GroupID: 7, Pinned: true}}
+		pinned.RateMultiplier = floatPtr(.1)
+		f := newSelectionRuntimeFixture(t, rear, front, pinned)
+		f.view.States[fakeSchedViewKey{7, pinned.ID, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
+		f.view.States[fakeSchedViewKey{7, rear.ID, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
+		ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+		selected, err := selectOrdinaryNewSessionForTest(t, f, ctx, "ordinary", nil, true)
+		require.NoError(t, err)
+		require.NotNil(t, selected)
+		defer selected.ReleaseFunc()
+		event := selectionNewSessionEvents(t, logs.String())
+		require.Len(t, event, 1)
+		require.Equal(t, resilience.StateFrom(ctx).GatewayRequestID(), event[0]["gateway_request_id"])
+		require.Equal(t, float64(1), event[0]["rear_count"])
+		require.Equal(t, float64(front.ID), event[0]["selected_account_id"])
+		require.Equal(t, "front", event[0]["selected_quality_position"])
+		require.Equal(t, "account_stored", event[0]["selected_sort_rate_source"])
+		require.Equal(t, float64(rear.ID), event[0]["cheapest_downgraded_account_id"])
+		require.Equal(t, .2, event[0]["cheapest_downgraded_rate_multiplier"])
+		require.Equal(t, []any{"error"}, event[0]["cheapest_downgraded_reason"])
+		require.Equal(t, .8, event[0]["next_higher_rate_multiplier"])
+		require.Equal(t, false, event[0]["next_higher_is_downgraded"])
+	})
+
+	t.Run("observed load and slot skips", func(t *testing.T) {
+		logs := captureSelectionNewSessionLog(t)
+		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 1), selectionFixtureAccount(3, 1))
+		f.loads.loadMap = map[int64]*AccountLoadInfo{1: {LoadRate: 100}}
+		f.loads.acquireResults = map[int64]bool{2: false, 3: true}
+		ctx := WithOpenAITierInput(context.Background(), nil, APIProtocolAnthropic, "")
+		selected, err := selectOrdinaryNewSessionForTest(t, f, ctx, "ordinary", nil, true)
+		require.NoError(t, err)
+		defer selected.ReleaseFunc()
+		event := selectionNewSessionEvents(t, logs.String())
+		require.Len(t, event, 1)
+		require.Equal(t, "messages", event[0]["entry"])
+		require.Equal(t, []int64{2, 3}, f.attempts)
+		require.Equal(t, float64(1), event[0]["load_full_skipped_count"])
+		require.Equal(t, float64(1), event[0]["slot_unavailable_skipped_count"])
+	})
+
+	t.Run("trial full is counted", func(t *testing.T) {
+		logs := captureSelectionNewSessionLog(t)
+		front, trial := selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 1)
+		f := newSelectionRuntimeFixture(t, front, trial)
+		f.view.States[fakeSchedViewKey{7, trial.ID, "m"}] = schedquality.StateView{TTFO: schedquality.LineView{Trial: true, TrialUntil: f.view.At().Add(schedquality.TrialDuration)}}
+		leases := newSelectionTrialLeaseFake()
+		leases.full[trial.ID] = true
+		f.svc.selectionBoard.leases = leases
+		selected, err := selectOrdinaryNewSessionForTest(t, f, context.Background(), "ordinary", nil, false)
+		require.NoError(t, err)
+		require.NotNil(t, selected)
+		defer selected.ReleaseFunc()
+		event := selectionNewSessionEvents(t, logs.String())
+		require.Len(t, event, 1)
+		require.Equal(t, float64(1), event[0]["trial_full_count"])
+		require.Equal(t, float64(0), event[0]["trial_unknown_count"])
+	})
+
+	t.Run("seat read failure is unknown", func(t *testing.T) {
+		logs := captureSelectionNewSessionLog(t)
+		front, trial := selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 1)
+		f := newSelectionRuntimeFixture(t, front, trial)
+		f.view.States[fakeSchedViewKey{7, trial.ID, "m"}] = schedquality.StateView{TTFO: schedquality.LineView{Trial: true, TrialUntil: f.view.At().Add(schedquality.TrialDuration)}}
+		leases := newSelectionTrialLeaseFake()
+		leases.roomErr = fmt.Errorf("synthetic room failure")
+		f.svc.selectionBoard.leases = leases
+		selected, err := selectOrdinaryNewSessionForTest(t, f, context.Background(), "ordinary", nil, true)
+		require.NoError(t, err)
+		require.NotNil(t, selected)
+		defer selected.ReleaseFunc()
+		event := selectionNewSessionEvents(t, logs.String())
+		require.Len(t, event, 1)
+		require.Equal(t, float64(1), event[0]["trial_unknown_count"])
+		require.Equal(t, float64(0), event[0]["trial_full_count"])
+		require.Equal(t, []any{"unknown"}, event[0]["cheapest_downgraded_reason"])
+	})
+
+	t.Run("profit ceiling and empty candidate pool", func(t *testing.T) {
+		logs := captureSelectionNewSessionLog(t)
+		account := selectionFixtureAccount(1, 1)
+		account.RateMultiplier = floatPtr(.9)
+		f := newSelectionRuntimeFixture(t, account)
+		ctx := context.WithValue(context.Background(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{
+			ceilingOn: true, groupID: 7, platform: PlatformOpenAI, threshold: .5, sell: 1, pricingAt: time.Now(),
+		})
+		selected, err := selectOrdinaryNewSessionForTest(t, f, ctx, "ordinary", nil, true)
+		require.Error(t, err)
+		require.Nil(t, selected)
+		event := selectionNewSessionEvents(t, logs.String())
+		require.Len(t, event, 1)
+		require.Equal(t, float64(1), event[0]["filtered_profit_ceiling_count"])
+		require.Equal(t, "profit_ceiling", event[0]["no_candidate_reason"])
+		require.Nil(t, event[0]["selected_account_id"])
+	})
+
+	t.Run("no candidates is logged once", func(t *testing.T) {
+		logs := captureSelectionNewSessionLog(t)
+		resilience.ProcessNegativeCache().InvalidateGroup(7)
+		t.Cleanup(func() { resilience.ProcessNegativeCache().InvalidateGroup(7) })
+		f := newSelectionRuntimeFixture(t)
+		selected, err := selectOrdinaryNewSessionForTest(t, f, context.Background(), "ordinary", nil, false)
+		require.Error(t, err)
+		require.Nil(t, selected)
+		event := selectionNewSessionEvents(t, logs.String())
+		require.Len(t, event, 1)
+		require.Equal(t, "no_schedulable_candidate", event[0]["no_candidate_reason"])
+		require.Equal(t, float64(0), event[0]["candidate_pool_count"])
+		// A different request can return from the negative cache before visiting the pool.
+		logs.Reset()
+		_, err = selectOrdinaryNewSessionForTest(t, f, context.Background(), "uncached-session", nil, false)
+		require.ErrorIs(t, err, errNegativeCached)
+		event = selectionNewSessionEvents(t, logs.String())
+		require.Len(t, event, 1)
+		require.Equal(t, "cached_no_candidate", event[0]["no_candidate_reason"])
+	})
+}
+
+func TestOpenAINewSessionSelectionLogSkipsRetryAndBoundSessions(t *testing.T) {
+	t.Run("retry candidate", func(t *testing.T) {
+		logs := captureSelectionNewSessionLog(t)
+		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+		ctx := WithOpenAISelectionCandidateConstraint(context.Background(), 1, "m", 99)
+		selected, err := selectOrdinaryNewSessionForTest(t, f, ctx, "ordinary", nil, false)
+		require.NoError(t, err)
+		require.NotNil(t, selected)
+		defer selected.ReleaseFunc()
+		require.Empty(t, selectionNewSessionEvents(t, logs.String()))
+	})
+
+	t.Run("same request without an exclusion list", func(t *testing.T) {
+		logs := captureSelectionNewSessionLog(t)
+		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+		ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
+		for range 2 {
+			result, err := selectOrdinaryNewSessionForTest(t, f, ctx, "", nil, false)
+			require.NoError(t, err)
+			result.ReleaseFunc()
+		}
+		events := selectionNewSessionEvents(t, logs.String())
+		require.Len(t, events, 1)
+		require.Equal(t, "not_used", events[0]["selected_sort_rate_source"])
+	})
+
+	t.Run("existing sticky owner", func(t *testing.T) {
+		logs := captureSelectionNewSessionLog(t)
+		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+		key := f.svc.openAISessionCacheKey("bound")
+		f.cache.sessionBindings[key] = 1
+		selected, err := selectOrdinaryNewSessionForTest(t, f, context.Background(), "bound", nil, false)
+		require.NoError(t, err)
+		require.NotNil(t, selected)
+		defer selected.ReleaseFunc()
+		require.Empty(t, selectionNewSessionEvents(t, logs.String()))
+	})
 }
 
 func TestOpenAISelectionCandidateConstraintRechecksAfterSlot(t *testing.T) {
@@ -324,7 +525,9 @@ func TestOpenAISelectionRuntimeSessionCacheAndOwnerSlotOrder(t *testing.T) {
 				if mode == "migration" {
 					f.view.States[fakeSchedViewKey{7, 10, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 				}
+				logs := captureSelectionNewSessionLog(t)
 				result := f.selectNow(t, ctx, "session", nil)
+				require.Empty(t, selectionNewSessionEvents(t, logs.String()))
 				require.Equal(t, int64(1), result.Account.ID)
 				require.Equal(t, int64(1), f.cache.sessionBindings[key])
 				require.Equal(t, []int64{1}, f.attempts, "migration runs before taking the owner slot")
@@ -383,10 +586,12 @@ func TestOpenAISelectionRuntimeFullOwnerRetryBorrowQueue(t *testing.T) {
 						f.loads.acquireResults[10] = true
 					}
 				}
+				logs := captureSelectionNewSessionLog(t)
 				started := time.Now()
 				result := f.selectNow(t, context.Background(), "session", nil)
 				require.Equal(t, int64(10), f.cache.sessionBindings["openai:session"])
 				require.Empty(t, f.cache.casKeys)
+				require.Empty(t, selectionNewSessionEvents(t, logs.String()))
 				switch mode {
 				case "short retry":
 					require.True(t, result.Acquired)

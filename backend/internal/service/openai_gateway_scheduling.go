@@ -1218,6 +1218,14 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (selection *AccountSelectionResult, selectionErr error) {
 	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
+	newSessionLogState, _ := ctx.Value(openAINewSessionLogStateKey{}).(*openAINewSessionLogState)
+	standalone := newSessionLogState == nil
+	firstSelection := standalone && resilience.StateFrom(ctx).BeginAccountSelection()
+	requestExcluded := len(excludedIDs) > 0
+	if standalone {
+		newSessionLogState = &openAINewSessionLogState{}
+		defer func() { newSessionLogState.log(ctx, selection, selectionErr) }()
+	}
 	ctx, excludedIDs = s.mergeStickyChangeExclusions(ctx, groupID, sessionHash, excludedIDs)
 	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
 		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)
@@ -1240,11 +1248,21 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if state, _ := ctx.Value(openAILegacyStickyCapacityKey{}).(*openAILegacyStickyCapacity); state != nil {
 		req.RequiredTransport, req.RequiredImageCapability = state.transport, state.image
 	}
-	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, req)
 	var stickyAccountID int64
+	missingBinding := sessionHash == ""
 	if sessionHash != "" && s.cache != nil {
-		stickyAccountID, _ = s.getStickySessionAccountID(ctx, groupID, sessionHash)
+		stickyAccountID, missingBinding, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
 	}
+	if firstSelection && missingBinding && !requestExcluded && req.candidateConstraint == nil && platform == PlatformOpenAI &&
+		(s.openAILegacySessionCacheKey(ctx, sessionHash) == "" || s.openAISessionHashReadOldFallbackEnabled()) &&
+		!openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
+		newSessionLogState.outcome = newOpenAINewSessionOutcome(ctx, req)
+	}
+	if !missingBinding || preserveOpenAIGuardianParentBinding(ctx, sessionHash) || preserveOpenAIRejectionBinding(ctx, sessionHash) {
+		newSessionLogState.outcome = nil
+	}
+	req.newSessionOutcome = newSessionLogState.outcome
+	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, req)
 	trial := s.newSelectionTrial(ctx, req, stickyAccountID)
 	ctx = context.WithValue(ctx, selectionTrialContextKey{}, trial)
 	defer func() {
@@ -1368,9 +1386,13 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 
 	accounts, err := members()
 	if err != nil {
+		if newSessionLogState.outcome != nil {
+			newSessionLogState.outcome.noCandidateReason = "candidate_read_failed"
+		}
 		return nil, err
 	}
 	candidates, stats := s.selectionCandidates(ctx, req, accounts)
+	newSessionLogState.outcome.recordFilterStats(stats, len(candidates))
 	if len(candidates) == 0 {
 		return nil, noAvailableOpenAISelectionError(requestedModel, false, stats.summary(""), stats.capabilityOnly())
 	}
@@ -1393,10 +1415,14 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			checked[fresh.ID] = fresh
 			slot, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
 			if err != nil || slot == nil || !slot.Acquired {
+				newSessionLogState.outcome.markSlotUnavailable(fresh.ID)
 				continue
 			}
 			selected, retryTrial, err := s.finishSelectionSlot(ctx, req, fresh, slot, trial, loads)
 			if err != nil {
+				if newSessionLogState.outcome != nil {
+					newSessionLogState.outcome.noCandidateReason = "selection_failed"
+				}
 				return nil, true, err
 			}
 			if selected == nil {

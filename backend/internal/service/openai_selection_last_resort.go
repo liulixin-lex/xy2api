@@ -20,6 +20,7 @@ func (s *OpenAIGatewayService) pickOpenAILastResort(ctx context.Context, req Ope
 	}
 	s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
 	request := s.selectionRequest(ctx, req, loads)
+	request.newSessionOutcome = req.newSessionOutcome
 	view, now := s.selectionView(), s.selectionNow()
 	keys := make(map[int64]selectionKey, len(accounts))
 	for _, a := range accounts {
@@ -169,6 +170,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 				return selection
 			}
 		}
+		req.newSessionOutcome.markSlotUnavailable(acc.ID)
 		meta.addReason("capacity")
 	}
 	if len(verified) == 0 || req.NoWait || openAISelectionNoWait(ctx) {

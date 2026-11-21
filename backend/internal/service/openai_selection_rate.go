@@ -66,18 +66,29 @@ func (s *OpenAIGatewayService) openAIOAuthSchedulingRateMultiplier(ctx context.C
 }
 
 func openAISchedulingRate(account *Account, now time.Time, oauthSchedulingRateMultiplier *float64) (float64, bool) {
+	rate, known, _ := openAISchedulingRateDetails(account, now, oauthSchedulingRateMultiplier)
+	return rate, known
+}
+
+func openAISchedulingRateDetails(account *Account, now time.Time, oauthSchedulingRateMultiplier *float64) (float64, bool, string) {
 	if account == nil || (!account.IsOpenAIApiKey() && !account.IsOpenAIOAuthLike()) {
-		return 0, false
+		return 0, false, "unknown"
 	}
 	if account.IsOpenAIOAuthLike() {
 		if rate := oauthSchedulingRateMultiplier; rate != nil && *rate >= 0 && !math.IsNaN(*rate) && !math.IsInf(*rate, 0) {
-			return *rate, true
+			return *rate, true, "oauth_setting"
 		}
 	} else if rate, ok := openAIFreshUpstreamBillingRate(account, now); ok {
-		return rate, true
+		return rate, true, "upstream_probe"
 	}
 	rate := account.BillingRateMultiplier()
-	return rate, !math.IsNaN(rate) && !math.IsInf(rate, 0)
+	if math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return rate, false, "unknown"
+	}
+	if account.RateMultiplier == nil || *account.RateMultiplier < 0 {
+		return rate, true, "default"
+	}
+	return rate, true, "account_stored"
 }
 
 func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, bool) {
