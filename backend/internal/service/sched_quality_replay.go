@@ -74,16 +74,7 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 		if exists {
 			start = r.EvaluatedAt
 			if start.IsZero() {
-				// A legacy row has no processed watermark. Its phase still has
-				// its original clock, even outside the retained evidence window.
-				switch {
-				case r.Identity == q.IdentityRear:
-					start = r.Entry
-				case r.Trial:
-					start = r.Epoch
-				default:
-					start = horizon.Add(-schedEvidenceRetention)
-				}
+				start = horizon.Add(-schedEvidenceRetention)
 			}
 		}
 		lower[k] = schedQualitySince(start, resets[k.AccountID])
@@ -171,7 +162,7 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 			}
 		}
 		deadline := func(at time.Time) {
-			if at.IsZero() {
+			if at.IsZero() || !at.After(start) {
 				at = horizon
 			}
 			add(at)
