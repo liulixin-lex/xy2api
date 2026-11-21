@@ -93,7 +93,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { sanitizeHtml } from '@/utils/sanitize'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { getLocale } from '@/i18n'
@@ -155,7 +155,7 @@ const renderedHtml = computed(() => {
     return ''
   }
   const html = marked.parse(content) as string
-  return DOMPurify.sanitize(html)
+  return sanitizeHtml(html)
 })
 
 const documentIcon = computed<LegalDocumentIcon>(() => {

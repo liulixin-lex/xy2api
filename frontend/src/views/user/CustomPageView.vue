@@ -138,7 +138,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { buildApiUrl } from '@/api/client'
 import { buildEmbeddedUrl, detectTheme } from '@/utils/embedded-url'
 import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { sanitizeHtml } from '@/utils/sanitize'
 
 interface TocItem {
   id: string
@@ -313,7 +313,7 @@ async function fetchAndRenderMarkdown(slug: string) {
     )
 
     const html = marked.parse(raw) as string
-    const sanitized = DOMPurify.sanitize(html, {
+    const sanitized = sanitizeHtml(html, {
       ADD_TAGS: ['iframe'],
       ADD_ATTR: ['allowfullscreen', 'frameborder', 'src'],
     })
