@@ -87,6 +87,7 @@
           :aria-describedby="errorId"
           class="h-12 min-w-0 flex-1 bg-transparent text-base font-medium tabular-nums text-gray-900 outline-none placeholder:font-normal placeholder:text-gray-500 dark:text-gray-100 dark:placeholder:text-dark-400"
           @input="handleInput"
+          @keydown.enter="onEnter"
         />
         <span
           :id="errorId"
@@ -135,6 +136,8 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: number | null]
+  /** Enter in the amount field: the page submits when the amount is payable */
+  submit: []
 }>()
 
 const { t } = useI18n()
@@ -202,6 +205,13 @@ const AMOUNT_PATTERN = /^\d*(\.\d{0,2})?$/
 function selectAmount(amt: number) {
   customText.value = String(amt)
   emit('update:modelValue', amt)
+}
+
+function onEnter(e: KeyboardEvent) {
+  // Enter that confirms an IME candidate is not a submit.
+  if (e.isComposing) return
+  e.preventDefault()
+  emit('submit')
 }
 
 function handleInput(e: Event) {

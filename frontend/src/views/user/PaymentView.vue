@@ -51,8 +51,9 @@
             <div v-if="enabledMethods.length === 0" class="card py-16 text-center">
               <p class="text-gray-500 dark:text-gray-400">{{ t('payment.notAvailable') }}</p>
             </div>
-            <!-- One form: Enter in the amount field submits, and only while the button is enabled -->
-            <form v-else class="space-y-6" novalidate data-testid="recharge-form" @submit.prevent="handleSubmitRecharge">
+            <!-- No <form> here: the admin's notice and help HTML must never be able to submit an order. Enter in the amount
+                 field submits through AmountInput's submit event, and only while the button is enabled. -->
+            <div v-else class="space-y-6" data-testid="recharge-form">
             <div class="card p-5 sm:p-6">
               <!-- 充值赠送活动文案（后台 Markdown 配置，空则不渲染） -->
               <div
@@ -71,6 +72,7 @@
                 :multiplier="balanceRechargeMultiplier"
                 :currency="selectedCurrency"
                 :error="amountHint"
+                @submit="handleSubmitRecharge"
               />
             </div>
             <div v-if="enabledMethods.length >= 1" class="card p-5 sm:p-6">
@@ -122,14 +124,14 @@
                 </div>
               </div>
             </div>
-            <button type="submit" :class="paymentButtonClass" :disabled="!canSubmit || submitting">
+            <button type="button" :class="paymentButtonClass" :disabled="!canSubmit || submitting" data-testid="recharge-submit" @click="handleSubmitRecharge">
               <span v-if="submitting" class="flex items-center justify-center gap-2">
                 <span class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
                 {{ t('common.processing') }}
               </span>
               <span v-else class="tabular-nums">{{ rechargeButtonText }}</span>
             </button>
-            </form>
+            </div>
           </template>
           <!-- Subscribe Tab -->
           <template v-else-if="activeTab === 'subscription'">
