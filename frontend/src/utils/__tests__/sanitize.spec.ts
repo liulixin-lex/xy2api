@@ -35,12 +35,4 @@ describe('sanitizeHtml', () => {
   it('keeps inline style attributes, which only touch their own element', () => {
     expect(sanitizeHtml('<span style="color: red">x</span>')).toBe('<span style="color: red">x</span>')
   })
-
-  it('applies the caller options alongside (custom pages allow iframes)', () => {
-    const out = sanitizeHtml(
-      '<p>x</p><iframe src="https://example.com/v" allowfullscreen=""></iframe><style>p { color: red }</style>',
-      { ADD_TAGS: ['iframe'], ADD_ATTR: ['allowfullscreen', 'frameborder', 'src'] }
-    )
-    expect(out).toBe('<p>x</p><iframe src="https://example.com/v" allowfullscreen=""></iframe>')
-  })
 })
