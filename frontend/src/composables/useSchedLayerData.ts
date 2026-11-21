@@ -16,14 +16,13 @@
  *
  *   const sched = useSchedLayerTasks()
  *   const table = useLiveTable({ …, tasks: [...sched.tasks] })
- *   sched.bind(table, (id) => pageRowOf(id))   // the page's row of an account when it has one (its summary is used)
+ *   sched.bind(table)
  */
 import { onScopeDispose, shallowReactive, watch } from 'vue'
-import schedQualityAPI, { backendSummary } from '@/api/admin/schedQuality'
-import type { BackendAccountDetail, BackendAccountSummary, BackendGroupSummary, BackendOrder, BackendPerformance } from '@/api/admin/schedQualityTypes'
+import schedQualityAPI from '@/api/admin/schedQuality'
+import type { BackendAccountDetail, BackendGroupSummary, BackendOrder, BackendPerformance } from '@/api/admin/schedQualityTypes'
 import type { LiveTable, LiveTask } from '@/composables/useLiveTable'
 import { trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
-import type { Account } from '@/types'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 export const SCHED_PANEL_TASK = 'schedPanel'
@@ -38,15 +37,11 @@ const BEAT_MS = 5000
  */
 export const SUMMARY_MS = 60_000
 
-/** A page's row of an account; `quality` is its summary when the page's table carries one. */
-export type SchedPanelRow = Account & { quality?: BackendAccountSummary | null }
 
 const panel = shallowReactive({
   /** The account the detail is for (it may differ from the open one right after a switch). */
   accountId: null as number | null,
   detail: null as BackendAccountDetail | null,
-  /** The summary fetched with the detail when the page's row has none. */
-  summary: null as BackendAccountSummary | null,
   /** The open account whose last run failed. */
   failedId: null as number | null,
   /** Why it failed, in the backend's words (7n-4). */
@@ -92,7 +87,7 @@ const boardPerf = shallowReactive(perfState())
 let refreshTask: ((name: string) => Promise<void>) | null = null
 // Closing a layer forgets its 12-hour request too: the next opening asks again.
 const forgetPanel = () => {
-  Object.assign(panel, { accountId: null, detail: null, summary: null, failedId: null, failedReason: '' })
+  Object.assign(panel, { accountId: null, detail: null, failedId: null, failedReason: '' })
   Object.assign(panelPerf, perfState())
   dropPerfRequest(panelPerf)
 }
@@ -157,8 +152,6 @@ async function loadPerf(
 
 /** The tasks for the host's live table, and bind() to hand it the table once it exists. */
 export function useSchedLayerTasks() {
-  let rowOf: ((id: number) => SchedPanelRow | undefined) | undefined
-
   const tasks: LiveTask[] = [
     {
       name: SCHED_PANEL_TASK,
@@ -166,14 +159,10 @@ export function useSchedLayerTasks() {
       run: async (signal) => {
         const id = drawer.accountId
         if (id === null) return
-        const ownSummary = rowOf?.(id)?.quality === undefined
         try {
-          const [detail, summary] = await Promise.all([
-            schedQualityAPI.accountDetail(id, { signal }),
-            ownSummary ? backendSummary([id], { signal }) : Promise.resolve(null)
-          ])
+          const detail = await schedQualityAPI.accountDetail(id, { signal })
           if (signal.aborted || drawer.accountId !== id) return
-          Object.assign(panel, { accountId: id, detail, summary: summary?.accounts.find((item) => item.account_id === id) ?? null, failedId: null, failedReason: '' })
+          Object.assign(panel, { accountId: id, detail, failedId: null, failedReason: '' })
         } catch (error) {
           if (signal.aborted || drawer.accountId !== id) return
           Object.assign(panel, { failedId: id, failedReason: extractApiErrorMessage(error, '') })
@@ -242,8 +231,7 @@ export function useSchedLayerTasks() {
     }
   ]
 
-  function bind(table: Pick<LiveTable<object>, 'refresh'>, row?: (id: number) => SchedPanelRow | undefined) {
-    rowOf = row
+  function bind(table: Pick<LiveTable<object>, 'refresh'>) {
     const refresh = (name: string) => table.refresh(name)
     refreshTask = refresh
     watch(() => [drawer.accountId, drawer.raise] as const, ([id]) => {

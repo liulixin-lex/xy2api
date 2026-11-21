@@ -72,52 +72,6 @@ export function placeEnd(row: BackendGroupModel | undefined, place: PanelPlace):
   return latest(DIMS.map((dim) => row.lines[dim]).filter((line) => line.identity === place).map((line) => (place === 'rear' ? line.until : line.trial_until)))
 }
 
-/** One line's reason for a rear or trial place: the figures its latest judgement was taken on, and when it ends. */
-export interface LineReason {
-  dim: BackendDim
-  identity: 'rear' | 'trial'
-  /** The judgement's own figures, formatted for the copy (admin.schedQuality.panel.why.<dim>); null when it had none. */
-  figures: Record<string, string> | null
-  /** The rear stay's or the trial's end. */
-  end: string | null
-  /** A rear line with no sample of this group: its evidence came from other groups. */
-  elsewhere: boolean
-}
-
-/** A threshold as set: 0.05 → "5%", 0.025 → "2.5%". */
-const limitPct = (ratio: number) => `${Number((ratio * 100).toFixed(1))}%`
-
-function lineFigures<D extends BackendDim>(dim: D, evidence: BackendEvidenceOf[D] | null | undefined): Record<string, string> | null {
-  if (!evidence) return null
-  if (dim === 'ttfo') {
-    const e = evidence as BackendEvidenceOf['ttfo']
-    return e.n > 0 ? { limit: String(e.limit_s), share: pct(e.k / e.n), peer: pct(e.prior_mu) } : null
-  }
-  if (dim === 'error') {
-    const e = evidence as BackendEvidenceOf['error']
-    return e.padded > 0 ? { n: String(e.padded), failed: String(e.failed), share: pct(e.failed / e.padded), limit: limitPct(e.limit) } : null
-  }
-  const e = evidence as BackendEvidenceOf['cache']
-  return e.turns > 0 ? { ratio: pct(e.ratio), min: limitPct(e.min_ratio) } : null
-}
-
-/** Why a group is at the rear or on trial for the model: each line that holds it there, in line order. */
-export function placeReasons(row: BackendGroupModel | undefined, place: PanelPlace): LineReason[] {
-  if (!row || (place !== 'rear' && place !== 'trial')) return []
-  return DIMS.flatMap((dim) => {
-    const line = row.lines[dim]
-    if (line.identity !== 'rear' && line.identity !== 'trial') return []
-    const rear = line.identity === 'rear'
-    return [{
-      dim,
-      identity: line.identity,
-      figures: rear ? lineFigures(dim, line.evidence) : null,
-      end: rear ? line.until : line.trial_until,
-      elsewhere: rear && line.samples_local === 0 && (line.samples_total ?? 0) > 0
-    }]
-  })
-}
-
 // ---- Decisions ----
 
 /** Records of one moment, one action and one model's line, across the groups it was taken in. */
@@ -131,16 +85,16 @@ export interface MergedDecision {
   until: string | null
   /** Group ids, each once, in record order. */
   groups: number[]
-  /** One record per group (the newest), for the evidence. */
+  /** Every record of the entry, each with its own end and evidence. */
   items: BackendDecision[]
 }
 
 const minuteOf = (time: string | null) => (time ? Math.floor(Date.parse(time) / 60_000) : '')
 
 /**
- * The decision list as read: records of the same minute, action, model, line and end are one entry listing their
- * groups (the engine judges a model's line in every group of the account at once); a record repeated for a group shows
- * once. Newest first, as given.
+ * The decision list as read: records of the same minute, action, model, line and end minute (as shown) are one entry
+ * listing their groups (the engine judges a model's line in every group of the account at once). Every record stays in
+ * the entry with its own end and evidence. Newest first, as given.
  */
 export function mergeDecisions(items: BackendDecision[]): MergedDecision[] {
   const out = new Map<string, MergedDecision>()
@@ -149,19 +103,21 @@ export function mergeDecisions(items: BackendDecision[]): MergedDecision[] {
     const entry = out.get(key)
     if (!entry) {
       out.set(key, { key, at: item.at, action: item.action, model: item.model, line: item.line, level: item.level, until: item.until, groups: [item.group_id], items: [item] })
-    } else if (!entry.groups.includes(item.group_id)) {
-      entry.groups.push(item.group_id)
-      entry.items.push(item)
+      continue
     }
+    entry.items.push(item)
+    if (!entry.groups.includes(item.group_id)) entry.groups.push(item.group_id)
   }
   return [...out.values()]
 }
 
-/** Models with a group at the rear (the amber mark on their tab). */
-export function backModels(detail: PlaceDetail & Pick<BackendAccountDetail, 'groups'>): Set<string> {
-  const out = new Set<string>()
+/** The mark on each model's tab: rear when a group is at the rear for it, else trial when one is on trial. */
+export function modelMarks(detail: PlaceDetail & Pick<BackendAccountDetail, 'groups'>): Map<string, 'rear' | 'trial'> {
+  const out = new Map<string, 'rear' | 'trial'>()
   for (const model of panelModels(detail)) {
-    if (detail.groups.some((group) => groupPlace(detail, group, model) === 'rear')) out.add(model)
+    const places = detail.groups.map((group) => groupPlace(detail, group, model))
+    if (places.includes('rear')) out.set(model, 'rear')
+    else if (places.includes('trial')) out.set(model, 'trial')
   }
   return out
 }

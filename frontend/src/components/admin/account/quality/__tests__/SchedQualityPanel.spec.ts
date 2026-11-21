@@ -153,7 +153,7 @@ describe('SchedQualityPanel data from the page\'s live table (7f-1)', () => {
     expect(panel()!.querySelector('[data-qp-loading]')).not.toBeNull()
     current.resolve(detail(8))
     await flushPromises()
-    expect(panel()!.querySelector('.qp-meta')).not.toBeNull()
+    expect(panel()!.querySelector('[data-qp-section="groups"]')).not.toBeNull()
     expect(panel()!.querySelector('h2')!.textContent).toBe('acc-8')
   })
 
@@ -168,7 +168,7 @@ describe('SchedQualityPanel data from the page\'s live table (7f-1)', () => {
     api.accountDetail.mockImplementation(async (id: number) => detail(id))
     panel()!.querySelector<HTMLElement>('[data-qp-failed] button')!.click()
     await flushPromises()
-    expect(panel()!.querySelector('.qp-meta')).not.toBeNull()
+    expect(panel()!.querySelector('[data-qp-section="groups"]')).not.toBeNull()
     expect(table.status.value).toBe('live')
   })
 })
@@ -185,13 +185,13 @@ describe('SchedQualityPanel switching accounts (7h)', () => {
     panel()!.querySelector<HTMLElement>('[data-qp-failed] button')!.click()
     await flushPromises()
     expect(api.accountDetail).toHaveBeenLastCalledWith(8, expect.anything())
-    expect(panel()!.querySelector('.qp-meta')).not.toBeNull()
+    expect(panel()!.querySelector('[data-qp-section="groups"]')).not.toBeNull()
   })
 
   it('closes the exemption popover when the panel switches to another account (7h-2)', async () => {
     mount(Panel, { attachTo: document.body })
     await openOn(7)
-    groupRow(54).querySelector<HTMLElement>('[data-qp-trigger="exempt:54"]')!.click()
+    groupRow(54).querySelector<HTMLElement>('[data-qp-place-trigger="54"]')!.click()
     await flushPromises()
     expect(document.querySelector('[data-sq-popover]')).not.toBeNull()
     await openOn(8)
@@ -237,8 +237,8 @@ describe('SchedQualityPanel', () => {
     expect(groupRow(54).classList.contains('is-target')).toBe(false)
     expect(groupRow(53).querySelector('[data-test="qp-state"]')!.textContent).toContain('admin.schedQuality.panel.placeUntil.rear')
     // The amber mark sits inside the tab of the model with a group at the back, before its text.
-    expect(tab('gpt-b').firstElementChild!.hasAttribute('data-qp-tab-back')).toBe(true)
-    expect(tab('gpt-a').querySelector('[data-qp-tab-back]')).toBeNull()
+    expect(tab('gpt-b').firstElementChild!.getAttribute('data-qp-tab-mark')).toBe('rear')
+    expect(tab('gpt-a').querySelector('[data-qp-tab-mark]')).toBeNull()
 
     // Another group's dot of the same account without a substandard model keeps the tab shown.
     await openOn(7, { groupId: 54 })
@@ -286,7 +286,7 @@ describe('SchedQualityPanel', () => {
     expect(api.accountDetail).toHaveBeenLastCalledWith(8, expect.anything())
     // Before the new detail: the header is acc-8's, the body still acc-7's, dimmed and out of reach; no skeleton.
     expect(panel()!.querySelector('h2')!.textContent).toBe('acc-8')
-    expect(panel()!.querySelector('.qp-meta')).toBeNull()
+    expect(panel()!.querySelector('.qp-actions')).toBeNull()
     expect(panel()!.querySelector('[data-qp-loading]')).toBeNull()
     const body = panel()!.querySelector<HTMLElement>('[data-qp-body]')!
     expect(body.classList.contains('opacity-60')).toBe(true)
@@ -297,7 +297,7 @@ describe('SchedQualityPanel', () => {
     await flushPromises()
     expect(body.classList.contains('opacity-60')).toBe(false)
     expect(body.hasAttribute('inert')).toBe(false)
-    expect(panel()!.querySelector('.qp-meta')).not.toBeNull()
+    expect(panel()!.querySelector('[data-qp-section="groups"]')).not.toBeNull()
     expect(tab('gpt-a').getAttribute('aria-selected')).toBe('true')
     expect(groupRow(54).classList.contains('is-target')).toBe(true)
   })
@@ -325,7 +325,7 @@ describe('SchedQualityPanel', () => {
     await openOn(7)
     const { changed } = useSchedLayers()
     const changes = changed.value
-    groupRow(54).querySelector<HTMLElement>('[data-qp-trigger="exempt:54"]')!.click()
+    groupRow(54).querySelector<HTMLElement>('[data-qp-place-trigger="54"]')!.click()
     await flushPromises()
     const popover = document.querySelector<HTMLElement>('[data-sq-popover]')!
     expect(popover).not.toBeNull()
@@ -461,7 +461,6 @@ describe('SchedQualityPanel', () => {
     mount(Panel, { attachTo: document.body })
     await openOn()
     expect(document.querySelector<HTMLButtonElement>('[data-qp-trigger="reset"]')!.disabled).toBe(false)
-    expect(tipOf('[data-qp-trigger="reset"]')).toBe('admin.schedQuality.panel.recoverTip')
     expect(tipOf('[data-qp-recover]')).toBe('')
     expect(wrapper().hasAttribute('tabindex')).toBe(false)
 
@@ -476,7 +475,6 @@ describe('SchedQualityPanel', () => {
     expect(button.parentElement).toBe(wrapper())
     expect(tipOf('[data-qp-recover]')).toBe('admin.schedQuality.panel.recoverNone')
     expect(wrapper().getAttribute('tabindex')).toBe('0')
-    expect(tipOf('[data-qp-trigger="reset"]')).toBe('')
   })
 
   const U = 'admin.schedQuality.evidence.samples.unknownValue'
@@ -527,7 +525,7 @@ describe('SchedQualityPanel', () => {
       record(7, { basis: basis('ttfo', { kind: 'trial', samples_local: 0 }) }),
       record(1, { action: 'enter', level: 1, until: inMinutes(20), basis: basis('ttfo') })
     ])
-    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, groupName: () => '晨星组' } })
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: () => ({ name: '晨星组' }) } })
     await flushPromises()
     // Eight entries: the newest six first, then the rest.
     await w.get('[data-qp-decisions-more]').trigger('click')
@@ -554,43 +552,48 @@ describe('SchedQualityPanel', () => {
 })
 
 describe('SchedQualityPanel groups table with the last 12 hours', () => {
-  /** gpt-b in 晨星组: 463 first sends, 53.1% slow; 210 turns at 90% cache; 480 attempts, 12 failed. */
+  /** gpt-b in 晨星组: 463 first sends, 53.1% slow against 19.7% for the group's others; 210 turns at 90% cache; 480 attempts, 12 failed. */
   const perfOf = (id: number) => perfAnswer(
     [
       perfRow(id, { group_id: 53, model: 'gpt-b', attempts: { failures: 12 } }, { n: 463, slowRate: 0.531 }),
       perfRow(id, { group_id: 53, model: 'gpt-a', requests: 120 }),
+      perfRow(id, { group_id: 54, model: 'gpt-b', requests: 50 }),
       perfRow(id, { group_id: 99, model: 'gpt-b', member: false, requests: 30 })
     ],
     [perfGroup({ group_id: 53, name: '晨星组' }), perfGroup({ group_id: 54, name: '北辰组' }), perfGroup({ group_id: 99, name: '旧组' })]
   )
-  const cells = (groupId: number) => Array.from(groupRow(groupId).querySelectorAll<HTMLElement>('[data-qp-cell]'), (cell) => [cell.dataset.qpCell, cell.textContent, cell.className.replace(/^gt__n gt__n--\w+ /, '')])
+  const cells = (groupId: number) => Array.from(groupRow(groupId).querySelectorAll<HTMLElement>('[data-qp-cell]'), (cell) => [
+    cell.dataset.qpCell, cell.firstElementChild!.textContent, [...cell.classList].find((name) => name.startsWith('is-')), cell.querySelector('[data-qp-ref]')?.textContent ?? null
+  ])
   const place = (groupId: number) => groupRow(groupId).querySelector('[data-test="qp-state"]')!.textContent!.trim()
-  const whys = (groupId: number) => Array.from(groupRow(groupId).querySelectorAll<HTMLElement>('[data-qp-why]'), (el) => [el.dataset.qpWhy, el.textContent!.trim()])
+  const trigger = (groupId: number) => groupRow(groupId).querySelector<HTMLElement>(`[data-qp-place-trigger="${groupId}"]`)
 
-  it('puts each group\'s place and its 12-hour figures in one row, each share in its line\'s verdict colour', async () => {
+  it('puts each group\'s place and 12-hour figures in one row; a held share shows only what it is measured against', async () => {
     atLocalNoon()
     const value = detail()
-    value.groups[0].by_model[1].lines.error = line('error', 'pass')
+    value.groups[0].by_model[1].lines.error = line('error', 'trial', { trial_until: inMinutes(50) })
     api.accountDetail.mockResolvedValue(value)
     api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
     mount(Panel, { attachTo: document.body })
     await openOn(7, { groupId: 53, model: 'gpt-b' })
     // Rear until the end of its rear line (a clock time, not a countdown).
-    expect(place(53)).toMatch(/^admin\.schedQuality\.panel\.placeUntil\.rear:\{"time":"12:20"\}$/)
+    expect(place(53)).toBe('admin.schedQuality.panel.placeUntil.rear:{"time":"12:20"}')
     expect(cells(53)).toEqual([
-      ['requests', '463', 'is-plain'],
-      ['ttfo', '53.1%', 'is-rear'],
-      ['error', '2.5%', 'is-pass'],
-      ['cache', '90.0%', 'is-unknown']
+      ['requests', '463', 'is-plain', null],
+      ['ttfo', '53.1%', 'is-rear', 'admin.schedQuality.panel.ref.ttfo:{"v":"19.7%"}'],
+      ['error', '2.5%', 'is-trial', 'admin.schedQuality.panel.ref.error:{"v":"5%"}'],
+      ['cache', '90.0%', 'is-unknown', null]
     ])
-    expect(groupRow(53).querySelector('[data-qp-cell="ttfo"]')!.getAttribute('aria-label')).toBe('admin.schedQuality.panel.col.ttfo 53.1% admin.schedQuality.identity.rear')
-    // A group without traffic of the model: front, a grey dash for every figure; a group the account left is not listed.
-    expect(place(54)).toBe('admin.schedQuality.placement.front')
-    expect(cells(54).map(([, text, tone]) => `${text} ${tone}`)).toEqual(['— is-none', '— is-none', '— is-none', '— is-none'])
+    expect(groupRow(53).querySelector('[data-qp-cell="ttfo"]')!.getAttribute('aria-label')).toBe(
+      'admin.schedQuality.panel.col.ttfo 53.1% admin.schedQuality.identity.rear admin.schedQuality.panel.ref.ttfo:{"v":"19.7%"}'
+    )
+    // No sentence, no legend, no section title: the figures and the place say it.
+    expect(document.querySelector('[data-qp-why], [data-qp-legend]')).toBeNull()
+    expect(document.querySelector('[data-qp-perf-note]')!.textContent).toBe('admin.schedQuality.panel.window')
+    expect((document.querySelector('[data-qp-perf-note]') as unknown as { __tipText: string }).__tipText).toMatch(/^admin\.schedQuality\.perf\.updated:/)
+    // A group the account left is not listed.
     expect(document.querySelector('[data-qp-group-row="99"]')).toBeNull()
-    // The whole group name, no cut; the heading tells the window and when it was worked out.
     expect(groupRow(53).querySelector('.gt__title')!.textContent).toBe('晨星组')
-    expect(document.querySelector('[data-qp-perf-note]')!.textContent!.trim()).toMatch(/^admin\.schedQuality\.panel\.window · admin\.schedQuality\.perf\.updated:/)
 
     tab('gpt-a').click()
     await flushPromises()
@@ -598,44 +601,82 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     expect(place(53)).toBe('admin.schedQuality.placement.front')
   })
 
-  it('says in one line per line why a group is at the rear or on trial, with the figures that judgement was taken on', async () => {
-    atLocalNoon()
+  // Astra 1: a group whose gate is now off keeps no figures of an older snapshot that still has its row.
+  it('shows a group with its gate off in grey dashes, whatever the snapshot still holds for it', async () => {
     const value = detail()
-    const row = value.groups[0].by_model[1]
-    Object.assign(row.lines.ttfo, { samples_local: 0, samples_total: 14 })
-    row.lines.error = line('error', 'rear', { level: 0, until: inMinutes(35), evidence: errorEvidence({ limit: 0.05, padded: 80, failed: 6 }) })
-    row.lines.cache = line('cache', 'trial', { trial_until: inMinutes(50) })
-    api.accountDetail.mockResolvedValue(value)
-    mount(Panel, { attachTo: document.body })
-    await openOn(7, { groupId: 53, model: 'gpt-b' })
-    const J = 'admin.schedQuality.panel.why.joiner'
-    const ttfo = ttfoEvidence()
-    expect(whys(53)).toEqual([
-      ['ttfo', `admin.schedQuality.dim.ttfo${['admin.schedQuality.panel.why.ttfo:' + JSON.stringify({ limit: String(ttfo.limit_s), share: `${((ttfo.k / ttfo.n) * 100).toFixed(1)}%`, peer: `${(ttfo.prior_mu * 100).toFixed(1)}%` }), 'admin.schedQuality.panel.why.elsewhere', 'admin.schedQuality.panel.why.recheck:{"time":"12:20"}'].join(J)}`],
-      ['error', `admin.schedQuality.dim.error${['admin.schedQuality.panel.why.error:{"n":"80","failed":"6","share":"7.5%","limit":"5%"}', 'admin.schedQuality.panel.why.recheck:{"time":"12:35"}'].join(J)}`],
-      ['cache', 'admin.schedQuality.dim.cacheadmin.schedQuality.panel.why.trial:{"time":"12:50"}']
-    ])
-    // The place ends with its latest rear line.
-    expect(place(53)).toBe('admin.schedQuality.panel.placeUntil.rear:{"time":"12:35"}')
-    // A group at the front says nothing more.
-    expect(whys(54)).toEqual([])
-  })
-
-  it('reads an exemption, a group with its gate off and a stale view in the place, and keeps the row actions', async () => {
-    atLocalNoon()
-    const value = detail()
-    value.groups[0].exemption = { group_id: 53, expires_at: inMinutes(90), reason: '' }
     value.groups[1].policy = { ...policy, enabled: false }
     api.accountDetail.mockResolvedValue(value)
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
     mount(Panel, { attachTo: document.body })
     await openOn(7, { model: 'gpt-b' })
-    expect(place(53)).toBe('admin.schedQuality.panel.placeUntil.exempt:{"time":"13:30"}')
-    expect(whys(53)).toEqual([])
-    expect(groupRow(53).querySelector('[data-qp-trigger="unexempt:53"]')!.getAttribute('aria-label')).toBe('admin.schedQuality.action.undoExempt 晨星组')
+    expect(cells(54)).toEqual([
+      ['requests', '—', 'is-none', null], ['ttfo', '—', 'is-none', null], ['error', '—', 'is-none', null], ['cache', '—', 'is-none', null]
+    ])
     const off = groupRow(54).querySelector<HTMLElement>('[data-qp-gate-off]')!
-    expect(off.textContent).toBe('admin.schedQuality.panel.gateOff')
+    expect(off.textContent!.trim()).toBe('admin.schedQuality.panel.gateOff')
     expect((off as unknown as { __tipText: string }).__tipText).toBe('admin.schedQuality.identity.gateOffGroup')
-    expect(groupRow(54).querySelector('[data-qp-trigger="exempt:54"]')).not.toBeNull()
+    expect(trigger(54)).toBeNull()
+    expect(cells(53)[0][1]).toBe('463')
+  })
+
+  it('opens a group\'s exemption at its place, and only the removal of one in force there', async () => {
+    atLocalNoon()
+    const value = detail()
+    value.groups[1].exemption = { group_id: 54, expires_at: inMinutes(90), reason: '' }
+    api.accountDetail.mockResolvedValue(value)
+    api.clearOverride.mockReset().mockResolvedValue(undefined)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(place(54)).toBe('admin.schedQuality.panel.placeUntil.exempt:{"time":"13:30"}')
+    // A new exemption from a group's place: that group in scope, the place marked open.
+    trigger(53)!.click()
+    await flushPromises()
+    expect(document.querySelector('[data-sq-popover] h3')!.textContent).toBe('admin.schedQuality.action.exempt')
+    expect(trigger(53)!.getAttribute('aria-expanded')).toBe('true')
+    expect(document.querySelector('[data-sq-popover] [data-sq-popover-undo]')).toBeNull()
+    document.querySelector<HTMLElement>('[data-sq-popover] .btn-secondary')!.click()
+    await flushPromises()
+    // An exempt group's place offers only to remove the exemption in force.
+    trigger(54)!.click()
+    await flushPromises()
+    expect(document.querySelector('[data-sq-popover] h3')!.textContent).toBe('admin.schedQuality.panel.placeUntil.exempt:{"time":"13:30"}')
+    expect(document.querySelector('[data-sq-popover] [role="radiogroup"]')).toBeNull()
+    const undo = document.querySelector<HTMLElement>('[data-sq-popover-undo]')!
+    expect(document.activeElement).toBe(undo)
+    undo.click()
+    await flushPromises()
+    expect(api.clearOverride).toHaveBeenCalledWith(7, 54)
+    expect(api.setOverride).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-sq-popover]')).toBeNull()
+  })
+
+  it('removes the all-groups exemption from any group\'s place, saying so in its title', async () => {
+    const value = detail()
+    value.groups.forEach((group) => { group.exemption = { group_id: 0, expires_at: null, reason: '' } })
+    value.exemptions = [{ group_id: 0, expires_at: null, reason: '' }]
+    api.accountDetail.mockResolvedValue(value)
+    api.clearOverride.mockReset().mockResolvedValue(undefined)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(place(53)).toBe('admin.schedQuality.panel.exemptForever')
+    trigger(53)!.click()
+    await flushPromises()
+    expect(document.querySelector('[data-sq-popover] h3')!.textContent).toBe('admin.schedQuality.panel.exemptAll:{"what":"admin.schedQuality.panel.exemptForever"}')
+    document.querySelector<HTMLElement>('[data-sq-popover-undo]')!.click()
+    await flushPromises()
+    expect(api.clearOverride).toHaveBeenCalledWith(7, 0)
+  })
+
+  it('marks each model\'s tab with its worst place, and keeps a stale view apart from the switch', async () => {
+    const value = detail()
+    value.groups[1].by_model.push(groupModel('gpt-c', { cache: 'trial' }))
+    api.accountDetail.mockResolvedValue(value)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-a' })
+    expect(Array.from(document.querySelectorAll<HTMLElement>('[data-qp-tab]'), (el) => [el.dataset.qpTab, el.querySelector<HTMLElement>('[data-qp-tab-mark]')?.dataset.qpTabMark ?? null])).toEqual([
+      ['gpt-a', null], ['gpt-b', 'rear'], ['gpt-c', 'trial']
+    ])
+    expect(document.querySelector('[data-qp-section="recent"]')).toBeNull()
 
     closeSchedDrawer()
     await flushPromises()
@@ -646,30 +687,16 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     expect(place(53)).toBe('admin.schedQuality.placement.front')
   })
 
-  it('shows every model tab by its whole name and marks the models with a group at the rear', async () => {
-    mount(Panel, { attachTo: document.body })
-    await openOn(7, { model: 'gpt-a' })
-    expect(Array.from(document.querySelectorAll<HTMLElement>('[data-qp-tab]'), (el) => el.textContent!.trim())).toEqual([
-      'gpt-a', 'gpt-badmin.schedQuality.panel.tabBack'
-    ])
-    expect(document.querySelector('[data-qp-section="recent"]')).toBeNull()
-    // No automatic state, no section.
-    api.accountDetail.mockResolvedValue({ ...detail(), auto_states: [] })
-    await markSchedChanged()
-    await flushPromises()
-    expect(document.querySelector('[data-qp-section="auto"]')).toBeNull()
-  })
-
   it('offers a retry when the 12 hours did not load, without failing the rest of the panel', async () => {
     api.accountPerformance.mockRejectedValue(new Error('down'))
     mount(Panel, { attachTo: document.body })
     await openOn(7, { model: 'gpt-b' })
-    expect(document.querySelector('[data-qp-perf-failed]')).not.toBeNull()
     expect(place(53)).toMatch(/placeUntil\.rear/)
     api.accountPerformance.mockResolvedValue(perfOf(7))
-    document.querySelector<HTMLElement>('[data-qp-perf-note] button')!.click()
+    document.querySelector<HTMLElement>('[data-qp-perf-retry]')!.click()
     await flushPromises()
-    expect(groupRow(53).querySelector('[data-qp-cell="requests"]')!.textContent).toBe('463')
+    expect(groupRow(53).querySelector('[data-qp-cell="requests"]')!.textContent!.trim()).toBe('463')
+    expect(document.querySelector('[data-qp-perf-retry]')).toBeNull()
   })
 
   // The account's detail comes every 5 s, the 12-hour snapshot every minute: asked at once on opening, once; another
@@ -686,23 +713,23 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     expect(api.accountPerformance).not.toHaveBeenCalled()
     await openOn(7, { model: 'gpt-b' })
     expect(api.accountPerformance).toHaveBeenCalledTimes(1)
-    expect(groupRow(53).querySelector('[data-qp-cell="requests"]')!.textContent).toBe('463')
+    const requests = () => groupRow(53).querySelector('[data-qp-cell="requests"]')!.textContent!.trim()
+    expect(requests()).toBe('463')
     await openOn(8, { model: 'gpt-b' })
-    expect(groupRow(53).querySelector('[data-qp-cell="requests"]')!.textContent).toBe('—')
-    expect(document.querySelector('[data-qp-perf-note]')!.textContent!.trim()).toBe('admin.schedQuality.panel.windowLoading')
+    expect(requests()).toBe('—')
     const updated = perfOf(8)
     updated.rows[0].requests = 77
     next.resolve(updated)
     await flushPromises()
-    expect(groupRow(53).querySelector('[data-qp-cell="requests"]')!.textContent).toBe('77')
+    expect(requests()).toBe('77')
     expect(api.accountPerformance.mock.calls.map((call) => call[0])).toEqual([7, 8])
   })
 
-  it('says how much of the window a partly covered snapshot covers', async () => {
+  it('heads the table with the hours a filling window covers', async () => {
     api.accountPerformance.mockResolvedValue(perfAnswer([], [perfGroup({ group_id: 53 })], { complete: false, at: '2026-11-19T12:10:00Z', window_from: '2026-11-19T09:10:00Z' }))
     mount(Panel, { attachTo: document.body })
     await openOn(7, { model: 'gpt-b' })
-    expect(document.querySelector('[data-qp-perf-note]')!.textContent!.trim()).toMatch(/^admin\.schedQuality\.panel\.windowPartial:\{"hours":"3\.0"\} · /)
+    expect(document.querySelector('[data-qp-perf-note]')!.textContent).toBe('admin.schedQuality.panel.windowPartial:{"hours":"3.0"}')
   })
 })
 
@@ -711,43 +738,51 @@ describe('SchedQualityPanel decision records', () => {
     id, at: inMinutes(-id * 2), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'enter', level: 1, until: inMinutes(20), basis: basis('ttfo'), ...patch
   })
   const entries = () => Array.from(document.querySelectorAll<HTMLElement>('[data-qp-decision]'), (el) => el.dataset.qpDecision)
+  const entry = (id: number) => document.querySelector<HTMLElement>(`[data-qp-decision="${id}"]`)!
 
-  it('loads with the panel, merges one moment\'s records across groups, shows the newest six, then the rest and older pages', async () => {
+  it('loads with the panel: one line a record, merged across groups, newest six, then the rest and older pages', async () => {
     atLocalNoon()
     const at = inMinutes(-1)
     const page = [
-      record(90, { at, group_id: 53 }), record(89, { at, group_id: 54 }), record(88, { at, group_id: 53 }),
+      record(90, { at, group_id: 53 }), record(89, { at, group_id: 54 }),
       record(87, { action: 'trial', until: inMinutes(50), at: inMinutes(-30) }),
       record(86, { line: '', action: 'renew', basis: null, at: inMinutes(-40) }),
-      ...Array.from({ length: 47 }, (_, i) => record(85 - i, { action: 'release', until: null }))
+      ...Array.from({ length: 46 }, (_, i) => record(85 - i, { action: 'release', until: null }))
     ]
     api.accountDecisions.mockResolvedValueOnce(page).mockResolvedValueOnce([record(3, { action: 'clear', until: null, at: inMinutes(-500) })])
     mount(Panel, { attachTo: document.body })
     await openOn()
     expect(api.accountDecisions).toHaveBeenCalledWith(7, { limit: 50, beforeId: undefined })
-    // The same minute, action, model and line in two groups (and a repeat for one of them) read as one entry.
     expect(entries()).toEqual(['90', '87', '86', '85', '84', '83'])
-    const entry = (id: number) => document.querySelector<HTMLElement>(`[data-qp-decision="${id}"]`)!
-    expect(entry(90).querySelector('.drow__where')!.textContent).toBe('gpt-b · admin.schedQuality.dim.ttfo · 晨星组admin.schedQuality.evidence.joiner北辰组')
-    expect(entry(90).querySelector('.drow__end')!.textContent).toBe('admin.schedQuality.decisions.rearUntil:{"time":"12:20","minutes":40}')
-    expect(entry(87).querySelector('.drow__end')!.textContent).toBe('admin.schedQuality.decisions.trialUntil:{"time":"12:50"}')
-    // A record of the previous rules: named as such, no evidence to open.
+    const line = entry(90).querySelector<HTMLElement>('.drow__line')!
+    expect(Array.from(line.children, (el) => [...el.classList].find((name) => name.startsWith('drow__')) ?? 'icon')).toEqual([
+      'drow__time', 'drow__what', 'drow__end', 'drow__dim', 'drow__meta', 'drow__caret'
+    ])
+    expect(line.querySelector('.drow__end')!.textContent!.trim()).toBe('admin.schedQuality.decisions.until12:20')
+    expect(line.querySelector('.drow__model')!.textContent).toBe('gpt-b')
+    expect(line.querySelector('.drow__groups')!.getAttribute('title')).toBe('晨星组admin.schedQuality.evidence.joiner北辰组')
+    expect(entry(87).querySelector('.drow__end')!.textContent!.trim()).toBe('admin.schedQuality.decisions.until12:50')
+    // A record of the previous rules: named as such, nothing to open, so not a button.
     expect(entry(86).querySelector('.drow__what')!.textContent).toBe('admin.schedQuality.decisions.legacy:{"action":"admin.schedQuality.decisions.action.renew"}')
-    expect(entry(86).querySelector('[data-qp-decision-evidence]')).toBeNull()
-    // The merged entry opens to each group's evidence, under its group's name.
-    entry(90).querySelector<HTMLElement>('[data-qp-decision-evidence]')!.click()
+    expect(entry(86).querySelector('button')).toBeNull()
+    // The whole line opens each group's evidence; closed, it is out of reach.
+    const open = entry(90).querySelector<HTMLElement>('.drow__open')!
+    expect(open.hasAttribute('inert')).toBe(true)
+    line.click()
     await flushPromises()
-    expect(Array.from(entry(90).querySelectorAll('.drow__group'), (el) => el.textContent)).toEqual(['晨星组', '北辰组'])
-    expect(entry(90).querySelectorAll('[data-qp-evidence]')).toHaveLength(2)
+    expect(line.getAttribute('aria-expanded')).toBe('true')
+    expect(open.hasAttribute('inert')).toBe(false)
+    expect(Array.from(open.querySelectorAll('.drow__group'), (el) => el.textContent!.trim())).toEqual(['晨星组', '北辰组'])
+    expect(open.querySelectorAll('[data-qp-evidence]')).toHaveLength(2)
 
     const more = () => document.querySelector<HTMLElement>('[data-qp-decisions-more]')
     more()!.click()
     await flushPromises()
     expect(api.accountDecisions).toHaveBeenCalledTimes(1)
-    expect(entries()).toHaveLength(50)
+    expect(entries()).toHaveLength(49)
     more()!.click()
     await flushPromises()
-    expect(api.accountDecisions).toHaveBeenLastCalledWith(7, { limit: 50, beforeId: 39 })
+    expect(api.accountDecisions).toHaveBeenLastCalledWith(7, { limit: 50, beforeId: 40 })
     expect(entries().at(-1)).toBe('3')
     expect(more()).toBeNull()
 
@@ -759,13 +794,35 @@ describe('SchedQualityPanel decision records', () => {
     expect(entries()).toEqual(['91', '90', '87', '86', '85', '84'])
   })
 
+  // Astra 2: records merged by the minute shown keep their own ends and evidence, to the second, when opened.
+  it('keeps every merged record\'s own end and evidence when their ends share the minute shown', async () => {
+    atLocalNoon()
+    const at = inMinutes(-1)
+    const end = (seconds: number) => new Date(2026, 10, 19, 12, 20, seconds).toISOString()
+    api.accountDecisions.mockResolvedValueOnce([
+      record(90, { at, group_id: 53, until: end(1), basis: basis('ttfo', { samples_local: 4 }) }),
+      record(89, { at, group_id: 54, until: end(59), basis: basis('ttfo', { samples_local: 9 }) })
+    ])
+    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: (id: number) => ({ name: id === 53 ? '晨星组' : '北辰组' }) } })
+    await flushPromises()
+    expect(entries()).toEqual(['90'])
+    const groups = Array.from(entry(90).querySelectorAll('[data-qp-decision-item]'), (el) => [
+      el.querySelector('.drow__group')!.textContent!.replace(/\s+/g, ' ').trim(), el.querySelector('[data-qp-evidence-samples]')!.textContent!.trim()
+    ])
+    const samples = (local: string) => `admin.schedQuality.evidence.samples.ttfo:${JSON.stringify({ local, total: 'admin.schedQuality.evidence.samples.total.ttfo:{"n":"30"}' })}`
+    expect(groups).toEqual([
+      ['晨星组 → 12:20:01', samples('4')],
+      ['北辰组 → 12:20:59', samples('9')]
+    ])
+  })
+
   // A first-page refresh that fails drops the old list, so its retry asks for the first page (no before_id) again.
   it('retries the first page after a refresh fails, never paging on from the records shown before', async () => {
     api.accountDecisions
       .mockResolvedValueOnce(Array.from({ length: 50 }, (_, i) => record(60 - i)))
       .mockRejectedValueOnce(new Error('down'))
       .mockResolvedValueOnce([record(61, { action: 'reset', until: null }), record(60)])
-    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, groupName: () => '晨星组' } })
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: () => ({ name: '晨星组' }) } })
     await flushPromises()
     await markSchedChanged()
     await flushPromises()

@@ -517,7 +517,7 @@ const live = useAccountsLiveTable({
   tasks: schedLayers.tasks
 })
 const table = live.table
-schedLayers.bind(table, (id) => table.record(id))
+schedLayers.bind(table)
 const { rows, loading, total, pending, status: liveStatus } = table
 // A ticked account reads in the shared table's selected background (12.1-3), at every width.
 const accountRowClass = (row: LiveAccount) => [

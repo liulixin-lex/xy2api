@@ -1,12 +1,12 @@
 import { defineComponent, h, type Component } from 'vue'
 import { useLiveTable, type LiveTable } from '@/composables/useLiveTable'
-import { useSchedLayerTasks, type SchedPanelRow } from '@/composables/useSchedLayerData'
+import { useSchedLayerTasks } from '@/composables/useSchedLayerData'
 
 /**
  * `layer` inside a page whose live table fetches the quality panel's and the group board's data, wired as the accounts
  * and groups pages wire it. Props given to the host go on to `layer`.
  */
-export function withSchedHost(layer: Component, options: { row?: (id: number) => SchedPanelRow | undefined; onTable?: (table: LiveTable<{ id: number }>) => void } = {}) {
+export function withSchedHost(layer: Component, options: { onTable?: (table: LiveTable<{ id: number }>) => void } = {}) {
   return defineComponent({
     inheritAttrs: false,
     setup(_, { attrs }) {
@@ -17,7 +17,7 @@ export function withSchedHost(layer: Component, options: { row?: (id: number) =>
         membershipIntervalMs: 0,
         tasks: sched.tasks
       })
-      sched.bind(table, options.row)
+      sched.bind(table)
       options.onTable?.(table)
       void table.reload()
       return () => h(layer, attrs)

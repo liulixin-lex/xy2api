@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { BackendDecision, BackendDetailGroup, BackendGroupModel } from '@/api/admin/schedQualityTypes'
 import { cacheEvidence, errorEvidence, groupModel, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
-import { backModels, evidenceCauses, groupPlace, lineEvidence, mergeDecisions, panelRecoverable, pickModelTab, placeEnd, placeReasons } from '../qualityPanel'
+import { evidenceCauses, groupPlace, lineEvidence, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeEnd } from '../qualityPanel'
 import { groupDotState } from '@/components/admin/account/table/accountGroups'
 
 const group = (id: number, rows: BackendGroupModel[], exempt = false): BackendDetailGroup => ({
@@ -26,9 +26,9 @@ describe('quality panel place', () => {
     expect(groupPlace(normal, g, 'front')).toBe('front')
     // No row for the model: no data, every line unknown, at the front.
     expect(groupPlace(normal, g, 'other')).toBe('front')
-    // Only a model with a group at the rear gets the tab mark; an exempt group is not at the rear.
+    // A model's tab is marked by its worst place: rear before trial; an exempt group is not at the rear.
     const detail = { ...normal, groups: [g, group(2, [groupModel('front', { cache: 'rear' })], true)] }
-    expect([...backModels(detail)]).toEqual(['rear'])
+    expect([...modelMarks(detail)]).toEqual([['rear', 'rear'], ['trial', 'trial']])
   })
 
   // 7f-2: the detail has no `effective`; the panel reads the same three conditions the backend's flag stands for, so
@@ -50,7 +50,7 @@ describe('quality panel place', () => {
       const place = groupPlace(detail, detail.groups[0], 'a')
       expect(place).toBe(effective ? 'rear' : 'front')
       expect(groupDotState(summary(effective), 1)).toBe(effective ? 'back' : 'ok')
-      expect(backModels(detail).has('a')).toBe(effective)
+      expect(modelMarks(detail).get('a')).toBe(effective ? 'rear' : undefined)
     }
   })
 
@@ -63,26 +63,6 @@ describe('quality panel place', () => {
     expect(placeEnd(row, 'trial')).toBe('2026-11-16T11:00:00Z')
     expect(placeEnd(row, 'front')).toBeNull()
     expect(placeEnd(undefined, 'rear')).toBeNull()
-  })
-
-  it('gives each line holding a group back the figures it was judged on: share and peers, failures and limit, hit and minimum', () => {
-    const row = groupModel('a', { ttfo: 'rear', error: 'rear', cache: 'rear' })
-    row.lines.ttfo = line('ttfo', 'rear', { until: '2026-11-16T10:20:00Z', evidence: ttfoEvidence({ n: 40, k: 9, prior_mu: 0.146 }), samples_local: 0, samples_total: 40 })
-    row.lines.error = line('error', 'rear', { until: '2026-11-16T10:30:00Z', evidence: errorEvidence({ limit: 0.025, padded: 50, failed: 3 }) })
-    row.lines.cache = line('cache', 'rear', { evidence: cacheEvidence({ ratio: 0.781, min_ratio: 0.85 }) })
-    expect(placeReasons(row, 'rear')).toEqual([
-      { dim: 'ttfo', identity: 'rear', figures: { limit: '10', share: '22.5%', peer: '14.6%' }, end: '2026-11-16T10:20:00Z', elsewhere: true },
-      { dim: 'error', identity: 'rear', figures: { n: '50', failed: '3', share: '6.0%', limit: '2.5%' }, end: '2026-11-16T10:30:00Z', elsewhere: false },
-      { dim: 'cache', identity: 'rear', figures: { ratio: '78.1%', min: '85%' }, end: null, elsewhere: false }
-    ])
-    // A trial line has only its end; a place at the front, exempt or stopped has no reason.
-    const trial = groupModel('b', { cache: 'trial' })
-    Object.assign(trial.lines.cache, { trial_until: '2026-11-16T11:00:00Z' })
-    expect(placeReasons(trial, 'trial')).toEqual([{ dim: 'cache', identity: 'trial', figures: null, end: '2026-11-16T11:00:00Z', elsewhere: false }])
-    expect(placeReasons(row, 'exempt')).toEqual([])
-    // No evidence counted: no figures.
-    row.lines.ttfo.evidence = ttfoEvidence({ n: 0, k: 0 })
-    expect(placeReasons(row, 'rear')[0].figures).toBeNull()
   })
 
   it('offers 恢复 for a line at the rear or on trial, not for unknown or pass', () => {
@@ -128,7 +108,7 @@ describe('decision records', () => {
     id, at: '2026-11-16T10:25:10Z', group_id: 1, model: 'a', line: 'ttfo', action: 'enter', level: 1, until: '2026-11-16T11:05:00Z', ...patch
   })
 
-  it('reads one moment\'s action on a model\'s line across groups as one entry, each group once, newest first', () => {
+  it('reads one moment\'s action on a model\'s line across groups as one entry, each group once and every record kept', () => {
     const merged = mergeDecisions([
       record(9, { group_id: 2 }),
       record(8, { group_id: 1, at: '2026-11-16T10:25:40Z' }),
@@ -138,12 +118,19 @@ describe('decision records', () => {
       record(4, { action: 'renew' })
     ])
     expect(merged.map((entry) => [entry.items.map((item) => item.id), entry.groups])).toEqual([
-      [[9, 8], [2, 1]],
+      [[9, 8, 7], [2, 1]],
       [[6], [1]],
       [[5], [1]],
       [[4], [1]]
     ])
     // Another end is another entry.
     expect(mergeDecisions([record(2), record(1, { group_id: 2, until: '2026-11-16T11:25:00Z' })])).toHaveLength(2)
+  })
+
+  // Astra 2: ends within the minute shown merge, and each record keeps its own end (and so its evidence).
+  it('keeps each record\'s own end when ends share the minute shown', () => {
+    const merged = mergeDecisions([record(2, { until: '2026-11-16T11:05:01Z' }), record(1, { group_id: 2, until: '2026-11-16T11:05:59Z' })])
+    expect(merged).toHaveLength(1)
+    expect(merged[0].items.map((item) => [item.group_id, item.until])).toEqual([[1, '2026-11-16T11:05:01Z'], [2, '2026-11-16T11:05:59Z']])
   })
 })
