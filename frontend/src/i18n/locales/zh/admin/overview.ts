@@ -1057,7 +1057,8 @@ export default {
       accountFilters: {
         title: '账号过滤控制',
         oauthOnly: '仅允许 OAuth 账号',
-        oauthOnlyEnabled: '已启用 — 排除 API Key 类型账号',
+        oauthOnlyEnabled: '已启用 — 不再接受 API Key 账号',
+        oauthOnlyMismatch: '已启用 — 不再接受 API Key 账号；现有 {n} 个仍可调度',
         privacySetOnly: '仅允许隐私保护已设置的账号',
         privacySetOnlyEnabled: '已启用 — Privacy 未设置的账号将被排除',
         disabled: '未启用'
