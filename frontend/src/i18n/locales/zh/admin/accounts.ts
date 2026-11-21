@@ -1674,9 +1674,7 @@ export default {
         },
         cacheTTLOverride: {
           label: '缓存写入计费分类覆盖',
-          hint: '仅将结算副本中的缓存写入归为指定计费档，不改变请求 TTL 或上游响应。调整后的用量不代表真实缓存效率。',
-          target: '计费分类',
-          targetHint: '选择缓存写入使用的本站计费档'
+          target: '计费分类'
         },
         customBaseUrl: {
           label: '自定义转发地址',

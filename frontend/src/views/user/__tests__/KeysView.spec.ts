@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-import type { ApiKey } from '@/types'
+import type { ApiKey, Group } from '@/types'
 import { keysAPI } from '@/api'
 import CcSwitchImportDialog from '@/components/keys/CcSwitchImportDialog.vue'
 import type { CcSwitchImportOptions } from '@/utils/ccswitchImport'
@@ -40,9 +40,10 @@ const messages: Record<string, string> = {
   'common.refresh': 'Refresh',
   'common.status': 'Status',
   'keys.apiKey': 'API Key',
-  'keys.cacheTTL.inheritCurrent': 'Follow global (currently {ttl})',
-  'keys.cacheTTL.duration.5m': '5 minutes',
-  'keys.cacheTTL.duration.1h': '1 hour',
+  'keys.cacheTTL.inherit': 'Follow global default',
+  'keys.cacheTTL.off': 'Do not override TTL',
+  'keys.cacheTTL.5m': '5 minutes',
+  'keys.cacheTTL.1h': '1 hour',
   'keys.allGroups': 'All Groups',
   'keys.allStatus': 'All Status',
   'keys.columnSettings': 'Column Settings',
@@ -614,13 +615,14 @@ describe('user KeysView column settings', () => {
       getAvailableGroups.mockResolvedValue(availableGroups)
     })
 
-    it('shows the current global default and preserves a chosen TTL across group changes', async () => {
+    it('names the TTL options plainly and preserves a chosen TTL across group changes', async () => {
       listKeys.mockResolvedValueOnce({ items: [], total: 0, pages: 0, meta: { anthropic_cache_ttl_default: '1h' } })
       const wrapper = await openCreate()
       await groupSelect(wrapper).vm.$emit('update:modelValue', 1)
       const ttl = () => wrapper.findComponent('#key-form-cache-ttl')
       expect(ttl().props('modelValue')).toBe('inherit')
-      expect(ttl().props('options')[0].label).toBe('Follow global (currently 1 hour)')
+      expect(ttl().props('options').map((option: { label: string }) => option.label))
+        .toEqual(['Follow global default', 'Do not override TTL', '5 minutes', '1 hour'])
       await ttl().vm.$emit('update:modelValue', '1h')
       await chooseProvider(wrapper, 'openai')
       await groupSelect(wrapper).vm.$emit('update:modelValue', 2)
@@ -636,10 +638,11 @@ describe('user KeysView column settings', () => {
     })
 
     it('keeps the persisted off preference when editing and sends only an explicit TTL change', async () => {
-      const key = { ...createApiKey(), group_id: 1, anthropic_cache_ttl_mode: 'off' as const }
+      const key = { ...createApiKey(), group_id: 1, group: availableGroups[0] as unknown as Group, anthropic_cache_ttl_mode: 'off' as const }
       listKeys.mockResolvedValue({ items: [key], total: 1, pages: 1 })
       updateKey.mockResolvedValue(key)
       const wrapper = await mountView()
+      expect(wrapper.get('[data-test="table-identity"]').text()).toBe(key.name)
       await getButtonByText(wrapper, 'common.edit').trigger('click')
       const ttl = wrapper.findComponent('#key-form-cache-ttl')
       expect(ttl.props('modelValue')).toBe('off')

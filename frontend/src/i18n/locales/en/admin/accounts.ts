@@ -1572,9 +1572,7 @@ export default {
         },
         cacheTTLOverride: {
           label: 'Cache write billing classification override',
-          hint: 'Classifies cache writes in the billing copy only. Does not change request TTL or upstream responses. Adjusted usage does not measure actual cache efficiency.',
-          target: 'Billing classification',
-          targetHint: 'Select the site billing tier for cache writes'
+          target: 'Billing classification'
         },
         customBaseUrl: {
           label: 'Custom Relay URL',
