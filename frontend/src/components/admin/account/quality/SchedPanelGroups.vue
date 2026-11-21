@@ -32,33 +32,36 @@
         <span v-else class="sr-only">{{ item.group.name }}</span>
       </span>
       <span class="gt__place" role="cell" data-test="qp-state" :data-qp-place="item.place">
-        <!-- The place is the group's own control: it opens the group's exemption (or its removal) where it stands. -->
-        <button
-          v-if="item.actionable"
-          type="button"
-          class="gt__place-btn"
-          aria-haspopup="dialog"
-          :aria-expanded="openGroupId === item.group.group_id"
-          :aria-label="`${item.group.name} ${item.placeText}`"
-          :data-qp-place-trigger="item.group.group_id"
-          @click="emit('place', item.group, $event.currentTarget as HTMLElement)"
-        >
-          <StatusDot :tone="item.tone" />
-          <span>{{ item.placeText }}</span>
-          <Icon name="chevronDown" size="xs" :stroke-width="2.5" class="gt__caret" />
-        </button>
-        <span
-          v-else
-          v-tip="item.gateOff ? t('admin.schedQuality.identity.gateOffGroup') : ''"
-          class="gt__place-static"
-          :class="{ 'is-off': item.gateOff }"
-          :tabindex="item.gateOff ? 0 : undefined"
-          :data-qp-gate-off="item.gateOff || undefined"
-        >
-          <StatusDot :tone="item.tone" />
-          <span>{{ item.placeText }}</span>
+        <span class="gt__place-main">
+          <!-- The place is the group's own control: it opens the group's exemption (or its removal) where it stands. -->
+          <button
+            v-if="item.actionable"
+            type="button"
+            class="gt__place-btn"
+            aria-haspopup="dialog"
+            :aria-expanded="openGroupId === item.group.group_id"
+            :aria-label="[item.group.name, item.placeText, item.stay].filter(Boolean).join(' ')"
+            :data-qp-place-trigger="item.group.group_id"
+            @click="emit('place', item.group, $event.currentTarget as HTMLElement)"
+          >
+            <StatusDot :tone="item.tone" />
+            <span>{{ item.placeText }}</span>
+            <Icon name="chevronDown" size="xs" :stroke-width="2.5" class="gt__caret" />
+          </button>
+          <span
+            v-else
+            v-tip="item.gateOff ? t('admin.schedQuality.identity.gateOffGroup') : ''"
+            class="gt__place-static"
+            :class="{ 'is-off': item.gateOff }"
+            :tabindex="item.gateOff ? 0 : undefined"
+            :data-qp-gate-off="item.gateOff || undefined"
+          >
+            <StatusDot :tone="item.tone" />
+            <span>{{ item.placeText }}</span>
+          </span>
+          <span v-if="failedGroups.has(item.group.group_id)" class="qp-fail">{{ t('admin.schedQuality.result.failed') }}</span>
         </span>
-        <span v-if="failedGroups.has(item.group.group_id)" class="qp-fail">{{ t('admin.schedQuality.result.failed') }}</span>
+        <span v-if="item.stay" class="gt__stay" data-qp-stay>{{ item.stay }}</span>
       </span>
       <span
         v-for="cell in item.cells"
@@ -83,9 +86,11 @@
  * - The first heading is the window ("近 12 小时", or what a filling window covers); when it was worked out is in its tip.
  * - Each group takes two lines: its alias and whole name (once, when the pill already reads it whole), then its place
  *   and the four 12-hour figures. The place reads
- *   前排, 后排至 / 试用至 / 豁免至 the time it ends, 停调, or 门槛关; its dot and the figures share one set of colours
+ *   前排, 后排, 试用, 豁免至 the time it ends, 停调, or 门槛关; its dot and the figures share one set of colours
  *   (amber rear, blue trial, green front or pass, purple exempt, grey unknown or no figure), so the amber figure is the
  *   line that holds the group at the rear.
+ * - Under 后排 its step and when it is reviewed, under 试用 when it started and when it ends at the latest, small like
+ *   the figures' references: of the line that ends last, named by its column when more than one line holds the place.
  * - Under a share at the rear or on trial, only what it is measured against, in the same 12-hour terms: the group's
  *   other accounts on the same requests for the first output, the group's limit and minimum for errors and cache.
  * - The place is a button for a manager: it opens the group's exemption, or its removal when exempt, at the place.
@@ -95,14 +100,14 @@ import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
 import GroupAliasPill from '@/components/common/GroupAliasPill.vue'
-import type { BackendAccountDetail, BackendDetailGroup, BackendDim, BackendIdentity } from '@/api/admin/schedQualityTypes'
+import type { BackendAccountDetail, BackendDetailGroup, BackendDim, BackendGroupModel, BackendIdentity } from '@/api/admin/schedQualityTypes'
 import { SCHED_PANEL_PERF_TASK, useSchedLayerData } from '@/composables/useSchedLayerData'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { DASH, schedWord } from '@/utils/schedQualityFormat'
 import { groupPillText } from '@/utils/groupAlias'
 import { vTip } from '@/utils/tip'
 import SchedPauseMark from './SchedPauseMark.vue'
-import { gateOff, groupPlace, modelRow, placeEnd, type PanelPlace } from './qualityPanel'
+import { gateOff, groupPlace, lineStay, modelRow, placeLine, rearStay, trialStay, type PanelPlace } from './qualityPanel'
 import { fmtCount, fmtPct, MIN_ATTEMPTS, perfView } from './performance'
 
 const props = defineProps<{
@@ -139,13 +144,21 @@ const updated = computed(() => (perf.value?.at ? t('admin.schedQuality.perf.upda
 /** A threshold as set: 0.05 → "5%", 0.025 → "2.5%". */
 const limitPct = (ratio: number) => `${Number((ratio * 100).toFixed(1))}%`
 
-function placeText(place: PanelPlace, group: BackendDetailGroup, end: string | null): string {
-  if ((place === 'rear' || place === 'trial') && end) return t(`admin.schedQuality.panel.placeUntil.${place}`, { time: formatShortTime(end) })
+function placeText(place: PanelPlace, group: BackendDetailGroup): string {
   if (place === 'exempt') {
     const expires = group.exemption?.expires_at
     return expires ? t('admin.schedQuality.panel.placeUntil.exempt', { time: formatShortTime(expires) }) : t('admin.schedQuality.panel.exemptForever')
   }
   return schedWord('placement', place, t, te)
+}
+
+/** The stay under a rear or trial place, of the line that ends last; named by its column when several hold the place. */
+function stayText(row: BackendGroupModel | undefined, place: PanelPlace): string {
+  const shown = placeLine(row, place)
+  if (!shown) return ''
+  const { dim, line, held } = shown
+  const stay = place === 'rear' ? rearStay(t, line.level, line.until) : trialStay(t, line.trial_started_at, line.trial_until)
+  return held > 1 ? lineStay(t, t(`admin.schedQuality.panel.col.${dim}`), stay) : stay
 }
 
 const rows = computed(() => {
@@ -185,7 +198,8 @@ const rows = computed(() => {
       pillIsName: groupPillText(info) === group.name,
       place,
       tone: off ? ('off' as const) : PLACE_TONES[place],
-      placeText: off ? t('admin.schedQuality.panel.gateOff') : placeText(place, group, placeEnd(row, place)),
+      placeText: off ? t('admin.schedQuality.panel.gateOff') : placeText(place, group),
+      stay: off ? '' : stayText(row, place),
       gateOff: off,
       actionable: props.canManage && place !== 'stopped' && !off,
       cells
@@ -270,11 +284,22 @@ const rows = computed(() => {
   overflow-wrap: anywhere;
 }
 .gt__place {
-  display: flex;
+  display: grid;
   grid-area: place;
+  justify-items: start;
+}
+.gt__place-main {
+  display: flex;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+}
+/* The stay under the place: small, like a figure's reference beneath it; on a phone it wraps at its dots only. */
+.gt__stay {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 14px;
+  word-break: keep-all;
 }
 /* The place: a quiet button whose dot lines up with the name above; hover and focus show it opens something. */
 .gt__place-btn,

@@ -14,8 +14,10 @@ import type {
   BackendDetailGroup,
   BackendDim,
   BackendEvidenceOf,
-  BackendGroupModel
+  BackendGroupModel,
+  BackendLine
 } from '@/api/admin/schedQualityTypes'
+import { formatShortTime } from '@/components/admin/account/table/accountTime'
 
 export type PanelPlace = 'stopped' | 'exempt' | 'rear' | 'trial' | 'front'
 
@@ -62,15 +64,33 @@ export function groupPlace(detail: PlaceDetail, group: BackendDetailGroup, model
 
 const DIMS: BackendDim[] = ['ttfo', 'error', 'cache']
 
-/** The latest of some ISO times; null without any. */
-const latest = (times: (string | null)[]) =>
-  times.reduce<string | null>((max, time) => (time && (!max || Date.parse(time) > Date.parse(max)) ? time : max), null)
-
-/** When a rear or trial place ends: the latest end of the lines that hold it there; null for the other places. */
-export function placeEnd(row: BackendGroupModel | undefined, place: PanelPlace): string | null {
+/**
+ * The line a rear or trial place shows: of the lines that hold the group there, the one that ends last (the place
+ * lasts till then), and how many hold it; null for the other places.
+ */
+export function placeLine(row: BackendGroupModel | undefined, place: PanelPlace): { dim: BackendDim; line: BackendLine; held: number } | null {
   if (!row || (place !== 'rear' && place !== 'trial')) return null
-  return latest(DIMS.map((dim) => row.lines[dim]).filter((line) => line.identity === place).map((line) => (place === 'rear' ? line.until : line.trial_until)))
+  const held = DIMS.filter((dim) => row.lines[dim].identity === place)
+  const end = (dim: BackendDim) => {
+    const time = place === 'rear' ? row.lines[dim].until : row.lines[dim].trial_until
+    return time ? Date.parse(time) : -Infinity
+  }
+  const dim = held.reduce<BackendDim | null>((last, item) => (last === null || end(item) > end(last) ? item : last), null)
+  return dim === null ? null : { dim, line: row.lines[dim], held: held.length }
 }
+
+type Translate = (key: string, values?: Record<string, unknown>) => string
+
+/** A rear stay as shown: its step (the backend's 0..4 as 1..5) and when it is reviewed. */
+export const rearStay = (t: Translate, level: number, until: string | null) =>
+  t('admin.schedQuality.stay.rear', { level: level + 1, time: formatShortTime(until) })
+
+/** A trial as shown: when it started and when it ends at the latest (it may end sooner). */
+export const trialStay = (t: Translate, start: string | null, end: string | null) =>
+  t('admin.schedQuality.stay.trial', { start: formatShortTime(start), end: formatShortTime(end) })
+
+/** A stay with the line it is of named before it. */
+export const lineStay = (t: Translate, line: string, stay: string) => t('admin.schedQuality.stay.line', { line, stay })
 
 // ---- Decisions ----
 

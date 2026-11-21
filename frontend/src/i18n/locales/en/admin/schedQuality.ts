@@ -47,8 +47,6 @@ export default {
         cache: 'Cache',
       },
       placeUntil: {
-        rear: 'Rear until {time}',
-        trial: 'Trial until {time}',
         exempt: 'Exempt until {time}',
       },
       ref: {
@@ -281,6 +279,12 @@ export default {
       error: 'Error line',
       cache: 'Cache line',
     },
+    // A stay wraps only at its dots: the words between them are held together by no-break spaces.
+    stay: {
+      rear: 'step\u00a0{level} · review\u00a0{time}',
+      trial: 'from\u00a0{start} · ends\u00a0by\u00a0{end}',
+      line: '{line} · {stay}',
+    },
     ttftRule: {
       title: 'First-output judging',
       hint: 'Applies to every OpenAI group. Judged on the first useful output against the front accounts of the same group and model; with fewer samples the estimate leans towards the group as a whole.',
@@ -465,6 +469,7 @@ export default {
         notMember: 'No longer in the group: not judged.',
         gateOff: 'This snapshot did not count the group (its quality gate was off at the time, or the group was created after it): not judged.',
         elsewhere: '{line}: no samples in this group; the evidence comes entirely from other groups.',
+        stay: '{line}: {place}, {stay}.',
       },
       switchReason: {
         handoff: 'first-output timeout handoff',
@@ -473,8 +478,6 @@ export default {
         profit_floor: 'profit floor release',
         other: 'other',
       },
-      rearUntil: 'reviewed at {time}',
-      trialUntil: 'trial ends at {time}',
     },
     noAction: {
       short: {
@@ -497,7 +500,6 @@ export default {
       counts: ' ({have} / {need})',
       none: 'no assessment recorded yet',
       since: ', for {duration}',
-      trialEnds: '; the trial ends at {time}',
     },
     duration: {
       minutes: '{m} min',

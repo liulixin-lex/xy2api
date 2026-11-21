@@ -234,7 +234,7 @@ describe('SchedQualityPanel', () => {
     expect(tab('gpt-b').getAttribute('aria-selected')).toBe('true')
     expect(groupRow(53).classList.contains('is-target')).toBe(true)
     expect(groupRow(54).classList.contains('is-target')).toBe(false)
-    expect(groupRow(53).querySelector('[data-test="qp-state"]')!.textContent).toContain('admin.schedQuality.panel.placeUntil.rear')
+    expect(groupRow(53).querySelector('[data-test="qp-state"]')!.textContent).toContain('admin.schedQuality.placement.rear')
     // The amber mark sits inside the tab of the model with a group at the back, before its text.
     expect(tab('gpt-b').firstElementChild!.getAttribute('data-qp-tab-mark')).toBe('rear')
     expect(tab('gpt-a').querySelector('[data-qp-tab-mark]')).toBeNull()
@@ -528,19 +528,24 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
   const cells = (groupId: number) => Array.from(groupRow(groupId).querySelectorAll<HTMLElement>('[data-qp-cell]'), (cell) => [
     cell.dataset.qpCell, cell.firstElementChild!.textContent, [...cell.classList].find((name) => name.startsWith('is-')), cell.querySelector('[data-qp-ref]')?.textContent ?? null
   ])
-  const place = (groupId: number) => groupRow(groupId).querySelector('[data-test="qp-state"]')!.textContent!.trim()
+  const place = (groupId: number) => groupRow(groupId).querySelector('[data-test="qp-state"] .gt__place-main')!.textContent!.trim()
+  const stay = (groupId: number) => groupRow(groupId).querySelector('[data-qp-stay]')?.textContent ?? null
   const trigger = (groupId: number) => groupRow(groupId).querySelector<HTMLElement>(`[data-qp-place-trigger="${groupId}"]`)
 
   it('puts each group\'s place and 12-hour figures in one row; a held share shows only what it is measured against', async () => {
     atLocalNoon()
     const value = detail()
-    value.groups[0].by_model[1].lines.error = line('error', 'trial', { trial_until: inMinutes(50) })
+    value.groups[0].by_model[1].lines.error = line('error', 'trial', { trial_started_at: inMinutes(-70), trial_until: inMinutes(50) })
     api.accountDetail.mockResolvedValue(value)
     api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
     mount(Panel, { attachTo: document.body })
     await openOn(7, { groupId: 53, model: 'gpt-b' })
-    // Rear until the end of its rear line (a clock time, not a countdown).
-    expect(place(53)).toBe('admin.schedQuality.panel.placeUntil.rear:{"time":"12:20"}')
+    // At the rear: under it the rear line's step (level 1 is 第 2 档) and when it is reviewed, a clock time; one line
+    // holds it there, so it is not named (its amber figure shows which).
+    expect(place(53)).toBe('admin.schedQuality.placement.rear')
+    expect(stay(53)).toBe('admin.schedQuality.stay.rear:{"level":2,"time":"12:20"}')
+    expect(trigger(53)!.getAttribute('aria-label')).toBe('晨星组 admin.schedQuality.placement.rear admin.schedQuality.stay.rear:{"level":2,"time":"12:20"}')
+    expect(stay(54)).toBeNull()
     expect(cells(53)).toEqual([
       ['requests', '463', 'is-plain', null],
       ['ttfo', '53.1%', 'is-rear', 'admin.schedQuality.panel.ref.ttfo:{"v":"19.7%"}'],
@@ -580,6 +585,29 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     expect((off as unknown as { __tipText: string }).__tipText).toBe('admin.schedQuality.identity.gateOffGroup')
     expect(trigger(54)).toBeNull()
     expect(cells(53)[0][1]).toBe('463')
+  })
+
+  it('shows a trial by its start and latest end, of the line that ends last, named when several are on trial', async () => {
+    atLocalNoon()
+    const value = detail()
+    const [, b] = value.groups[0].by_model
+    // An old 60-minute trial that started last but ends first, and a new 120-minute one.
+    b.placement = 'trial'
+    b.lines.ttfo = line('ttfo', 'trial', { trial_started_at: inMinutes(-10), trial_until: inMinutes(50) })
+    b.lines.error = line('error', 'trial', { trial_started_at: inMinutes(-40), trial_until: inMinutes(80) })
+    // 北辰组: one line on trial; the first-output line just passed its trial: back to normal, it reads unknown until
+    // new evidence says pass, whatever the passed trial's verdict.
+    value.groups[1].by_model = [groupModel('gpt-b', { ttfo: 'unknown', error: 'unknown', cache: 'trial' })]
+    Object.assign(value.groups[1].by_model[0].lines.ttfo, { verdict: 'pass' })
+    Object.assign(value.groups[1].by_model[0].lines.cache, { trial_started_at: inMinutes(-5), trial_until: inMinutes(115) })
+    api.accountDetail.mockResolvedValue(value)
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-b' })
+    expect(place(53)).toBe('admin.schedQuality.placement.trial')
+    expect(stay(53)).toBe('admin.schedQuality.stay.line:{"line":"admin.schedQuality.panel.col.error","stay":"admin.schedQuality.stay.trial:{\\"start\\":\\"11:20\\",\\"end\\":\\"13:20\\"}"}')
+    expect(stay(54)).toBe('admin.schedQuality.stay.trial:{"start":"11:55","end":"13:55"}')
+    expect(cells(54).slice(1).map(([col, , tone]) => `${col} ${tone}`)).toEqual(['ttfo is-unknown', 'error is-unknown', 'cache is-trial'])
   })
 
   it('opens a group\'s exemption at its place, and only the removal of one in force there', async () => {
@@ -654,7 +682,7 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     api.accountPerformance.mockRejectedValue(new Error('down'))
     mount(Panel, { attachTo: document.body })
     await openOn(7, { model: 'gpt-b' })
-    expect(place(53)).toMatch(/placeUntil\.rear/)
+    expect(place(53)).toBe('admin.schedQuality.placement.rear')
     api.accountPerformance.mockResolvedValue(perfOf(7))
     document.querySelector<HTMLElement>('[data-qp-perf-retry]')!.click()
     await flushPromises()

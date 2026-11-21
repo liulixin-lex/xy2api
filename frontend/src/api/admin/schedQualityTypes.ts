@@ -53,7 +53,11 @@ export interface BackendRear {
   model: string
   /** The lines at the rear. */
   lines: BackendDim[]
+  /** The line with the latest end, whose end and stay step these are. */
+  until_line: BackendDim
   until: string
+  /** Stay step, 0..4 (shown as 1..5). */
+  level: number
   exempt: boolean
   /**
    * The record really puts the account at the back of the group: not exempt, quality scheduling switched on, its
@@ -62,10 +66,13 @@ export interface BackendRear {
   effective: boolean
 }
 
-/** A model of a group in which the account is on trial; `until` is the trial's end. */
+/** A model of a group in which the account is on trial: the trial with the latest end, on `until_line`. */
 export interface BackendTrial {
   group_id: number
   model: string
+  until_line: BackendDim
+  trial_started_at: string
+  /** The trial's end at the latest (it may end sooner). */
   until: string
 }
 
@@ -186,11 +193,13 @@ export interface BackendSampleCounts {
 /** One line of one group × model. */
 export interface BackendLine<D extends BackendDim = BackendDim> extends BackendSampleCounts {
   identity: BackendIdentity
-  /** Rear stay step, 0..4 (20, 40, 60, 90, 120 minutes). */
+  /** Rear stay step, 0..4 (20, 40, 80, 160, 240 minutes). */
   level: number
   /** End of the rear stay. */
   until: string | null
-  /** End of the trial. */
+  /** Start of the trial. */
+  trial_started_at: string | null
+  /** End of the trial at the latest (it may end sooner). */
   trial_until: string | null
   verdict: BackendVerdict
   evidence: BackendEvidenceOf[D]
@@ -527,12 +536,16 @@ export interface BackendPerfGroup {
 }
 
 /**
- * A line of a performance row: its identity now, the end of its rear stay or trial, its latest assessment, and the
- * units its rule counted from this group and from all (absent or null until the backend sends them).
+ * A line of a performance row: its identity now, the end of its rear stay or trial (with the stay step and the trial's
+ * start), its latest assessment, and the units its rule counted from this group and from all (absent or null until the
+ * backend sends them).
  */
 export interface BackendPerfLine extends BackendSampleCounts {
   identity: BackendIdentity
+  /** Rear stay step, 0..4 (20, 40, 80, 160, 240 minutes). */
+  level: number
   until: string | null
+  trial_started_at: string | null
   last_eval: BackendLastEval | null
 }
 

@@ -12,10 +12,11 @@
 <script setup lang="ts">
 /**
  * One 12-hour performance row opened (the board's 12-hour view and the panel's "过去 12 小时"): every figure of the row
- * in plain sentences, then each line's latest assessment, its result (no action, or the action) and its main reason. The
- * score is for reading only. A figure short of its minimum is told as counts; what the backend did not send is left
- * out, not written as unknown. A rear line whose counted units are all from other groups says so, from the row's own
- * counts only (another source may be another assessment's).
+ * in plain sentences, then each line's latest assessment, its result (no action, or the action) and its main reason,
+ * and a line at the rear or on trial its step and review, or its start and latest end. The score is for reading only. A
+ * figure short of its minimum is told as counts; what the backend did not send is left out, not written as unknown. A
+ * rear line whose counted units are all from other groups says so, from the row's own counts only (another source may
+ * be another assessment's).
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -29,6 +30,7 @@ import {
   fmtPct,
   fmtScore,
   fmtSigned,
+  lineStayText,
   MIN_ATTEMPTS,
   MIN_FIRST,
   MIN_FIRST_SESSIONS,
@@ -110,9 +112,11 @@ function verdictLines(): string[] {
     if (!latest) lines.push(T('evalNone', { line: name }))
     else {
       const result = latest.acted ? schedWord('decisions.action', latest.action, t, te) : T('resultNone')
-      const reason = reasonLong(latest, t, te, { trialEnd: line?.identity === 'trial' ? line.until : null, formatTime: formatShortTime })
+      const reason = reasonLong(latest, t, te)
       lines.push(T('evalLine', { line: name, time: formatShortTime(latest.at), result, reason }))
     }
+    const stay = line ? lineStayText(line, t) : ''
+    if (line && stay) lines.push(T('stay', { line: name, place: schedWord('identity', line.identity, t, te), stay }))
     if (line && evidenceElsewhere(line.identity, line)) lines.push(T('elsewhere', { line: name }))
     return lines
   })

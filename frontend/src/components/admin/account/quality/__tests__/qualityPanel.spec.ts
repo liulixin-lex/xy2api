@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { BackendDecision, BackendDetailGroup, BackendGroupModel } from '@/api/admin/schedQualityTypes'
 import { basis, cacheEvidence, errorEvidence, groupModel, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
-import { basisFigures, evidenceCauses, groupPlace, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeEnd } from '../qualityPanel'
+import { basisFigures, evidenceCauses, groupPlace, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeLine } from '../qualityPanel'
 import { groupDotState } from '@/components/admin/account/table/accountGroups'
 
 const group = (id: number, rows: BackendGroupModel[], exempt = false): BackendDetailGroup => ({
@@ -54,15 +54,24 @@ describe('quality panel place', () => {
     }
   })
 
-  it('ends a rear place with its latest rear line and a trial with its latest trial; the other places have no end', () => {
+  it('shows a rear place by its rear line that ends last and a trial by its trial that ends last; the other places by none', () => {
     const row = groupModel('a', { ttfo: 'rear', error: 'rear', cache: 'trial' })
-    Object.assign(row.lines.ttfo, { until: '2026-11-16T10:20:00Z' })
-    Object.assign(row.lines.error, { until: '2026-11-16T10:50:00Z' })
-    Object.assign(row.lines.cache, { trial_until: '2026-11-16T11:00:00Z' })
-    expect(placeEnd(row, 'rear')).toBe('2026-11-16T10:50:00Z')
-    expect(placeEnd(row, 'trial')).toBe('2026-11-16T11:00:00Z')
-    expect(placeEnd(row, 'front')).toBeNull()
-    expect(placeEnd(undefined, 'rear')).toBeNull()
+    Object.assign(row.lines.ttfo, { level: 3, until: '2026-11-16T10:20:00Z' })
+    Object.assign(row.lines.error, { level: 1, until: '2026-11-16T10:50:00Z' })
+    Object.assign(row.lines.cache, { trial_started_at: '2026-11-16T09:00:00Z', trial_until: '2026-11-16T11:00:00Z' })
+    expect(placeLine(row, 'rear')).toEqual({ dim: 'error', line: row.lines.error, held: 2 })
+    expect(placeLine(row, 'trial')).toEqual({ dim: 'cache', line: row.lines.cache, held: 1 })
+    expect(placeLine(row, 'front')).toBeNull()
+    expect(placeLine(undefined, 'rear')).toBeNull()
+  })
+
+  it('takes the trial that ends last, whatever its start: three lines on trial from three starts', () => {
+    const row = groupModel('a', { ttfo: 'trial', error: 'trial', cache: 'trial' })
+    // An old 60-minute trial that started last but ends first, a new 120-minute one, and one without an end.
+    Object.assign(row.lines.ttfo, { trial_started_at: '2026-11-16T10:30:00Z', trial_until: '2026-11-16T11:30:00Z' })
+    Object.assign(row.lines.error, { trial_started_at: '2026-11-16T10:00:00Z', trial_until: '2026-11-16T12:00:00Z' })
+    Object.assign(row.lines.cache, { trial_started_at: '2026-11-16T10:10:00Z', trial_until: null })
+    expect(placeLine(row, 'trial')).toEqual({ dim: 'error', line: row.lines.error, held: 3 })
   })
 
   it('offers 恢复 for a line at the rear or on trial, not for unknown or pass', () => {
