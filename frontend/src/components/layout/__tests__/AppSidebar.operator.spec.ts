@@ -265,13 +265,12 @@ describe('AppSidebar custom menu icons', () => {
     '<style>svg { color: #526071; } @media (prefers-color-scheme: dark) { svg { color: #d8e0ea; } }</style>' +
     '<path d="M12 6v12m6-6H6"/></svg>'
 
-  it('inlines an uploaded icon without the stylesheet it carries', async () => {
+  it('draws an uploaded icon with its stylesheet inside its own shadow root', async () => {
     const wrapper = setup('admin', { menuIcon: LIVE_ICON })
     await flushPromises()
-    const icon = wrapper.get('a[href="/custom/tools"] .sidebar-svg-icon')
-    expect(icon.find('svg path').attributes('d')).toBe('M12 6v12m6-6H6')
-    expect(icon.find('svg').attributes('stroke')).toBe('currentColor')
-    expect(icon.find('style').exists()).toBe(false)
-    expect(wrapper.html()).not.toContain('#d8e0ea')
+    const root = wrapper.get('a[href="/custom/tools"] .sidebar-svg-icon').element.shadowRoot!
+    expect(root.querySelector('svg path')!.getAttribute('d')).toBe('M12 6v12m6-6H6')
+    expect(root.querySelector('svg > style')!.textContent).toContain('#d8e0ea')
+    expect(wrapper.find('style').exists()).toBe(false)
   })
 })

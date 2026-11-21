@@ -76,14 +76,14 @@ describe('image upload read lifecycle', () => {
 })
 
 describe('svg upload', () => {
-  it('stores an uploaded icon without the stylesheet it carries', async () => {
+  it('stores an uploaded icon with the stylesheet that colours it', async () => {
     const { wrapper, choose } = uploader('svg')
     await choose('image/svg+xml')
     ControlledReader.instances[0].complete(
-      '<svg viewBox="0 0 24 24" stroke="currentColor"><style>svg { color: #d8e0ea; }</style><path d="M12 6v12"/></svg>'
+      '<svg viewBox="0 0 24 24"><style>.cls-1 { stroke: #123456; }</style><path class="cls-1" d="M4 12h16"/></svg>'
     )
     const [[stored]] = wrapper.emitted('update:modelValue') as string[][]
-    expect(stored).toBe('<svg viewBox="0 0 24 24" stroke="currentColor"><path d="M12 6v12"></path></svg>')
+    expect(stored).toBe('<svg viewBox="0 0 24 24"><style>.cls-1 { stroke: #123456; }</style><path class="cls-1" d="M4 12h16"></path></svg>')
   })
 
   it('keeps the current icon when the file holds nothing drawable', async () => {
