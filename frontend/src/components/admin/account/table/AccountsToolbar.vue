@@ -95,7 +95,8 @@
       </template>
 
       <template #status>
-      <TableSortHint v-if="!phone && sortHint" class="tb-sort" :label="sortHint.label" :order="sortHint.order" />
+      <!-- Below 1024px only (a tablet): from 1024px, as before the mobile list plan, the toolbar has no sort hint. -->
+      <TableSortHint v-if="!phone && !desktop && sortHint" class="tb-sort" :label="sortHint.label" :order="sortHint.order" />
       <LiveStatusIndicator :status="liveStatus" :pause="pause" :resume="resume" :detail="t('admin.accounts.table.liveDetail')" />
       </template>
       <template #actions>
@@ -184,7 +185,7 @@ import Select from '@/components/common/Select.vue'
 import TableToolbar from '@/components/layout/TableToolbar.vue'
 import StatusDot, { type StatusDotTone } from '@/components/common/StatusDot.vue'
 import TableSortHint from '@/components/common/TableSortHint.vue'
-import { usePhoneViewport } from '@/composables/useTableViewport'
+import { useTableViewport } from '@/composables/useTableViewport'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import type { LiveStatus } from '@/composables/useLiveTable'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
@@ -362,7 +363,7 @@ const filtersOverflow = () => {
  * 768px the filters are in the phone's bottom sheet: nothing is measured or folded, so "more filters" counts nothing.
  */
 const wide = useMediaQuery('(min-width: 768px)')
-const phone = usePhoneViewport()
+const { phone, desktop } = useTableViewport()
 /** The phone's sheet lists every filter: the four direct ones, then the rest. */
 const sheetKeys = computed(() => [...DIRECT, ...moreKeys.value])
 watch(wide, () => {

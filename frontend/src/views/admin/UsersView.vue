@@ -6,7 +6,7 @@
              menu and create. -->
         <TableToolbar compact filter-sheet :filter-count="filterTags.length" @clear-filters="clearAllFilters">
           <template #status>
-            <TableSortHint v-if="!phone && sortHint" :label="sortHint.label" :order="sortHint.order" />
+            <TableSortHint v-if="!phone && !desktop && sortHint" :label="sortHint.label" :order="sortHint.order" />
             <LiveStatusIndicator :status="liveStatus" :pause="liveUsers.pause" :resume="liveUsers.resume" :detail="t('admin.users.liveDetail')" />
           </template>
           <template #search>
