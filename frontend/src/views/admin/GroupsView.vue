@@ -7,7 +7,7 @@
              tags; the count, live state and tools on one row, the page's own tools in "more". -->
         <TableToolbar compact filter-sheet :filter-count="filterTags.length" @clear-filters="clearGroupFilters">
           <template #status>
-            <TableSortHint v-if="!phone && sortHint" :label="sortHint.label" :order="sortHint.order" />
+            <TableSortHint v-if="!phone && !desktop && sortHint" :label="sortHint.label" :order="sortHint.order" />
             <LiveStatusIndicator :status="liveStatus" :pause="liveGroups.pause" :resume="liveGroups.resume" :detail="t('admin.groups.liveDetail')" />
           </template>
           <!-- The toolbar renders each slot in its own form (sheet, tags, info on a phone; filters in the row): not gated on
