@@ -90,26 +90,30 @@
         </template>
 
         <!--
-          管理端：请求模型和发往上游的模型写在同一行（a → b），上游答回的模型不一致属少见的异常，另起一行标出。
-          用户端只写请求的模型（不推断、不显示上游映射），悬停和明细同样。
+          照改版前：12px，请求的模型一行，管理端发往上游的模型在下面用“↳”逐级缩进（映射链每级多缩一格），上游答回的模型不一致属
+          少见的异常，再另起一行标出。用户端只写请求的模型（不推断、不显示上游映射），明细同样。
         -->
         <template #cell-model="{ row }">
-          <div class="max-w-[280px] text-sm">
-            <div class="truncate" data-testid="usage-model-steps" :title="shownModelSteps(row).join(' → ')">
-              <template v-for="(step, i) in shownModelSteps(row)" :key="i">
-                <span v-if="i > 0" class="mx-1 text-gray-400 dark:text-gray-500" aria-hidden="true">→</span>
-                <span :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'">{{ step }}</span>
-              </template>
+          <div class="space-y-0.5 text-xs" data-testid="usage-model-cell">
+            <div v-if="shownModelSteps(row).length > 1" class="space-y-0.5" data-testid="usage-model-steps">
+              <div
+                v-for="(step, i) in shownModelSteps(row)"
+                :key="i"
+                class="break-all"
+                :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
+                :style="i > 0 && isMappingChain(row) ? `padding-left: ${i * 0.75}rem` : ''"
+              ><span v-if="i > 0" class="mr-0.5">↳</span>{{ step }}</div>
             </div>
+            <span v-else class="font-medium text-gray-900 dark:text-white" data-testid="usage-model-steps">{{ row.model }}</span>
             <div
               v-if="isAdmin && hasModelAudit(row)"
-              class="mt-0.5 truncate text-xs"
+              class="break-all pl-3 text-[11px]"
               :class="isLikelyModelVariant(row) ? 'text-amber-600 dark:text-amber-400' : 'text-orange-600 dark:text-orange-400'"
               :title="modelAuditTitle(row, t)"
             >
-              <span class="mr-1">{{ t('usage.upstreamResponseModel') }}:</span>{{ row.upstream_response_model }}
+              <span class="mr-1">↳ {{ t('usage.upstreamResponseModel') }}:</span>{{ row.upstream_response_model }}
               <span
-                class="ml-1 inline-flex rounded px-1 py-px text-xs font-medium leading-tight ring-1 ring-inset"
+                class="ml-1 inline-flex rounded px-1 py-px text-[10px] font-medium ring-1 ring-inset"
                 :class="isLikelyModelVariant(row)
                   ? 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30'
                   : 'bg-orange-50 text-orange-700 ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-500/30'"
@@ -323,14 +327,15 @@
         </template>
 
         <!--
-          时间（今年省略年份）。从 1024px 起时间旁一个“明细”按钮；1024 以下“明细”在右侧冻结的 44px 列里（与账号页“⋯”同一做法），
-          不用横滑到最后一列。点按、Enter、Space 都打开同一个明细对话框。
+          时间（今年省略年份）。1024 以下“明细”在右侧冻结的 44px 列里（与账号页“⋯”同一做法），不用横滑到最后一列；从 1024px 起
+          主指针是触屏（没有悬停）时时间旁一个“明细”按钮。鼠标为主的电脑（带触摸屏的也算）和改版前一样没有“明细”：四列的细项都在
+          格子和悬停里，档位明细从费用的小图标点开。点按、Enter、Space 都打开同一个明细对话框。
         -->
         <template #cell-created_at="{ row, value }">
           <div class="flex items-center gap-3 whitespace-nowrap">
             <span class="text-sm tabular-nums text-gray-600 dark:text-gray-400">{{ formatListDateTime(value) }}</span>
             <button
-              v-if="desktop"
+              v-if="desktop && !mouseFirst"
               type="button"
               data-testid="usage-detail-open"
               :data-row-key="rowKey(row)"
@@ -498,6 +503,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import CellEmpty from '@/components/common/CellEmpty.vue'
 import TableIdentityCell from '@/components/common/TableIdentityCell.vue'
+import { useMediaQuery } from '@vueuse/core'
 import { useTableViewport } from '@/composables/useTableViewport'
 import Icon from '@/components/icons/Icon.vue'
 import UsageTokenBreakdown from './UsageTokenBreakdown.vue'
@@ -610,9 +616,13 @@ const tableColumns = computed<Column[]>(() =>
     ? props.columns
     : [...props.columns, { key: 'actions', label: t('usage.requestDetail.button'), class: 'w-11 min-w-11 !px-0 text-center' }]
 )
+/** A mouse-first computer (a touch screen beside the mouse included): no "Details" beside the time, as before the plan. */
+const mouseFirst = useMediaQuery('(hover: hover) and (pointer: fine)')
 const isAdmin = computed(() => props.viewer === 'admin')
 /** The model steps a page may show: the admin page the whole mapping, the user page the model asked for. */
 const shownModelSteps = (row: AdminUsageLog) => (isAdmin.value ? modelSteps(row) : [row.model])
+/** The steps come from the mapping chain (each step one more indent), not just requested and upstream. */
+const isMappingChain = (row: AdminUsageLog) => !!row.model_mapping_chain?.includes('→')
 
 const currentPageIps = computed(() =>
   Array.from(new Set(props.data.map((row) => row.ip_address).filter((ip): ip is string => Boolean(ip))))
