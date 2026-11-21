@@ -2,7 +2,7 @@
   <div class="recent sq-focus" :tabindex="quality ? 0 : undefined" data-test="account-recent" v-tip="tipCard" @click="showTipNow($event.currentTarget)">
     <template v-for="line in lines" :key="line.dim">
       <span class="recent__k">{{ line.label }}</span>
-      <span class="recent__v" :class="{ 'recent__v--na': line.muted }" :data-dim="line.dim">
+      <span class="recent__v" :class="line.tone ? LATENCY_TEXT_CLASSES[line.tone] : 'recent__v--na'" :data-dim="line.dim">
         <template v-if="line.spoken"><span aria-hidden="true">{{ line.text }}</span><span class="sr-only">{{ line.spoken }}</span></template>
         <template v-else>{{ line.text }}</template>
       </span>
@@ -12,12 +12,12 @@
 
 <script setup lang="ts">
 /**
- * Recent status: first token, errors and cache on three lines, from the account's quality summary. These are the
- * whole account's values over the last hour, so they are never coloured by a mark that judges one group and model
- * (7k-2): which group, model and line fall short is the group dots' and their tips' to tell. First token is the
- * median first output with timeouts counted last ("超时" when more than half timed out), cache the continuation
- * turns. Too few samples or no data reads muted. The whole cell has one tip card (12.7): the window, then four rows with their samples, the same as
- * the quality panel's recent section. With a tip the cell takes keyboard focus, which shows the card and points
+ * Recent status: first token, errors and cache on three lines, from the account's quality summary: the whole
+ * account's values over the last hour. First token is the median first output with timeouts counted last ("超时" when
+ * more than half timed out), cache the continuation turns. Each value takes the latency colours on the owner's bands
+ * (recentTone, judged on the value as shown); "—" without data reads muted. Which group and model fall short is still
+ * the group dots' to tell. The whole cell has one tip card (12.7): the window, then four rows with their samples (too
+ * few samples say so there), the same as the quality panel's recent section. With a tip the cell takes keyboard focus, which shows the card and points
  * aria-describedby at it (v-tip); a tap shows it too (touch has no hover). Without quality data there is nothing to
  * focus. The shared ring sits outside the content; in the table, whose cell clips outside 72px, AccountsView draws it
  * on the column's cell instead.
@@ -25,7 +25,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { showTipNow, vTip, type TipCard } from '@/utils/tip'
-import { RECENT_DIMS, type RecentQuality, firstOutputMedian, recentRows, recentTitle } from './accountRecent'
+import { LATENCY_TEXT_CLASSES } from '@/utils/latencyHealth'
+import { RECENT_DIMS, type RecentQuality, firstOutputMedian, recentRows, recentTitle, recentTone } from './accountRecent'
 
 const props = defineProps<{ quality: RecentQuality | null }>()
 const { t } = useI18n()
@@ -37,13 +38,14 @@ const lines = computed(() => {
     // The 72px table cell takes the short labels (English "Errors"/"Cache" do not fit); the tip has the full ones.
     const label = t(`admin.accounts.table.dimsShort.${dim}`)
     const row = rows.find((item) => item.key === dim)!
+    const tone = recentTone(q, dim)
     // English "Timeout" does not fit the 72px table cell: it shows "T/O", and a screen reader reads the word (Chinese
     // "超时" is the same either way, nothing to add).
     if (q && dim === 'ttfo' && firstOutputMedian(q) === 'timeout') {
       const short = t('admin.accounts.table.recent.timeoutShort')
-      return { dim, label, text: short, spoken: short === row.text ? '' : row.text, muted: row.muted }
+      return { dim, label, text: short, spoken: short === row.text ? '' : row.text, tone }
     }
-    return { dim, label, text: row.text, spoken: '', muted: row.muted }
+    return { dim, label, text: row.text, spoken: '', tone }
   })
 })
 
@@ -79,8 +81,9 @@ function tipCard(): TipCard | '' {
   font-size: var(--font-size-small);
   line-height: var(--line-height-body);
 }
+/* No colour of its own: a value takes its band's latency colour (a utility class, which an unlayered colour here would
+   override), "—" the muted one. */
 .recent__v {
-  color: var(--color-text-primary);
   font-size: var(--font-size-body);
   font-variant-numeric: tabular-nums;
   line-height: var(--line-height-body);

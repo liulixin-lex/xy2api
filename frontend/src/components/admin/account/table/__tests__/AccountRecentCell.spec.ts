@@ -53,27 +53,34 @@ const json = (key: string, params: Record<string, unknown>) => `admin.accounts.t
 const tooFew = (note: string) => json('tooFew', { note })
 const muted = (text: string) => ({ text, tone: 'muted' })
 
-// Recent status: the whole account's values, never judged in the browser.
+// Recent status: the whole account's values, each in its band's latency colour (accountRecent.spec.ts has the bands).
 describe('AccountRecentCell', () => {
-  it('shows the whole account\'s values plainly, even under a red mark that judges one group and model (7k-2)', () => {
+  it('colours each value by its band in the latency colours, light and dark; the labels stay muted', () => {
     expect(cells(quality({ error: { n: 100, short: false, red: true, rate: 0.12, failed: 12 } }))).toEqual([
-      { dim: 'ttfo', text: '7.0s', cls: [] },
-      { dim: 'error', text: '12%', cls: [] },
-      { dim: 'cache', text: '70%', cls: [] }
+      { dim: 'ttfo', text: '7.0s', cls: ['text-amber-600', 'dark:text-amber-400'] },
+      { dim: 'error', text: '12%', cls: ['text-red-600', 'dark:text-red-400'] },
+      { dim: 'cache', text: '70%', cls: ['text-red-600', 'dark:text-red-400'] }
     ])
+    expect(cells(quality({ first_output: { n: 33, timeouts: 0, p50_ms: 3900 }, error: { n: 1000, short: false, red: false, rate: 0.001, failed: 1 }, cache: { ratio: 0.93, turns: 29 } }))).toEqual([
+      { dim: 'ttfo', text: '3.9s', cls: ['text-emerald-600', 'dark:text-emerald-400'] },
+      { dim: 'error', text: '0.1%', cls: ['text-emerald-600', 'dark:text-emerald-400'] },
+      { dim: 'cache', text: '93%', cls: ['text-emerald-600', 'dark:text-emerald-400'] }
+    ])
+    expect(mountCell(quality()).findAll('.recent__k').every((label) => label.classes().join(' ') === 'recent__k')).toBe(true)
   })
 
-  it('writes first token as the median in seconds, "超时" when the median is a timeout, "—" without samples; muted under 20', () => {
+  it('writes first token as the median in seconds, "超时" (red) when the median is a timeout, "—" (muted) without samples', () => {
     const ttfo = (first_output: Quality['first_output']) => cells(quality({ first_output }))[0]
-    expect(ttfo({ n: 20, timeouts: 10, p50_ms: 7000 })).toEqual({ dim: 'ttfo', text: '7.0s', cls: [] })
-    expect(ttfo({ n: 19, timeouts: 0, p50_ms: 7000 })).toEqual({ dim: 'ttfo', text: '7.0s', cls: ['recent__v--na'] })
+    expect(ttfo({ n: 20, timeouts: 10, p50_ms: 7000 })).toEqual({ dim: 'ttfo', text: '7.0s', cls: ['text-amber-600', 'dark:text-amber-400'] })
+    // Too few samples: the table shows the value in its colour all the same; the tip card says the samples are too few.
+    expect(ttfo({ n: 19, timeouts: 0, p50_ms: 7000 })).toEqual({ dim: 'ttfo', text: '7.0s', cls: ['text-amber-600', 'dark:text-amber-400'] })
     // The table's short word is hidden from screen readers, which read the full one.
     expect(ttfo({ n: 21, timeouts: 11, p50_ms: null }))
-      .toEqual({ dim: 'ttfo', text: 'admin.accounts.table.recent.timeoutShort', spoken: 'admin.accounts.table.recent.timeout', cls: [] })
+      .toEqual({ dim: 'ttfo', text: 'admin.accounts.table.recent.timeoutShort', spoken: 'admin.accounts.table.recent.timeout', cls: ['text-red-600', 'dark:text-red-400'] })
     expect(ttfo({ n: 0, timeouts: 0, p50_ms: null })).toEqual({ dim: 'ttfo', text: '—', cls: ['recent__v--na'] })
     // A median of 0 ms is a time, not a timeout.
     const instant = quality({ first_output: { n: 30, timeouts: 0, p50_ms: 0 } })
-    expect(cells(instant)[0]).toEqual({ dim: 'ttfo', text: '0.00s', cls: [] })
+    expect(cells(instant)[0]).toEqual({ dim: 'ttfo', text: '0.00s', cls: ['text-emerald-600', 'dark:text-emerald-400'] })
     expect(rowsOf(instant)[0]).toEqual(['admin.accounts.table.recent.firstOutput', '0.00s', json('count', { n: 30 })])
     expect(rowsOf(quality({ first_output: { n: 3, timeouts: 3, p50_ms: null } }))[0])
       .toEqual(['admin.accounts.table.recent.firstOutput', muted('admin.accounts.table.recent.timeout'), tooFew(json('count', { n: 3 }))])
@@ -117,8 +124,8 @@ describe('AccountRecentCell', () => {
     expect(rowsOf(quality({ error: { n: 0, short: true, red: false, rate: null, failed: 0 } }))[2][1]).toEqual(muted('—'))
     expect(rowsOf(quality({ cache: { ratio: 0.2, turns: 19 } }))[3]).toEqual(['admin.accounts.table.recent.cacheTurns', muted('20%'), tooFew(json('turns', { n: 19 }))])
     expect(rowsOf(quality({ cache: { ratio: 0.2, turns: 20 } }))[3]).toEqual(['admin.accounts.table.recent.cacheTurns', '20%', json('turns', { n: 20 })])
-    expect(cells(quality({ cache: { ratio: 0.2, turns: 19 } }))[2]).toEqual({ dim: 'cache', text: '20%', cls: ['recent__v--na'] })
-    expect(cells(quality({ cache: { ratio: 0.2, turns: 20 } }))[2]).toEqual({ dim: 'cache', text: '20%', cls: [] })
+    expect(cells(quality({ cache: { ratio: 0.2, turns: 19 } }))[2]).toEqual({ dim: 'cache', text: '20%', cls: ['text-red-600', 'dark:text-red-400'] })
+    expect(cells(quality({ cache: { ratio: 0.2, turns: 20 } }))[2]).toEqual({ dim: 'cache', text: '20%', cls: ['text-red-600', 'dark:text-red-400'] })
     expect(cells(null).map((cell) => [cell.text, cell.cls])).toEqual([['—', ['recent__v--na']], ['—', ['recent__v--na']], ['—', ['recent__v--na']]])
   })
 
