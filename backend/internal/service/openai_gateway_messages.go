@@ -734,7 +734,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	if err != nil {
 		var conversion *apicompat.UpstreamConversionError
 		if errors.As(err, &conversion) {
-			WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, conversion.Field, "Invalid upstream response event")
+			writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolAnthropic, "server_error", conversion.Field, "Invalid upstream response event", err)
 		}
 		var readErr *openAICompatBufferedReadError
 		if errors.As(err, &readErr) && readErr != nil {
@@ -805,11 +805,11 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	acc.SupplementResponseOutput(finalResponse)
 
 	if err := acc.Err(); err != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolAnthropic, "api_error", "", err.Error(), err)
 		return nil, err
 	}
 	if err := apicompat.ValidateResponsesForAnthropic(finalResponse); err != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolAnthropic, "api_error", "", err.Error(), err)
 		return nil, err
 	}
 	anthropicResp := apicompat.ResponsesToAnthropicWithOptions(finalResponse, originalModel, m7ConversionOptions(c.Request.Context()))
@@ -1225,7 +1225,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		pendingPrelude.take()
 		firstEvent.disarm()
 		stopPreludeCancel()
-		WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", message)
+		writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolAnthropic, "api_error", "", message, err)
 		if conversionBeforeOutput {
 			_ = resp.Body.Close()
 		}
@@ -1495,7 +1495,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		}
 		finalEvents := apicompat.FinalizeResponsesAnthropicStream(state)
 		if err := state.Err(); err != nil {
-			WriteTargetProtocolError(c, PreOutputProtocolAnthropic, http.StatusBadGateway, "api_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+			writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolAnthropic, "api_error", "", err.Error(), err)
 			return resultWithUsage(), err
 		}
 		if len(finalEvents) > 0 && !clientDisconnected {

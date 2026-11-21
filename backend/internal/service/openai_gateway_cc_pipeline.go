@@ -341,7 +341,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 			return true
 		}
 		// Deliver the terminal before waiting for the remaining upstream usage.
-		writeCCStreamReadError(c, protocol, err)
+		writeCCStreamReadError(c, protocol, err, resp)
 		return false
 	}
 	processFrame := func(frame openAICompatSSEFrame) bool {
@@ -439,11 +439,21 @@ func (s *OpenAIGatewayService) scanCCStream(
 	return st
 }
 
-func writeCCStreamReadError(c *gin.Context, protocol string, err error) {
+func writeCCStreamReadError(c *gin.Context, protocol string, err error, responses ...*http.Response) {
 	code, message := classifyOpenAIUpstreamStreamReadError(err)
 	var conversion *apicompat.UpstreamConversionError
 	if errors.As(err, &conversion) {
-		code, message = OpenAIUpstreamProtocolErrorCode, "Invalid upstream Chat Completions stream"
+		message = "Invalid upstream Chat Completions stream"
+		errType := "server_error"
+		if protocol == PreOutputProtocolAnthropic {
+			errType = "api_error"
+		}
+		var resp *http.Response
+		if len(responses) > 0 {
+			resp = responses[0]
+		}
+		writeUpstreamConversionError(c, resp, "chat", protocol, errType, "", message, err)
+		return
 	}
 	errType := "server_error"
 	if protocol == PreOutputProtocolAnthropic {

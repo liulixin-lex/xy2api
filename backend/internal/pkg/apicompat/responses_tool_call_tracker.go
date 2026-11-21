@@ -60,7 +60,7 @@ func (t *ResponsesToolCallTracker) Register(item ResponsesOutput, index int, kno
 	}
 	if call != nil {
 		if !terminal && (bufferedIdentityConflict(call.Item, item) || (call.Item.Name != "" && item.Name != "" && call.Item.Name != item.Name)) {
-			return nil, false, toolTrackingError("output", "conflicting tool identity")
+			return nil, false, outputIdentityConflict(call.Item, item, "", "conflicting tool identity")
 		}
 		if !terminal && known && call.IndexKnown && call.OutputIndex != index {
 			return nil, false, toolTrackingError("output_index", "conflicting tool index")
@@ -149,7 +149,7 @@ func (t *ResponsesToolCallTracker) Resolve(event *ResponsesStreamEvent) (*respon
 	}
 	if call != nil {
 		if (event.ItemID != "" && call.Item.ID != "" && event.ItemID != call.Item.ID) || (event.CallID != "" && call.Item.CallID != "" && event.CallID != call.Item.CallID) {
-			return nil, toolTrackingError("output", "conflicting tool identity")
+			return nil, outputIdentityConflict(call.Item, ResponsesOutput{ID: event.ItemID, CallID: event.CallID}, "", "conflicting tool identity")
 		}
 		return call, nil
 	}

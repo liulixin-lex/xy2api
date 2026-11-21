@@ -708,7 +708,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	if err != nil {
 		var conversion *apicompat.UpstreamConversionError
 		if errors.As(err, &conversion) {
-			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, conversion.Field, "Invalid upstream response event")
+			writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolChat, "server_error", conversion.Field, "Invalid upstream response event", err)
 		}
 		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
 	}
@@ -776,11 +776,11 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	acc.SupplementResponseOutput(finalResponse)
 
 	if err := acc.Err(); err != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolChat, "server_error", "", err.Error(), err)
 		return nil, err
 	}
 	if err := apicompat.ValidateResponsesForChat(finalResponse); err != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolChat, "server_error", "", err.Error(), err)
 		return nil, err
 	}
 	chatResp := apicompat.ResponsesToChatCompletions(finalResponse, originalModel)
@@ -1008,7 +1008,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		pendingPrelude.take()
 		firstEvent.disarm()
 		stopPreludeCancel()
-		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", message)
+		writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolChat, "server_error", "", message, err)
 		if conversionBeforeOutput {
 			_ = resp.Body.Close()
 		}
