@@ -410,7 +410,7 @@ export default {
         cacheAny: 'Turns that continued a session on this same account: the share of input read from cache, by tokens; below, the number of turns. Red under the group\'s cache minimum',
         timeouts: 'Share of attempts on this account cut off at the first-output time limit and sent elsewhere; below, how many',
         switches: 'Times a session on this account was moved to another account; each move starts the cache over. Below, how many were released by the profit floor; open the row for every reason',
-        score: 'Lower is better: the excess in points, shrunk: the account\'s slow first sends minus the expected ones, over comparable first sends plus 20, times 100, worked out over every group with the gate on. {use}Below, its place among scored accounts of the same priority and model',
+        score: 'Lower is better: the excess in points, shrunk: the account\'s slow first sends minus the expected ones, over comparable first sends plus 20, times 100, worked out over every group with the gate on. {use} Below, its place among scored accounts of the same priority and model',
         now: 'The current verdicts of the first-output, error and cache lines in that order: filled circle pass, filled square rear, ring trial, dash unknown',
       },
       expected: 'expected {rate}',
@@ -432,8 +432,7 @@ export default {
         fast: 'Clearly faster: the slow share\'s cautious upper bound {upper} is below the expected {expected}',
         cacheLow: 'Large deviation: cache on continued turns {rate} is under the group\'s minimum {min}',
       },
-      scoreUse: 'A new session goes first to an account scored clearly lower than the one it would otherwise get (lower by 3.0 or more), with the same priority and no higher price. ',
-      scoreUseFull: 'A new session goes first to an account scored clearly lower than the one it would otherwise get (lower by 3.0 or more), with the same priority and no higher price. In each 15-minute slot, an account takes no more of these sessions than a quarter of the first sends it got in the last 15 minutes. Sessions that already have an account are not affected.',
+      scoreUse: 'For reading only: it takes no part in picking accounts.',
       detail: {
         first: 'First output',
         cache: 'Cache',

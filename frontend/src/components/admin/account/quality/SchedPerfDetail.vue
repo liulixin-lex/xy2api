@@ -12,10 +12,10 @@
 <script setup lang="ts">
 /**
  * One 12-hour performance row opened (the board's 12-hour view and the panel's "过去 12 小时"): every figure of the row
- * in plain sentences, then each line's latest assessment, its result (no action, or the action) and its main reason. A
- * figure short of its minimum is told as counts; what the backend did not send is left out, not written as unknown. A
- * rear line whose counted units are all from other groups says so, from the row's own counts only (another source may
- * be another assessment's).
+ * in plain sentences, then each line's latest assessment, its result (no action, or the action) and its main reason. The
+ * score is for reading only. A figure short of its minimum is told as counts; what the backend did not send is left
+ * out, not written as unknown. A rear line whose counted units are all from other groups says so, from the row's own
+ * counts only (another source may be another assessment's).
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -94,7 +94,7 @@ function scoreLines(): string[] {
   }
   const lines = [T('scoreLine', { value: fmtScore(score.value), sends: count('comparable', score.n), sessions: count('sessions', score.sessions), excess: fmtAmountSigned(score.excess) })]
   if (rank) lines.push(T('scoreRank', { place: rank.place, of: rank.of, accounts: count('scoredAccounts', rank.of) }))
-  lines.push(t('admin.schedQuality.perf.scoreUseFull'))
+  lines.push(t('admin.schedQuality.perf.scoreUse'))
   return lines
 }
 

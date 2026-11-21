@@ -177,7 +177,9 @@ describe('GroupSchedBoard 12-hour view', () => {
     await click('[data-sq-perf-expand="18:483:gpt-x"]')
     const detail = () => document.querySelector('[data-sq-perf-detail="18:483:gpt-x"]')
     expect(detail()).not.toBeNull()
-    expect(detail()!.querySelector('[data-sq-perf-detail-item="score"]')!.textContent).toContain('admin.schedQuality.perf.scoreUseFull')
+    // Plan item 11: the score is for reading only; nothing says new sessions follow it.
+    expect(detail()!.querySelector('[data-sq-perf-detail-item="score"]')!.textContent).toMatch(/admin\.schedQuality\.perf\.scoreUse$/)
+    expect((document.querySelector('[data-sq-perf-sort="score"]') as unknown as { __tipText: string }).__tipText).toBe('admin.schedQuality.perf.tip.score:{"use":"admin.schedQuality.perf.scoreUse"}')
     // Never assessed: each line says there is no assessment on record.
     expect(detail()!.querySelector('[data-sq-perf-detail-item="verdict"]')!.textContent).toContain('admin.schedQuality.perf.detail.evalNone')
     await markSchedChanged()
