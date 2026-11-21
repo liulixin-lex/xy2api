@@ -79,7 +79,7 @@ func TestStepAuditF3GoodSinceResets(t *testing.T) {
 						t.Fatal("first error/cache failure must remain pending and Unknown")
 					}
 					if tc.kind == EventTrial && (next.Level != 3 || next.Admissions != 4 ||
-						next.Until.Sub(machineNow) != 90*time.Minute) {
+						next.Until.Sub(machineNow) != 160*time.Minute) {
 						t.Fatalf("trial failure must advance exactly once from level 2 despite prior admissions: %+v", next)
 					}
 				})
@@ -104,23 +104,25 @@ func TestStepAuditF3QuietClearRequiresLastRear(t *testing.T) {
 	}
 }
 
-func TestStepFirstAdmissionClearsAfterGoodEvidence(t *testing.T) {
+func TestStepFirstAdmissionRetainedAfterGoodEvidence(t *testing.T) {
 	rear, _ := machineStep(machineState(DimensionTTFO), EventRegular, VerdictFail, machineNow)
 	releasedAt := rear.Until
 	s, _ := machineStep(rear, EventReview, VerdictPass, releasedAt)
+	s, _ = machineStep(s, EventTrial, VerdictPass, releasedAt.Add(TrialMinimum))
+	releasedAt = s.EvaluatedAt
 	for tick := 1; tick <= 6; tick++ {
 		next, action := machineStep(s, EventRegular, VerdictPass, releasedAt.Add(time.Duration(tick)*RegularInterval))
-		if tick < 6 && (next.Level != 0 || next.Admissions != 1 || action != "") {
+		if next.Level != 0 || next.Admissions != 1 || action != "" {
 			t.Fatalf("first-admission history cleared before 30 minutes: %+v / %s", next, action)
 		}
-		if tick == 6 && (next.Level != 0 || next.Admissions != 0 || action != ActionClear) {
+		if tick == 6 && (next.Level != 0 || next.Admissions != 1 || action != "") {
 			t.Fatalf("level-zero admission did not clear with 30 minutes of good evidence: %+v / %s", next, action)
 		}
 		s = next
 	}
 	at := s.EvaluatedAt.Add(RegularInterval)
 	next, action := machineStep(s, EventRegular, VerdictFail, at)
-	if action != ActionEnter || next.Level != 0 || next.Admissions != 1 || next.Until.Sub(at) != 20*time.Minute {
+	if action != ActionEnter || next.Level != 1 || next.Admissions != 2 || next.Until.Sub(at) != 40*time.Minute {
 		t.Fatalf("cleared first admission escalated on re-entry: %+v / %s", next, action)
 	}
 }

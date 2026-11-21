@@ -1182,7 +1182,7 @@
     },
     "five_min": true,
     "verdict": 0,
-    "identity": 0
+    "identity": -1
   },
   {
     "name": "configuration-2/case-36",
@@ -1212,7 +1212,7 @@
     },
     "five_min": false,
     "verdict": 0,
-    "identity": 0
+    "identity": -1
   },
   {
     "name": "configuration-2/case-38",
@@ -1227,7 +1227,7 @@
     },
     "five_min": false,
     "verdict": 0,
-    "identity": 0
+    "identity": -1
   },
   {
     "name": "configuration-2/case-39",
@@ -1257,7 +1257,7 @@
     },
     "five_min": true,
     "verdict": 0,
-    "identity": 0
+    "identity": -1
   },
   {
     "name": "configuration-2/case-41",
@@ -1842,7 +1842,7 @@
     },
     "five_min": true,
     "verdict": 0,
-    "identity": 0
+    "identity": -1
   },
   {
     "name": "configuration-3/case-36",
