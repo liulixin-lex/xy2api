@@ -928,9 +928,30 @@ describe('PaymentView recharge form details', () => {
     expect(input.props('error')).toBe('')
   })
 
-  it('names only the action on the disabled button until there is an amount, then submits from the form', async () => {
+  it('names the amount that can actually be submitted when a discount lowers the pay base below the limit', async () => {
+    const wrapper = await mountRecharge({
+      methods: limited(100, 0),
+      recharge_bonus_mode: 'discount',
+      recharge_bonus_tiers: [{ min_amount: 1, bonus_percent: 10 }],
+    })
+    const input = wrapper.getComponent(AmountInput)
+
+    input.vm.$emit('update:modelValue', 100)
+    await flushPromises()
+    expect(input.props('error')).toBe('payment.amountTooLow')
+    expect(translate).toHaveBeenCalledWith('payment.amountTooLow', { min: formatPaymentAmount(111.11, 'CNY') })
+    expect(wrapper.get('[data-testid="recharge-submit"]').attributes('disabled')).toBeDefined()
+
+    // The amount the note names is payable: no note, button enabled.
+    input.vm.$emit('update:modelValue', 111.11)
+    await flushPromises()
+    expect(input.props('error')).toBe('')
+    expect(wrapper.get('[data-testid="recharge-submit"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('names only the action on the disabled button until there is an amount, then Enter in the field submits', async () => {
     const wrapper = await mountRecharge()
-    const button = wrapper.get('[data-testid="recharge-form"] button[type="submit"]')
+    const button = wrapper.get('[data-testid="recharge-submit"]')
     expect(button.text()).toBe('payment.createOrder')
     expect(button.attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-testid="recharge-summary"]').attributes('inert')).toBeDefined()
@@ -941,9 +962,57 @@ describe('PaymentView recharge form details', () => {
     expect(button.attributes('disabled')).toBeUndefined()
     expect(wrapper.get('[data-testid="recharge-summary"]').attributes('inert')).toBeUndefined()
 
-    await wrapper.get('[data-testid="recharge-form"]').trigger('submit')
+    wrapper.getComponent(AmountInput).vm.$emit('submit')
     await flushPromises()
     expect(createOrder).toHaveBeenCalledTimes(1)
     expect(createOrder.mock.calls[0][0]).toMatchObject({ amount: 10, payment_type: 'wxpay', order_type: 'balance' })
+  })
+
+  it('prices the button with the exact total while the detail rows are still gliding', async () => {
+    // A frame clock that never ticks: every glide stays at its first frame.
+    vi.stubGlobal('requestAnimationFrame', () => 1)
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    try {
+      const wrapper = await mountRecharge()
+      const input = wrapper.getComponent(AmountInput)
+      input.vm.$emit('update:modelValue', 10)
+      await flushPromises()
+      input.vm.$emit('update:modelValue', 500)
+      await flushPromises()
+
+      const paymentRow = wrapper.get('[data-testid="recharge-summary"] dd')
+      expect(paymentRow.text()).toBe(formatPaymentAmount(10, 'CNY'))
+      expect(wrapper.get('[data-testid="recharge-submit"]').text()).toBe(`payment.createOrder ${formatPaymentAmount(500, 'CNY')}`)
+
+      input.vm.$emit('submit')
+      await flushPromises()
+      expect(createOrder.mock.calls[0][0]).toMatchObject({ amount: 500 })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('never places an order from a button inside the admin notice or help text', async () => {
+    const wrapper = await mountRecharge({
+      recharge_bonus_notice: '<button>活动详情</button>',
+      help_text: '<button>联系客服</button>',
+    })
+    wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 20)
+    await flushPromises()
+
+    const notice = wrapper.get('[data-testid="recharge-bonus-notice"] button')
+    const help = wrapper.get('[data-testid="payment-help"] button')
+    expect(notice.element.closest('form')).toBeNull()
+    expect(help.element.closest('form')).toBeNull()
+    await notice.trigger('click')
+    await help.trigger('click')
+    await flushPromises()
+    expect(createOrder).not.toHaveBeenCalled()
+
+    // Enter in the amount field still submits.
+    wrapper.getComponent(AmountInput).vm.$emit('submit')
+    await flushPromises()
+    expect(createOrder).toHaveBeenCalledTimes(1)
+    expect(createOrder.mock.calls[0][0]).toMatchObject({ amount: 20 })
   })
 })

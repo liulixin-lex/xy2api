@@ -138,3 +138,14 @@ describe('quick amounts as one radio group', () => {
     expect(wrapper.get('[data-testid="amount-field"]').classes()).toContain('border-status-back')
   })
 })
+
+describe('Enter in the amount field', () => {
+  it('asks the page to submit, except while an IME candidate is being confirmed', async () => {
+    const wrapper = mount(AmountInput, { props: { modelValue: 100 } })
+    const input = wrapper.get('input')
+    await input.trigger('keydown', { key: 'Enter', isComposing: true })
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('submit')).toHaveLength(1)
+  })
+})

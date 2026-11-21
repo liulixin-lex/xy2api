@@ -51,8 +51,9 @@
             <div v-if="enabledMethods.length === 0" class="card py-16 text-center">
               <p class="text-gray-500 dark:text-gray-400">{{ t('payment.notAvailable') }}</p>
             </div>
-            <!-- One form: Enter in the amount field submits, and only while the button is enabled -->
-            <form v-else class="space-y-6" novalidate data-testid="recharge-form" @submit.prevent="handleSubmitRecharge">
+            <!-- No <form> here: the admin's notice and help HTML must never be able to submit an order. Enter in the amount
+                 field submits through AmountInput's submit event, and only while the button is enabled. -->
+            <div v-else class="space-y-6" data-testid="recharge-form">
             <div class="card p-5 sm:p-6">
               <!-- 充值赠送活动文案（后台 Markdown 配置，空则不渲染） -->
               <div
@@ -71,6 +72,7 @@
                 :multiplier="balanceRechargeMultiplier"
                 :currency="selectedCurrency"
                 :error="amountHint"
+                @submit="handleSubmitRecharge"
               />
             </div>
             <div v-if="enabledMethods.length >= 1" class="card p-5 sm:p-6">
@@ -122,14 +124,14 @@
                 </div>
               </div>
             </div>
-            <button type="submit" :class="paymentButtonClass" :disabled="!canSubmit || submitting">
+            <button type="button" :class="paymentButtonClass" :disabled="!canSubmit || submitting" data-testid="recharge-submit" @click="handleSubmitRecharge">
               <span v-if="submitting" class="flex items-center justify-center gap-2">
                 <span class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
                 {{ t('common.processing') }}
               </span>
               <span v-else class="tabular-nums">{{ rechargeButtonText }}</span>
             </button>
-            </form>
+            </div>
           </template>
           <!-- Subscribe Tab -->
           <template v-else-if="activeTab === 'subscription'">
@@ -317,6 +319,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import AmountInput from '@/components/payment/AmountInput.vue'
 import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
 import { useTweenedNumber } from '@/components/payment/useTweenedNumber'
+import { nearestPayableAmount } from '@/components/payment/payableAmount'
 import { METHOD_ORDER, getPaymentPopupFeatures } from '@/components/payment/providerConfig'
 import {
   PAYMENT_RECOVERY_STORAGE_KEY,
@@ -746,23 +749,47 @@ const canSubmit = computed(() =>
     && selectedLimit.value?.available !== false
 )
 
-// The note inside the amount field. When no method takes the amount because it is below every minimum or above every
-// maximum, name that bound (what to type instead); otherwise the same message as amountError.
+// The note inside the amount field. Method limits apply to the pay base, which a discount tier makes lower than the
+// typed amount, so a "too low / too high" note names the nearest amount the user can actually type and submit
+// (worked back through the same quote, to the cent). When that cannot be confirmed, the note names the limit on the
+// discounted amount instead. Only the note changes: the limit checks and the amounts are untouched.
 const amountHint = computed(() => {
   if (!amountError.value) return ''
   const base = payBaseAmount.value
-  if (!enabledMethods.value.some((m) => amountFitsMethod(base, m))) {
-    if (globalMinAmount.value > 0 && base < globalMinAmount.value) {
-      return t('payment.amountTooLow', { min: formatSelectedPaymentAmount(globalMinAmount.value) })
-    }
-    if (globalMaxAmount.value > 0 && base > globalMaxAmount.value) {
-      return t('payment.amountTooHigh', { max: formatSelectedPaymentAmount(globalMaxAmount.value) })
-    }
+  const usable = enabledMethods.value.some((m) => amountFitsMethod(base, m))
+  const considered = usable ? [selectedMethod.value] : enabledMethods.value
+  const ranges = considered
+    .map((m) => visibleMethods.value[m])
+    .filter((limit): limit is NonNullable<typeof limit> => !!limit)
+    .map((limit) => ({ min: limit.single_min, max: limit.single_max }))
+  if (ranges.length === 0) return amountError.value
+  const tooLow = ranges.every((r) => r.min > 0 && base < r.min)
+  const tooHigh = ranges.every((r) => r.max > 0 && base > r.max)
+  if (!tooLow && !tooHigh) return amountError.value
+  const quoteOptions = {
+    multiplier: balanceRechargeMultiplier.value,
+    mode: rechargeBonusMode.value,
+    currencyDigits: currencyFractionDigits(selectedCurrency.value),
   }
-  return amountError.value
+  const payable = nearestPayableAmount(
+    validAmount.value,
+    tooLow ? 'up' : 'down',
+    ranges,
+    (value) => quoteRechargeBonus(rechargeBonusTiers.value, value, quoteOptions).payBase,
+    rechargeBonusTiers.value.map((tier) => tier.min_amount),
+  )
+  if (payable !== null) {
+    return tooLow
+      ? t('payment.amountTooLow', { min: formatSelectedPaymentAmount(payable) })
+      : t('payment.amountTooHigh', { max: formatSelectedPaymentAmount(payable) })
+  }
+  return tooLow
+    ? t('payment.payAmountTooLow', { min: formatSelectedPaymentAmount(Math.min(...ranges.map((r) => r.min))) })
+    : t('payment.payAmountTooHigh', { max: formatSelectedPaymentAmount(Math.max(...ranges.map((r) => r.max))) })
 })
 
-// Display copies of the detail figures: they glide to a new value instead of jumping (display only, never submitted).
+// Display copies of the detail rows only: they glide to a new value instead of jumping. Never used for the button,
+// the amount field, validation or the order.
 const shownAmount = useTweenedNumber(() => validAmount.value)
 const shownDiscount = useTweenedNumber(() => discountAmount.value)
 const shownFee = useTweenedNumber(() => feeAmount.value)
@@ -770,10 +797,11 @@ const shownTotal = useTweenedNumber(() => totalAmount.value)
 const shownBonus = useTweenedNumber(() => bonusQuote.value.bonus)
 const shownCredited = useTweenedNumber(() => creditedAmount.value)
 
+// The button is what the user confirms, so it shows the exact total that will be ordered, never a gliding figure.
 // Without an amount the (disabled) button names the action only, not a zero total.
 const rechargeButtonText = computed(() => {
   const action = t(selectedMethod.value === 'stripe_hosted' ? 'payment.hostedPay' : 'payment.createOrder')
-  return totalAmount.value > 0 ? `${action} ${formatSelectedPaymentAmount(shownTotal.value)}` : action
+  return totalAmount.value > 0 ? `${action} ${formatSelectedPaymentAmount(totalAmount.value)}` : action
 })
 
 const subPaymentAmount = computed(() => {
