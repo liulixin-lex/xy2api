@@ -131,11 +131,7 @@
           >
             <slot name="empty">
               <div class="flex flex-col items-center">
-                <Icon
-                  name="inbox"
-                  size="xl"
-                  class="mb-4 h-12 w-12 text-fg-muted"
-                />
+                <Icon name="inbox" size="xl" class="mb-4 text-fg-muted" />
                 <p class="text-lg font-medium text-fg-primary">
                   {{ t('empty.noData') }}
                 </p>
