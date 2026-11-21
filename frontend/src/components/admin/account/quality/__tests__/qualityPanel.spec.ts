@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import type { BackendDetailGroup, BackendGroupModel } from '@/api/admin/schedQualityTypes'
+import type { BackendDecision, BackendDetailGroup, BackendGroupModel } from '@/api/admin/schedQualityTypes'
 import { cacheEvidence, errorEvidence, groupModel, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
-import { backModels, evidenceCauses, groupPlace, lineEvidence, lineIdentity, lineSecondsLeft, panelRecoverable, pickModelTab } from '../qualityPanel'
+import { evidenceCauses, groupPlace, lineEvidence, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeEnd } from '../qualityPanel'
 import { groupDotState } from '@/components/admin/account/table/accountGroups'
 
 const group = (id: number, rows: BackendGroupModel[], exempt = false): BackendDetailGroup => ({
@@ -26,11 +26,9 @@ describe('quality panel place', () => {
     expect(groupPlace(normal, g, 'front')).toBe('front')
     // No row for the model: no data, every line unknown, at the front.
     expect(groupPlace(normal, g, 'other')).toBe('front')
-    expect(['ttfo', 'error', 'cache'].map((dim) => lineIdentity(undefined, dim as 'ttfo'))).toEqual(['unknown', 'unknown', 'unknown'])
-    expect(['ttfo', 'error', 'cache'].map((dim) => lineIdentity(g.by_model[0], dim as 'ttfo'))).toEqual(['trial', 'rear', 'pass'])
-    // Only a model with a group at the rear gets the tab mark; an exempt group is not at the rear.
+    // A model's tab is marked by its worst place: rear before trial; an exempt group is not at the rear.
     const detail = { ...normal, groups: [g, group(2, [groupModel('front', { cache: 'rear' })], true)] }
-    expect([...backModels(detail)]).toEqual(['rear'])
+    expect([...modelMarks(detail)]).toEqual([['rear', 'rear'], ['trial', 'trial']])
   })
 
   // 7f-2: the detail has no `effective`; the panel reads the same three conditions the backend's flag stands for, so
@@ -52,16 +50,19 @@ describe('quality panel place', () => {
       const place = groupPlace(detail, detail.groups[0], 'a')
       expect(place).toBe(effective ? 'rear' : 'front')
       expect(groupDotState(summary(effective), 1)).toBe(effective ? 'back' : 'ok')
-      expect(backModels(detail).has('a')).toBe(effective)
+      expect(modelMarks(detail).get('a')).toBe(effective ? 'rear' : undefined)
     }
   })
 
-  it('counts down a rear line to its end and a trial to the trial\'s end; the other identities have no time', () => {
-    const now = Date.parse('2026-11-16T10:00:00Z')
-    expect(lineSecondsLeft(line('ttfo', 'rear', { until: '2026-11-16T10:20:00Z', trial_until: '2026-11-16T11:00:00Z' }), now)).toBe(1200)
-    expect(lineSecondsLeft(line('ttfo', 'trial', { until: '2026-11-16T10:20:00Z', trial_until: '2026-11-16T10:45:00Z' }), now)).toBe(2700)
-    expect(lineSecondsLeft(line('ttfo', 'pass', { until: '2026-11-16T10:20:00Z' }), now)).toBeNull()
-    expect(lineSecondsLeft(line('ttfo', 'unknown'), now)).toBeNull()
+  it('ends a rear place with its latest rear line and a trial with its latest trial; the other places have no end', () => {
+    const row = groupModel('a', { ttfo: 'rear', error: 'rear', cache: 'trial' })
+    Object.assign(row.lines.ttfo, { until: '2026-11-16T10:20:00Z' })
+    Object.assign(row.lines.error, { until: '2026-11-16T10:50:00Z' })
+    Object.assign(row.lines.cache, { trial_until: '2026-11-16T11:00:00Z' })
+    expect(placeEnd(row, 'rear')).toBe('2026-11-16T10:50:00Z')
+    expect(placeEnd(row, 'trial')).toBe('2026-11-16T11:00:00Z')
+    expect(placeEnd(row, 'front')).toBeNull()
+    expect(placeEnd(undefined, 'rear')).toBeNull()
   })
 
   it('offers 恢复 for a line at the rear or on trial, not for unknown or pass', () => {
@@ -99,5 +100,37 @@ describe('line evidence', () => {
     ])
     expect(evidenceCauses('error', errorEvidence())).toEqual([])
     expect(evidenceCauses('ttfo', undefined)).toEqual([])
+  })
+})
+
+describe('decision records', () => {
+  const record = (id: number, patch: Partial<BackendDecision> = {}): BackendDecision => ({
+    id, at: '2026-11-16T10:25:10Z', group_id: 1, model: 'a', line: 'ttfo', action: 'enter', level: 1, until: '2026-11-16T11:05:00Z', ...patch
+  })
+
+  it('reads one moment\'s action on a model\'s line across groups as one entry, each group once and every record kept', () => {
+    const merged = mergeDecisions([
+      record(9, { group_id: 2 }),
+      record(8, { group_id: 1, at: '2026-11-16T10:25:40Z' }),
+      record(7, { group_id: 2 }),
+      record(6, { model: 'b' }),
+      record(5, { at: '2026-11-16T10:20:00Z' }),
+      record(4, { action: 'renew' })
+    ])
+    expect(merged.map((entry) => [entry.items.map((item) => item.id), entry.groups])).toEqual([
+      [[9, 8, 7], [2, 1]],
+      [[6], [1]],
+      [[5], [1]],
+      [[4], [1]]
+    ])
+    // Another end is another entry.
+    expect(mergeDecisions([record(2), record(1, { group_id: 2, until: '2026-11-16T11:25:00Z' })])).toHaveLength(2)
+  })
+
+  // Astra 2: ends within the minute shown merge, and each record keeps its own end (and so its evidence).
+  it('keeps each record\'s own end when ends share the minute shown', () => {
+    const merged = mergeDecisions([record(2, { until: '2026-11-16T11:05:01Z' }), record(1, { group_id: 2, until: '2026-11-16T11:05:59Z' })])
+    expect(merged).toHaveLength(1)
+    expect(merged[0].items.map((item) => [item.group_id, item.until])).toEqual([[1, '2026-11-16T11:05:01Z'], [2, '2026-11-16T11:05:59Z']])
   })
 })

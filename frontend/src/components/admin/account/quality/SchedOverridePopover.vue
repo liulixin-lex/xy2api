@@ -11,8 +11,8 @@
         data-sq-popover
         @keydown.tab="trapTab($event, rootRef)"
       >
-        <h3 :id="titleId" class="text-sm font-semibold text-fg-primary">{{ t('admin.schedQuality.action.exempt') }}</h3>
-        <div class="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-3 text-sm">
+        <h3 :id="titleId" class="text-sm font-semibold text-fg-primary">{{ undo ?? t('admin.schedQuality.action.exempt') }}</h3>
+        <div v-if="undo === undefined || undo === null" class="mt-3 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-3 text-sm">
           <label :for="scopeId" class="text-fg-secondary">{{ t('admin.schedQuality.override.scope') }}</label>
           <Select :id="scopeId" ref="scopeRef" v-model="groupId" :options="scopeOptions" :searchable="false" />
           <span class="text-fg-secondary">{{ t('admin.schedQuality.override.duration') }}</span>
@@ -33,8 +33,16 @@
         <div class="mt-4 flex items-center justify-end gap-2">
           <span v-if="failed" class="sq-fail-word">{{ t('admin.schedQuality.result.failed') }}</span>
           <button type="button" class="sop-hit btn btn-secondary btn-sm" @click="emit('close')">{{ t('admin.schedQuality.action.cancel') }}</button>
-          <button type="button" class="sop-hit btn btn-primary btn-sm" :disabled="busy" :aria-busy="busy" @click="confirm">
-            <span v-if="busy" class="spinner h-3.5 w-3.5" aria-hidden="true" />{{ t('admin.schedQuality.action.confirm') }}
+          <button
+            ref="primaryRef"
+            type="button"
+            class="sop-hit btn btn-primary btn-sm"
+            :disabled="busy"
+            :aria-busy="busy"
+            :data-sq-popover-undo="undo ? '' : undefined"
+            @click="undo ? emit('undo') : confirm()"
+          >
+            <span v-if="busy" class="spinner h-3.5 w-3.5" aria-hidden="true" />{{ undo ? t('admin.schedQuality.action.undoExempt') : t('admin.schedQuality.action.confirm') }}
           </button>
         </div>
       </div>
@@ -53,7 +61,8 @@ import type { SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
 import { closeOverlay, isTopOverlay, openOverlay, trapTab } from '@/utils/overlayStack'
 
 // Exemption popover (design spec B.8): non-modal, anchored under its button, closed by Escape, an outside click
-// or Cancel. Scope 0 = every group of the account.
+// or Cancel. Scope 0 = every group of the account. With `undo` (its title: the exemption in force) it only offers to
+// remove that exemption.
 type Duration = 'oneHour' | 'today' | 'forever'
 const DURATIONS: Duration[] = ['oneHour', 'today', 'forever']
 
@@ -66,8 +75,11 @@ const props = defineProps<{
   batch?: boolean
   busy?: boolean
   failed?: boolean
+  undo?: string | null
+  /** Which edge it shares with its anchor: the right (a header button) or the left (a group's place). */
+  align?: 'start' | 'end'
 }>()
-const emit = defineEmits<{ close: []; confirm: [request: SchedOverrideRequest] }>()
+const emit = defineEmits<{ close: []; confirm: [request: SchedOverrideRequest]; undo: [] }>()
 const { t } = useI18n()
 
 const titleId = `sq-pop-${useId()}`
@@ -76,6 +88,7 @@ const reasonId = `sq-pop-reason-${useId()}`
 const token = Symbol('popover')
 const rootRef = ref<HTMLElement | null>(null)
 const scopeRef = ref<{ $el?: HTMLElement } | null>(null)
+const primaryRef = ref<HTMLElement | null>(null)
 const stackZ = ref<number>()
 const pos = reactive({ top: 0, left: 0 })
 const groupId = ref(0)
@@ -103,7 +116,8 @@ function place() {
   if (!anchor || !panel) return
   const width = panel.offsetWidth
   const height = panel.offsetHeight
-  const left = Math.max(16, Math.min(anchor.right - width, window.innerWidth - width - 16))
+  const edge = props.align === 'start' ? anchor.left : anchor.right - width
+  const left = Math.max(16, Math.min(edge, window.innerWidth - width - 16))
   const below = anchor.bottom + 6
   pos.left = left
   pos.top = below + height <= window.innerHeight - 8 ? below : Math.max(8, anchor.top - height - 6)
@@ -141,7 +155,8 @@ watch(
     document.addEventListener('pointerdown', onPointerDown, true)
     document.addEventListener('keydown', onEscape)
     window.addEventListener('resize', place)
-    scopeRef.value?.$el?.querySelector<HTMLElement>('button')?.focus()
+    if (props.undo) primaryRef.value?.focus()
+    else scopeRef.value?.$el?.querySelector<HTMLElement>('button')?.focus()
   },
   { immediate: true }
 )

@@ -9,15 +9,13 @@
  */
 import type {
   BackendAccountDetail,
+  BackendDecision,
   BackendDetailGroup,
   BackendDim,
   BackendEvidenceOf,
   BackendGroupModel,
-  BackendSampleCounts,
-  BackendIdentity,
-  BackendLine
+  BackendSampleCounts
 } from '@/api/admin/schedQualityTypes'
-import { secondsUntil } from '@/utils/schedQualityFormat'
 
 export type PanelPlace = 'stopped' | 'exempt' | 'rear' | 'trial' | 'front'
 
@@ -62,21 +60,64 @@ export function groupPlace(detail: PlaceDetail, group: BackendDetailGroup, model
   return row.placement
 }
 
-/** A line's identity; a group without a row for the model has no data, which is unknown. */
-export const lineIdentity = (row: BackendGroupModel | undefined, dim: BackendDim): BackendIdentity => row?.lines[dim].identity ?? 'unknown'
+const DIMS: BackendDim[] = ['ttfo', 'error', 'cache']
 
-/** Seconds left of a rear stay or a trial; null for the other identities or without an end. */
-export function lineSecondsLeft(line: Pick<BackendLine, 'identity' | 'until' | 'trial_until'> | undefined, now: number): number | null {
-  if (line?.identity === 'rear') return secondsUntil(line.until, now)
-  if (line?.identity === 'trial') return secondsUntil(line.trial_until, now)
-  return null
+/** The latest of some ISO times; null without any. */
+const latest = (times: (string | null)[]) =>
+  times.reduce<string | null>((max, time) => (time && (!max || Date.parse(time) > Date.parse(max)) ? time : max), null)
+
+/** When a rear or trial place ends: the latest end of the lines that hold it there; null for the other places. */
+export function placeEnd(row: BackendGroupModel | undefined, place: PanelPlace): string | null {
+  if (!row || (place !== 'rear' && place !== 'trial')) return null
+  return latest(DIMS.map((dim) => row.lines[dim]).filter((line) => line.identity === place).map((line) => (place === 'rear' ? line.until : line.trial_until)))
 }
 
-/** Models with a group at the rear (the amber mark on their tab). */
-export function backModels(detail: PlaceDetail & Pick<BackendAccountDetail, 'groups'>): Set<string> {
-  const out = new Set<string>()
+// ---- Decisions ----
+
+/** Records of one moment, one action and one model's line, across the groups it was taken in. */
+export interface MergedDecision {
+  key: string
+  at: string
+  action: string
+  model: string
+  line: BackendDim | ''
+  level: number
+  until: string | null
+  /** Group ids, each once, in record order. */
+  groups: number[]
+  /** Every record of the entry, each with its own end and evidence. */
+  items: BackendDecision[]
+}
+
+const minuteOf = (time: string | null) => (time ? Math.floor(Date.parse(time) / 60_000) : '')
+
+/**
+ * The decision list as read: records of the same minute, action, model, line and end minute (as shown) are one entry
+ * listing their groups (the engine judges a model's line in every group of the account at once). Every record stays in
+ * the entry with its own end and evidence. Newest first, as given.
+ */
+export function mergeDecisions(items: BackendDecision[]): MergedDecision[] {
+  const out = new Map<string, MergedDecision>()
+  for (const item of items) {
+    const key = [minuteOf(item.at), item.action, item.model, item.line, minuteOf(item.until)].join('|')
+    const entry = out.get(key)
+    if (!entry) {
+      out.set(key, { key, at: item.at, action: item.action, model: item.model, line: item.line, level: item.level, until: item.until, groups: [item.group_id], items: [item] })
+      continue
+    }
+    entry.items.push(item)
+    if (!entry.groups.includes(item.group_id)) entry.groups.push(item.group_id)
+  }
+  return [...out.values()]
+}
+
+/** The mark on each model's tab: rear when a group is at the rear for it, else trial when one is on trial. */
+export function modelMarks(detail: PlaceDetail & Pick<BackendAccountDetail, 'groups'>): Map<string, 'rear' | 'trial'> {
+  const out = new Map<string, 'rear' | 'trial'>()
   for (const model of panelModels(detail)) {
-    if (detail.groups.some((group) => groupPlace(detail, group, model) === 'rear')) out.add(model)
+    const places = detail.groups.map((group) => groupPlace(detail, group, model))
+    if (places.includes('rear')) out.set(model, 'rear')
+    else if (places.includes('trial')) out.set(model, 'trial')
   }
   return out
 }

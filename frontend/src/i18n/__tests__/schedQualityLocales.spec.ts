@@ -94,16 +94,17 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
     expect(templates.filter(([, text]) => !text.includes('{v}'))).toEqual([])
   })
 
-  // Final review: the panel's not-counted note sits in one line of the figures' width (196px on a phone, 13px text);
-  // the whole explanation is in its tip and covers a gate that was off and an account not in the group yet (a new group,
-  // or one the account joined after the snapshot: the detail, every 5 s, shows it before the snapshot, every minute).
-  it('keeps the panel\'s not-counted note short and its tip complete', () => {
-    const note = String(lookup(messages, 'admin.schedQuality.perf.panel.gateOff'))
-    const width = [...note].reduce((sum, char) => sum + (/[\u3000-\u9fff\uff00-\uffef]/.test(char) ? 13 : 7), 0)
-    expect(width).toBeLessThanOrEqual(196)
-    const tip = String(lookup(messages, 'admin.schedQuality.perf.panel.gateOffTip'))
-    expect(tip.length).toBeGreaterThan(note.length)
-    expect(tip).toMatch(/这个号当时还不在本分组|this account was not in the group yet/)
+  // 前端修整 (package C): the panel's figure headings fit their 56px columns (12px text), and in Chinese the error line
+  // is 报错 wherever the quality copy names it.
+  it('keeps the panel\'s figure headings within their columns and names the error line one way', () => {
+    const headings = Object.values(lookup(messages, 'admin.schedQuality.panel.col') as Record<string, string>)
+    const width = (text: string) => [...text].reduce((sum, char) => sum + (/[\u3000-\u9fff\uff00-\uffef]/.test(char) ? 12 : 7), 0)
+    expect(headings.filter((text) => width(text) > 56)).toEqual([])
+    if (messages === zh) {
+      expect(['dim.error', 'policy.error', 'lineName.error', 'panel.col.error'].map((key) => String(lookup(messages, `admin.schedQuality.${key}`)))).toEqual([
+        '报错', '报错上限', '报错线', '报错'
+      ])
+    }
   })
 })
 
