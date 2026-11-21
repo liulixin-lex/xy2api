@@ -596,14 +596,12 @@ const filled = (slot: Slot | undefined) => !!slot && rendersSomething(slot())
   text-align: center;
 }
 /* Touch: text fields 40px high at 16px, so they are easy to hit and the browser does not zoom in on focus (mobile list
-   plan). A hybrid device with a touch screen gets the 40px buttons too (any-pointer). */
+   plan), and 40px buttons. Only a touch primary pointer: a mouse-first computer with a touch screen stays as with a mouse. */
 @media (pointer: coarse) {
   .table-toolbar--compact :deep(.table-toolbar__input) {
     height: 40px;
     font-size: 16px;
   }
-}
-@media (any-pointer: coarse) {
   /* min-width too: a secondary action whose wide label is hidden is a 32px square there. */
   .table-toolbar--compact :deep(.table-toolbar__btn) {
     min-width: 40px;

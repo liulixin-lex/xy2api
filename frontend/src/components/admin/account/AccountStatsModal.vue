@@ -429,7 +429,7 @@
         v-else-if="!loading"
         class="flex flex-col items-center justify-center py-12 text-gray-500 dark:text-gray-400"
       >
-        <Icon name="chartBar" size="xl" class="mb-4 h-12 w-12" />
+        <Icon name="chartBar" size="xl" class="mb-4" />
         <p class="text-sm">{{ t('admin.accounts.stats.noData') }}</p>
       </div>
     </div>

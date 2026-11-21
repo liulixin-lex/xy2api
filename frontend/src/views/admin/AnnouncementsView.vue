@@ -51,8 +51,8 @@
           @sort="handleSort"
         >
           <template #cell-title="{ value, row }">
-            <!-- The frozen identity column: at most 240px, both lines cut with "…" and whole on a tap. -->
-            <div class="max-w-[240px]">
+            <!-- The frozen identity column: at most 240px below 1024px, both lines cut with "…" and whole on a tap. -->
+            <div class="max-lg:max-w-[240px]">
               <TableIdentityCell :primary="value" :secondary="`#${row.id} · ${formatListDateTime(row.created_at)}`" />
             </div>
           </template>

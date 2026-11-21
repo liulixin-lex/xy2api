@@ -73,8 +73,8 @@
           :sticky-actions-column="!phone"
         >
           <template #cell-name="{ row, value }">
-            <!-- The frozen identity column: at most 240px, the name cut with "…" and whole on a tap. -->
-            <div class="flex max-w-[240px] items-center gap-1.5">
+            <!-- The frozen identity column: at most 240px below 1024px, the name cut with "…" and whole on a tap. -->
+            <div class="flex max-lg:max-w-[240px] items-center gap-1.5">
               <TableIdentityCell :primary="value" />
               <HelpTooltip v-if="row.api_key_decrypt_failed" :content="t('admin.channelMonitor.apiKeyDecryptFailed')">
                 <Icon name="exclamationTriangle" size="sm" class="text-red-500" />

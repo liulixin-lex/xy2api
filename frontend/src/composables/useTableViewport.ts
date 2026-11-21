@@ -6,7 +6,7 @@ import { SHORT_VIEWPORT_PX, visibleHeight } from '@/components/layout/tableRegio
 /**
  * The widths and input a list page lays out by (mobile list plan): a phone below 768px, a tablet from 768 to 1023, a
  * desktop from 1024. Touch sizes follow the primary pointer (`pointer: coarse`, an iPad in landscape included), never
- * the width; a hybrid device with a touch screen besides its mouse matches `any-pointer: coarse` in CSS for its buttons.
+ * the width; a mouse-first computer with a touch screen lays out as with a mouse.
  */
 /** From 768px: a tablet or wider. A phone is "not this" (so a test environment that matches every query is wide). */
 export const TABLET_UP_QUERY = '(min-width: 768px)'

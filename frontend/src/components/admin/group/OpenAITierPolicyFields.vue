@@ -2,7 +2,7 @@
   <section class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-400">
     <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.groups.openaiFast.title') }}</h4>
     <p class="input-hint">{{ t('admin.groups.openaiFast.scope') }}</p>
-    <label v-if="legacy" class="mt-3 flex items-start gap-2 [@media(any-pointer:coarse)]:min-h-10 text-sm text-gray-700 dark:text-gray-300">
+    <label v-if="legacy" class="mt-3 flex items-start gap-2 [@media(pointer:coarse)]:min-h-10 text-sm text-gray-700 dark:text-gray-300">
       <input v-model="migrate" type="checkbox" class="mt-1" :disabled="disabled" data-testid="migrate-openai-tier" />
       <span>
         {{ t('admin.groups.openaiFast.migrate') }}
@@ -24,7 +24,7 @@
           <option value="force_off">{{ t('admin.groups.openaiFast.forceOff') }}</option>
         </select>
       </label>
-      <label class="flex items-center gap-2 [@media(any-pointer:coarse)]:min-h-10 text-sm text-gray-700 dark:text-gray-300 sm:pb-2">
+      <label class="flex items-center gap-2 [@media(pointer:coarse)]:min-h-10 text-sm text-gray-700 dark:text-gray-300 sm:pb-2">
         <input type="checkbox" :checked="model[tier.free]" :disabled="locked" :data-testid="tier.free"
           @change="model = { ...model, [tier.free]: ($event.target as HTMLInputElement).checked }" />
         {{ t('admin.groups.openaiFast.waive', { tier: tier.label }) }}

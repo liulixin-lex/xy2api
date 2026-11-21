@@ -31,7 +31,7 @@ describe('UserErrorRequestsTable layout', () => {
       global: { stubs: { Pagination: true, UserErrorDetailModal: true, Teleport: true } },
     })
     const cell = wrapper.get('[data-testid="error-key-cell"]')
-    expect(cell.classes()).toContain('max-w-[240px]')
+    expect(cell.classes()).toContain('max-lg:max-w-[240px]')
     const text = cell.get('span')
     expect(text.classes()).toContain('truncate')
     expect(text.attributes('title')).toBe(name)

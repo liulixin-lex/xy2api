@@ -164,7 +164,7 @@
         >
           <template #cell-name="{ value }">
             <!-- The frozen identity column (with the check box): at most 240px, cut with "…" and whole on a tap. -->
-            <div class="max-w-[240px]"><TableIdentityCell :primary="value" /></div>
+            <div class="max-lg:max-w-[240px]"><TableIdentityCell :primary="value" /></div>
           </template>
 
           <template #cell-protocol="{ value }">

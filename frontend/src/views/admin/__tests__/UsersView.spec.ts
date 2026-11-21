@@ -420,21 +420,49 @@ describe('admin UsersView', () => {
 
   // Mobile list plan: the frozen identity is the address with the user name under it, no avatar; a cut line shows
   // whole in the tip a tap opens (7o-5).
-  it('shows the address and the user name in the identity, whole in the tip a tap shows when cut (7o-5)', async () => {
-    const email = 'a-very-long-address-for-acceptance@example.test'
-    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42, email, username: 'acceptance' })], total: 1, page: 1, page_size: 20, pages: 1 })
+  // From 1024px the desktop as before the mobile list plan: the initial's badge and the address, the user name in a
+  // column of its own that shows by default.
+  it('shows the initial and the address from 1024px, the user name in its own default column', async () => {
+    listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42, email: 'acceptance@example.test', username: 'acceptance' })], total: 1, page: 1, page_size: 20, pages: 1 })
     const wrapper = mountBulkDeleteView()
     await flushPromises()
-    document.body.appendChild(wrapper.element)
     const cell = wrapper.get('[data-test="user-email"]')
-    const primary = cell.get('.table-identity__primary')
-    expect(primary.text()).toBe(email)
-    expect(cell.get('.table-identity__secondary').text()).toBe('acceptance')
-    Object.defineProperty(primary.element, 'scrollWidth', { configurable: true, value: 400 })
-    Object.defineProperty(primary.element, 'clientWidth', { configurable: true, value: 160 })
-    await cell.trigger('click')
-    expect(document.getElementById('sq-tip')!.textContent).toBe(`${email}\nacceptance`)
+    expect(cell.text()).toBe('acceptance@example.test')
+    expect(cell.element.previousElementSibling!.textContent!.trim()).toBe('A')
+    expect(wrapper.find('.table-identity').exists()).toBe(false)
+    expect(wrapper.get('[data-test="columns"]').text().split(',')).toContain('username')
     wrapper.unmount()
+  })
+
+  it('shows the address and the user name in the identity below 1024px, whole in the tip a tap shows when cut (7o-5)', async () => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = ((query: string) => ({
+      matches: query !== '(min-width: 1024px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {}
+    })) as unknown as typeof window.matchMedia
+    try {
+      const email = 'a-very-long-address-for-acceptance@example.test'
+      listUsers.mockResolvedValue({ items: [createAdminUser({ id: 42, email, username: 'acceptance' })], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = mountBulkDeleteView()
+      await flushPromises()
+      document.body.appendChild(wrapper.element)
+      const cell = wrapper.get('[data-test="user-email"]')
+      const primary = cell.get('.table-identity__primary')
+      expect(primary.text()).toBe(email)
+      expect(cell.get('.table-identity__secondary').text()).toBe('acceptance')
+      expect(wrapper.get('[data-test="columns"]').text().split(',')).not.toContain('username')
+      Object.defineProperty(primary.element, 'scrollWidth', { configurable: true, value: 400 })
+      Object.defineProperty(primary.element, 'clientWidth', { configurable: true, value: 160 })
+      await cell.trigger('click')
+      expect(document.getElementById('sq-tip')!.textContent).toBe(`${email}\nacceptance`)
+      wrapper.unmount()
+    } finally {
+      window.matchMedia = matchMedia
+    }
   })
 
   it('keeps the selection when bulk enabling is cancelled or fails', async () => {

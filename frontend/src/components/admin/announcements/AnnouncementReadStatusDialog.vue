@@ -34,7 +34,7 @@
           @sort="handleSort"
         >
           <template #cell-email="{ value }">
-            <div class="max-w-[240px]"><TableIdentityCell :primary="value" /></div>
+            <div class="max-lg:max-w-[240px]"><TableIdentityCell :primary="value" /></div>
           </template>
 
           <template #cell-balance="{ value }">

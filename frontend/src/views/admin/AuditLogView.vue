@@ -210,7 +210,7 @@
 
           <template #empty>
             <div class="flex flex-col items-center py-8">
-              <Icon name="shield" size="xl" class="mb-4 h-12 w-12 text-gray-300 dark:text-dark-600" />
+              <Icon name="shield" size="xl" class="mb-4 text-gray-300 dark:text-dark-600" />
               <p class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('admin.audit.empty') }}</p>
             </div>
           </template>

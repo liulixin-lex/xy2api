@@ -72,7 +72,7 @@
           <!-- The rebates' frozen identity column: at most 240px, the trade number cut with "…" and whole on a tap. -->
           <template #cell-order="{ row }">
             <CellEmpty v-if="row.order_id == null" />
-            <div v-else class="max-w-[240px]">
+            <div v-else class="max-lg:max-w-[240px]">
               <TableIdentityCell class="font-mono" :primary="`#${row.order_id}`" :secondary="row.out_trade_no" />
             </div>
           </template>

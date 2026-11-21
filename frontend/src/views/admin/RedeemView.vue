@@ -109,9 +109,9 @@
           </template>
 
           <template #cell-code="{ value }">
-            <!-- The frozen identity column: at most 240px, the code cut with "…" and whole on a tap; the copy button stays,
+            <!-- The frozen identity column: at most 240px below 1024px, the code cut with "…" and whole on a tap; the copy button stays,
                  on touch a 40px square of its own, 8px from the code (it reaches into the cell's right padding). -->
-            <div class="flex max-w-[240px] items-center gap-2">
+            <div class="flex max-lg:max-w-[240px] items-center gap-2">
               <TableIdentityCell class="font-mono" :primary="value" />
               <button
                 type="button"
