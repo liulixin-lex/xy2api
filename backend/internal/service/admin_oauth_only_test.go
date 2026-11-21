@@ -65,7 +65,12 @@ func TestOAuthOnlyAccountWrites(t *testing.T) {
 					require.Empty(t, repo.bindGroupsCalls)
 				} else {
 					require.NoError(t, err)
-					require.Len(t, repo.bindGroupsCalls, 1)
+					if creating {
+						require.Equal(t, requested, repo.createAccount.GroupIDs)
+						require.Empty(t, repo.bindGroupsCalls, "creation owns its bindings atomically")
+					} else {
+						require.Len(t, repo.bindGroupsCalls, 1)
+					}
 				}
 			})
 		}

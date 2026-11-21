@@ -51,6 +51,7 @@ type OAuthRefreshCandidatePager interface {
 }
 
 type AccountRepository interface {
+	// Create atomically persists the account and its requested GroupIDs.
 	Create(ctx context.Context, account *Account) error
 	GetByID(ctx context.Context, id int64) (*Account, error)
 	// GetByIDs fetches accounts by IDs in a single query.
@@ -270,15 +271,9 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 	if err := validateNewOAuthOnlyBindings(ctx, s.groupRepo, account.Type, nil, req.GroupIDs); err != nil {
 		return nil, err
 	}
+	account.GroupIDs = append([]int64(nil), req.GroupIDs...)
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, fmt.Errorf("create account: %w", err)
-	}
-
-	// 绑定分组
-	if len(req.GroupIDs) > 0 {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, req.GroupIDs); err != nil {
-			return nil, fmt.Errorf("bind groups: %w", err)
-		}
 	}
 
 	return account, nil

@@ -244,6 +244,9 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 	if err := lockLiveGroups(ctx, txClient, []int64{groupIn.ID}); err != nil {
 		return err
 	}
+	if err := filterOAuthOnlyCopyMembers(ctx, txClient, groupIn.ID, snapshot, groupIn.RequireOAuthOnly); err != nil {
+		return err
+	}
 	var count int64
 	err = scanSingleRow(ctx, txClient, `WITH added AS (
  INSERT INTO account_groups(account_id,group_id,pinned,created_at)

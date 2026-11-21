@@ -633,15 +633,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := validateNewOAuthOnlyBindings(ctx, s.groupRepo, account.Type, nil, groupIDs); err != nil {
 		return nil, err
 	}
+	account.GroupIDs = append([]int64(nil), groupIDs...)
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
-	}
-
-	// 绑定分组
-	if len(groupIDs) > 0 {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
-			return nil, err
-		}
 	}
 
 	AfterAccountCommit(ctx, func(_ context.Context) {

@@ -126,7 +126,7 @@ func TestAdminService_CreateAccountAllowsCompositeGroupAssignment(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, int64(7), account.ID)
 	require.Equal(t, PlatformOpenAI, accountRepo.createAccount.Platform)
-	require.ElementsMatch(t, []int64{99}, accountRepo.bindGroupsByAccount[7])
+	require.ElementsMatch(t, []int64{99}, accountRepo.createAccount.GroupIDs)
 }
 
 func TestAdminService_UpdateAccountAllowsCompositeGroupAssignment(t *testing.T) {
