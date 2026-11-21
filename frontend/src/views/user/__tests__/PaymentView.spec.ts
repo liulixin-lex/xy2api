@@ -887,3 +887,63 @@ describe('PaymentView subscription feature flag', () => {
     wrapper.unmount()
   })
 })
+
+describe('PaymentView recharge form details', () => {
+  async function mountRecharge(overrides: Partial<CheckoutInfoResponse> = {}) {
+    vi.useRealTimers()
+    translate.mockClear()
+    routeState.path = '/purchase'
+    routeState.query = {}
+    createOrder.mockReset().mockRejectedValue(new Error('gateway down'))
+    showError.mockReset()
+    window.localStorage.clear()
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture(overrides))
+    const wrapper = shallowMount(PaymentView, {
+      global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Teleport: true, Transition: false } },
+    })
+    await flushPromises()
+    return wrapper
+  }
+
+  const limited = (single_min: number, single_max: number) => ({
+    wxpay: { ...checkoutInfoFixture().data.methods.wxpay, single_min, single_max },
+  })
+
+  it('names the bound inside the amount field when the amount is outside every method range', async () => {
+    const wrapper = await mountRecharge({ methods: limited(50, 2000) })
+    const input = wrapper.getComponent(AmountInput)
+
+    input.vm.$emit('update:modelValue', 20)
+    await flushPromises()
+    expect(input.props('error')).toBe('payment.amountTooLow')
+    expect(translate).toHaveBeenCalledWith('payment.amountTooLow', { min: formatPaymentAmount(50, 'CNY') })
+
+    input.vm.$emit('update:modelValue', 30000)
+    await flushPromises()
+    expect(input.props('error')).toBe('payment.amountTooHigh')
+    expect(translate).toHaveBeenCalledWith('payment.amountTooHigh', { max: formatPaymentAmount(2000, 'CNY') })
+
+    input.vm.$emit('update:modelValue', 500)
+    await flushPromises()
+    expect(input.props('error')).toBe('')
+  })
+
+  it('names only the action on the disabled button until there is an amount, then submits from the form', async () => {
+    const wrapper = await mountRecharge()
+    const button = wrapper.get('[data-testid="recharge-form"] button[type="submit"]')
+    expect(button.text()).toBe('payment.createOrder')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="recharge-summary"]').attributes('inert')).toBeDefined()
+
+    wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 10)
+    await flushPromises()
+    expect(button.text()).toBe(`payment.createOrder ${formatPaymentAmount(10, 'CNY')}`)
+    expect(button.attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="recharge-summary"]').attributes('inert')).toBeUndefined()
+
+    await wrapper.get('[data-testid="recharge-form"]').trigger('submit')
+    await flushPromises()
+    expect(createOrder).toHaveBeenCalledTimes(1)
+    expect(createOrder.mock.calls[0][0]).toMatchObject({ amount: 10, payment_type: 'wxpay', order_type: 'balance' })
+  })
+})
