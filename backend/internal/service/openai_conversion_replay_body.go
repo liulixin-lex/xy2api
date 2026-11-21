@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json/jsontext"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -9,7 +10,12 @@ import (
 // This narrower gate belongs only to identity-conflict replay. It must never
 // replace or widen requestBodyReplaySafe's transport-read retry policy.
 func conversionReplayBodyReason(body []byte) string {
-	if !gjson.ValidBytes(body) {
+	// Unlike gjson lookups, the strict JSON reader verifies unique decoded names
+	// in every object, including objects inside arrays. Only this replay uses it.
+	if raw := jsontext.Value(body); !raw.IsValid() {
+		if raw.IsValid(jsontext.AllowDuplicateNames(true)) {
+			return "duplicate_key"
+		}
 		return "unrecognized_input"
 	}
 	root := gjson.ParseBytes(body)

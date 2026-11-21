@@ -1,10 +1,8 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -21,9 +19,9 @@ const OpenAIConversionIdentityReason GatewayFailureReason = "openai_conversion_i
 
 type openAIConversionRetryKey struct{}
 type openAIConversionRetryState struct {
-	wire, replay                       []byte
+	openAIConversionWire
 	used, resent, logged, replayOutput bool
-	protocolRejected                   atomic.Bool
+	protocolRejected, wireRejected     atomic.Bool
 	failure                            *UpstreamFailoverError
 	model, param, message              string
 }
@@ -36,34 +34,6 @@ func WithOpenAIConversionRetry(ctx context.Context) context.Context {
 func openAIConversionRetryFrom(ctx context.Context) *openAIConversionRetryState {
 	state, _ := ctx.Value(openAIConversionRetryKey{}).(*openAIConversionRetryState)
 	return state
-}
-
-// Use the final builder bytes: same-account repairs and prompt injection may
-// have changed them since entry. Replaying changes only destination headers.
-func prepareOpenAIConversionWire(ctx context.Context, req *http.Request) []byte {
-	state := openAIConversionRetryFrom(ctx)
-	if state == nil {
-		return nil
-	}
-	if state.replay != nil {
-		body := state.replay
-		state.replay = nil
-		req.Body = io.NopCloser(bytes.NewReader(body))
-		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
-		req.ContentLength = int64(len(body))
-		req.Header.Del("Content-Length")
-	}
-	state.wire = nil
-	if req.GetBody != nil {
-		reader, err := req.GetBody()
-		if err == nil {
-			defer func() { _ = reader.Close() }()
-			if body, readErr := io.ReadAll(reader); readErr == nil {
-				state.wire = body
-			}
-		}
-	}
-	return state.wire
 }
 
 func openAIConversionRetryError(c *gin.Context, resp *http.Response, account *Account, model string, usage bool, param, message string, err error) *UpstreamFailoverError {
@@ -157,14 +127,19 @@ func (s *OpenAIGatewayService) StartOpenAIConversionRetry(c *gin.Context, accoun
 		return false
 	}
 	state.used = true
-	state.replay = append([]byte(nil), state.wire...)
-	ctx = WithOpenAISelectionCandidateConstraint(ctx, account.Priority, state.model, account.ID, func(candidate *Account) bool {
-		allowed := candidate != nil && candidate.Platform != PlatformGrok && s.resolveUpstreamProtocolFor(ctx, candidate, APIProtocolChatCompletions, state.model) == APIProtocolResponses
-		if !allowed {
+	state.replay = state.wire
+	filter := func(candidate *Account) bool {
+		if candidate == nil || candidate.Platform == PlatformGrok || s.resolveUpstreamProtocolFor(ctx, candidate, state.inbound, state.model) != APIProtocolResponses {
 			state.protocolRejected.Store(true)
+			return false
 		}
-		return allowed
-	})
+		if !s.matchesConversionWire(ctx, candidate, state) {
+			state.wireRejected.Store(true)
+			return false
+		}
+		return true
+	}
+	ctx = WithOpenAISelectionCandidateConstraint(ctx, account.Priority, state.model, account.ID, filter)
 	c.Request = c.Request.WithContext(WithOpenAISelectionNoWait(ctx))
 	return true
 }
@@ -180,8 +155,13 @@ func WriteOpenAIConversionRetryFailure(c *gin.Context, failure *UpstreamFailover
 		state.log(false, "client_canceled", "canceled")
 		return
 	}
-	if reason == "no_candidate" && state.protocolRejected.Load() {
-		reason = "candidate_protocol"
+	if reason == "no_candidate" {
+		switch {
+		case state.wireRejected.Load():
+			reason = "candidate_wire"
+		case state.protocolRejected.Load():
+			reason = "candidate_protocol"
+		}
 	}
 	writeUpstreamConversionError(c, &http.Response{StatusCode: failure.StatusCode}, "responses", PreOutputProtocolChat, "server_error", state.param, state.message, failure.cause)
 	state.log(false, reason, "not_retried")

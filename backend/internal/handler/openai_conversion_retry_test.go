@@ -19,6 +19,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func newConversionRetryHandler(t *testing.T, upstream service.HTTPUpstream, mutate func([]service.Account), stores ...*conversionRetryRequestStore) *OpenAIGatewayHandler {
@@ -232,8 +233,10 @@ func TestChatConversionRetryEndToEnd(t *testing.T) {
 				}
 				mutate := func(accounts []service.Account) {
 					if scenario == "second_protocol_fallback" {
-						accounts[1].Type = service.AccountTypeAPIKey
-						accounts[1].Credentials = map[string]any{"api_key": "fixture"}
+						for i := range accounts {
+							accounts[i].Type = service.AccountTypeAPIKey
+							accounts[i].Credentials = map[string]any{"api_key": "fixture"}
+						}
 					}
 					if scenario == "no_candidate" {
 						accounts[1].Priority = 1
@@ -380,4 +383,109 @@ func TestConversionRetryConsumesBudgetWithoutPenalties(t *testing.T) {
 	excluded := map[int64]struct{}{1: {}}
 	require.False(t, resilienceBeforeSwitch(ctx, &hostSharingUnscheduler{sameHost: map[int64][]int64{1: {1, 2}}}, 1, failure, excluded))
 	require.Equal(t, map[int64]struct{}{1: {}}, excluded)
+}
+
+func conversionAPIKey(a *service.Account) {
+	a.Type = service.AccountTypeAPIKey
+	a.Credentials = map[string]any{"api_key": "fixture", "api_protocol": "responses"}
+	a.Extra = map[string]any{"openai_responses_supported": true}
+}
+
+func runConversionChat(t *testing.T, h *OpenAIGatewayHandler, body string) (string, map[string]any) {
+	t.Helper()
+	sink := &conversionRetryLogs{}
+	previous := slog.Default()
+	logger.InitBootstrap()
+	logger.SetSink(sink)
+	t.Cleanup(func() { logger.SetSink(nil); slog.SetDefault(previous) })
+	c, rec := newOpenAIResponsesFailoverTestContext(t, budgetCtx(t, resilience.KindText, 3131))
+	c.Request.URL.Path = "/v1/chat/completions"
+	c.Request.Body = io.NopCloser(strings.NewReader(body))
+	c.Request.ContentLength = int64(len(body))
+	service.InstallDeliveryTracking(c, time.Now())
+	h.ChatCompletions(c)
+	events := sink.events("openai_conversion_retry")
+	require.Len(t, events, 1)
+	return rec.Body.String(), events[0]
+}
+
+func TestConversionReplayDuplicateKeysAtDispatch(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, tc := range []struct {
+		name, fields, preserved string
+		duplicate               bool
+	}{
+		{"previous_response", `"input":"hello","previous_response_id":"","previous_response_id":""`, `"previous_response_id":"","previous_response_id":""`, true},
+		{"conversation", `"input":"hello","conversation":null,"conversation":null`, `"conversation":null,"conversation":null`, true},
+		{"tools", `"input":"hello","tools":[],"tools":[]`, `"tools":[],"tools":[]`, true},
+		{"nested_tool", `"input":"hello","tools":[{"type":"function","name":"fixture","name":"fixture"}]`, `"name":"fixture","name":"fixture"`, true},
+		{"nested_input_escaped_name", `"input":[{"role":"user","content":[{"type":"input_text","text":"a","\u0074ext":"a"}]}]`, `"text":"a","\u0074ext":"a"`, true},
+		{"separate_objects", `"input":[{"role":"user","content":"a"},{"role":"user","content":"b"}]`, `{"role":"user","content":"b"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			up := &conversionRetryUpstream{responses: []string{conversionConflictStream(false), conversionSuccessStream}}
+			h := newConversionRetryHandler(t, up, func(as []service.Account) {
+				for i := range as {
+					conversionAPIKey(&as[i])
+				}
+			})
+			output, event := runConversionChat(t, h, `{"model":"gpt-5.4",`+tc.fields+`}`)
+			require.NotEmpty(t, up.bodies)
+			require.Contains(t, string(up.bodies[0]), tc.preserved, "gate is tested on the actual bytes sent")
+			if tc.duplicate {
+				require.Len(t, up.bodies, 1)
+				require.Equal(t, "duplicate_key", event["skip_reason"])
+				require.Equal(t, false, event["retried"])
+				require.NotContains(t, output, "retry-success")
+			} else {
+				require.Len(t, up.bodies, 2)
+				require.Equal(t, "success", event["result"])
+			}
+		})
+	}
+}
+
+func TestReviewConversionToolAliasAcrossAccountTypes(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, stream := range []bool{false, true} {
+		for _, from := range []string{service.AccountTypeOAuth, service.AccountTypeAPIKey} {
+			for _, to := range []string{service.AccountTypeOAuth, service.AccountTypeAPIKey} {
+				t.Run(fmt.Sprintf("%s_to_%s/stream=%t", from, to, stream), func(t *testing.T) {
+					up := &conversionRetryUpstream{responses: []string{conversionConflictStream(false), ""}}
+					h := newConversionRetryHandler(t, up, func(as []service.Account) {
+						for i, kind := range []string{from, to} {
+							if kind == service.AccountTypeAPIKey {
+								conversionAPIKey(&as[i])
+							}
+						}
+					})
+					up.onSend = func(i int) {
+						if i == 1 {
+							name := gjson.GetBytes(up.bodies[i], "tools.0.name").String()
+							up.responses[i] = "data: " + fmt.Sprintf(`{"type":"response.completed","response":{"id":"result","status":"completed","output":[{"id":"item","type":"function_call","call_id":"call","name":%q,"arguments":"{}","status":"completed"}]}}`, name) + "\n\n"
+						}
+					}
+					body := fmt.Sprintf(`{"model":"gpt-5.4","stream":%t,"messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"python","parameters":{"type":"object"}}}]}`, stream)
+					out, event := runConversionChat(t, h, body)
+					require.NotEmpty(t, up.bodies)
+					wireName := gjson.GetBytes(up.bodies[0], "tools.0.name").String()
+					require.NotEmpty(t, wireName)
+					require.Equal(t, from == service.AccountTypeAPIKey, wireName == "python")
+					if from != to {
+						require.Len(t, up.accounts, 1)
+						require.Equal(t, "candidate_wire", event["skip_reason"])
+						require.Equal(t, false, event["retried"])
+						return
+					}
+					require.Equal(t, []int64{1, 2}, up.accounts)
+					require.Equal(t, up.bodies[0], up.bodies[1])
+					require.Equal(t, "success", event["result"])
+					require.Contains(t, out, `"name":"python"`)
+					if wireName != "python" {
+						require.NotContains(t, out, wireName)
+					}
+				})
+			}
+		}
+	}
 }

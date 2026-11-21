@@ -459,7 +459,9 @@ retryChatResponsesWire:
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	if wire := prepareOpenAIConversionWire(ctx, upstreamReq); wire != nil {
+	if wire, wireErr := s.prepareOpenAIConversionWire(ctx, c, upstreamReq, account, inbound); wireErr != nil {
+		return nil, wireErr
+	} else if wire != nil {
 		responsesBody = wire
 	}
 	bindM7ResponsesWireBody(c, account, responsesBody)

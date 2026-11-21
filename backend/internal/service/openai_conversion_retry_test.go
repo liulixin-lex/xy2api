@@ -130,24 +130,56 @@ func TestConversionRetryQualification(t *testing.T) {
 	}
 }
 
+func captureConversionTestWire(t *testing.T, c *gin.Context, account *Account, body string) *http.Request {
+	t.Helper()
+	r, err := http.NewRequest(http.MethodPost, "https://fixture.invalid/v1/responses", strings.NewReader(body))
+	require.NoError(t, err)
+	_, err = (&OpenAIGatewayService{}).prepareOpenAIConversionWire(c.Request.Context(), c, r, account, APIProtocolChatCompletions)
+	require.NoError(t, err)
+	return r
+}
+
 func TestConversionRetryWireUsesFinalRequest(t *testing.T) {
 	c, _ := conversionRetryTestContext(t, `{"model":"fixture"}`)
-	ctx := c.Request.Context()
-	first := `{"model":"fixture","input":"repaired","stream":true,"tools":[{"type":"function","name":"fixture"}]}`
-	request, err := http.NewRequest(http.MethodPost, "https://fixture.invalid/v1/responses", strings.NewReader(first))
-	require.NoError(t, err)
-	require.JSONEq(t, first, string(prepareOpenAIConversionWire(ctx, request)))
-	scope := openAIConversionRetryFrom(ctx)
-	scope.replay = append([]byte(nil), scope.wire...)
-	second, err := http.NewRequest(http.MethodPost, "https://other.invalid/v1/responses", strings.NewReader(`{"model":"fixture","input":"original"}`))
-	require.NoError(t, err)
-	prepareOpenAIConversionWire(ctx, second)
+	scope := openAIConversionRetryFrom(c.Request.Context())
+	original := `{"model":"fixture","input":"hello","top_p":0.8}`
+	repaired := `{"model":"fixture","input":"hello"}`
+	a := &Account{ID: 1}
+	setCodexToolNameReverse(c, map[string]string{"alias": "before repair"})
+	captureConversionTestWire(t, c, a, original)
+	setCodexToolNameReverse(c, map[string]string{"alias": "name at send"})
+	captureConversionTestWire(t, c, a, repaired)
+	codexToolNameReverseFromContext(c)["alias"] = "changed after send"
+	scope.replay = scope.wire
+	setCodexToolNameReverse(c, map[string]string{"second": "new builder"})
+	second := captureConversionTestWire(t, c, &Account{ID: 2}, original)
 	actual, err := io.ReadAll(second.Body)
 	require.NoError(t, err)
-	require.Equal(t, first, string(actual))
-	require.EqualValues(t, len(first), second.ContentLength)
+	require.Equal(t, repaired, string(actual))
+	require.EqualValues(t, len(repaired), second.ContentLength)
+	require.Equal(t, map[string]string{"alias": "name at send"}, codexToolNameReverseFromContext(c))
 	require.Nil(t, scope.replay)
-	t.Logf("same_account_repair_preserved=true next_wire_bytes=%d", len(actual))
+}
+
+func TestConversionRetryCandidateWireScope(t *testing.T) {
+	c, _ := conversionRetryTestContext(t, `{"model":"fixture"}`)
+	svc := &OpenAIGatewayService{}
+	first := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "source"}}
+	next := &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "destination"}}
+	for _, tc := range []struct {
+		wire       string
+		compatible bool
+	}{
+		{`{"model":"fixture","input":"hello"}`, true},
+		{`{"model":"fixture","input":"hello","prompt_cache_key":"scoped"}`, false},
+	} {
+		captureConversionTestWire(t, c, first, tc.wire)
+		state := openAIConversionRetryFrom(c.Request.Context())
+		require.Equal(t, tc.compatible, svc.matchesConversionWire(c.Request.Context(), next, state))
+	}
+	// A later edit to the selected row must not change the captured namespace.
+	first.Credentials["chatgpt_account_id"] = "destination"
+	require.False(t, svc.matchesConversionWire(c.Request.Context(), next, openAIConversionRetryFrom(c.Request.Context())))
 }
 
 func TestConversionRetryChecksRepairedWireShape(t *testing.T) {
@@ -158,9 +190,7 @@ func TestConversionRetryChecksRepairedWireShape(t *testing.T) {
 		if repaired {
 			wire = `{"model":"fixture","input":"complete local history"}`
 		}
-		request, err := http.NewRequest(http.MethodPost, "https://fixture.invalid/v1/responses", strings.NewReader(wire))
-		require.NoError(t, err)
-		prepareOpenAIConversionWire(c.Request.Context(), request)
+		captureConversionTestWire(t, c, &Account{ID: 1}, wire)
 		failure := openAIConversionRetryError(c, &http.Response{StatusCode: 200}, &Account{ID: 1}, "fixture", false, "", "conversion failed", &apicompat.UpstreamConversionError{SourceProtocol: "responses", Field: "output", Reason: "conflicting output identity"})
 		require.Equal(t, repaired, failure != nil, "only the actual wire's continuation state controls the structural gate")
 	}
@@ -168,7 +198,7 @@ func TestConversionRetryChecksRepairedWireShape(t *testing.T) {
 
 func TestConversionRetryCandidatesRecheckEveryConstraint(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, changed := range []string{"protocol", "priority", "model", "profit"} {
+	for _, changed := range []string{"protocol", "wire", "image_rewrite", "priority", "model", "profit"} {
 		t.Run(changed, func(t *testing.T) {
 			accounts := []Account{selectionFixtureAccount(10, 1), selectionFixtureAccount(2, 1), selectionFixtureAccount(3, 1), selectionFixtureAccount(4, 1)}
 			now := time.Now()
@@ -181,6 +211,10 @@ func TestConversionRetryCandidatesRecheckEveryConstraint(t *testing.T) {
 				switch changed {
 				case "protocol":
 					account.Extra["openai_responses_supported"] = false
+				case "image_rewrite":
+					account.Credentials = map[string]any{"base_url": DefaultDeepseekBaseURL}
+				case "wire":
+					account.Extra["openai_passthrough"] = true
 				case "priority":
 					account.Priority = 2
 				case "model":
@@ -199,7 +233,7 @@ func TestConversionRetryCandidatesRecheckEveryConstraint(t *testing.T) {
 				}
 			}
 			c, _ := conversionRetryTestContext(t, `{"model":"m","messages":[{"role":"user","content":"hello"}]}`)
-			openAIConversionRetryFrom(c.Request.Context()).wire = []byte(`{"model":"m","input":"hello"}`)
+			captureConversionTestWire(t, c, &accounts[0], `{"model":"m","input":"hello"}`)
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: 7, platform: PlatformOpenAI, ceilingOn: true, threshold: 0.5, pricingAt: now}))
 			failure := openAIConversionRetryError(c, &http.Response{StatusCode: 200}, &accounts[0], "m", false, "", "conversion failed", &apicompat.UpstreamConversionError{SourceProtocol: "responses", Field: "output", Reason: "conflicting output identity"})
 			require.NotNil(t, failure)
@@ -219,7 +253,7 @@ func TestConversionRetryCannotBypassBusySlot(t *testing.T) {
 	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(10, 1), selectionFixtureAccount(2, 1))
 	f.loads.acquireResults = map[int64]bool{2: false}
 	c, _ := conversionRetryTestContext(t, `{"model":"m","messages":[{"role":"user","content":"hello"}]}`)
-	openAIConversionRetryFrom(c.Request.Context()).wire = []byte(`{"model":"m","input":"hello"}`)
+	captureConversionTestWire(t, c, &f.repo.accounts[0], `{"model":"m","input":"hello"}`)
 	failure := openAIConversionRetryError(c, &http.Response{StatusCode: 200}, &f.repo.accounts[0], "m", false, "", "conversion failed", &apicompat.UpstreamConversionError{SourceProtocol: "responses", Field: "output", Reason: "conflicting output identity"})
 	require.NotNil(t, failure)
 	require.True(t, f.svc.StartOpenAIConversionRetry(c, &f.repo.accounts[0], failure))
