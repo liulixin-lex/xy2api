@@ -282,6 +282,7 @@ func (r *groupRepository) GetByID(ctx context.Context, id int64) (*service.Group
 		out.AccountCount = c.Total
 		out.ActiveAccountCount = c.Active
 		out.RateLimitedAccountCount = c.RateLimited
+		out.OAuthOnlyMismatchCount = c.OAuthOnlyMismatch
 	}
 	return out, nil
 }
@@ -575,6 +576,7 @@ func (r *groupRepository) listWithFiltersQuery(ctx context.Context, q *dbent.Gro
 			outGroups[i].AccountCount = c.Total
 			outGroups[i].ActiveAccountCount = c.Active
 			outGroups[i].RateLimitedAccountCount = c.RateLimited
+			outGroups[i].OAuthOnlyMismatchCount = c.OAuthOnlyMismatch
 		}
 	}
 
@@ -660,6 +662,7 @@ func (r *groupRepository) listWithAccountCountSort(ctx context.Context, q *dbent
 		g.AccountCount = c.Total
 		g.ActiveAccountCount = c.Active
 		g.RateLimitedAccountCount = c.RateLimited
+		g.OAuthOnlyMismatchCount = c.OAuthOnlyMismatch
 		if idx, ok := pageIdx[g.ID]; ok {
 			outGroups[idx] = *g
 		}
@@ -746,6 +749,7 @@ func (r *groupRepository) ListActive(ctx context.Context) ([]service.Group, erro
 			outGroups[i].AccountCount = c.Total
 			outGroups[i].ActiveAccountCount = c.Active
 			outGroups[i].RateLimitedAccountCount = c.RateLimited
+			outGroups[i].OAuthOnlyMismatchCount = c.OAuthOnlyMismatch
 		}
 	}
 
@@ -819,6 +823,7 @@ func (r *groupRepository) ListActiveByPlatform(ctx context.Context, platform str
 			outGroups[i].AccountCount = c.Total
 			outGroups[i].ActiveAccountCount = c.Active
 			outGroups[i].RateLimitedAccountCount = c.RateLimited
+			outGroups[i].OAuthOnlyMismatchCount = c.OAuthOnlyMismatch
 		}
 	}
 
@@ -1013,9 +1018,10 @@ func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEm
 }
 
 type groupAccountCounts struct {
-	Total       int64
-	Active      int64
-	RateLimited int64
+	Total             int64
+	Active            int64
+	RateLimited       int64
+	OAuthOnlyMismatch int64
 }
 
 const (
@@ -1051,12 +1057,13 @@ func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int6
 		fmt.Sprintf(`SELECT ag.group_id,
 			COUNT(*) FILTER (WHERE a.deleted_at IS NULL) AS total,
 			COUNT(*) FILTER (WHERE %s) AS active,
-			COUNT(*) FILTER (WHERE %s) AS rate_limited
+			COUNT(*) FILTER (WHERE %s) AS rate_limited,
+			COUNT(*) FILTER (WHERE a.deleted_at IS NULL AND a.type = $2) AS oauth_only_mismatch
 		FROM account_groups ag
 		JOIN accounts a ON a.id = ag.account_id
 		WHERE ag.group_id = ANY($1)
 		GROUP BY ag.group_id`, groupAccountAvailableSQL, groupAccountTemporarilyLimitedSQL),
-		pq.Array(groupIDs),
+		pq.Array(groupIDs), service.AccountTypeAPIKey,
 	)
 	if err != nil {
 		return nil, err
@@ -1071,7 +1078,7 @@ func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int6
 	for rows.Next() {
 		var groupID int64
 		var c groupAccountCounts
-		if err = rows.Scan(&groupID, &c.Total, &c.Active, &c.RateLimited); err != nil {
+		if err = rows.Scan(&groupID, &c.Total, &c.Active, &c.RateLimited, &c.OAuthOnlyMismatch); err != nil {
 			return nil, err
 		}
 		counts[groupID] = c

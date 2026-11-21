@@ -1207,6 +1207,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 			return nil, fmt.Errorf("failed to copy account members: %w", err)
 		}
 		group.AccountCount = count
+		if group.RequireOAuthOnly && groupSupportsOAuthOnlyFilter(group.Platform) {
+			group.OAuthOnlyMismatchCount = 0
+		}
 
 	}
 
