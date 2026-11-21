@@ -146,16 +146,9 @@
           </template>
 
           <template #cell-name="{ value, row }">
-            <!-- The frozen identity column: at most 240px below 1024px, the name (and the cache TTL line) cut with "…", whole on a tap. -->
+            <!-- The frozen identity column: at most 240px below 1024px, the name cut with "…", whole on a tap. -->
             <div class="flex max-lg:max-w-[240px] items-center gap-1.5">
-              <TableIdentityCell
-                :primary="value"
-                :secondary="groupSupportsAnthropicCacheTTL(row.group) ? t('keys.cacheTTL.summary', { mode: cacheTTLLabel(row.anthropic_cache_ttl_mode ?? 'off') }) : undefined"
-              >
-                <template v-if="groupSupportsAnthropicCacheTTL(row.group)" #secondary>
-                  <span data-test="key-cache-ttl">{{ t('keys.cacheTTL.summary', { mode: cacheTTLLabel(row.anthropic_cache_ttl_mode ?? 'off') }) }}</span>
-                </template>
-              </TableIdentityCell>
+              <TableIdentityCell :primary="value" />
               <Icon
                 v-if="row.ip_whitelist?.length > 0 || row.ip_blacklist?.length > 0"
                 name="shield"
@@ -607,11 +600,9 @@
             id="key-form-cache-ttl"
             v-model="formData.anthropic_cache_ttl_mode"
             :aria-label="t('keys.cacheTTL.label')"
-            aria-describedby="key-form-cache-ttl-hint"
             :options="cacheTTLOptions"
             match-trigger-width
           />
-          <p id="key-form-cache-ttl-hint" class="input-hint">{{ t('keys.cacheTTL.hint') }}</p>
         </div>
 
         <!-- Custom Key Section (only for create) -->
@@ -1231,7 +1222,7 @@ import BulkEditKeysModal from '@/components/keys/BulkEditKeysModal.vue'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
 	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 	import ExclusiveGroupTag from '@/components/common/ExclusiveGroupTag.vue'
-	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest, AnthropicCacheTTLMode, AnthropicCacheTTL } from '@/types'
+	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest, AnthropicCacheTTLMode } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
 import { formatDateTime, formatListDateTime } from '@/utils/format'
@@ -1367,15 +1358,8 @@ const columns = computed<Column[]>(() =>
 )
 
 const apiKeys = ref<ApiKey[]>([])
-const anthropicCacheTTLDefault = ref<AnthropicCacheTTL | null>(null)
-const cacheTTLLabel = (mode: AnthropicCacheTTLMode = 'inherit') => {
-  if (mode !== 'inherit') return t(`keys.cacheTTL.${mode}`)
-  return anthropicCacheTTLDefault.value
-    ? t('keys.cacheTTL.inheritCurrent', { ttl: t(`keys.cacheTTL.duration.${anthropicCacheTTLDefault.value}`) })
-    : t('keys.cacheTTL.inherit')
-}
 const cacheTTLOptions = computed(() => (['inherit', 'off', '5m', '1h'] as const).map((value) => ({
-  value, label: cacheTTLLabel(value)
+  value, label: t(`keys.cacheTTL.${value}`)
 })))
 const selectedIds = ref<number[]>([])
 const showBulkEditModal = ref(false)
@@ -1642,7 +1626,6 @@ const loadApiKeys = async () => {
     })
     if (signal.aborted) return
     apiKeys.value = response.items
-    anthropicCacheTTLDefault.value = response.meta?.anthropic_cache_ttl_default ?? null
     handleSelectionChange(selectedIds.value)
     pagination.value.total = response.total
     pagination.value.pages = response.pages
