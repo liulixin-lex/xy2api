@@ -15,6 +15,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestConversionReplayBodyBoundary(t *testing.T) {
@@ -52,6 +53,7 @@ func conversionRetryTestContext(t *testing.T, body string) (*gin.Context, *resil
 	settings := resilience.Defaults()
 	state.SetBudget(resilience.NewBudget(ctx, &settings, resilience.KindText, time.Now()))
 	ctx = WithRequestReplaySafety(ctx, []byte(body), false)
+	ctx = WithChatRequestRequirementFromBody(ctx, []byte(body), gjson.Get(body, "model").String())
 	c.Request = c.Request.WithContext(WithOpenAIConversionRetry(ctx))
 	InstallDeliveryTracking(c, time.Now())
 	openAIConversionRetryFrom(c.Request.Context()).wire = []byte(`{"model":"fixture","input":"hello","stream":true}`)
@@ -245,6 +247,50 @@ func TestConversionRetryCandidatesRecheckEveryConstraint(t *testing.T) {
 			require.Equal(t, int64(4), selected.Account.ID)
 			require.Equal(t, []int64{2, 4}, f.attempts)
 			require.Equal(t, []int64{2}, f.releases)
+		})
+	}
+}
+
+func TestConversionRetryPassthroughMappingAtSlot(t *testing.T) {
+	withResilienceSettings(t, nil)
+	const dispatch = "gpt-5.4"
+	for _, timing := range []string{"before_slot", "after_slot"} {
+		t.Run(timing, func(t *testing.T) {
+			accounts := []Account{selectionFixtureAccount(10, 1), selectionFixtureAccount(2, 1), selectionFixtureAccount(4, 1)}
+			for i := range accounts {
+				accounts[i].Credentials = map[string]any{"api_protocol": "responses"}
+				accounts[i].Extra = map[string]any{"openai_responses_supported": true, "openai_passthrough": true}
+			}
+			remap := func(a *Account) { a.Credentials["model_mapping"] = map[string]any{dispatch: "gpt-5.5"} }
+			if timing == "before_slot" {
+				remap(&accounts[1])
+			}
+			f := newSelectionRuntimeFixture(t, accounts...)
+			if timing == "after_slot" {
+				f.loads.after = func(id int64) {
+					if id == 2 {
+						remap(&f.repo.accounts[1])
+					}
+				}
+			}
+			// The user-facing model differs from the channel's dispatch model.
+			c, _ := conversionRetryTestContext(t, `{"model":"public","messages":[{"role":"user","content":"hello"}]}`)
+			c.Request = c.Request.WithContext(WithChatRequestRequirement(c.Request.Context(), ChatRequestRequirement{OriginalModel: "public", DispatchModel: dispatch}))
+			captureConversionTestWire(t, c, &accounts[0], `{"model":"gpt-5.4","input":"hello"}`)
+			failure := openAIConversionRetryError(c, &http.Response{StatusCode: 200}, &accounts[0], dispatch, false, "", "fixture", &apicompat.UpstreamConversionError{SourceProtocol: "responses", Field: "output", Reason: "conflicting output identity"})
+			require.NotNil(t, failure)
+			require.True(t, f.svc.StartOpenAIConversionRetry(c, &accounts[0], failure))
+			result, _, err := f.svc.SelectAccountWithSchedulerForCapability(c.Request.Context(), ptrInt64Selection(7), "", "", dispatch, nil, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityChatCompletions, false, false, true, PlatformOpenAI)
+			require.NoError(t, err)
+			require.Equal(t, int64(4), result.Account.ID)
+			defer result.ReleaseFunc()
+			if timing == "before_slot" {
+				require.Equal(t, []int64{4}, f.attempts)
+				require.Empty(t, f.releases)
+			} else {
+				require.Equal(t, []int64{2, 4}, f.attempts)
+				require.Equal(t, []int64{2}, f.releases)
+			}
 		})
 	}
 }

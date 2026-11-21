@@ -20,10 +20,10 @@ const OpenAIConversionIdentityReason GatewayFailureReason = "openai_conversion_i
 type openAIConversionRetryKey struct{}
 type openAIConversionRetryState struct {
 	openAIConversionWire
-	used, resent, logged, replayOutput bool
-	protocolRejected, wireRejected     atomic.Bool
-	failure                            *UpstreamFailoverError
-	model, param, message              string
+	used, resent, logged, replayOutput   bool
+	protocolRejected, wireRejected       atomic.Bool
+	failure                              *UpstreamFailoverError
+	dispatchModel, model, param, message string
 }
 
 // WithOpenAIConversionRetry gives the Chat handler ownership of a single replay.
@@ -53,9 +53,12 @@ func openAIConversionRetryError(c *gin.Context, resp *http.Response, account *Ac
 	state.failure = &UpstreamFailoverError{Reason: OpenAIConversionIdentityReason, StatusCode: resp.StatusCode,
 		Scope: GatewayFailureScopeRequest, ClientStatusCode: http.StatusBadGateway,
 		SafeToFailoverAfterWrite: true, cause: err, conversionRetry: state}
-	state.model = model
+	// DispatchModel is the same channel-resolved input the Chat handler gives selection.
+	requirement, _ := ChatRequestRequirementFromContext(c.Request.Context())
+	state.dispatchModel = requirement.DispatchModel
+	state.model = OpenAIAttemptModel(account, state.dispatchModel)
 	if wireModel := gjson.GetBytes(state.wire, "model"); wireModel.Type == gjson.String && wireModel.Str != "" {
-		state.model = wireModel.Str
+		model = wireModel.Str
 	}
 	reason := ""
 	safe, marked := c.Request.Context().Value(requestReplaySafetyContextKey{}).(bool)
@@ -83,6 +86,9 @@ func openAIConversionRetryError(c *gin.Context, resp *http.Response, account *Ac
 		reason = "budget_exhausted"
 	default:
 		reason = conversionReplayBodyReason(state.wire)
+		if reason == "" && model != state.model {
+			reason = "wire_model_mapped"
+		}
 	}
 	if reason != "" {
 		result := "not_retried"
@@ -133,7 +139,10 @@ func (s *OpenAIGatewayService) StartOpenAIConversionRetry(c *gin.Context, accoun
 			state.protocolRejected.Store(true)
 			return false
 		}
-		if !s.matchesConversionWire(ctx, candidate, state) {
+		// Selection has already matched this candidate's OpenAIAttemptModel
+		// to state.model. Chat also applies account mappings on passthrough rows.
+		_, chatModel := resolveOpenAICompatForwardModels(candidate, state.dispatchModel, "")
+		if chatModel != state.model || !s.matchesConversionWire(ctx, candidate, state) {
 			state.wireRejected.Store(true)
 			return false
 		}

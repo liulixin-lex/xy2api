@@ -489,3 +489,48 @@ func TestReviewConversionToolAliasAcrossAccountTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestConversionRetryPassthroughOriginalModel(t *testing.T) {
+	withHandlerResilience(t, nil)
+	const dispatch = "gpt-5.4"
+	for _, tc := range []struct {
+		name         string
+		passthrough  bool
+		mapped, skip string
+	}{
+		{"both_mapped", true, "gpt-5.5", "wire_model_mapped"},
+		{"no_mapping", true, "", ""},
+		{"normal_mapping", false, "gpt-5.5", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			up := &conversionRetryUpstream{responses: []string{conversionConflictStream(false), conversionSuccessStream}}
+			h := newConversionRetryHandler(t, up, func(as []service.Account) {
+				for i := range as {
+					conversionAPIKey(&as[i])
+					as[i].Extra["openai_passthrough"] = tc.passthrough
+					if tc.mapped != "" {
+						as[i].Credentials["model_mapping"] = map[string]any{dispatch: tc.mapped}
+					}
+				}
+			})
+			output, event := runConversionChat(t, h, `{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}`)
+			wantWire := dispatch
+			if tc.mapped != "" {
+				wantWire = tc.mapped
+			}
+			require.NotEmpty(t, up.bodies)
+			require.Equal(t, wantWire, gjson.GetBytes(up.bodies[0], "model").String())
+			require.Equal(t, tc.skip, event["skip_reason"])
+			if tc.skip != "" {
+				require.Equal(t, []int64{1}, up.accounts)
+				require.Equal(t, false, event["retried"])
+				require.Equal(t, "not_retried", event["result"])
+				return
+			}
+			require.Equal(t, []int64{1, 2}, up.accounts)
+			require.Equal(t, up.bodies[0], up.bodies[1])
+			require.Equal(t, "success", event["result"])
+			require.Contains(t, output, "retry-success")
+		})
+	}
+}
