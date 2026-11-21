@@ -187,6 +187,9 @@ func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts 
 // Inspect the counterfactual candidate through normal admission and current
 // capacity without acquiring a slot, changing full marks or selection evidence.
 func (s *OpenAIGatewayService) switchVetoOpportunity(ctx context.Context, req OpenAIAccountScheduleRequest, owner *Account, members []Account, reason string, soft, strict map[int64]struct{}, allowed func(*Account) bool) *Account {
+	if req.baseExclusions != nil {
+		req.ExcludedIDs = req.baseExclusions
+	}
 	ctx = context.WithValue(withSelectionFailureEvidence(ctx), openAISelectionRequestKey{}, req)
 	candidates, _ := s.selectionCandidates(ctx, req, members)
 	eligible := candidates[:0]

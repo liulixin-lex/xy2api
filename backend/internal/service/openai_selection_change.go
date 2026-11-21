@@ -190,6 +190,28 @@ func FinishOpenAIStickyForward(ctx context.Context, accountID int64, result *Ope
 	change.completeLocked(ctx, success, canceled, beforeSend)
 }
 
+const stickyAbandonIdentityConflict = "identity_conflict"
+
+// AbandonOpenAIStickyForwardForIdentityConflict retires only this candidate's
+// sticky plan after a Responses conversion identity conflict. The caller must
+// invoke it only for that fixed conversion reason; the old binding is preserved
+// and the request can prepare a fresh plan for its next candidate.
+func AbandonOpenAIStickyForwardForIdentityConflict(ctx context.Context, accountID int64) {
+	state := resilience.StateFrom(ctx)
+	change := pendingOpenAIStickyChange(ctx)
+	if state == nil || change == nil || change.target != accountID {
+		return
+	}
+	change.mu.Lock()
+	if change.done {
+		change.mu.Unlock()
+		return
+	}
+	change.reason = stickyAbandonIdentityConflict
+	change.completeLocked(ctx, false, false, false)
+	state.SetStickyChange(nil)
+}
+
 func pendingOpenAIStickyChange(ctx context.Context) *openAIStickyChange {
 	change, _ := resilience.StateFrom(ctx).StickyChange().(*openAIStickyChange)
 	return change
@@ -542,6 +564,9 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 	}()
 	if canceled && change.kind == stickyFollow {
 		change.reason = "canceled"
+	}
+	if change.reason == stickyAbandonIdentityConflict {
+		return
 	}
 	if canceled || change.skipCommit {
 		return
