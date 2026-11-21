@@ -1674,7 +1674,9 @@ export default {
         },
         cacheTTLOverride: {
           label: '缓存写入计费分类覆盖',
-          target: '计费分类'
+          target: '计费分类',
+          '5m': '5 分钟',
+          '1h': '1 小时'
         },
         customBaseUrl: {
           label: '自定义转发地址',

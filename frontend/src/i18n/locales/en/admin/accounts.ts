@@ -1572,7 +1572,9 @@ export default {
         },
         cacheTTLOverride: {
           label: 'Cache write billing classification override',
-          target: 'Billing classification'
+          target: 'Billing classification',
+          '5m': '5 minutes',
+          '1h': '1 hour'
         },
         customBaseUrl: {
           label: 'Custom Relay URL',

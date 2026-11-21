@@ -308,6 +308,18 @@ describe('EditAccountModal for operators: upstream address and proxy', () => {
     expect(anthropicPayload.extra ?? {}).not.toHaveProperty('cache_ttl_override_enabled')
     expect(anthropicPayload.extra ?? {}).not.toHaveProperty('cache_ttl_override_target')
   })
+
+  it('names the billing classification options in words and still sends the raw value', async () => {
+    seedOperator(['users.balance_adjust'])
+    const wrapper = mountModal(anthropicOAuthAccount({ cache_ttl_override_enabled: true, cache_ttl_override_target: '1h' }))
+    await flushPromises()
+    const options = wrapper.findAll('option').filter((option) => ['5m', '1h'].includes(option.attributes('value') ?? ''))
+    expect(options.map((option) => option.text())).toEqual([
+      'admin.accounts.quotaControl.cacheTTLOverride.5m', 'admin.accounts.quotaControl.cacheTTLOverride.1h'
+    ])
+    const payload = await submit(wrapper)
+    expect(payload.extra).toMatchObject({ cache_ttl_override_enabled: true, cache_ttl_override_target: '1h' })
+  })
 })
 
 
