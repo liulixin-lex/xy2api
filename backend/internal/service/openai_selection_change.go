@@ -119,6 +119,7 @@ func (c *openAIStickyChange) writeFirstOutputAvoid(ctx context.Context, fact res
 
 // A selection only plans a change. Admission and billing must never commit it.
 type openAIStickyChange struct {
+	aliasPairMissing bool // Immutable evidence from the existing pre-selection alias resolution.
 	mu               sync.Mutex
 	done             bool
 	followDelivered  bool
@@ -274,6 +275,7 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 		key = legacy
 		expected, err = cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
 	}
+	pairMissing := expected.BothKeysMissing && errors.Is(err, ErrStickySessionNotFound)
 	unreadable := err != nil && !errors.Is(err, ErrStickySessionNotFound)
 	kind := "migrate"
 	if expected.AccountID <= 0 {
@@ -287,9 +289,9 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 		groupID: derefGroupID(groupID), session: strings.TrimSpace(session), key: key,
 		kind: kind, expected: expected, ttl: s.openAIStickyBindingTTL(groupID), cache: cache,
 		dualWriteLegacy: s.openAISessionHashDualWriteOldEnabled(),
-		skipCommit:      unreadable,
-		resetAt:         s.resilience.sessionAccountResetAt,
-		leases:          s.selectionTrialLeases(), trialSession: session, ownerLookup: s.selectionTrialOwner,
+		skipCommit:      unreadable, aliasPairMissing: pairMissing,
+		resetAt: s.resilience.sessionAccountResetAt,
+		leases:  s.selectionTrialLeases(), trialSession: session, ownerLookup: s.selectionTrialOwner,
 	})
 }
 

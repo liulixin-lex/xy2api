@@ -1259,7 +1259,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		stickyAccountID, missingBinding, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
 	}
 	if firstSelection && missingBinding && !requestExcluded && req.candidateConstraint == nil && platform == PlatformOpenAI &&
-		(s.openAILegacySessionCacheKey(ctx, sessionHash) == "" || s.openAISessionHashReadOldFallbackEnabled()) &&
+		s.newSessionAliasAbsent(ctx, groupID, sessionHash) &&
 		!openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
 		newSessionLogState.outcome = newOpenAINewSessionOutcome(ctx, req)
 	}

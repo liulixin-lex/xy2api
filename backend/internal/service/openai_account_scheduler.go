@@ -305,7 +305,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		stickyOwner, missingBinding, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
 		state.NoteStickyOwner(stickyOwner)
 	}
-	if firstSelection && ordinary && stickyOwner == 0 && missingBinding && (s.openAILegacySessionCacheKey(ctx, sessionHash) == "" || s.openAISessionHashReadOldFallbackEnabled()) && strings.TrimSpace(previousResponseID) == "" && request.candidateConstraint == nil && len(excludedIDs) == 0 &&
+	if firstSelection && ordinary && stickyOwner == 0 && missingBinding && s.newSessionAliasAbsent(ctx, groupID, sessionHash) && strings.TrimSpace(previousResponseID) == "" && request.candidateConstraint == nil && len(excludedIDs) == 0 &&
 		!preserveOpenAIGuardianParentBinding(ctx, sessionHash) && !preserveOpenAIRejectionBinding(ctx, sessionHash) {
 		newSessionLogState.outcome = newOpenAINewSessionOutcome(ctx, request)
 	}

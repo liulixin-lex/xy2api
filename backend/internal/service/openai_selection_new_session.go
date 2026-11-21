@@ -149,7 +149,7 @@ func (s *openAINewSessionLogState) log(ctx context.Context, selection *AccountSe
 	if selected.RateSource == "" {
 		selected.RateSource = "unknown"
 	}
-	// Only compare price or placement within the selected priority and pin.
+	// Compare prices only within the selected priority and pin.
 	// Without a winner the observed layers still describe the visited pool.
 	sameClass := func(c newSessionCandidate) bool {
 		return !haveSelected || selected.ID != 0 && c.Pinned == selected.Pinned && c.Priority == selected.Priority
@@ -157,10 +157,10 @@ func (s *openAINewSessionLogState) log(ctx context.Context, selection *AccountSe
 	var cheapest newSessionCandidate
 	counts := map[string]int{}
 	for _, c := range o.candidates {
+		counts[c.position]++
 		if !sameClass(c) {
 			continue
 		}
-		counts[c.position]++
 		if c.Tier > 0 && c.RateKnown && c.RateSource != "not_used" && (cheapest.ID == 0 || c.Rate < cheapest.Rate || c.Rate == cheapest.Rate && selectionLess(c.selectionKey, cheapest.selectionKey)) {
 			cheapest = c
 		}
@@ -191,4 +191,14 @@ func (s *openAINewSessionLogState) log(ctx context.Context, selection *AccountSe
 		"filtered_model_not_supported_count", o.stats.reasons["model_not_supported"], "filtered_profit_floor_count", o.stats.reasons[openAIProfitFilterReasonFloor],
 		"filtered_profit_ceiling_count", o.stats.reasons[openAIProfitFilterReasonThreshold], "filtered_profit_invalid_rate_count", o.stats.reasons[openAIProfitFilterReasonInvalidAccountRate],
 		"load_full_skipped_count", len(o.loadFull), "slot_unavailable_skipped_count", len(o.slotUnavailable), "no_candidate_reason", reason)
+}
+
+// When adoption is off, the primary lookup alone cannot prove that an alias
+// is absent. Reuse the existing binding-plan resolution; unknown stays unknown.
+func (s *OpenAIGatewayService) newSessionAliasAbsent(ctx context.Context, group *int64, session string) bool {
+	if s.openAILegacySessionCacheKey(ctx, session) == "" || s.openAISessionHashReadOldFallbackEnabled() {
+		return true
+	}
+	plan := pendingOpenAIStickyChange(ctx)
+	return plan.matchesSession(group, session) && plan.aliasPairMissing
 }

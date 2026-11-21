@@ -65,6 +65,7 @@ func (c *selectionRuntimeCache) ResolveSessionBinding(ctx context.Context, group
 		c.sessionBindings[primary] = c.sessionBindings[legacy]
 	}
 	binding, err := c.GetSessionBinding(ctx, group, primary)
+	binding.BothKeysMissing = err == ErrStickySessionNotFound && c.sessionBindings[legacy] == 0
 	binding.LegacyKey = legacy
 	if c.sessionBindings[legacy] != 0 && binding.AccountID != 0 {
 		c.sessionBindings[legacy] = binding.AccountID
@@ -262,8 +263,9 @@ func TestOpenAINewSessionSelectionLogUsesObservedCandidates(t *testing.T) {
 		defer selected.ReleaseFunc()
 		event := selectionNewSessionEvents(t, logs.String())
 		require.Len(t, event, 1)
+		require.Nil(t, selected.selectionContext.request.newSessionOutcome)
 		require.Equal(t, resilience.StateFrom(ctx).GatewayRequestID(), event[0]["gateway_request_id"])
-		require.Equal(t, float64(1), event[0]["rear_count"])
+		require.Equal(t, float64(2), event[0]["rear_count"])
 		require.Equal(t, float64(front.ID), event[0]["selected_account_id"])
 		require.Equal(t, "front", event[0]["selected_quality_position"])
 		require.Equal(t, "account_stored", event[0]["selected_sort_rate_source"])
@@ -606,4 +608,26 @@ func (c *selectionRuntimeCache) RecordSessionBindingFailure(ctx context.Context,
 		return 0, nil
 	}
 	return time.Now().Add(ttl).UnixMilli(), c.store.AddSessionAvoid(ctx, group, session, target, ttl, resetAt...)
+}
+
+func TestSelectionDualWriteNewSession(t *testing.T) {
+	for _, old := range []bool{false, true} {
+		t.Run(fmt.Sprint(old), func(t *testing.T) {
+			logs := captureSelectionNewSessionLog(t)
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+			f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = false
+			f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = true
+			if old {
+				f.cache.sessionBindings["openai:alias"] = 1
+			}
+			r, err := selectOrdinaryNewSessionForTest(t, f, withOpenAILegacySessionHash(selectionReviewContext(), "alias"), "fresh", nil, true)
+			require.NoError(t, err)
+			r.ReleaseFunc()
+			want := 1
+			if old {
+				want = 0
+			}
+			require.Len(t, selectionNewSessionEvents(t, logs.String()), want)
+		})
+	}
 }

@@ -76,6 +76,7 @@ func attachSelectionContext(ctx context.Context, selection *AccountSelectionResu
 			}
 			req.ExcludedIDs = excluded
 		}
+		req.newSessionOutcome = nil // the handler replays admission, not the selection log
 		copied.request = &req
 	}
 	copied.exempt = openAISelectionExempt(ctx)

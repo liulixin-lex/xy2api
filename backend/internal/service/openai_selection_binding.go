@@ -12,6 +12,8 @@ type StickySessionBinding struct {
 	Generation string
 	// LegacyKey is an alias of the canonical key, never a second CAS authority.
 	LegacyKey string
+	// BothKeysMissing is observed by the atomic alias read, even with adoption disabled.
+	BothKeysMissing bool
 }
 
 // Alias operations share the primary owner's generation and never let an
