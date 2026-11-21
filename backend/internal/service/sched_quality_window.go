@@ -184,12 +184,13 @@ func closerPredecessor(current, candidate q.AttemptSample, previous *q.AttemptSa
 	return previous == nil || candidate.StartedAt.After(previous.StartedAt) || candidate.StartedAt.Equal(previous.StartedAt) && candidate.AttemptID > previous.AttemptID
 }
 
-// runningPredecessors indexes only unfinished observations for this evaluation.
-// Completed predecessors are resolved separately from ledger evidence.
+// runningPredecessors indexes local observations not yet backed by the ledger.
+// Include finished observations still in the window so a delayed insert cannot
+// expose stale cache evidence before merge resolves the predecessor.
 func (w *schedQualityWindow) runningPredecessors() schedPredecessorIndex {
 	var index schedPredecessorIndex
 	for _, candidate := range w.running {
-		if !candidate.FinishedAt.IsZero() || candidate.SessionKey == "" {
+		if candidate.SessionKey == "" {
 			continue
 		}
 		if index == nil {
@@ -201,10 +202,8 @@ func (w *schedQualityWindow) runningPredecessors() schedPredecessorIndex {
 	return index
 }
 
-// maskRunningCachePredecessors hides cache evidence whose cached predecessor
-// is superseded by a closer attempt that is still in flight. The copy is only
-// for the current assessment; the window never stores the in-flight row as a
-// predecessor.
+// maskRunningCachePredecessors hides cache evidence when a closer local attempt
+// has not reached the ledger. Only the assessment copy is changed.
 func maskRunningCachePredecessors(samples []q.AttemptSample, running schedPredecessorIndex, previous map[string]*q.AttemptSample) []q.AttemptSample {
 	if len(running) == 0 {
 		return samples

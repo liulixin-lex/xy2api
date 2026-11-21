@@ -140,10 +140,17 @@ func TestQualityWindowMasksRunningCachePredecessorTemporarily(t *testing.T) {
 				}
 			}
 			middle.FinishedAt = current.StartedAt.Add(tc.finishOffset)
+			f.e.Observe(middle)
+			f.now = f.now.Add(5 * time.Second)
+			assess(f.e, q.VerdictUnknown, q.CacheMinTurns-1)
+			require.Same(t, prior, f.e.window.previous[current.AttemptID])
+			require.Equal(t, middle.FinishedAt, f.e.window.running[middle.AttemptID].FinishedAt)
+
 			middle.InsertedAt = f.now
 			f.ledger.Rows = append(f.ledger.Rows, middle) // Arrived after its successor.
 			assess(f.e, tc.verdict, tc.turns)
 			require.Equal(t, middle.AttemptID, f.e.window.previous[current.AttemptID].AttemptID)
+			require.NotContains(t, f.e.window.running, middle.AttemptID)
 			fresh := NewSchedQualityEngineService(f.store, f.ledger, f.switches, func() time.Time { return f.now }, nil)
 			assess(fresh, tc.verdict, tc.turns)
 		})
