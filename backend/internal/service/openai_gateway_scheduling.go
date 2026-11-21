@@ -1205,7 +1205,9 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 }
 
 // SelectAccountWithLoadAwareness selects an account with load-awareness and wait plan.
-func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
+func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (selection *AccountSelectionResult, err error) {
+	ctx, handoff := beginSelectionHandoff(ctx)
+	defer handoff.finish(&selection)
 	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
 	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
@@ -1548,6 +1550,7 @@ func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accoun
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
 	result, err := s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+	guardAcquiredSelectionSlot(ctx, result)
 	if err != nil {
 		observeSelectionFailure(ctx, accountID, string(SelectionReasonDependencyError), err)
 	} else if result == nil || !result.Acquired {

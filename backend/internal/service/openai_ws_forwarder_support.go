@@ -443,7 +443,9 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 	requestedModel string,
 	excludedIDs map[int64]struct{},
 	requireCompact bool,
-) (*AccountSelectionResult, error) {
+) (selection *AccountSelectionResult, err error) {
+	ctx, handoff := beginSelectionHandoff(ctx)
+	defer handoff.finish(&selection)
 	// 分组利润控制：公共入口装门，保证不经 selectAccountWithScheduler
 	// 的调用方也无法绕过利润准入（scheduler 内部路径已在唯一调度入口装门）。
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, OpenAIAccountScheduleRequest{

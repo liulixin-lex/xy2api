@@ -200,6 +200,7 @@ func (t *selectionTrial) reserve(ctx context.Context, account *Account, full boo
 		known = err == nil
 		if err == nil && acquired {
 			r := &selectionTrialReservation{leases: t.leases, account: account.ID, group: gid, model: model, member: member, request: t.request.SessionHash == "" || t.borrowing(ctx), session: TrialLeaseSessionMember(t.request.SessionHash), now: t.service.selectionNow}
+			guardSelectionReservation(ctx, r)
 			r.rememberRound(view, generation)
 			return r, true
 		}

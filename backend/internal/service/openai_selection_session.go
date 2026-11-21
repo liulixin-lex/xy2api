@@ -287,6 +287,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 						return nil, nil
 					}
 					reservation = &selectionTrialReservation{leases: s.leases, account: latest.ID, group: groupID, model: OpenAIAttemptModel(latest, model), member: TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID()), session: TrialLeaseSessionMember(sessionHash), now: s.now}
+					guardSelectionReservation(ctx, reservation)
 					reservation.rememberRound(view, generation)
 				}
 				reason := "priority_takeover"
