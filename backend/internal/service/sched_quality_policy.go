@@ -202,6 +202,8 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 		}
 		if relax(k) {
 			relaxed := schedquality.Relaxed(k)
+			// Forget this line's recurrence level, not the group's latest failure.
+			relaxed.LastRear = rows[k].LastRear
 			relaxed.LastAssessment = rows[k].LastAssessment
 			rows[k] = relaxed
 		}
