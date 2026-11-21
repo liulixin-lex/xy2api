@@ -37,7 +37,8 @@
       >
         <!--
           手机上第一列冻结为身份列：一行邮箱，超长省略，点邮箱照旧看充值记录（伪元素把可点区域扩到 40px 高）；#编号和“已删除”在明细里。
-          从 768px 起这一列（平板上也冻结）最宽 240px，邮箱超长省略、悬停看全文，编号和“已删除”跟在后面。
+          从 768px 起编号和“已删除”跟在邮箱后面；768–1023px（平板上也冻结）最宽 240px，邮箱超长省略、悬停看全文；
+          从 1024px 起不设上限，与改版前一样整段显示。
         -->
         <template #cell-user="{ row }">
           <template v-if="identityKey === 'user'">
@@ -51,7 +52,7 @@
             ><span class="block truncate underline decoration-dashed underline-offset-2">{{ row.user.email }}</span></button>
             <CellEmpty v-else />
           </template>
-          <div v-else class="flex max-w-[240px] items-center text-sm" data-testid="usage-user-cell">
+          <div v-else class="flex items-center text-sm max-lg:max-w-[240px]" data-testid="usage-user-cell">
             <button
               v-if="row.user?.email"
               type="button"
@@ -72,7 +73,7 @@
 
         <template #cell-api_key="{ row }">
           <TableIdentityCell v-if="identityKey === 'api_key' && row.api_key?.name" :primary="row.api_key.name" />
-          <span v-else-if="row.api_key?.name" class="block max-w-[240px] truncate text-sm text-gray-900 dark:text-white" :title="row.api_key.name">{{ row.api_key.name }}</span>
+          <span v-else-if="row.api_key?.name" class="block truncate text-sm text-gray-900 dark:text-white max-lg:max-w-[240px]" :title="row.api_key.name">{{ row.api_key.name }}</span>
           <CellEmpty v-else />
         </template>
 

@@ -106,6 +106,16 @@ describe('UsageTable cells', () => {
     expect(time.get('button').text()).toBe('usage.requestDetail.button')
   })
 
+  // The 240px cap is the tablet's (768–1023px): from 1024px the email and the key name show whole, as before the plan.
+  it('caps the user and API key cells at 240px below 1024px only', () => {
+    const userCell = cell(mountTable(ADMIN), 'user').get('[data-testid="usage-user-cell"]')
+    const keyCell = cell(mountTable(USER), 'api_key').get('span')
+    for (const el of [userCell, keyCell]) {
+      expect(el.classes()).toContain('max-lg:max-w-[240px]')
+      expect(el.classes()).not.toContain('max-w-[240px]')
+    }
+  })
+
   // The shared empty cell (mobile list plan, copy): one light "—"; an unknown endpoint keeps its label.
   it('shows the shared light dash for an empty account and group, and "—" after an unknown endpoint\'s label', () => {
     const wrapper = mountTable(USER, [{ ...row, account: null, inbound_endpoint: '', group: null, group_id: null, origin_group_id: null }])
