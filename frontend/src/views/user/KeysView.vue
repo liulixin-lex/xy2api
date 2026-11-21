@@ -146,8 +146,8 @@
           </template>
 
           <template #cell-name="{ value, row }">
-            <!-- The frozen identity column: at most 240px, the name (and the cache TTL line) cut with "…", whole on a tap. -->
-            <div class="flex max-w-[240px] items-center gap-1.5">
+            <!-- The frozen identity column: at most 240px below 1024px, the name (and the cache TTL line) cut with "…", whole on a tap. -->
+            <div class="flex max-lg:max-w-[240px] items-center gap-1.5">
               <TableIdentityCell
                 :primary="value"
                 :secondary="groupSupportsAnthropicCacheTTL(row.group) ? t('keys.cacheTTL.summary', { mode: cacheTTLLabel(row.anthropic_cache_ttl_mode ?? 'off') }) : undefined"

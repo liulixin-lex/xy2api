@@ -92,6 +92,29 @@ describe('AccountsToolbar', () => {
     wrapper.unmount()
   })
 
+  // The sort hint beside the live state is a tablet's (768–1023px); from 1024px the toolbar has none, as before the
+  // mobile list plan, so it takes no room from the filters (desktop layout fixes).
+  it('shows the sort hint beside the live state from 768 to 1023px only', async () => {
+    const matchMedia = window.matchMedia
+    onTestFinished(() => { window.matchMedia = matchMedia })
+    const hintAt = async (width: number) => {
+      window.matchMedia = ((query: string) => {
+        const min = /min-width:\s*(\d+)px/.exec(query)
+        return { matches: min ? width >= Number(min[1]) : false, media: query, addEventListener: () => {}, removeEventListener: () => {} }
+      }) as unknown as typeof window.matchMedia
+      const wrapper = mount(AccountsToolbar, {
+        attachTo: document.body,
+        props: { filters: {}, search: '', groups: [], liveStatus: 'live', pause: () => {}, resume: () => {}, sortHint: { label: 'Last used', order: 'desc' } },
+        global: { stubs: { LiveStatusIndicator: true } }
+      })
+      await flushPromises()
+      const shown = wrapper.find('.tb-sort').exists()
+      wrapper.unmount()
+      return shown
+    }
+    expect([await hintAt(800), await hintAt(1023), await hintAt(1024), await hintAt(1440)]).toEqual([true, true, false, false])
+  })
+
   // Mobile list plan: below 768px the phone toolbar. Every filter is in the bottom sheet, applied at once; the chosen
   // ones are removable tags under the search, counted on "Filters"; nothing is measured or folded.
   it('below 768px puts every filter in the bottom sheet, the chosen ones as tags counted on "Filters"', async () => {

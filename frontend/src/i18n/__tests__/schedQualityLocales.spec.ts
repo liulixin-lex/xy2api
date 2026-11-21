@@ -2,13 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import en from '../locales/en'
 import zh from '../locales/zh'
-import { lineEvidence } from '@/components/admin/account/quality/qualityPanel'
-import { cacheEvidence, errorEvidence, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
 
 // The quality panel, the group board and the decision records build these keys from values the backend sends
 // (identities, placements, layers, actions, unknown causes, evidence fields), so the static key check cannot see
 // them. Every value of the contract (blueprint section 4, machine Action list, rule B's unknown reasons) has copy in
-// both languages, and every evidence template takes its value.
+// both languages, and so has every label of a decision's figures.
 const VALUES: Record<string, string[]> = {
   'admin.schedQuality.identity': ['pass', 'unknown', 'trial', 'rear'],
   'admin.schedQuality.placement': ['front', 'trial', 'rear', 'exempt', 'stopped'],
@@ -18,11 +16,7 @@ const VALUES: Record<string, string[]> = {
     'no_peers', 'all_peers_rear', 'peer_known_insufficient', 'no_samples', 'mass_insufficient', 'sessions_insufficient',
     'slow_sessions_insufficient', 'absolute_unconfirmed', 'relative_unconfirmed', 'worst_mean_above_tolerance', 'relative_veto'
   ],
-  'admin.schedQuality.evidence.ttfo': lineEvidence('ttfo', ttfoEvidence()).map((item) => item.key),
-  'admin.schedQuality.evidence.error': lineEvidence('error', errorEvidence()).map((item) => item.key),
-  'admin.schedQuality.evidence.cache': lineEvidence('cache', cacheEvidence()).map((item) => item.key),
-  'admin.schedQuality.evidence.samples': ['ttfo', 'error', 'cache'],
-  'admin.schedQuality.evidence.samples.total': ['ttfo', 'error', 'cache'],
+  'admin.schedQuality.evidence': ['over', 'bar', 'peers', 'failed', 'limit', 'hit', 'min', 'samples', 'local'],
   'admin.schedQuality.decisions.timeout.seats': ['full', 'not_observed', 'unknown'],
   'admin.schedQuality.ttftRule': ['confidence', 'tolerance', 'peer_margin', 'confidenceHint', 'toleranceHint', 'peer_marginHint'],
   'admin.schedQuality.ttftRule.legal': ['confidence', 'tolerance', 'peer_margin'],
@@ -87,23 +81,21 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
     expect(new Set(words).size).toBe(1)
   })
 
-  it('puts the value into every evidence template', () => {
-    const templates = ['ttfo', 'error', 'cache'].flatMap((line) =>
-      VALUES[`admin.schedQuality.evidence.${line}`].map((key) => [key, String(lookup(messages, `admin.schedQuality.evidence.${line}.${key}`))])
-    )
-    expect(templates.filter(([, text]) => !text.includes('{v}'))).toEqual([])
+  it('puts the first-output limit into its figure label', () => {
+    expect(String(lookup(messages, 'admin.schedQuality.evidence.over'))).toContain('{s}')
   })
 
-  // Final review: the panel's not-counted note sits in one line of the figures' width (196px on a phone, 13px text);
-  // the whole explanation is in its tip and covers a gate that was off and an account not in the group yet (a new group,
-  // or one the account joined after the snapshot: the detail, every 5 s, shows it before the snapshot, every minute).
-  it('keeps the panel\'s not-counted note short and its tip complete', () => {
-    const note = String(lookup(messages, 'admin.schedQuality.perf.panel.gateOff'))
-    const width = [...note].reduce((sum, char) => sum + (/[\u3000-\u9fff\uff00-\uffef]/.test(char) ? 13 : 7), 0)
-    expect(width).toBeLessThanOrEqual(196)
-    const tip = String(lookup(messages, 'admin.schedQuality.perf.panel.gateOffTip'))
-    expect(tip.length).toBeGreaterThan(note.length)
-    expect(tip).toMatch(/这个号当时还不在本分组|this account was not in the group yet/)
+  // 前端修整 (package C): the panel's figure headings fit their 56px columns (12px text), and in Chinese the error line
+  // is 报错 wherever the quality copy names it.
+  it('keeps the panel\'s figure headings within their columns and names the error line one way', () => {
+    const headings = Object.values(lookup(messages, 'admin.schedQuality.panel.col') as Record<string, string>)
+    const width = (text: string) => [...text].reduce((sum, char) => sum + (/[\u3000-\u9fff\uff00-\uffef]/.test(char) ? 12 : 7), 0)
+    expect(headings.filter((text) => width(text) > 56)).toEqual([])
+    if (messages === zh) {
+      expect(['dim.error', 'policy.error', 'lineName.error', 'panel.col.error'].map((key) => String(lookup(messages, `admin.schedQuality.${key}`)))).toEqual([
+        '报错', '报错上限', '报错线', '报错'
+      ])
+    }
   })
 })
 

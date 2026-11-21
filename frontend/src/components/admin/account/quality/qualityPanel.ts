@@ -9,15 +9,13 @@
  */
 import type {
   BackendAccountDetail,
+  BackendBasis,
+  BackendDecision,
   BackendDetailGroup,
   BackendDim,
   BackendEvidenceOf,
-  BackendGroupModel,
-  BackendSampleCounts,
-  BackendIdentity,
-  BackendLine
+  BackendGroupModel
 } from '@/api/admin/schedQualityTypes'
-import { secondsUntil } from '@/utils/schedQualityFormat'
 
 export type PanelPlace = 'stopped' | 'exempt' | 'rear' | 'trial' | 'front'
 
@@ -62,21 +60,64 @@ export function groupPlace(detail: PlaceDetail, group: BackendDetailGroup, model
   return row.placement
 }
 
-/** A line's identity; a group without a row for the model has no data, which is unknown. */
-export const lineIdentity = (row: BackendGroupModel | undefined, dim: BackendDim): BackendIdentity => row?.lines[dim].identity ?? 'unknown'
+const DIMS: BackendDim[] = ['ttfo', 'error', 'cache']
 
-/** Seconds left of a rear stay or a trial; null for the other identities or without an end. */
-export function lineSecondsLeft(line: Pick<BackendLine, 'identity' | 'until' | 'trial_until'> | undefined, now: number): number | null {
-  if (line?.identity === 'rear') return secondsUntil(line.until, now)
-  if (line?.identity === 'trial') return secondsUntil(line.trial_until, now)
-  return null
+/** The latest of some ISO times; null without any. */
+const latest = (times: (string | null)[]) =>
+  times.reduce<string | null>((max, time) => (time && (!max || Date.parse(time) > Date.parse(max)) ? time : max), null)
+
+/** When a rear or trial place ends: the latest end of the lines that hold it there; null for the other places. */
+export function placeEnd(row: BackendGroupModel | undefined, place: PanelPlace): string | null {
+  if (!row || (place !== 'rear' && place !== 'trial')) return null
+  return latest(DIMS.map((dim) => row.lines[dim]).filter((line) => line.identity === place).map((line) => (place === 'rear' ? line.until : line.trial_until)))
 }
 
-/** Models with a group at the rear (the amber mark on their tab). */
-export function backModels(detail: PlaceDetail & Pick<BackendAccountDetail, 'groups'>): Set<string> {
-  const out = new Set<string>()
+// ---- Decisions ----
+
+/** Records of one moment, one action and one model's line, across the groups it was taken in. */
+export interface MergedDecision {
+  key: string
+  at: string
+  action: string
+  model: string
+  line: BackendDim | ''
+  level: number
+  until: string | null
+  /** Group ids, each once, in record order. */
+  groups: number[]
+  /** Every record of the entry, each with its own end and evidence. */
+  items: BackendDecision[]
+}
+
+const minuteOf = (time: string | null) => (time ? Math.floor(Date.parse(time) / 60_000) : '')
+
+/**
+ * The decision list as read: records of the same minute, action, model, line and end minute (as shown) are one entry
+ * listing their groups (the engine judges a model's line in every group of the account at once). Every record stays in
+ * the entry with its own end and evidence. Newest first, as given.
+ */
+export function mergeDecisions(items: BackendDecision[]): MergedDecision[] {
+  const out = new Map<string, MergedDecision>()
+  for (const item of items) {
+    const key = [minuteOf(item.at), item.action, item.model, item.line, minuteOf(item.until)].join('|')
+    const entry = out.get(key)
+    if (!entry) {
+      out.set(key, { key, at: item.at, action: item.action, model: item.model, line: item.line, level: item.level, until: item.until, groups: [item.group_id], items: [item] })
+      continue
+    }
+    entry.items.push(item)
+    if (!entry.groups.includes(item.group_id)) entry.groups.push(item.group_id)
+  }
+  return [...out.values()]
+}
+
+/** The mark on each model's tab: rear when a group is at the rear for it, else trial when one is on trial. */
+export function modelMarks(detail: PlaceDetail & Pick<BackendAccountDetail, 'groups'>): Map<string, 'rear' | 'trial'> {
+  const out = new Map<string, 'rear' | 'trial'>()
   for (const model of panelModels(detail)) {
-    if (detail.groups.some((group) => groupPlace(detail, group, model) === 'rear')) out.add(model)
+    const places = detail.groups.map((group) => groupPlace(detail, group, model))
+    if (places.includes('rear')) out.set(model, 'rear')
+    else if (places.includes('trial')) out.set(model, 'trial')
   }
   return out
 }
@@ -103,85 +144,42 @@ export const allGroupsExemption = (detail: Pick<BackendAccountDetail, 'exemption
 
 // ---- Evidence ----
 
-/** One evidence field: its label key under admin.schedQuality.evidence.<line>, and its value with the unit. */
-export interface EvidenceItem {
-  key: string
+const pct = (ratio: number) => `${(ratio * 100).toFixed(1)}%`
+/** A threshold as set: 0.05 → "5%", 0.025 → "2.5%". */
+const limitPct = (ratio: number) => `${Number((ratio * 100).toFixed(1))}%`
+
+/** A figure of a basis: its label (admin.schedQuality.evidence.<label>, with `params`) and its value. */
+export interface BasisFigure {
+  label: string
+  params?: Record<string, unknown>
   value: string
 }
 
-const pct = (ratio: number) => `${(ratio * 100).toFixed(1)}%`
-/** Discounted amounts are not whole requests: one decimal. */
-const mass = (value: number) => value.toFixed(1)
-const orDash = (value: number | null, format: (v: number) => string) => (value === null ? '—' : format(value))
-/** Rule B counts sessions up to 3 and slow sessions up to 2; at the cap the true count may be higher. */
-const capped = (value: number, cap: number) => (value >= cap ? `≥${cap}` : String(value))
-
 /**
- * The evidence of a line (the panel's expanded row and a decision's basis), in reading order. The labels carry the
- * units in the copy (秒, 条, 个); ratios and confidences are percentages here.
+ * What a decision was taken on, as figures against what they were measured against: the share over the group's limit
+ * against the line drawn from the front peers (or the peers' own share when there is no line), the failure share
+ * against the limit, the cache hit against the minimum; then the units counted (all, and this group's). A figure the
+ * record does not have is left out.
  */
-export function lineEvidence<D extends BackendDim>(dim: D, evidence: BackendEvidenceOf[D]): EvidenceItem[] {
-  if (dim === 'ttfo') {
-    const e = evidence as BackendEvidenceOf['ttfo']
-    return [
-      { key: 'limit_s', value: String(e.limit_s) },
-      { key: 'n', value: mass(e.n) },
-      { key: 'k', value: mass(e.k) },
-      { key: 'x', value: mass(e.x) },
-      { key: 's', value: capped(e.s, 3) },
-      { key: 'd', value: capped(e.d, 2) },
-      { key: 'prior_mu', value: pct(e.prior_mu) },
-      { key: 'peer_nu', value: pct(e.peer_nu) },
-      { key: 'p_abs', value: pct(e.p_abs) },
-      { key: 'p_rel', value: orDash(e.p_rel, pct) },
-      { key: 'u', value: orDash(e.u, pct) },
-      { key: 'z', value: orDash(e.z, pct) }
+export function basisFigures(basis: BackendBasis): { measure: [BasisFigure, BasisFigure] | null; samples: BasisFigure[] } {
+  let measure: [BasisFigure, BasisFigure] | null = null
+  if (basis.line === 'ttfo' && basis.ttft && basis.ttft.n > 0) {
+    const e = basis.ttft
+    measure = [
+      { label: 'over', params: { s: e.limit_s }, value: pct(e.k / e.n) },
+      e.z != null ? { label: 'bar', value: pct(e.z) } : { label: 'peers', value: pct(e.prior_mu) }
     ]
+  } else if (basis.line === 'error' && basis.error && basis.error.padded > 0) {
+    const e = basis.error
+    measure = [{ label: 'failed', value: pct(e.failed / e.padded) }, { label: 'limit', value: limitPct(e.limit) }]
+  } else if (basis.line === 'cache' && basis.cache && basis.cache.turns > 0) {
+    const e = basis.cache
+    measure = [{ label: 'hit', value: pct(e.ratio) }, { label: 'min', value: limitPct(e.min_ratio) }]
   }
-  if (dim === 'error') {
-    const e = evidence as BackendEvidenceOf['error']
-    return [
-      { key: 'limit', value: pct(e.limit) },
-      { key: 'clear', value: String(e.clear) },
-      { key: 'failed', value: String(e.failed) },
-      { key: 'unknown', value: String(e.unknown) },
-      { key: 'padded', value: String(e.padded) },
-      { key: 'lower_fail', value: pct(e.lower_fail) },
-      { key: 'lower_pass', value: pct(e.lower_pass) }
-    ]
-  }
-  const e = evidence as BackendEvidenceOf['cache']
-  return [
-    { key: 'min_ratio', value: pct(e.min_ratio) },
-    { key: 'turns', value: String(e.turns) },
-    { key: 'ratio', value: pct(e.ratio) },
-    { key: 'sessions', value: String(e.sessions) },
-    { key: 'low_sessions', value: String(e.low_sessions) }
-  ]
-}
-
-/** This group's and all the units of a line, as the copy shows them; each null when the record does not have it. */
-export interface SampleSplit {
-  local: string | null
-  total: string | null
-}
-
-/**
- * The units the line's rule really counted (samples, clear outcomes or turns): this group's and all, borrowed ones
- * included, from the line or the basis itself; for the first-output line also the discounted weight (this group's
- * n_local of all n), from its evidence. Each value is read on its own: one a record does not have is unknown (null),
- * never worked out from the source groups, and does not hide the others. No weight without first-output evidence.
- */
-export function lineSamples(
-  dim: BackendDim,
-  counts: BackendSampleCounts | null | undefined,
-  evidence: BackendEvidenceOf[BackendDim] | null | undefined
-): { count: SampleSplit; weight: SampleSplit | null } {
-  const text = (value: number | null | undefined) => (value == null ? null : String(value))
-  const count = { local: text(counts?.samples_local), total: text(counts?.samples_total) }
-  const ttfo = dim === 'ttfo' ? (evidence as BackendEvidenceOf['ttfo'] | null | undefined) : null
-  const weight = ttfo ? { local: ttfo.n_local == null ? null : mass(ttfo.n_local), total: mass(ttfo.n) } : null
-  return { count, weight }
+  const samples: BasisFigure[] = []
+  if (basis.samples_total != null) samples.push({ label: 'samples', value: String(basis.samples_total) })
+  if (basis.samples_local != null) samples.push({ label: 'local', value: String(basis.samples_local) })
+  return { measure, samples }
 }
 
 /** Why a first-output verdict is unknown (rule B's reasons); the other lines carry none. */

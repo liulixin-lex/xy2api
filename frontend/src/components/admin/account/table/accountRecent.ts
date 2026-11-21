@@ -2,9 +2,11 @@
  * Recent status from an account's quality summary, as the backend counts it: the whole account over the last hour
  * (from a reset within it), every model and group together, by upstream attempt. The accounts table shows three lines
  * (first token, errors, cache) and a tip card of four rows; the quality panel's recent section shows the same four.
- * Nothing here compares a value with a threshold or colours it; the group dots judge each group and model (7k).
+ * The table's three values take a colour from the owner's bands (recentTone); the group dots still judge each group
+ * and model (7k).
  */
 import type { BackendAccountSummary, BackendDim } from '@/api/admin/schedQualityTypes'
+import type { LatencySeverity } from '@/utils/latencyHealth'
 
 export type RecentQuality = Pick<BackendAccountSummary, 'first_output' | 'slow_10s' | 'error' | 'cache' | 'recent_since'>
 type Translate = (key: string, params?: Record<string, unknown>, plural?: number) => string
@@ -53,6 +55,46 @@ export function formatSharePercent(part: number, n: number): string | null {
 export function firstOutputMedian({ first_output: first }: Pick<RecentQuality, 'first_output'>): number | 'timeout' | null {
   if (first.n <= 0) return null
   return first.p50_ms ?? 'timeout'
+}
+
+/** Cache in whole percent: 93. */
+const cachePercent = (ratio: number) => Math.round(ratio * 100)
+
+export type RecentTone = Extract<LatencySeverity, 'good' | 'warn' | 'critical'>
+
+/**
+ * The owner's colour bands for the table's three values (11-21), on the value as shown, so "5.0s" is yellow: first
+ * token under 5s green, 5–10s yellow, over 10s red; errors under 1% green, 1–5% yellow, over 5% red (the owner left
+ * 1–2% open; it takes yellow); cache from 85% green, 80–85% yellow, under 80% red.
+ */
+export const RECENT_BANDS = {
+  ttfo: { goodBelow: 5, warnUpTo: 10 },
+  error: { goodBelow: 1, warnUpTo: 5 },
+  cache: { goodFrom: 85, warnFrom: 80 }
+} as const
+
+const lowIsGood = (shown: number, band: { goodBelow: number; warnUpTo: number }): RecentTone =>
+  shown < band.goodBelow ? 'good' : shown <= band.warnUpTo ? 'warn' : 'critical'
+
+/**
+ * A value's band, from the number the cell shows ("3.9s", "4.2%", "93%"); a median on a timeout is red. null without
+ * data ("—"), which stays muted.
+ */
+export function recentTone(quality: RecentQuality | null, dim: BackendDim): RecentTone | null {
+  if (!quality) return null
+  if (dim === 'ttfo') {
+    const median = firstOutputMedian(quality)
+    if (median === null) return null
+    return median === 'timeout' ? 'critical' : lowIsGood(parseFloat(formatRecentSecondsCompact(median)), RECENT_BANDS.ttfo)
+  }
+  if (dim === 'error') {
+    const rate = quality.error.rate
+    return rate == null ? null : lowIsGood(parseFloat(formatRecentPercent(rate)), RECENT_BANDS.error)
+  }
+  const ratio = quality.cache.ratio
+  if (ratio == null) return null
+  const shown = cachePercent(ratio)
+  return shown >= RECENT_BANDS.cache.goodFrom ? 'good' : shown >= RECENT_BANDS.cache.warnFrom ? 'warn' : 'critical'
 }
 
 export type RecentKey = BackendDim | 'slow'
@@ -126,7 +168,7 @@ export function recentRows(quality: RecentQuality | null, t: Translate): RecentR
     ),
     row(
       'cache',
-      cache.ratio == null ? null : `${Math.round(cache.ratio * 100)}%`,
+      cache.ratio == null ? null : `${cachePercent(cache.ratio)}%`,
       cache.turns < RECENT_MIN_SAMPLES,
       t('admin.accounts.table.tip.turns', { n: cache.turns }, cache.turns)
     )

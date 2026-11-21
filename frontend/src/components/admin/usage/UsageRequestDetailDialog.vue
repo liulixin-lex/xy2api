@@ -5,7 +5,7 @@
 
       <section class="py-4" :aria-labelledby="`${uid}-latency`">
         <h4 :id="`${uid}-latency`" class="mb-2 font-semibold text-gray-900 dark:text-white">{{ t('usage.latency') }}</h4>
-        <UsageLatencyBreakdown :row="row" variant="panel" :show-end-to-end="showEndToEnd" :show-token-speed="showTokenSpeed" />
+        <UsageLatencyBreakdown :row="row" :show-end-to-end="showEndToEnd" :show-token-speed="showTokenSpeed" />
       </section>
 
       <section class="py-4" :aria-labelledby="`${uid}-tokens`">

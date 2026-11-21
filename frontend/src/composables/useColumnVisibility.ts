@@ -4,8 +4,8 @@ import { usePhoneViewport } from './useTableViewport'
 /** One width's memory of the hidden columns: where it is kept and what it hides until the user changes it. */
 export interface ColumnVisibilityTier {
   storageKey: string
-  /** The columns hidden until the user changes them. */
-  defaultHidden?: readonly string[]
+  /** The columns hidden until the user changes them; a function when they depend on the width (read reactively). */
+  defaultHidden?: readonly string[] | (() => readonly string[])
   /**
    * Instead of `defaultHidden`: only these show until the user changes them; every other column hides, those the page
    * adds later (attribute columns loaded after the page) included.
@@ -72,7 +72,10 @@ export function useColumnVisibility(options: UseColumnVisibilityOptions) {
   const sets = reactive<Partial<Record<Tier, Set<string> | null>>>({})
   const defaultsOf = (name: Tier): Set<string> => {
     const visible = options[name].defaultVisible
-    if (!visible) return new Set(options[name].defaultHidden ?? [])
+    if (!visible) {
+      const hidden = options[name].defaultHidden
+      return new Set(typeof hidden === 'function' ? hidden() : hidden ?? [])
+    }
     const shown = new Set(visible)
     return new Set(options.keys.value.filter((key) => !shown.has(key)))
   }

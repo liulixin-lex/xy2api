@@ -76,9 +76,9 @@ describe('touch targets', () => {
     expect(px(touchRule(mini, '.sub-mini-btn'), 'min-height')).toBe(40)
   })
 
-  it('accounts toolbar: "more actions" is a real 40px target at every width, like its neighbours', () => {
+  it('accounts toolbar: "more actions" is a real 40px target at every width on a touch primary pointer', () => {
     const source = read('admin/account/table/AccountToolsMenu.vue')
-    const rule = touchRule(source, '.tools-btn', '(any-pointer: coarse)')
+    const rule = touchRule(source, '.tools-btn')
     expect(px(rule, 'min-width')).toBe(40)
     expect(px(rule, 'min-height')).toBe(40)
     expect(source).not.toContain('.tools-btn::after')

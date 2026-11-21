@@ -13,21 +13,9 @@
         data-quality-panel
         @keydown.tab="!wide && layer.trapTab($event)"
       >
+        <!-- One line: the account, what can be done to it, close. -->
         <header class="qp-head">
-          <div class="qp-title-row">
-            <div class="qp-title">
-              <h2 :id="titleId" ref="titleRef" class="qp-name" tabindex="-1">{{ (fresh && detail?.account.name) || drawer.accountName }}</h2>
-              <div class="qp-sub">{{ subline }}</div>
-            </div>
-            <button type="button" class="qp-close" :aria-label="t('admin.schedQuality.aria.close')" data-qp-close @click="close(true)">
-              <Icon name="x" size="md" />
-            </button>
-          </div>
-          <dl v-if="fresh && detail" class="qp-meta">
-            <div><dt>{{ t('admin.schedQuality.drawer.priority') }}</dt><dd>{{ detail.account.priority }}</dd></div>
-            <div><dt>{{ t('admin.schedQuality.drawer.rate') }}</dt><dd>{{ detail.account.rate.toFixed(3) }}</dd></div>
-            <div><dt>{{ t('admin.schedQuality.drawer.concurrency') }}</dt><dd>{{ detail.account.in_flight }} / {{ detail.account.concurrency }}</dd></div>
-          </dl>
+          <h2 :id="titleId" ref="titleRef" class="qp-name" tabindex="-1">{{ (fresh && detail?.account.name) || drawer.accountName }}</h2>
           <div v-if="fresh && detail && canManage" class="qp-actions">
             <span v-if="failedGroups.has(0)" class="qp-fail">{{ t('admin.schedQuality.result.failed') }}</span>
             <button
@@ -35,7 +23,6 @@
               class="btn btn-secondary btn-sm"
               :disabled="!allExemption && !!detail.stop"
               :data-qp-trigger="allExemption ? 'unexempt:0' : 'exempt:0'"
-              v-tip="allExemption ? '' : t('admin.schedQuality.panel.exemptAllTip')"
               @click="onHeaderExempt($event)"
             >{{ allExemption ? t('admin.schedQuality.action.undoExempt') : t('admin.schedQuality.action.exempt') }}</button>
             <!-- A disabled button takes no focus and, in some browsers, no mouse events: the reason sits on this wrapper
@@ -52,11 +39,13 @@
                 :disabled="!recoverable || recovering"
                 :aria-busy="recovering"
                 data-qp-trigger="reset"
-                v-tip="recoverable ? t('admin.schedQuality.panel.recoverTip') : ''"
                 @click="startRecover"
               >{{ t('admin.schedQuality.action.reset') }}</button>
             </span>
           </div>
+          <button type="button" class="qp-close" :aria-label="t('admin.schedQuality.aria.close')" data-qp-close @click="close(true)">
+            <Icon name="x" size="md" />
+          </button>
         </header>
 
         <!-- Switched to another account: the previous one's content stays, dimmed and out of reach, until the new one lands
@@ -79,50 +68,9 @@
           </div>
 
           <template v-else>
-            <!-- Model tabs: the amber mark sits inside the tab, before the text; text that does not fit is cut. -->
-            <div v-if="models.length" v-roving-tabs role="tablist" :aria-label="t('admin.schedQuality.aria.model')" class="qp-seg">
-              <button
-                v-for="model in models"
-                :key="model"
-                type="button"
-                role="tab"
-                class="qp-seg__btn"
-                :aria-selected="model === tab"
-                :tabindex="model === tab ? 0 : -1"
-                :data-qp-tab="model"
-                @click="tab = model"
-              >
-                <span v-if="backTabs.has(model)" class="qp-seg__dot" aria-hidden="true" data-qp-tab-back />
-                <span class="qp-seg__label" :title="model">{{ model }}</span>
-                <span v-if="backTabs.has(model)" class="sr-only">{{ t('admin.schedQuality.panel.tabBack') }}</span>
-              </button>
-            </div>
-
-            <section class="qp-section" data-qp-section="groups">
-              <h3 class="qp-h">
-                <span class="inline-flex items-center gap-1.5">{{ t('admin.schedQuality.drawer.byGroup') }}<SchedPauseMark :global-enabled="detail.global_enabled" :stale="detail.stale" /></span>
-                <span class="qp-h-note">{{ tab ? t('admin.schedQuality.panel.groupsNote', { n: detail.groups.length, model: tab }) : t('admin.schedQuality.panel.groupsCount', { n: detail.groups.length }) }}</span>
-              </h3>
-              <SchedPanelGroups
-                :detail="detail"
-                :model="tab"
-                :now="now"
-                :target-group-id="targetGroupId"
-                :group-info="groupInfo"
-                :can-manage="canManage"
-                :failed-groups="failedGroups"
-                @exempt="(group, anchor) => openPopover(group.group_id, anchor)"
-                @unexempt="(group) => clearExemption(group.group_id)"
-              />
-            </section>
-
-            <SchedPanelPerformance :detail="detail" :model="tab" :target-group-id="targetGroupId" :group-info="groupInfo" />
-
-            <SchedDecisions :account-id="detail.account.id" :group-name="groupName" />
-
-            <section class="qp-section" data-qp-section="auto">
-              <h3 class="qp-h">{{ t('admin.schedQuality.drawer.autoStates') }}</h3>
-              <div v-if="detail.auto_states.length" class="alist">
+            <!-- The account's automatic states, when there are any: what stops it besides quality, first. -->
+            <section v-if="detail.auto_states.length" class="qp-section" data-qp-section="auto" :aria-label="t('admin.schedQuality.drawer.autoStates')">
+              <div class="alist">
                 <div v-for="item in detail.auto_states" :key="item.key" class="arow" :data-qp-auto="item.key">
                   <span class="arow__k">{{ kindName(item.kind, t, te) }}</span>
                   <span class="arow__m">{{ scopeLabel(item) }}</span>
@@ -146,27 +94,41 @@
                   </span>
                 </div>
               </div>
-              <p v-else class="qp-note">{{ t('admin.schedQuality.panel.noAutoStates') }}</p>
             </section>
 
-            <section class="qp-section" data-qp-section="recent">
-              <h3 class="qp-h">
-                <span>{{ ratio ? t('admin.schedQuality.panel.recentRatioTitle') : t('admin.schedQuality.panel.recentTitle') }}</span>
-                <span class="qp-h-note" data-qp-recent-window>{{ recentWindow }}</span>
-              </h3>
-              <div class="rlist">
-                <div v-for="line in recentLines" :key="line.key" class="rrow" :data-qp-recent="line.key">
-                  <span class="rrow__k">{{ line.label }}</span>
-                  <span class="rrow__v" :class="{ 'rrow__v--na': line.muted }">{{ line.text }}</span>
-                  <span class="rrow__g">{{ line.note }}</span>
-                </div>
-                <div v-if="ratio" class="rrow" data-qp-recent="ratio">
-                  <span class="rrow__k">{{ t('admin.schedQuality.panel.ratio') }}</span>
-                  <span class="rrow__v" :class="{ 'rrow__v--na': ratio.dimmed }">{{ ratio.value }}</span>
-                  <span class="rrow__g">{{ ratio.note }}</span>
-                </div>
-              </div>
-            </section>
+            <!-- Model tabs: whole names, wrapping onto another line when they do not fit; a dot before a model with a group
+                 at the rear (amber) or on trial (blue). -->
+            <div v-if="models.length" v-roving-tabs role="tablist" :aria-label="t('admin.schedQuality.aria.model')" class="qp-seg">
+              <button
+                v-for="model in models"
+                :key="model"
+                type="button"
+                role="tab"
+                class="qp-seg__btn"
+                :aria-selected="model === tab"
+                :tabindex="model === tab ? 0 : -1"
+                :data-qp-tab="model"
+                @click="tab = model"
+              >
+                <span v-if="tabMarks.has(model)" class="qp-seg__dot" :class="`is-${tabMarks.get(model)}`" aria-hidden="true" :data-qp-tab-mark="tabMarks.get(model)" />
+                <span class="qp-seg__label">{{ model }}</span>
+                <span v-if="tabMarks.has(model)" class="sr-only">{{ t(`admin.schedQuality.panel.tabMark.${tabMarks.get(model)}`) }}</span>
+              </button>
+            </div>
+
+            <SchedPanelGroups
+              :detail="detail"
+              :model="tab"
+              :target-group-id="targetGroupId"
+              :group-info="groupInfo"
+              :can-manage="canManage"
+              :failed-groups="failedGroups"
+              :open-group-id="popover.open ? popover.groupId : null"
+              @place="openPlace"
+            />
+
+
+            <SchedDecisions :account-id="detail.account.id" :group="pillOf" :model="tab" />
           </template>
         </div>
       </aside>
@@ -180,8 +142,11 @@
     :default-group-id="popover.groupId"
     :busy="popover.busy"
     :failed="popover.failed"
+    :undo="popover.undo"
+    :align="popover.groupId === 0 ? 'end' : 'start'"
     @close="popover.open = false"
     @confirm="applyExemption"
+    @undo="undoExemption"
   />
 
   <BaseDialog :show="proxyItem !== null" :title="t('admin.schedQuality.proxy.title')" width="narrow" @close="proxyItem = null">
@@ -200,9 +165,12 @@
 /**
  * The account quality panel (spec 5, 7a, 7b; prototype). One instance per page, opened through useSchedLayers.
  *
- * - Data: the backend's own detail and summary of the account (no compatibility layer), fetched by the host page's
- *   live table (useSchedLayerData); the content updates in place. After an exemption, its removal or a recovery from
- *   here markSchedChanged() tells the page, which loads the panel and its quality summary again.
+ * - Content, top to bottom, with as few words as it can: the account's name with 豁免, 恢复 and close on one line; its
+ *   automatic states, when there are any; the model tabs; the groups table with the last 12 hours (SchedPanelGroups),
+ *   where a group's place opens its own exemption; the decision records (SchedDecisions).
+ * - Data: the backend's own detail of the account (no compatibility layer) and its 12-hour figures, fetched by the host
+ *   page's live table (useSchedLayerData); the content updates in place. After an exemption, its removal or a recovery
+ *   from here markSchedChanged() tells the page, which loads the panel and its quality summary again.
  * - Switching to another account puts its name in the header at once; the body keeps the previous account's content,
  *   dimmed as the table dims its old rows, until the new detail lands. The skeleton shows only when the panel opens
  *   with nothing to show yet.
@@ -221,14 +189,12 @@ import { useI18n } from 'vue-i18n'
 import { gsap } from 'gsap'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
-import SchedPauseMark from './SchedPauseMark.vue'
 import SchedPanelGroups from './SchedPanelGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
 import SchedDecisions from './SchedDecisions.vue'
-import SchedPanelPerformance from './SchedPanelPerformance.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { BackendAutoState, SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
-import { SCHED_PANEL_TASK, useSchedLayerData, type SchedPanelRow } from '@/composables/useSchedLayerData'
+import type { BackendAutoState, BackendDetailGroup, SchedOverrideRequest } from '@/api/admin/schedQualityTypes'
+import { SCHED_PANEL_TASK, useSchedLayerData } from '@/composables/useSchedLayerData'
 import { useLiveClock } from '@/composables/useLiveClock'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
 import { closeSchedDrawer, markSchedChanged, openSchedDrawer, qualityOpenerKey, useSchedLayers } from '@/composables/useSchedLayers'
@@ -236,15 +202,11 @@ import { isRecovering, useAccountRecovery } from '@/composables/useAccountRecove
 import { useAdminPermission } from '@/composables/useAdminPermission'
 import { isReducedMotion } from '@/composables/useMotionPreference'
 import { motionDuration, motionEase } from '@/utils/motionTokens'
-import { probeFailureText, upstreamRateView } from '@/components/account/upstreamBillingRate'
-import { recentRows, recentTitle } from '@/components/admin/account/table/accountRecent'
-import { accountTypeLabel } from '@/components/admin/account/table/accountLabels'
+import { kindName, parentIdFromKey, secondsUntil } from '@/utils/schedQualityFormat'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
-import { platformLabel } from '@/utils/platformColors'
-import { fmtCountdown, kindName, parentIdFromKey, secondsUntil } from '@/utils/schedQualityFormat'
 import { vRovingTabs } from '@/utils/rovingTabs'
 import { vTip } from '@/utils/tip'
-import { allGroupsExemption, backModels, closesPanel, panelModels, panelRecoverable, pickModelTab } from './qualityPanel'
+import { allGroupsExemption, closesPanel, modelMarks, panelModels, panelRecoverable, pickModelTab } from './qualityPanel'
 
 const props = defineProps<{
   /** Opens the IQ check records of an account; the link is hidden when not given. */
@@ -253,11 +215,8 @@ const props = defineProps<{
   onEdit?: (accountId: number) => void
   /** Reads the account back on the page after a recovery from here. */
   onRecovered?: (accountId: number) => Promise<void> | void
-  /**
-   * The page's row of an account (platform, type, upstream ratio probe, and its quality summary, which the table
-   * refreshes every 5 s), when the page has one. Without a row the panel asks for the summary itself.
-   */
-  account?: (id: number) => SchedPanelRow | undefined
+  /** The page's row of an account (a parent's name before its detail is in), when the page has one. */
+  account?: (id: number) => { name: string } | undefined
   /** Name and alias of a group by id, for the alias pills. */
   groupInfo?: (id: number) => { name: string; alias?: string | null } | undefined
   /** The element whose top edge the panel's top follows (the table); the page header's bottom without one. */
@@ -279,15 +238,11 @@ const open = computed(() => drawer.accountId !== null)
 // ---- Data ----
 // The header is the open account's; the body shows the account the detail is for (the previous one right after a
 // switch, until the new detail lands: `fresh` is false meanwhile).
-const row = computed(() => (drawer.accountId === null ? undefined : props.account?.(drawer.accountId)))
 const detail = computed(() => panel.detail)
 const fresh = computed(() => panel.accountId !== null && panel.accountId === drawer.accountId)
 const failed = computed(() => !fresh.value && drawer.accountId !== null && panel.failedId === drawer.accountId)
 /** The previous account's content is shown while the new one is on its way (not once it failed). */
 const switching = computed(() => !!detail.value && !fresh.value && !failed.value)
-const shownRow = computed(() => (panel.accountId === null ? undefined : props.account?.(panel.accountId)))
-// The row's summary when the page's table carries one (the same numbers as its cells); otherwise the fetched one.
-const summary = computed(() => (shownRow.value?.quality !== undefined ? shownRow.value.quality : panel.summary))
 
 // ---- Layer: Escape, focus, outside clicks ----
 const wide = useMediaQuery('(min-width: 1024px)')
@@ -303,8 +258,8 @@ const layer = useOverlayLayer(open, {
 
 // Keep focus in the panel when a refresh re-renders the control that had it.
 let restoreFocus: (() => void) | null = null
-watch(() => [panel.detail, panel.summary], () => { restoreFocus = layer.holdFocus() }, { flush: 'pre' })
-watch(() => [panel.detail, panel.summary], () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
+watch(() => panel.detail, () => { restoreFocus = layer.holdFocus() }, { flush: 'pre' })
+watch(() => panel.detail, () => { restoreFocus?.(); restoreFocus = null }, { flush: 'post' })
 
 function focusOpener(accountId: number, groupId: number | null) {
   const usable = (el: HTMLElement) => el.isConnected && !el.closest('[inert]') && !el.matches(':disabled') && (el.checkVisibility?.() ?? true)
@@ -366,16 +321,9 @@ onScopeDispose(() => {
   if (frame) cancelAnimationFrame(frame)
 })
 
-// ---- Header ----
-const subline = computed(() => {
-  const account = row.value
-  const kind = account ? t('admin.accounts.table.nameSub', { platform: platformLabel(account.platform), type: accountTypeLabel(account.type, t) }) : ''
-  return [kind, t('admin.schedQuality.panel.sub')].filter(Boolean).join(' · ')
-})
-
 // ---- Model tab and the target group ----
 const models = computed(() => (detail.value ? panelModels(detail.value) : []))
-const backTabs = computed(() => (detail.value ? backModels(detail.value) : new Set<string>()))
+const tabMarks = computed(() => (detail.value ? modelMarks(detail.value) : new Map<string, 'rear' | 'trial'>()))
 const tab = ref<string | null>(null)
 const targetGroupId = ref<number | null>(null)
 /** The open request (a dot's group and model) is applied once its account's detail is shown. */
@@ -418,14 +366,28 @@ function applyRequest(toTop: boolean) {
 }
 
 const groupInfo = (id: number) => props.groupInfo?.(id)
-const groupName = (id: number) => groupInfo(id)?.name ?? detail.value?.groups.find((group) => group.group_id === id)?.name
+/** A group's name and alias for its pill: the groups store's, else the detail's name, else its id. */
+const pillOf = (id: number) => groupInfo(id) ?? { name: detail.value?.groups.find((group) => group.group_id === id)?.name ?? `#${id}` }
 const scopeGroups = computed(() => detail.value?.groups.map((group) => ({ id: group.group_id, name: group.name })) ?? [])
 
 // ---- Exemptions ----
 const allExemption = computed(() => (detail.value ? allGroupsExemption(detail.value) : null))
-const popover = reactive({ open: false, groupId: 0, anchor: null as HTMLElement | null, busy: false, failed: false })
-function openPopover(groupId: number, anchor: HTMLElement) {
-  Object.assign(popover, { open: true, groupId, anchor, busy: false, failed: false })
+/**
+ * One popover for the header's 豁免 (group 0) and a group's place: a new exemption, or with `undo` (its title, the
+ * exemption in force) only its removal; `target` is the exemption it removes (0 for the all-groups one).
+ */
+const popover = reactive({ open: false, groupId: 0, anchor: null as HTMLElement | null, busy: false, failed: false, undo: null as string | null, target: 0 })
+function openPopover(groupId: number, anchor: HTMLElement, undo: string | null = null, target = 0) {
+  Object.assign(popover, { open: true, groupId, anchor, busy: false, failed: false, undo, target })
+}
+/** A group's place pressed: its exemption, or the removal of the one in force there. */
+function openPlace(group: BackendDetailGroup, anchor: HTMLElement) {
+  const exemption = group.exemption
+  if (!exemption) return openPopover(group.group_id, anchor)
+  const title = exemption.expires_at
+    ? t('admin.schedQuality.panel.placeUntil.exempt', { time: formatShortTime(exemption.expires_at) })
+    : t('admin.schedQuality.panel.exemptForever')
+  openPopover(group.group_id, anchor, exemption.group_id === 0 ? t('admin.schedQuality.panel.exemptAll', { what: title }) : title, exemption.group_id)
 }
 function onHeaderExempt(event: MouseEvent) {
   if (allExemption.value) void clearExemption(0)
@@ -456,6 +418,22 @@ function flash<T>(set: Set<T>, key: T) {
   setTimeout(() => set.delete(key), 2000)
 }
 
+async function undoExemption() {
+  const id = drawer.accountId
+  if (id === null || !canManage.value) return
+  popover.busy = true
+  popover.failed = false
+  try {
+    await schedQualityAPI.clearOverride(id, popover.target)
+    popover.open = false
+    void markSchedChanged()
+  } catch {
+    popover.failed = true
+  } finally {
+    popover.busy = false
+  }
+}
+
 async function clearExemption(groupId: number) {
   const id = drawer.accountId
   if (id === null) return
@@ -484,8 +462,10 @@ function scopeLabel(item: BackendAutoState) {
 }
 
 function autoValue(item: BackendAutoState) {
-  const left = secondsUntil(item.until, now.value)
-  if (left) return t(item.kind === 'iq_gate' ? 'admin.schedQuality.panel.autoRecheck' : 'admin.schedQuality.panel.autoUntil', { time: fmtCountdown(left) })
+  // A clock time, not a countdown: "11:55" read as a time of day either way.
+  if (secondsUntil(item.until, now.value)) {
+    return t(item.kind === 'iq_gate' ? 'admin.schedQuality.panel.autoRecheck' : 'admin.schedQuality.panel.autoUntil', { time: formatShortTime(item.until) })
+  }
   if (item.count) return `${item.count[0]} / ${item.count[1]}`
   return '—'
 }
@@ -541,22 +521,6 @@ watch(canManage, (allowed) => {
   proxyItem.value = null
 })
 
-// ---- Recent values and the upstream ratio (also readable on touch) ----
-// The recent cell's tip card: its window as the note by the heading, then its four rows with their samples. Nothing is
-// compared with a threshold here (7k-1); the groups' rows above judge per group and model.
-const recentWindow = computed(() => recentTitle(summary.value ?? null, t))
-const recentLines = computed(() => recentRows(summary.value ?? null, t))
-
-const ratio = computed(() => {
-  const account = shownRow.value
-  if (!account) return null
-  const view = upstreamRateView(account, now.value)
-  if (!view.eligible) return null
-  const note = view.lastAttemptAt ? t('admin.schedQuality.panel.lastProbe', { time: formatShortTime(view.lastAttemptAt) }) : t('admin.schedQuality.panel.notProbed')
-  const failure = probeFailureText(view.failure, t)
-  return { value: view.shownValue ?? '—', dimmed: view.dimmed, note: [note, failure].filter(Boolean).join(' · ') }
-})
-
 // Slides in from the right (--motion-panel, ease-out) and out in --motion-exit; at once under reduced motion. Only the
 // transform moves.
 let running: gsap.core.Tween | undefined
@@ -597,24 +561,18 @@ onScopeDispose(() => running?.kill())
   outline: none;
 }
 
+/* One line: the name takes what is left, then 豁免 and 恢复, then close. */
 .qp-head {
-  display: grid;
+  display: flex;
+  min-height: 60px;
+  align-items: center;
   gap: 12px;
-  padding: 16px 20px;
+  padding: 12px 12px 12px 20px;
   border-bottom: 1px solid var(--color-line-row);
 }
-.qp-title-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-.qp-title {
-  display: grid;
+.qp-name {
   min-width: 0;
   flex: 1;
-  gap: 2px;
-}
-.qp-name {
   overflow: hidden;
   font-size: var(--font-size-title);
   font-weight: var(--font-weight-semibold);
@@ -631,18 +589,12 @@ onScopeDispose(() => running?.kill())
   outline: 2px solid theme('colors.primary.500');
   outline-offset: 2px;
 }
-.qp-sub {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-  line-height: var(--line-height-small);
-}
 .qp-close {
   display: grid;
   width: 32px;
   height: 32px;
   flex: none;
   place-items: center;
-  margin: -4px -8px 0 0;
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
@@ -658,26 +610,9 @@ onScopeDispose(() => running?.kill())
     color: var(--color-text-primary);
   }
 }
-.qp-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 20px;
-}
-.qp-meta > div {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-.qp-meta dt {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-}
-.qp-meta dd {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
 .qp-actions {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 8px;
 }
@@ -687,10 +622,12 @@ onScopeDispose(() => running?.kill())
   display: grid;
   min-height: 0;
   align-content: start;
-  gap: 24px;
+  gap: 16px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 16px 20px 32px;
+  /* A scrollbar that comes and goes (a record opened) must not shift the table's columns. */
+  scrollbar-gutter: stable;
+  padding: 16px 20px 20px;
 }
 .qp-loading {
   display: grid;
@@ -710,36 +647,38 @@ onScopeDispose(() => running?.kill())
   overflow-wrap: anywhere;
 }
 
-/* Model tabs: a segmented control as wide as the panel; each tab cuts its own text */
+/* Model tabs: chips with their whole names, wrapping onto another line when they do not fit. */
 .qp-seg {
-  display: grid;
-  width: 100%;
-  grid-auto-columns: minmax(0, 1fr);
-  grid-auto-flow: column;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--color-line-control);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-seg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
+/* A tab is never wider than the row: a very long name breaks inside its tab, whole. */
 .qp-seg__btn {
   display: inline-flex;
-  min-width: 0;
-  height: 26px;
+  max-width: 100%;
+  min-height: 26px;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  overflow: hidden;
-  padding: 0 6px;
-  border: 0;
-  border-radius: var(--radius-sm);
+  gap: 5px;
+  padding: 2px 10px;
+  border: 1px solid var(--color-line-control);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: var(--font-size-small);
   font-weight: var(--font-weight-medium);
+  text-align: left;
   transition: background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
 }
+.qp-seg__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.qp-seg__btn:active {
+  background: var(--color-bg-seg-active);
+}
 .qp-seg__btn[aria-selected='true'] {
+  border-color: transparent;
   background: var(--color-bg-seg-active);
   color: var(--color-text-primary);
 }
@@ -751,7 +690,7 @@ onScopeDispose(() => running?.kill())
 }
 .qp-seg__btn:focus-visible {
   outline: 2px solid theme('colors.primary.500');
-  outline-offset: -1px;
+  outline-offset: 1px;
 }
 .qp-seg__dot {
   display: block;
@@ -761,15 +700,11 @@ onScopeDispose(() => running?.kill())
   border-radius: 50%;
   background: var(--color-status-back);
 }
-.qp-seg__label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.qp-seg__dot.is-trial {
+  background: var(--color-status-info);
 }
 
-/* From 1280px: 40px more, all of it for the group name column (45px at 460, a group name of four to six characters
-   needs about 72px); the other columns are fixed widths. */
+/* From 1280px: 40px more (the width stays as it was). */
 @media (min-width: 1280px) {
   .qpanel {
     width: calc(var(--sidebar-width) + 40px);
@@ -788,20 +723,19 @@ onScopeDispose(() => running?.kill())
   .qp-close {
     width: 44px;
     height: 44px;
-    margin: -6px -12px 0 0;
   }
 }
-/* A phone (prototype, panel under 440px): tighter padding, the two header buttons side by side at full width, the
-   tabs closer; each tab still cuts its own text. */
+/* A phone (prototype, panel under 440px): tighter padding, the two header buttons side by side at full width. */
+/* A phone: the name above, 豁免 and 恢复 under it at full width, close at the top right. */
 @media (max-width: 439px) {
   .qp-head {
-    padding: 8px 16px 16px;
+    flex-wrap: wrap;
+    padding: 8px 4px 12px 16px;
   }
-  .qp-title {
-    padding-top: 10px;
-  }
-  .qp-close {
-    margin: 0 -12px 0 0;
+  .qp-actions {
+    order: 3;
+    width: 100%;
+    padding-right: 12px;
   }
   .qp-body {
     padding: 16px 16px 32px;
@@ -811,12 +745,9 @@ onScopeDispose(() => running?.kill())
     height: 36px;
     flex: 1;
   }
-  .qp-seg__btn {
-    padding: 0 4px;
-  }
 }
-/* Touch: every control here at least 40px to hit. The model tabs grow (each cuts its own text, so the button clips);
-   the rest keep their look and reach out with an invisible area that stays inside its row. */
+/* Touch: every control here at least 40px to hit. The model tabs grow; the rest keep their look and reach out with an
+   invisible area that stays inside its row. */
 @media (pointer: coarse) {
   .qp-seg__btn {
     height: 40px;
@@ -867,8 +798,7 @@ onScopeDispose(() => running?.kill())
   white-space: nowrap;
 }
 /* Automatic states: kind, model or scope, time, action */
-.alist,
-.rlist {
+.alist {
   display: grid;
 }
 .arow {
@@ -879,13 +809,16 @@ onScopeDispose(() => running?.kill())
   min-height: 36px;
   border-top: 1px solid var(--color-line-row);
 }
-.arow:first-child,
-.rrow:first-child {
+.arow:first-child {
   border-top: 0;
 }
-.arow > *,
-.rrow > * {
+.arow > * {
   min-width: 0;
+}
+/* What stops the account, in the rear's amber. */
+.arow__k {
+  color: var(--color-status-back-text);
+  font-weight: var(--font-weight-medium);
 }
 .arow__m {
   overflow: hidden;
@@ -907,33 +840,6 @@ onScopeDispose(() => running?.kill())
 }
 .arow__a:empty {
   display: none;
-}
-
-/* Recent values and the upstream ratio */
-.rrow {
-  display: grid;
-  grid-template-columns: 88px auto minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-  min-height: 36px;
-  border-top: 1px solid var(--color-line-row);
-}
-.rrow__k {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-}
-.rrow__v {
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.rrow__v--na {
-  color: var(--color-text-muted);
-}
-.rrow__g {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-small);
-  line-height: var(--line-height-small);
-  text-align: right;
 }
 
 /* Shared by the groups table */

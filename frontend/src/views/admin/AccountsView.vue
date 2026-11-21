@@ -136,7 +136,7 @@
               <span class="acol-head" v-tip="() => `${t('admin.accounts.columns.upstreamBillingRateFull')}\n${t('admin.accounts.upstreamBilling.trustWarning')}`" data-test="upstream-rate-head">{{ column.label }}</span>
             </template>
             <template #cell-upstream_billing_rate="{ row }">
-              <div class="acell acell--num">
+              <div class="acell">
                 <UpstreamBillingRateCell :account="row" :global-probe-enabled="upstreamBillingProbeGloballyEnabled" :now="now" :probing="probingUpstreamBilling.has(row.id)" @probe="handleProbeUpstreamBilling(row)" />
               </div>
             </template>
@@ -144,7 +144,7 @@
               <div class="acell"><AccountTodayCell :stats="row.today_stats" /></div>
             </template>
             <template #cell-id="{ value }">
-              <div class="acell acell--num"><span class="acc-num text-fg-secondary">#{{ value }}</span></div>
+              <div class="acell"><span class="acc-num text-fg-secondary">#{{ value }}</span></div>
             </template>
             <template #cell-platform_type="{ row }">
               <div class="acell">
@@ -166,7 +166,7 @@
               </div>
             </template>
             <template #cell-priority="{ row }">
-              <div class="acell acell--row acell--num">
+              <div class="acell acell--row">
                 <AccountPriorityCell :account="row" :save="(priority: number) => savePriority(row, priority)" @error="(message: string) => appStore.showError(message)" />
               </div>
             </template>
@@ -204,7 +204,7 @@
               </div>
             </template>
             <template #cell-rate_multiplier="{ row }">
-              <div class="acell acell--row acell--num">
+              <div class="acell acell--row">
                 <span class="acc-rate">
                   <!-- A value longer than "9.9999x" may be cut: the tip then has it whole (12.5). -->
                   <span class="acc-rate__v" v-tip="rateText(row).length > 7 ? rateText(row) : ''">{{ rateText(row) }}</span>
@@ -517,7 +517,7 @@ const live = useAccountsLiveTable({
   tasks: schedLayers.tasks
 })
 const table = live.table
-schedLayers.bind(table, (id) => table.record(id))
+schedLayers.bind(table)
 const { rows, loading, total, pending, status: liveStatus } = table
 // A ticked account reads in the shared table's selected background (12.1-3), at every width.
 const accountRowClass = (row: LiveAccount) => [
@@ -578,9 +578,7 @@ const handleManualRefresh = () => {
 }
 
 // ---- Columns ----
-// The actions header sits at the right, over the icons (text-right also right-aligns the shared header's content; 7i-8);
-// so do the number columns, whose values are right-aligned in tabular digits (mobile list plan, typography).
-const RIGHT_ALIGNED = new Set(['actions', 'id', 'priority', 'rate_multiplier', 'upstream_billing_rate'])
+// The actions header sits at the right, over the icons (text-right also right-aligns the shared header's content; 7i-8).
 const allColumns = computed(() => [
   { key: 'select', label: '', sortable: false },
   { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
@@ -604,7 +602,7 @@ const allColumns = computed(() => [
   { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
   { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
   { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
-].map((column) => ({ ...column, class: `acol acol-${column.key}${RIGHT_ALIGNED.has(column.key) ? ' text-right' : ''}`, headerClass: `acol acol-${column.key}` })))
+].map((column) => ({ ...column, class: `acol acol-${column.key}${column.key === 'actions' ? ' text-right' : ''}`, headerClass: `acol acol-${column.key}` })))
 const PINNED = new Set(['select', 'name', 'actions'])
 const toggleableColumns = computed(() => allColumns.value.filter((column) => !PINNED.has(column.key)))
 const { orderedKeys: columnOrder, isCustomized: columnOrderCustomized, setOrder: setColumnOrder, resetOrder: resetColumnOrder } = useColumnOrder(ACCOUNT_COLUMN_ORDER_KEY, toggleableColumnKeys)
@@ -1626,13 +1624,7 @@ onUnmounted(() => cancelModalPrefetch?.())
     height: 40px;
   }
 }
-/* Number columns: right-aligned, tabular digits, body size. */
-.account-table :deep(.acell--num) {
-  align-items: flex-end;
-}
-.account-table :deep(.acell--num.acell--row) {
-  justify-content: flex-end;
-}
+/* Numbers and dates: tabular digits, body size. */
 .acc-num {
   font-size: var(--font-size-body);
   font-variant-numeric: tabular-nums;

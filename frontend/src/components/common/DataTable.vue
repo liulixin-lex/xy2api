@@ -131,11 +131,7 @@
           >
             <slot name="empty">
               <div class="flex flex-col items-center">
-                <Icon
-                  name="inbox"
-                  size="xl"
-                  class="mb-4 h-12 w-12 text-fg-muted"
-                />
+                <Icon name="inbox" size="xl" class="mb-4 text-fg-muted" />
                 <p class="text-lg font-medium text-fg-primary">
                   {{ t('empty.noData') }}
                 </p>
@@ -284,6 +280,8 @@ function revealFocused(event: FocusEvent) {
 // 检查是否可滚动
 const checkScrollable = () => {
   if (tableWrapperRef.value) {
+    // The visible width, for the frozen identity column's cap from 1024px (see the styles).
+    tableWrapperRef.value.style.setProperty('--dt-view-w', `${tableWrapperRef.value.clientWidth}px`)
     isScrollable.value = tableWrapperRef.value.scrollWidth > tableWrapperRef.value.clientWidth
     measureFreeze(tableWrapperRef.value)
   }
@@ -1195,6 +1193,16 @@ defineExpose({
 .table-wrapper:focus-visible {
   outline: 2px solid theme('colors.primary.500');
   outline-offset: -2px;
+}
+/* From 1024px a frozen identity (TableIdentityCell, or a page's own .table-identity-box) shows a name whole, as before
+   the mobile list plan, up to 40% of the table's visible width (--dt-view-w, set with the scroll check), so the columns
+   beside it keep room to scroll; a longer name is cut with "…" and shows whole in its tip. Below 1024px the pages cap
+   it at 240px. */
+@media (min-width: 1024px) {
+  .table-wrapper :deep(.sticky-col .table-identity),
+  .table-wrapper :deep(.sticky-col .table-identity-box) {
+    max-width: calc(var(--dt-view-w, 100vw) * 0.4);
+  }
 }
 /* ---- The table layout (mobile list plan) ---- */
 /* The built-in check box column is exactly 44px, its border box whatever padding the page gives cells (TablePageLayout

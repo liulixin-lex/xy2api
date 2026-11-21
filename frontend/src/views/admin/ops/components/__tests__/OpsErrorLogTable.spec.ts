@@ -132,7 +132,7 @@ describe('OpsErrorLogTable user cell width', () => {
       global: { stubs: { 'el-tooltip': TooltipStub, Pagination: PaginationStub } },
     })
     const cell = wrapper.get('[data-testid="error-user-cell"]')
-    expect(cell.classes()).toContain('max-w-[240px]')
+    expect(cell.classes()).toContain('max-lg:max-w-[240px]')
     const button = cell.get('button')
     expect(button.get('span').classes()).toContain('truncate')
     expect(button.attributes('title')).toContain(email)

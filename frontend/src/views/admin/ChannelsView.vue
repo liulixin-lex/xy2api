@@ -61,8 +61,8 @@
           @sort="handleSort"
         >
           <template #cell-name="{ value }">
-            <!-- The frozen identity column: at most 240px, the name cut with "…" and whole on a tap. -->
-            <div class="max-w-[240px]"><TableIdentityCell :primary="value" /></div>
+            <!-- The frozen identity column: at most 240px below 1024px, the name cut with "…" and whole on a tap. -->
+            <div class="max-lg:max-w-[240px]"><TableIdentityCell :primary="value" /></div>
           </template>
 
           <template #cell-description="{ value }">
