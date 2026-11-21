@@ -75,7 +75,7 @@ const RouterLinkStub = {
 
 function setup(
   role: 'admin' | 'operator',
-  options: { simple?: boolean; modules?: MeAccess['modules']; pendingAccess?: boolean } = {}
+  options: { simple?: boolean; modules?: MeAccess['modules']; pendingAccess?: boolean; menuIcon?: string } = {}
 ) {
   const simple = options.simple ?? false
   getActivePinia()!.state.value.auth = { user: { id: 5, role }, runMode: simple ? 'simple' : 'standard' }
@@ -111,7 +111,7 @@ function setup(
     opsMonitoringEnabled: true,
     paymentEnabled: true,
     customMenuItems: [
-      { id: 'tools', label: 'Admin Tools', visibility: 'admin', sort_order: 1, icon_svg: '', url: 'https://example.com' }
+      { id: 'tools', label: 'Admin Tools', visibility: 'admin', sort_order: 1, icon_svg: options.menuIcon ?? '', url: 'https://example.com' }
     ],
     fetch: vi.fn()
   })
@@ -256,5 +256,21 @@ describe('AppSidebar for operators', () => {
     expect(superHrefs).toContain('/admin/settings')
     expect(superHrefs).toContain('/admin/plugins')
     expect(superHrefs).toContain('/custom/tools')
+  })
+})
+
+describe('AppSidebar custom menu icons', () => {
+  // The icon configured on the live site: inlined with its <style>, that style recoloured every SVG on every page.
+  const LIVE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">' +
+    '<style>svg { color: #526071; } @media (prefers-color-scheme: dark) { svg { color: #d8e0ea; } }</style>' +
+    '<path d="M12 6v12m6-6H6"/></svg>'
+
+  it('draws an uploaded icon with its stylesheet inside its own shadow root', async () => {
+    const wrapper = setup('admin', { menuIcon: LIVE_ICON })
+    await flushPromises()
+    const root = wrapper.get('a[href="/custom/tools"] .sidebar-svg-icon').element.shadowRoot!
+    expect(root.querySelector('svg path')!.getAttribute('d')).toBe('M12 6v12m6-6H6')
+    expect(root.querySelector('svg > style')!.textContent).toContain('#d8e0ea')
+    expect(wrapper.find('style').exists()).toBe(false)
   })
 })

@@ -100,7 +100,7 @@
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { sanitizeHtml } from '@/utils/sanitize'
 import { useAnnouncementStore } from '@/stores/announcements'
 import { formatRelativeWithDateTime } from '@/utils/format'
 import { useOverlayLayer } from '@/composables/useOverlayLayer'
@@ -136,7 +136,7 @@ const renderedContent = computed(() => {
   const content = displayedAnnouncement.value?.content
   if (!content) return ''
   const html = marked.parse(content) as string
-  return DOMPurify.sanitize(html)
+  return sanitizeHtml(html)
 })
 
 function handleDismiss() {

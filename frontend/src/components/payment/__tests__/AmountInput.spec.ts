@@ -90,3 +90,62 @@ describe('recharge bonus hints on quick amounts', () => {
     expect(hit.get('[data-testid="quick-amount-credited"]').text()).toContain('350.00')
   })
 })
+
+describe('quick amounts as one radio group', () => {
+  it('marks the picked amount, keeps only it in the Tab order, and lights it when the typed amount matches', async () => {
+    const wrapper = mount(AmountInput, { props: { modelValue: null, amounts: [50, 100, 500] } })
+    const radios = () => wrapper.findAll('[role="radio"]')
+    expect(wrapper.get('[role="radiogroup"]').exists()).toBe(true)
+    expect(radios().map(r => r.attributes('tabindex'))).toEqual(['0', '-1', '-1'])
+
+    await wrapper.setProps({ modelValue: 100 })
+    expect(radios().map(r => r.attributes('aria-checked'))).toEqual(['false', 'true', 'false'])
+    expect(radios().map(r => r.attributes('tabindex'))).toEqual(['-1', '0', '-1'])
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('100')
+
+    await wrapper.setProps({ modelValue: 120 })
+    expect(radios().every(r => r.attributes('aria-checked') === 'false')).toBe(true)
+  })
+
+  it('moves and picks with the arrow keys', async () => {
+    const wrapper = mount(AmountInput, { props: { modelValue: 50, amounts: [50, 100, 500] }, attachTo: document.body })
+    const radios = wrapper.findAll('[role="radio"]')
+    ;(radios[0].element as HTMLElement).focus()
+    await wrapper.get('[role="radiogroup"]').trigger('keydown', { key: 'ArrowRight' })
+    expect(document.activeElement).toBe(radios[1].element)
+    await wrapper.get('[role="radiogroup"]').trigger('keydown', { key: 'ArrowLeft' })
+    await wrapper.get('[role="radiogroup"]').trigger('keydown', { key: 'ArrowLeft' })
+    expect(document.activeElement).toBe(radios[2].element)
+    expect(wrapper.emitted('update:modelValue')).toEqual([[100], [50], [500]])
+  })
+
+  it('drops the quick amount block when no amount fits the range', () => {
+    const wrapper = mount(AmountInput, { props: { modelValue: null, amounts: [50, 100], min: 6000 } })
+    expect(wrapper.find('[role="radiogroup"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('payment.quickAmounts')
+  })
+
+  it('flags an unusable amount inside the field', async () => {
+    const wrapper = mount(AmountInput, { props: { modelValue: 20, amounts: [50], error: '' } })
+    const input = wrapper.get('input')
+    expect(input.attributes('aria-invalid')).toBeUndefined()
+    expect(wrapper.get('[data-testid="amount-error"]').text()).toBe('')
+
+    await wrapper.setProps({ error: 'payment.amountTooLow' })
+    expect(input.attributes('aria-invalid')).toBe('true')
+    expect(wrapper.get('[data-testid="amount-error"]').text()).toBe('payment.amountTooLow')
+    expect(input.attributes('aria-describedby')).toBe(wrapper.get('[data-testid="amount-error"]').attributes('id'))
+    expect(wrapper.get('[data-testid="amount-field"]').classes()).toContain('border-status-back')
+  })
+})
+
+describe('Enter in the amount field', () => {
+  it('asks the page to submit, except while an IME candidate is being confirmed', async () => {
+    const wrapper = mount(AmountInput, { props: { modelValue: 100 } })
+    const input = wrapper.get('input')
+    await input.trigger('keydown', { key: 'Enter', isComposing: true })
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('submit')).toHaveLength(1)
+  })
+})

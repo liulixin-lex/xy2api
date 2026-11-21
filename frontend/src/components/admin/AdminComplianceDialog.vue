@@ -99,7 +99,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { sanitizeHtml } from '@/utils/sanitize'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Input from '@/components/common/Input.vue'
@@ -139,7 +139,7 @@ const inputError = computed(() => {
 })
 const renderedDocument = computed(() => {
   const html = marked.parse(currentDocument.value) as string
-  return DOMPurify.sanitize(html)
+  return sanitizeHtml(html)
 })
 
 watch(expectedPhrase, () => {

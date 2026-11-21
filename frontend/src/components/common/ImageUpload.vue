@@ -7,12 +7,12 @@
         :class="[previewSizeClass, { 'border-solid': !!modelValue }]"
       >
         <!-- SVG mode: render inline -->
-        <span
+        <IsolatedSvg
           v-if="mode === 'svg' && modelValue"
-          class="text-gray-600 dark:text-gray-300 [&>svg]:h-full [&>svg]:w-full"
+          :svg="modelValue"
+          class="text-gray-600 dark:text-gray-300"
           :class="innerSizeClass"
-          v-html="sanitizedValue"
-        ></span>
+        />
         <!-- Image mode: show as img -->
         <img
           v-else-if="mode === 'image' && modelValue"
@@ -72,6 +72,7 @@
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import IsolatedSvg from '@/components/common/IsolatedSvg.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 
 const { t } = useI18n()
@@ -112,10 +113,6 @@ const resolvedRemoveLabel = computed(() => props.removeLabel || t('common.remove
 
 const acceptTypes = computed(() => props.mode === 'svg' ? '.svg' : 'image/*')
 
-const sanitizedValue = computed(() =>
-  props.mode === 'svg' ? sanitizeSvg(props.modelValue ?? '') : ''
-)
-
 const previewSizeClass = computed(() => props.size === 'sm' ? 'h-14 w-14' : 'h-20 w-20')
 const innerSizeClass = computed(() => props.size === 'sm' ? 'h-7 w-7' : 'h-12 w-12')
 const placeholderSizeClass = computed(() => props.size === 'sm' ? 'h-5 w-5' : 'h-8 w-8')
@@ -140,8 +137,8 @@ function handleUpload(event: Event) {
   reader = new FileReader()
   if (props.mode === 'svg') {
     reader.onload = (e) => {
-      const text = e.target?.result as string
-      if (text) emit('update:modelValue', text.trim())
+      const svg = sanitizeSvg(((e.target?.result as string) || '').trim())
+      if (svg) emit('update:modelValue', svg)
     }
     reader.readAsText(file)
   } else {

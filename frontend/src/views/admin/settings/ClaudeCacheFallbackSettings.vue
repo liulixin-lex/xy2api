@@ -1,7 +1,6 @@
 <template>
   <section class="card mt-6 p-6" data-testid="claude-cache-settings" aria-labelledby="claude-cache-title">
     <h2 id="claude-cache-title" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.settings.claudeCacheFallback.title') }}</h2>
-    <p class="mt-1 max-w-prose text-sm text-gray-600 dark:text-dark-300">{{ t('admin.settings.claudeCacheFallback.hint') }}</p>
     <div v-if="loading" class="mt-5 h-10 animate-pulse rounded-lg bg-gray-100 dark:bg-dark-700" role="status" :aria-label="t('common.loading')" />
     <div v-if="loadFailed || groupsFailed" class="mt-4 flex flex-wrap items-center gap-3" role="alert">
       <p class="text-sm text-red-700 dark:text-red-300">{{ t('admin.settings.claudeCacheFallback.loadFailed') }}</p>
@@ -9,11 +8,8 @@
     </div>
     <div v-if="loaded" class="mt-5 space-y-5">
       <div class="space-y-3">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.settings.claudeCacheFallback.enabled') }}</h3>
-            <p class="mt-1 max-w-prose text-xs text-gray-600 dark:text-dark-300">{{ t('admin.settings.claudeCacheFallback.enabledHint') }}</p>
-          </div>
+        <div class="flex items-center justify-between gap-4">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.settings.claudeCacheFallback.enabled') }}</h3>
           <Toggle v-model="draft.enabled" :disabled="saving" :aria-label="t('admin.settings.claudeCacheFallback.enabled')" />
         </div>
         <div class="max-w-xl">
@@ -39,12 +35,9 @@
           </ul>
         </div>
       </div>
-      <div class="flex flex-col gap-3 border-t border-gray-200 pt-5 dark:border-dark-600 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div>
-          <h3 id="claude-cache-ttl-title" class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.settings.claudeCacheFallback.ttl') }}</h3>
-          <p id="claude-cache-ttl-hint" class="mt-1 max-w-prose text-xs text-gray-600 dark:text-dark-300">{{ t('admin.settings.claudeCacheFallback.ttlHint') }}</p>
-        </div>
-        <div class="flex shrink-0 gap-1" role="group" aria-labelledby="claude-cache-ttl-title" aria-describedby="claude-cache-ttl-hint">
+      <div class="flex flex-col gap-3 border-t border-gray-200 pt-5 dark:border-dark-600 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <h3 id="claude-cache-ttl-title" class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.settings.claudeCacheFallback.ttl') }}</h3>
+        <div class="flex shrink-0 gap-1" role="group" aria-labelledby="claude-cache-ttl-title">
           <button
             v-for="ttl in ttlOptions"
             :key="ttl"

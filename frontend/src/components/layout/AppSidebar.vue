@@ -95,7 +95,7 @@
               "
               @click="handleMenuItemClick(item.path)"
             >
-              <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
+              <IsolatedSvg v-if="item.iconSvg" :svg="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" />
               <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
               <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
                 {{ item.label }}
@@ -123,7 +123,7 @@
             :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
             @click="handleMenuItemClick(item.path)"
           >
-            <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
+            <IsolatedSvg v-if="item.iconSvg" :svg="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" />
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
               {{ item.label }}
@@ -146,7 +146,7 @@
             :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
             @click="handleMenuItemClick(item.path)"
           >
-            <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
+            <IsolatedSvg v-if="item.iconSvg" :svg="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" />
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
               {{ item.label }}
@@ -209,7 +209,7 @@ import { useAdminAccessStore } from '@/stores/adminAccess'
 import type { AdminModuleId } from '@/types/adminAccess'
 import VersionBadge from '@/components/common/VersionBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { sanitizeSvg } from '@/utils/sanitize'
+import IsolatedSvg from '@/components/common/IsolatedSvg.vue'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
@@ -1175,12 +1175,6 @@ onBeforeUnmount(() => {
 /* Custom SVG icon in sidebar: constrain size without overriding uploaded SVG colors */
 .sidebar-svg-icon {
   color: currentColor;
-}
-
-.sidebar-svg-icon :deep(svg) {
-  display: block;
-  width: 1.25rem;
-  height: 1.25rem;
 }
 
 /* Touch: submenu links at least 40px tall and 8px from every neighbour, including the

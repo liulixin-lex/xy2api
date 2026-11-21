@@ -1,23 +1,30 @@
 <template>
-  <div class="space-y-4">
-    <!-- Quick Amount Buttons -->
-    <div>
-      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+  <div class="space-y-6">
+    <!-- Quick Amount Buttons: one radio group (arrow keys move and pick, only the picked amount is a Tab stop) -->
+    <div v-if="filteredAmounts.length">
+      <p :id="quickLabelId" class="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
         {{ t('payment.quickAmounts') }}
-      </label>
-      <div class="grid grid-cols-3 gap-x-4 gap-y-4 pt-2">
+      </p>
+      <div
+        role="radiogroup"
+        :aria-labelledby="quickLabelId"
+        class="grid grid-cols-3 gap-x-3 gap-y-4"
+        @keydown="onRadioGroupKeydown"
+      >
         <button
           v-for="amt in filteredAmounts"
           :key="amt"
           type="button"
-          :aria-pressed="modelValue === amt"
+          role="radio"
+          :aria-checked="modelValue === amt"
+          :tabindex="quickTabStop === amt ? 0 : -1"
           :class="[
-            'relative min-h-12 rounded-md border px-4 py-3 text-center text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-dark-900',
+            'relative min-h-12 rounded-md border px-2 py-3 text-center sm:px-4 text-sm tabular-nums transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-dark-900',
             modelValue === amt
-              ? 'border-primary-500 bg-primary-50/40 text-primary-700 dark:border-primary-400 dark:bg-primary-900/10 dark:text-primary-300'
+              ? 'border-primary-500 bg-primary-50/40 font-semibold text-primary-700 inset-ring inset-ring-primary-500 dark:border-primary-400 dark:bg-primary-900/10 dark:text-primary-300 dark:inset-ring-primary-400'
               : quoteFor(amt).percent > 0
-                ? 'border-red-200 bg-white text-gray-700 hover:border-red-300 dark:border-red-500/40 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-red-400/60'
-                : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-dark-500',
+                ? 'border-red-200 bg-white font-medium text-gray-700 hover:border-red-300 hover:bg-gray-50 dark:border-red-500/40 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-red-400/60 dark:hover:bg-dark-700/60'
+                : 'border-gray-200 bg-white font-medium text-gray-700 hover:border-gray-300 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-dark-500 dark:hover:bg-dark-700/60',
           ]"
           :data-testid="`quick-amount-${amt}`"
           @click="selectAmount(amt)"
@@ -49,34 +56,57 @@
       </div>
     </div>
 
-    <!-- Custom Amount Input -->
+    <!-- Custom Amount Input: the same amount as the quick buttons; an amount no method takes is flagged inside the field -->
     <div>
-      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+      <label :for="inputId" class="mb-3 block text-sm font-medium text-gray-700 dark:text-gray-300">
         {{ t('payment.customAmount') }}
       </label>
-      <div class="relative">
-        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-dark-500">
+      <div
+        :class="[
+          'flex min-h-12 cursor-text items-center gap-3 rounded-xl border bg-white px-4 transition-[border-color,box-shadow] duration-150 ease-out focus-within:ring-2 dark:bg-dark-800',
+          error
+            ? 'border-status-back focus-within:ring-status-back/25'
+            : 'border-gray-200 hover:border-gray-300 focus-within:border-primary-500 focus-within:ring-primary-500/30 dark:border-dark-600 dark:hover:border-dark-500 dark:focus-within:border-primary-500',
+        ]"
+        data-testid="amount-field"
+        @click="inputRef?.focus()"
+      >
+        <span class="shrink-0 text-base text-gray-500 dark:text-dark-400" aria-hidden="true">
           {{ currencySymbol(currency) }}
         </span>
         <input
+          :id="inputId"
+          ref="inputRef"
           type="text"
           inputmode="decimal"
+          autocomplete="off"
+          enterkeyhint="go"
           :value="customText"
           :placeholder="placeholderText"
-          class="input w-full py-3 pl-12 pr-4"
+          :aria-invalid="error ? 'true' : undefined"
+          :aria-describedby="errorId"
+          class="h-12 min-w-0 flex-1 bg-transparent text-base font-medium tabular-nums text-gray-900 outline-none placeholder:font-normal placeholder:text-gray-500 dark:text-gray-100 dark:placeholder:text-dark-400"
           @input="handleInput"
+          @keydown.enter="onEnter"
         />
+        <span
+          :id="errorId"
+          aria-live="polite"
+          class="max-w-[55%] shrink-0 text-right text-xs font-medium leading-tight text-status-back-text empty:hidden"
+          data-testid="amount-error"
+        >{{ error }}</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { RechargeBonusTier } from '@/types/payment'
 import { formatRechargeBonusNumber, quoteRechargeBonus, type RechargeBonusMode } from '@/utils/rechargeBonus'
 import { currencySymbol, formatPaymentAmount } from './currency'
+import { onRadioGroupKeydown } from './radioGroupKeys'
 
 const props = withDefaults(defineProps<{
   amounts?: number[]
@@ -91,6 +121,8 @@ const props = withDefaults(defineProps<{
   multiplier?: number
   /** 支付币种（折扣模式第二行实付金额的币种与精度） */
   currency?: string
+  /** 金额不可用时的就地提示（输入框内右侧）；空串表示金额可用 */
+  error?: string
 }>(), {
   amounts: () => [10, 20, 50, 100, 200, 500, 1000, 2000, 5000],
   min: 0,
@@ -99,19 +131,33 @@ const props = withDefaults(defineProps<{
   bonusMode: 'bonus',
   multiplier: 1,
   currency: 'CNY',
+  error: '',
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: number | null]
+  /** Enter in the amount field: the page submits when the amount is payable */
+  submit: []
 }>()
 
 const { t } = useI18n()
+
+const uid = useId()
+const quickLabelId = `quick-amounts-${uid}`
+const inputId = `custom-amount-${uid}`
+const errorId = `custom-amount-error-${uid}`
+const inputRef = ref<HTMLInputElement | null>(null)
 
 const customText = ref('')
 
 // 0 = no limit
 const filteredAmounts = computed(() =>
   props.amounts.filter((a) => (props.min <= 0 || a >= props.min) && (props.max <= 0 || a <= props.max))
+)
+
+// The quick amount that takes Tab focus: the picked one, or the first when the typed amount matches none.
+const quickTabStop = computed(() =>
+  props.modelValue !== null && filteredAmounts.value.includes(props.modelValue) ? props.modelValue : filteredAmounts.value[0]
 )
 
 const showSecondLine = computed(() => props.bonusTiers.length > 0)
@@ -159,6 +205,13 @@ const AMOUNT_PATTERN = /^\d*(\.\d{0,2})?$/
 function selectAmount(amt: number) {
   customText.value = String(amt)
   emit('update:modelValue', amt)
+}
+
+function onEnter(e: KeyboardEvent) {
+  // Enter that confirms an IME candidate is not a submit.
+  if (e.isComposing) return
+  e.preventDefault()
+  emit('submit')
 }
 
 function handleInput(e: Event) {
