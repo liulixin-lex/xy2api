@@ -77,6 +77,19 @@ func (s *SchedQualityEngineService) replayTx(ctx context.Context, tx SchedQualit
 	return b, nil
 }
 
+// commitReplay advances the watermark, releases ended trials, and logs and counts
+// committed decisions. The caller still needs to publish the snapshot.
+//
+// Hold the engine lock throughout. Write each decision once in the same transaction
+// and collect it once in b.decisions in write order. For decisions rejudge already
+// inserted, only append them; do not write or publish them again.
+//
+// Call exactly once after RunExclusive succeeds or RunCycle returns locked=true
+// and err=nil. Discard the batch on failure. Never call inside the transaction
+// callback or retry publication of the same batch.
+//
+// Pass the full committed line state as final, including the state returned by
+// rejudge when applicable, so trial release uses the committed result.
 func (s *SchedQualityEngineService) commitReplay(ctx context.Context, b *schedReplayBatch, final []q.LineState) {
 	slog.DebugContext(ctx, "sched_quality.replay", "component", "sched_quality", "horizon", b.horizon, "batches", b.stats.batches, "assessments", b.stats.assessments)
 	s.processedAt = b.horizon
