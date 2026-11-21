@@ -262,3 +262,98 @@ func TestRecoveryRelaxPreservesRecentFailureClock(t *testing.T) {
 		}
 	}
 }
+
+// A NULL evaluated_at is not a new round. Replay the persisted phase deadlines
+// before letting arrivals in the recovered normal segment affect the line.
+func TestRecoveryReplayNullableWatermark(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		watermark, freshFailures bool
+		trialDuration            time.Duration // zero starts from rear; nonzero starts from a persisted trial
+	}{
+		{name: "control", watermark: true},
+		{name: "null_empty"},
+		{name: "null_fresh_fail", freshFailures: true},
+		{name: "null_trial", trialDuration: 120 * time.Minute, freshFailures: true},
+		{name: "null_legacy_trial", trialDuration: 60 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output := captureSchedObsLogs(t)
+			f := newQualityFixture(t)
+			origin := f.now.Truncate(time.Minute).Add(5 * time.Second)
+			review := origin.Add(240 * time.Minute)
+			hard := review.Add(q.TrialDuration)
+			horizon := origin.Add(500 * time.Minute)
+			r := q.LineState{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionError}, Identity: q.IdentityRear, Epoch: origin, Entry: origin, LastRear: origin, Until: review, Level: 4, Admissions: 5}
+			trialStart := review
+			if tc.trialDuration != 0 {
+				r.Identity, r.Trial, r.Until = q.IdentityUnknown, true, time.Time{}
+				trialStart = origin
+				hard = origin.Add(tc.trialDuration)
+				r.TrialUntil = hard
+			}
+			if tc.watermark {
+				r.EvaluatedAt = origin
+			}
+			f.store.Rows = []q.LineState{r}
+			f.now = horizon.Add(10 * time.Second)
+			f.e = NewSchedQualityEngineService(f.store, f.ledger, f.switches, func() time.Time { return f.now }, nil)
+			if tc.freshFailures {
+				f.ledger.Rows = errorRecoverySamples(20, 20, horizon.Add(-time.Minute))
+			}
+			f.cycle()
+			decisions := f.store.Decisions
+			if tc.trialDuration == 0 {
+				require.Len(t, decisions, 2)
+				require.Equal(t, q.ActionTrial, decisions[0].Action)
+				require.Equal(t, review, decisions[0].At)
+				require.Equal(t, hard, decisions[0].Until)
+				require.True(t, decisions[0].Basis.HistoryMissing)
+				require.Equal(t, origin, decisions[0].Basis.Cut)
+			} else {
+				require.Len(t, decisions, 1)
+			}
+			release := decisions[len(decisions)-1]
+			require.Equal(t, q.ActionTrialTimeout, release.Action)
+			require.Equal(t, hard, release.At)
+			require.Equal(t, trialStart, release.Basis.Cut)
+			require.Equal(t, "deadline", release.Basis.ReleaseReason)
+			require.Equal(t, int64(hard.Sub(trialStart)/time.Second), release.Basis.TrialDurationSeconds)
+			var logged int
+			for _, record := range schedObsLogRecords(t, output) {
+				if record["msg"] == "sched_quality.state" {
+					require.Less(t, logged, len(decisions))
+					require.Equal(t, string(decisions[logged].Action), record["action"])
+					require.Equal(t, decisions[logged].At.Format(time.RFC3339Nano), record["at"])
+					logged++
+				}
+			}
+			require.Equal(t, len(decisions), logged)
+			got := f.line(q.DimensionError)
+			require.Equal(t, q.IdentityUnknown, got.Identity)
+			require.False(t, got.Trial)
+			require.Equal(t, hard, got.Epoch)
+			require.Equal(t, origin, got.LastRear)
+			grid := horizon.Truncate(q.RegularInterval)
+			require.Equal(t, grid, got.EvaluatedAt)
+			if tc.freshFailures {
+				require.Equal(t, grid, got.PendingAt)
+			} else {
+				require.True(t, got.PendingAt.IsZero())
+			}
+			f.cycle()
+			require.Equal(t, decisions, f.store.Decisions)
+			require.Equal(t, got, f.line(q.DimensionError))
+			if tc.freshFailures {
+				f.now = f.now.Add(q.RegularInterval)
+				f.cycle()
+				require.Len(t, f.store.Decisions, len(decisions)+1)
+				entered := f.store.Decisions[len(decisions)]
+				require.Equal(t, q.ActionEnter, entered.Action)
+				require.Equal(t, grid.Add(q.RegularInterval), entered.At)
+				require.Equal(t, hard, entered.Basis.Cut)
+				require.Equal(t, 20, entered.Basis.Error.Failed)
+			}
+		})
+	}
+}
