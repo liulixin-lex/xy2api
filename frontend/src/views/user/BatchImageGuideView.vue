@@ -241,7 +241,7 @@
 
           <template #empty>
             <div class="flex min-h-[260px] flex-col items-center justify-center py-6 md:min-h-[300px]">
-              <Icon name="sparkles" size="xl" class="mb-4 h-12 w-12 text-gray-400 dark:text-dark-500" />
+              <Icon name="sparkles" size="xl" class="mb-4 text-gray-400 dark:text-dark-500" />
               <p class="text-lg font-medium text-gray-900 dark:text-gray-100">{{ t('batchImage.list.empty') }}</p>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 {{ t('batchImage.list.emptyHint') }}

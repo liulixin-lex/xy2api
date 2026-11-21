@@ -4,7 +4,7 @@
   <div class="table-wrapper">
     <table
       data-testid="desktop-channels"
-      class="table !hidden w-full table-fixed border-collapse text-sm lg:!table"
+      class="table !hidden w-full table-fixed border-collapse text-sm lg:!table [&_tr:last-child_td]:!border-b-0"
     >
       <thead>
         <tr class="border-b border-gray-100 bg-gray-50/50 text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-dark-700 dark:bg-dark-800/50 dark:text-gray-400">
@@ -25,7 +25,7 @@
       <tbody v-else-if="rows.length === 0">
         <tr>
           <td colspan="5" class="py-12 text-center">
-            <Icon name="inbox" size="xl" class="mx-auto mb-3 h-12 w-12 text-gray-400" />
+            <Icon name="inbox" size="xl" class="mx-auto mb-3 text-gray-400" />
             <p class="text-sm text-gray-500 dark:text-gray-400">{{ emptyLabel }}</p>
           </td>
         </tr>
@@ -181,7 +181,7 @@
         <Icon name="refresh" size="lg" class="inline-block animate-spin text-gray-400" />
       </div>
       <div v-else-if="rows.length === 0" data-testid="mobile-empty" class="py-12 text-center">
-        <Icon name="inbox" size="xl" class="mx-auto mb-3 h-12 w-12 text-gray-400" />
+        <Icon name="inbox" size="xl" class="mx-auto mb-3 text-gray-400" />
         <p class="text-sm text-gray-500 dark:text-gray-400">{{ emptyLabel }}</p>
       </div>
       <section
