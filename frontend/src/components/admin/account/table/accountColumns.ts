@@ -2,15 +2,15 @@
  * The accounts table's column widths (prototype, spec 12.5): each column has a fixed width in two sizes, [compact,
  * roomy]; the name column takes what is left, between NAME_MIN and NAME_MAX.
  *
- * Compact, the ten default columns take 1093px and the table at least 1269px with the name column. At 1440 with the
+ * Compact, the ten default columns take 1105px and the table at least 1281px with the name column. At 1440 with the
  * navigation folded the table's scroll container is 1302px wide, 1287px once a classic scrollbar (15px on Windows)
  * takes its reserved gutter, so nothing scrolls sideways (7i-2, 7m-1); at 1366 the table scrolls, the name and actions
- * frozen. Roomy, they take 1208px: from 1440px (1208 + NAME_MAX) the table switches to the roomy widths, which 1920
+ * frozen. Roomy, they take 1220px: from 1452px (1220 + NAME_MAX) the table switches to the roomy widths, which 1920
  * reaches with the navigation open (1583px with the gutter) or folded.
  *
- * - Capacity is 140px in either size and takes no share of the room left over: its content and the standard 12px of
- *   padding on each side (11-21). The widest real lines, "窗口 $105 / $100" and "总额 $120 / $100", are 112.6px of chip
- *   with the system fonts; 3.4px more for other platforms' fonts. A wider line ends in "…" and its tip has it whole.
+ * - Capacity is 152px in either size and takes no share of the room left over: its content and the standard 12px of
+ *   padding on each side (11-21). A cost in cents, "窗口 $12.34 / $100", is 124.1px of chip with the system fonts
+ *   (Astra review); about 4px more for other platforms' fonts. A wider line ends in "…" and its tip has it whole.
  * - The two rate columns are 88px compact and 96px roomy, with 8px of padding on the left and 6px on the right: the
  *   74px left take "9.9999x" (51.1px at 13px) with the 3px gap and the 18px refresh button (72.1px), or the account
  *   rate's sync mark (12px, 4px gap); longer values end in "…" and the tip has them whole.
@@ -30,7 +30,7 @@
  */
 export const COLUMN_WIDTHS: Record<string, [number, number]> = {
   select: [36, 40], status: [128, 140], schedulable: [52, 60], groups: [176, 176], sq_recent: [96, 120], iq_check: [149, 164],
-  capacity: [140, 140], upstream_billing_rate: [88, 96], today_stats: [152, 168], actions: [76, 104], id: [80, 88],
+  capacity: [152, 152], upstream_billing_rate: [88, 96], today_stats: [152, 168], actions: [76, 104], id: [80, 88],
   platform_type: [168, 180], priority: [112, 120], usage: [220, 240], proxy: [160, 176], rate_multiplier: [88, 96],
   upstream_balance: [140, 152], last_used_at: [120, 132], created_at: [150, 160], expires_at: [150, 160], notes: [180, 200]
 }

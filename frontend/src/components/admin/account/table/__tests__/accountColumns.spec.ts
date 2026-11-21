@@ -8,25 +8,25 @@ describe('accountColumnLayout (12.5)', () => {
   it('fits the ten default columns at 1440 with the navigation folded, a 15px scrollbar gutter included', () => {
     const layout = accountColumnLayout(DEFAULTS, 1287)
     expect(layout.roomy).toBe(false)
-    // Today's stats take 152px for exact amounts and whole labels (mobile list plan), capacity 140px: 1269px.
-    expect(layout.min).toBe(1269)
+    // Today's stats take 152px for exact amounts and whole labels (mobile list plan), capacity 152px: 1281px.
+    expect(layout.min).toBe(1281)
     expect(layout.widths.upstream_billing_rate).toBe(88)
-    expect(layout.widths.capacity).toBe(140)
+    expect(layout.widths.capacity).toBe(152)
     // At 1366 with the navigation open the same table scrolls sideways.
     expect(accountColumnLayout(DEFAULTS, 1046).min).toBeGreaterThan(1046)
   })
 
-  it('switches to the roomy widths from 1440px and shares what is left only between the content columns', () => {
-    expect(accountColumnLayout(DEFAULTS, 1439).roomy).toBe(false)
-    expect(accountColumnLayout(DEFAULTS, 1440).roomy).toBe(true)
-    // 1920 with the navigation open, a 15px gutter: 1583 - 1208 - 232 = 143px for five content columns.
+  it('switches to the roomy widths from 1452px and shares what is left only between the content columns', () => {
+    expect(accountColumnLayout(DEFAULTS, 1451).roomy).toBe(false)
+    expect(accountColumnLayout(DEFAULTS, 1452).roomy).toBe(true)
+    // 1920 with the navigation open, a 15px gutter: 1583 - 1220 - 232 = 131px for five content columns.
     const { roomy, widths } = accountColumnLayout(DEFAULTS, 1583)
     expect(roomy).toBe(true)
     expect([widths.select, widths.schedulable, widths.upstream_billing_rate, widths.actions]).toEqual([40, 60, 96, 104])
-    expect(widths.status - 140).toBeCloseTo(143 / 5)
+    expect(widths.status - 140).toBeCloseTo(131 / 5)
     // Capacity keeps its content's width however wide the table (11-21).
-    expect(widths.capacity).toBe(140)
-    expect(accountColumnLayout(DEFAULTS, 2400).widths.capacity).toBe(140)
+    expect(widths.capacity).toBe(152)
+    expect(accountColumnLayout(DEFAULTS, 2400).widths.capacity).toBe(152)
   })
 
   it('keeps the name column between 176 and 232px from the compact minimum to past the switch (12.12-1)', () => {
@@ -35,11 +35,11 @@ describe('accountColumnLayout (12.5)', () => {
       const { min, widths } = accountColumnLayout(DEFAULTS, width)
       return +(Math.max(width, min) - Object.values(widths).reduce((total, w) => total + w, 0)).toFixed(3)
     }
-    expect([1200, 1269, 1300, 1439, 1440, 1600].map(name)).toEqual([176, 176, 207, 232, 232, 232])
-    // Compact past the cap, the room goes to the five content columns only: 1439 - 1093 - 232 = 114px.
-    const { roomy, widths } = accountColumnLayout(DEFAULTS, 1439)
+    expect([1200, 1281, 1300, 1451, 1452, 1600].map(name)).toEqual([176, 176, 195, 232, 232, 232])
+    // Compact past the cap, the room goes to the five content columns only: 1451 - 1105 - 232 = 114px.
+    const { roomy, widths } = accountColumnLayout(DEFAULTS, 1451)
     expect(roomy).toBe(false)
-    expect([widths.select, widths.schedulable, widths.capacity, widths.upstream_billing_rate, widths.actions]).toEqual([36, 52, 140, 88, 76])
+    expect([widths.select, widths.schedulable, widths.capacity, widths.upstream_billing_rate, widths.actions]).toEqual([36, 52, 152, 88, 76])
     expect(widths.groups - 176).toBeCloseTo(114 / 5)
   })
 
