@@ -1,5 +1,6 @@
-// Mobile list plan, usage records: tokens, cost and latency on one line each in every width, everything else in a
-// per-row request detail dialog (click, Enter or Space) that shows only what the page may show.
+// Usage records: the endpoint, token, cost and latency cells as they were before the mobile list plan (owner, 2026-11-21),
+// the same in every width; the rest of the plan stays: one-line cells elsewhere and a per-row request detail dialog
+// (click, Enter or Space) that shows only what the page may show.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
@@ -55,34 +56,39 @@ const cell = (w: ReturnType<typeof mountTable>, key: string) => w.get(`[data-cel
 enableAutoUnmount(afterEach)
 afterEach(() => { document.body.innerHTML = '' })
 
-describe('UsageTable one-line summaries', () => {
-  it('keeps tokens to input and output, with the cache counts left to the tip and the detail', () => {
-    const tokens = cell(mountTable(ADMIN), 'tokens')
-    expect(tokens.get('[data-testid="usage-token-summary"]').text()).toBe('12,345678')
-    expect(tokens.text()).not.toContain('1,500')
-    expect(tokens.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
+describe('UsageTable cells', () => {
+  it('lists input and output, then the cache read and write counts and the cache share, under each other', () => {
+    const tokens = cell(mountTable(ADMIN), 'tokens').get('[data-testid="usage-token-cell"]')
+    const lines = tokens.findAll('.space-y-1 > div').map((line) => line.text())
+    expect(lines).toEqual(['12,345678', '1.5K40', expect.stringMatching(/%$/)])
+    expect(tokens.get('[data-testid="usage-cache-read"]').text()).toBe('1.5K')
+    expect(tokens.get('[data-testid="usage-cache-creation"]').text()).toBe('40')
+    expect(tokens.get('[data-testid="usage-token-tip"] > div').classes()).toEqual(expect.arrayContaining(['h-4', 'w-4']))
   })
 
-  it('writes the cost with six decimals and thousands separators, the account cost "A $…" on the same line', () => {
+  it('writes the cost with six decimals and thousands separators, the account cost "A $…" on its own line in 11px', () => {
     const admin = cell(mountTable(ADMIN), 'cost')
     const line = admin.get('.flex')
     expect(line.text()).toContain('$1,234.012345')
-    expect(line.get('[data-testid="usage-account-billed"]').text()).toBe('A $0.000237')
-    expect(line.get('[data-testid="usage-account-billed"]').classes()).toContain('text-xs')
+    expect(line.find('[data-testid="usage-account-billed"]').exists()).toBe(false)
+    const billed = admin.get('[data-testid="usage-account-billed"]')
+    expect(billed.text()).toBe('A $0.000237')
+    expect(billed.classes()).toEqual(expect.arrayContaining(['mt-0.5', 'text-[11px]', 'text-orange-500']))
     const user = cell(mountTable(USER), 'cost')
     expect(user.find('[data-testid="usage-account-billed"]').exists()).toBe(false)
     expect(user.text()).not.toContain('A $')
   })
 
-  it('puts the requested and the sent model on one line, and the endpoints only where the page shows the upstream one', () => {
+  it('puts the requested and the sent model on one line, and the endpoints on two lines where the page shows the upstream one', () => {
     const admin = mountTable(ADMIN)
     expect(cell(admin, 'model').get('[data-testid="usage-model-steps"]').findAll('span').map((s) => s.text())).toEqual(['gpt-6.1-sol', '→', 'gpt-6.1'])
     const endpoint = cell(admin, 'endpoint').get('[data-testid="usage-endpoint"]')
-    expect(endpoint.findAll('span').map((s) => s.text())).toEqual(['/v1/messages', '→', '/v1/responses'])
-    expect(endpoint.attributes('title')).toBe('usage.inboundEndpoint: /v1/messages\nusage.upstreamEndpoint: /v1/responses')
+    expect(endpoint.findAll(':scope > div').map((d) => d.findAll('span').map((s) => s.text()))).toEqual([
+      ['usage.inbound:', '/v1/messages'],
+      ['usage.upstream:', '/v1/responses'],
+    ])
     const user = cell(mountTable(USER), 'endpoint').get('[data-testid="usage-endpoint"]')
-    expect(user.text()).toBe('/v1/messages')
-    expect(user.attributes('title')).toBe('usage.inboundEndpoint: /v1/messages')
+    expect(user.findAll(':scope > div').map((d) => d.text())).toEqual(['usage.inbound:/v1/messages'])
   })
 
   it('keeps the account and its rescue marks, and the group and its fallback, on one line', () => {
@@ -100,12 +106,13 @@ describe('UsageTable one-line summaries', () => {
     expect(time.get('button').text()).toBe('usage.requestDetail.button')
   })
 
-  // The shared empty cell (mobile list plan, copy): one light "—".
-  it('shows the shared light dash for an empty account, endpoint and group', () => {
+  // The shared empty cell (mobile list plan, copy): one light "—"; an unknown endpoint keeps its label.
+  it('shows the shared light dash for an empty account and group, and "—" after an unknown endpoint\'s label', () => {
     const wrapper = mountTable(USER, [{ ...row, account: null, inbound_endpoint: '', group: null, group_id: null, origin_group_id: null }])
-    for (const key of ['account', 'endpoint', 'group']) {
+    for (const key of ['account', 'group']) {
       expect(cell(wrapper, key).get('[data-test="cell-empty"]').text()).toBe('—')
     }
+    expect(cell(wrapper, 'endpoint').text()).toBe('usage.inbound:—')
   })
 })
 
@@ -290,7 +297,7 @@ describe('UsageTable after review', () => {
     vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(600)
     vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200)
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(120)
-    const trigger = cell(wrapper, 'latency').get('[data-testid="usage-latency-tip"]')
+    const trigger = cell(wrapper, 'tokens').get('[data-testid="usage-token-tip"]')
     vi.spyOn(trigger.element, 'getBoundingClientRect').mockReturnValue({ left: 1070, right: 1086, top: 580, bottom: 596, width: 16, height: 16, x: 1070, y: 580, toJSON: () => ({}) } as DOMRect)
     await trigger.trigger('mouseenter')
     await nextTick()
@@ -302,15 +309,18 @@ describe('UsageTable after review', () => {
     expect(tip.find('.right-full').exists()).toBe(false)
   })
 
-  it('hides the hover-only info icons on touch screens, where "Details" carries them', () => {
+  it('hides the hover-only token icon on touch screens, where "Details" carries it; the latency cell has no tip', () => {
     const wrapper = mountTable(ADMIN)
-    expect(cell(wrapper, 'tokens').get('.group.relative').classes()).toContain('[@media(hover:none)]:hidden')
-    expect(cell(wrapper, 'latency').get('[data-testid="usage-latency-tip"]').classes()).toContain('[@media(hover:none)]:hidden')
+    expect(cell(wrapper, 'tokens').get('[data-testid="usage-token-tip"]').classes()).toContain('[@media(hover:none)]:hidden')
+    expect(cell(wrapper, 'latency').find('.group').exists()).toBe(false)
   })
 
-  it('keeps the tier details button available with a 40px touch target', () => {
+  // Owner's desk is mouse plus touch screen (any-pointer: coarse): only a touch primary pointer gets the 40px target, the
+  // icon itself stays the original 16px everywhere.
+  it('keeps the tier details icon 16px, with a 40px target only for a touch primary pointer', () => {
     const button = cell(mountTable(ADMIN), 'cost').get('button[data-testid="usage-tier-details"]')
-    expect(button.classes()).toEqual(expect.arrayContaining(['[@media(any-pointer:coarse)]:h-10', '[@media(any-pointer:coarse)]:w-10']))
+    expect(button.classes()).toEqual(expect.arrayContaining(['h-4', 'w-4', '[@media(pointer:coarse)]:before:-inset-3']))
+    expect(button.classes().some((c) => c.includes('any-pointer'))).toBe(false)
     expect(button.classes()).not.toContain('[@media(hover:none)]:hidden')
   })
 

@@ -203,8 +203,9 @@ describe('admin UsageTable tooltip', () => {
       },
       global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
     })
-    // The one-line latency summary leaves the rate to the request detail.
-    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+    // The latency cell's fourth line and the request detail show the same rate.
+    expect(wrapper.findAll('[data-testid="usage-token-speed"]').map(cell => cell.text())).toEqual(['50.0 t/s', '—'])
+    expect(wrapper.text()).toContain('Avg TPS')
     const speeds: (string | null)[] = []
     for (const id of ['req-admin-image', 'no-duration', 'image']) {
       const detail = await openDetail(wrapper, `[data-request-id="${id}"]`)
@@ -1025,7 +1026,8 @@ describe('admin usage metric visibility', () => {
     props: { data, columns: [], ...props },
     global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><slot name="cell-tokens" :row="row"/><slot name="cell-latency" :row="row"/><slot name="cell-created_at" :row="row" :value="row.created_at"/></template></div>' }, Icon: true, Teleport: true } },
   })
-  // Both metrics left the one-line cells for the request detail (and the token tip); the settings still decide them.
+  // Both metrics show in the cells (cache share under the tokens, rate as the latency's last line) and in the request
+  // detail; the settings decide them.
   it('hides both metrics by default for shared user rendering', async () => {
     const wrapper = mountMetrics()
     const detail = await openDetail(wrapper)
@@ -1036,8 +1038,10 @@ describe('admin usage metric visibility', () => {
   })
   it.each([[true,true],[true,false],[false,true],[false,false]])('obeys independent flags %s / %s', async (showCacheHitRate, showTokenSpeed) => {
     const wrapper = mountMetrics({ showCacheHitRate, showTokenSpeed })
-    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(showCacheHitRate)
+    expect(wrapper.find('[data-testid="usage-token-speed"]').exists()).toBe(showTokenSpeed)
+    if (showCacheHitRate) expect(wrapper.get('[data-testid="usage-cache-hit-rate"]').element.parentElement?.textContent?.trim()).toBe('75.0%')
+    if (showTokenSpeed) expect(wrapper.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 t/s')
     const detail = await openDetail(wrapper)
     expect(detail.find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(showCacheHitRate)
     expect(detail.find('[data-testid="usage-token-speed"]').exists()).toBe(showTokenSpeed)
@@ -1049,9 +1053,9 @@ describe('admin usage metric visibility', () => {
     if (showTokenSpeed) expect(detail.get('[data-testid="usage-token-speed"]').text()).toBe('33.3 t/s')
     else expect(wrapper.text()).not.toContain(' t/s')
     await closeDetail(wrapper)
-    // The token tip on hover shows the same share under the same setting.
-    await wrapper.get('.group.relative').trigger('mouseenter')
-    expect(wrapper.get('.fixed').find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(showCacheHitRate)
+    // The token tip on hover is the original one: the share is in the cell, not repeated there.
+    await wrapper.get('[data-testid="usage-token-tip"]').trigger('mouseenter')
+    expect(wrapper.get('.fixed').find('[data-testid="usage-cache-hit-rate"]').exists()).toBe(false)
   })
   it('updates reactively after changing settings', async () => {
     const wrapper = mountMetrics({ showCacheHitRate: true, showTokenSpeed: true })
@@ -1083,24 +1087,25 @@ describe('admin usage latency: the user wait first', () => {
     global: { stubs: { DataTable: { props: ['data'], template: '<div><template v-for="row in data"><div data-test="latency"><slot name="cell-latency" :row="row"/></div><slot name="cell-created_at" :row="row" :value="row.created_at"/></template></div>' }, Icon: true, Teleport: true } },
   })
   const cell = (w: ReturnType<typeof mountLatency>) => w.get('[data-test="latency"]')
-  // The summary's pieces in reading order (labels, values, separators).
-  const parts = (w: ReturnType<typeof mountLatency>) => cell(w).findAll('[data-testid="usage-latency-summary"] > span:nth-child(2) > span').map((el) => el.text())
+  // The grid's labels and values in reading order (two per line).
+  const parts = (w: ReturnType<typeof mountLatency>) => cell(w).findAll('[data-testid="usage-latency-cell"] > div > span').map((el) => el.text())
 
-  // One line: "wait X · first token Y"; the wait has no grade of its own, the last attempt's first token keeps its color.
+  // Owner, 2026-11-21: the original four lines with short labels. "Wait" and its value in gray; the last attempt's first
+  // token and duration graded; the labels' tips still say they are the last attempt's.
   it('shows user wait in neutral text and colors the last first token and upper bar by its severity', () => {
     const wrapper = mountLatency({ showEndToEnd: true })
     const e2e = wrapper.get('[data-testid="usage-latency-e2e"]')
     expect(e2e.text()).toBe('51.00s')
-    expect(e2e.classes()).toContain('text-gray-700')
+    expect(e2e.classes()).toContain('text-gray-500')
     expect(e2e.classes().some((c) => /(emerald|amber|orange|red)-/.test(c))).toBe(false)
     const last = wrapper.get('[data-testid="usage-latency-last-attempt"]')
     expect(last.text()).toBe('800ms')
     expect(last.classes()).toContain('text-emerald-600')
-    expect(parts(wrapper)).toEqual(['usage.latencyWaitShort', '51.00s', '·', 'usage.latencyLastAttempt', '800ms'])
-    // The admin page never uses the user page's plain first-token label: its first token is the last attempt's.
-    expect(cell(wrapper).text()).not.toContain('usage.latencyFirstToken')
-    const labels = cell(wrapper).findAll('span.text-xs')
-    expect(labels.map((l) => l.attributes('title'))).toEqual(['usage.latencyEndToEndHint', 'usage.latencyLastAttemptHint'])
+    expect(wrapper.get('[data-testid="usage-latency-duration"]').classes()).toContain('text-amber-600')
+    expect(parts(wrapper)).toEqual(['usage.latencyWaitShort', '51.00s', 'usage.latencyFirstToken', '800ms', 'usage.duration', '1m 10s'])
+    expect(cell(wrapper).text()).not.toContain('usage.latencyLastAttempt')
+    const labels = cell(wrapper).findAll('[data-testid="usage-latency-cell"] > div > span:nth-child(odd)')
+    expect(labels.map((l) => l.attributes('title'))).toEqual(['usage.latencyEndToEndHint', 'usage.latencyLastAttemptHint', 'usage.latencyLastAttemptDurationHint'])
     expect(wrapper.get('span[aria-hidden="true"]').classes()).toEqual(expect.arrayContaining(['from-emerald-500', 'to-amber-400']))
   })
 
@@ -1159,27 +1164,27 @@ describe('admin usage latency: the user wait first', () => {
     expect(userLabel.hasAttribute('title')).toBe(false)
   })
 
-  // Desktop hover on the latency cell: the same lines as the detail dialog's latency (one component), no tips inside.
+  // The cell has every line itself (no hover tip); the admin page's short labels, the detail's full names.
   it.each([
-    ['admin', { showEndToEnd: true, showTokenSpeed: true }, ['usage.latencyEndToEnd', '51.00s', 'usage.latencyLastAttempt', '800ms', 'usage.latencyLastAttemptDuration', '1m 10s', 'Avg TPS', '—']],
-    ['user', { showTokenSpeed: true }, ['usage.latencyFirstToken', '800ms', 'usage.latencyDuration', '1m 10s', 'Avg TPS', '—']],
-  ] as const)('shows the %s page\'s latency breakdown on hover, as in the detail', async (_, props, expected) => {
+    ['admin', { showEndToEnd: true, showTokenSpeed: true },
+      ['usage.latencyWaitShort', '51.00s', 'usage.latencyFirstToken', '800ms', 'usage.duration', '1m 10s', 'usage.outputTpsShort', '—'],
+      ['usage.latencyEndToEnd', '51.00s', 'usage.latencyLastAttempt', '800ms', 'usage.latencyLastAttemptDuration', '1m 10s', 'Avg TPS', '—']],
+    ['user', { showTokenSpeed: true },
+      ['usage.latencyFirstToken', '800ms', 'usage.latencyDuration', '1m 10s', 'Avg TPS', '—'],
+      ['usage.latencyFirstToken', '800ms', 'usage.latencyDuration', '1m 10s', 'Avg TPS', '—']],
+  ] as const)('lists the %s page\'s latency lines in the cell, with the full names in the detail', async (_, props, inCell, inDetail) => {
     const wrapper = mountLatency(props)
-    await wrapper.get('[data-testid="usage-latency-tip"]').trigger('mouseenter')
-    const tip = wrapper.get('.fixed')
-    expect(tip.findAll('dt, dd').map((el) => el.text())).toEqual(expected)
-    expect(tip.find('[title]').exists()).toBe(false)
+    expect(parts(wrapper)).toEqual(inCell)
+    expect(wrapper.find('[data-testid="usage-latency-tip"]').exists()).toBe(false)
     const detail = await openDetail(wrapper)
-    expect(detail.findAll('dt, dd').slice(0, expected.length).map((el) => el.text())).toEqual(expected)
-    await wrapper.get('[data-testid="usage-latency-tip"]').trigger('mouseleave')
-    expect(wrapper.find('.fixed').exists()).toBe(false)
+    expect(detail.findAll('dt, dd').slice(0, inDetail.length).map((el) => el.text())).toEqual(inDetail)
   })
 
-  // The user page's one line: "first token X · duration Y", each graded, no admin-only figure or tip.
+  // The user page's original lines: first token, total duration (each graded), average TPS; no admin-only figure or tip.
   it('keeps the first token on the shared user page, whose answer has no end-to-end value', async () => {
     const wrapper = mountLatency({ showTokenSpeed: true })
     expect(wrapper.find('[data-testid="usage-latency-e2e"]').exists()).toBe(false)
-    expect(parts(wrapper)).toEqual(['usage.latencyFirstToken', '800ms', '·', 'usage.duration', '1m 10s'])
+    expect(parts(wrapper)).toEqual(['usage.latencyFirstToken', '800ms', 'usage.latencyDuration', '1m 10s', 'Avg TPS', '—'])
     expect(wrapper.get('[data-testid="usage-latency-first-token"]').classes()).toContain('text-emerald-600')
     expect(wrapper.get('[data-testid="usage-latency-duration"]').classes()).toContain('text-amber-600')
     expect(cell(wrapper).find('[title]').exists()).toBe(false)

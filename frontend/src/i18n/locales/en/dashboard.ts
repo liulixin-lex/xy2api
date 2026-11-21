@@ -447,7 +447,6 @@ export default {
     latencyUnknown: 'Unknown',
     latencyWaitShort: 'Wait',
     removeFilter: 'Remove filter: {label}',
-    latencyDetails: 'Latency Breakdown',
     requestDetail: {
       button: 'Details',
       open: 'View details for {time}',
@@ -472,6 +471,7 @@ export default {
     e2eFirstOutputP50Missing: 'Based on {n} request, but the answer has no median | Based on {n} requests, but the answer has no median',
     e2eFirstOutputHint: 'Median end-to-end first output: from the request entering the gateway to the user receiving the first useful output, queueing and earlier failed attempts included. Only requests with this record count.',
     outputTps: 'Avg TPS',
+    outputTpsShort: 'TPS',
     outputTpsHint: 'Average TPS = output tokens ÷ total request duration, including first-token wait, in t/s (output tokens per second). Output may already include reasoning tokens; do not add them again. — means no valid output or duration.',
     time: 'Time',
     ws: 'WS',

@@ -26,7 +26,12 @@ describe('usage pages: no text under 12px', () => {
     }
   })
 
-  it.each(Object.entries(sources))('%s', (_, source) => {
-    expect(source).not.toMatch(/text-\[1[01]px\]|text-2xs|font-size:\s*1[01]px|\bsize:\s*1[01]\b/)
+  // The usage table's token, cost and latency cells are back to their original desktop look (owner, 2026-11-21): their
+  // 10px badges and the 11px account cost "A $…" are the one exception.
+  const checked = (name: string, source: string) =>
+    name.endsWith('/UsageTable.vue') ? source.replace(/<template #cell-tokens[\s\S]*?<template #cell-created_at/, '') : source
+
+  it.each(Object.entries(sources))('%s', (name, source) => {
+    expect(checked(name, source)).not.toMatch(/text-\[1[01]px\]|text-2xs|font-size:\s*1[01]px|\bsize:\s*1[01]\b/)
   })
 })
