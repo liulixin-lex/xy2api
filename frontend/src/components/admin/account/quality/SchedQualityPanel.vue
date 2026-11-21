@@ -128,7 +128,7 @@
             />
 
 
-            <SchedDecisions :account-id="detail.account.id" :group="pillOf" />
+            <SchedDecisions :account-id="detail.account.id" :group="pillOf" :model="tab" />
           </template>
         </div>
       </aside>
@@ -625,7 +625,9 @@ onScopeDispose(() => running?.kill())
   gap: 16px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 16px 20px 32px;
+  /* A scrollbar that comes and goes (a record opened) must not shift the table's columns. */
+  scrollbar-gutter: stable;
+  padding: 16px 20px 20px;
 }
 .qp-loading {
   display: grid;

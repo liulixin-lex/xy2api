@@ -2,13 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import en from '../locales/en'
 import zh from '../locales/zh'
-import { lineEvidence } from '@/components/admin/account/quality/qualityPanel'
-import { cacheEvidence, errorEvidence, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
 
 // The quality panel, the group board and the decision records build these keys from values the backend sends
 // (identities, placements, layers, actions, unknown causes, evidence fields), so the static key check cannot see
 // them. Every value of the contract (blueprint section 4, machine Action list, rule B's unknown reasons) has copy in
-// both languages, and every evidence template takes its value.
+// both languages, and so has every label of a decision's figures.
 const VALUES: Record<string, string[]> = {
   'admin.schedQuality.identity': ['pass', 'unknown', 'trial', 'rear'],
   'admin.schedQuality.placement': ['front', 'trial', 'rear', 'exempt', 'stopped'],
@@ -18,11 +16,7 @@ const VALUES: Record<string, string[]> = {
     'no_peers', 'all_peers_rear', 'peer_known_insufficient', 'no_samples', 'mass_insufficient', 'sessions_insufficient',
     'slow_sessions_insufficient', 'absolute_unconfirmed', 'relative_unconfirmed', 'worst_mean_above_tolerance', 'relative_veto'
   ],
-  'admin.schedQuality.evidence.ttfo': lineEvidence('ttfo', ttfoEvidence()).map((item) => item.key),
-  'admin.schedQuality.evidence.error': lineEvidence('error', errorEvidence()).map((item) => item.key),
-  'admin.schedQuality.evidence.cache': lineEvidence('cache', cacheEvidence()).map((item) => item.key),
-  'admin.schedQuality.evidence.samples': ['ttfo', 'error', 'cache'],
-  'admin.schedQuality.evidence.samples.total': ['ttfo', 'error', 'cache'],
+  'admin.schedQuality.evidence': ['over', 'bar', 'peers', 'failed', 'limit', 'hit', 'min', 'samples', 'local'],
   'admin.schedQuality.decisions.timeout.seats': ['full', 'not_observed', 'unknown'],
   'admin.schedQuality.ttftRule': ['confidence', 'tolerance', 'peer_margin', 'confidenceHint', 'toleranceHint', 'peer_marginHint'],
   'admin.schedQuality.ttftRule.legal': ['confidence', 'tolerance', 'peer_margin'],
@@ -87,11 +81,8 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
     expect(new Set(words).size).toBe(1)
   })
 
-  it('puts the value into every evidence template', () => {
-    const templates = ['ttfo', 'error', 'cache'].flatMap((line) =>
-      VALUES[`admin.schedQuality.evidence.${line}`].map((key) => [key, String(lookup(messages, `admin.schedQuality.evidence.${line}.${key}`))])
-    )
-    expect(templates.filter(([, text]) => !text.includes('{v}'))).toEqual([])
+  it('puts the first-output limit into its figure label', () => {
+    expect(String(lookup(messages, 'admin.schedQuality.evidence.over'))).toContain('{s}')
   })
 
   // 前端修整 (package C): the panel's figure headings fit their 56px columns (12px text), and in Chinese the error line
