@@ -1,7 +1,7 @@
 // Usage records: the endpoint, token, cost and latency cells as they were before the mobile list plan (owner, 2026-11-21),
 // the same in every width; the rest of the plan stays: one-line cells elsewhere and a per-row request detail dialog
 // (click, Enter or Space) that shows only what the page may show.
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
@@ -52,6 +52,17 @@ function mountTable(props: Record<string, unknown>, data: unknown[] = [row]) {
 
 const cell = (w: ReturnType<typeof mountTable>, key: string) => w.get(`[data-cell="${key}"]`)
 
+/** A matchMedia answering by width (min-width queries) and by primary input: a touch-first device has no hover. */
+const setMedia = (width: number, mouseFirst: boolean) => vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => {
+  const min = /min-width:\s*(\d+)px/.exec(query)
+  return {
+    matches: query.includes('hover: hover') ? mouseFirst : min ? width >= Number(min[1]) : true, media: query, onchange: null,
+    addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+  } as unknown as MediaQueryList
+})
+// Most tests open the request detail from "Details" beside the time: they render a touch-first desktop, which has it.
+beforeEach(() => { setMedia(1280, false) })
+
 // Each test's dialogs leave the shared overlay stack with their wrapper (focus return reads the stack).
 enableAutoUnmount(afterEach)
 afterEach(() => { document.body.innerHTML = '' })
@@ -79,9 +90,12 @@ describe('UsageTable cells', () => {
     expect(user.text()).not.toContain('A $')
   })
 
-  it('puts the requested and the sent model on one line, and the endpoints on two lines where the page shows the upstream one', () => {
+  it('puts the sent model under the requested one in 12px, and the endpoints on two lines where the page shows the upstream one', () => {
     const admin = mountTable(ADMIN)
-    expect(cell(admin, 'model').get('[data-testid="usage-model-steps"]').findAll('span').map((s) => s.text())).toEqual(['gpt-6.1-sol', '→', 'gpt-6.1'])
+    const model = cell(admin, 'model').get('[data-testid="usage-model-cell"]')
+    expect(model.classes()).toContain('text-xs')
+    expect(model.get('[data-testid="usage-model-steps"]').findAll(':scope > div').map((s) => s.text())).toEqual(['gpt-6.1-sol', '↳gpt-6.1'])
+    expect(cell(mountTable(USER), 'model').get('[data-testid="usage-model-steps"]').text()).toBe('gpt-6.1-sol')
     const endpoint = cell(admin, 'endpoint').get('[data-testid="usage-endpoint"]')
     expect(endpoint.findAll(':scope > div').map((d) => d.findAll('span').map((s) => s.text()))).toEqual([
       ['usage.inbound:', '/v1/messages'],
@@ -100,10 +114,21 @@ describe('UsageTable cells', () => {
     expect(cell(wrapper, 'group').text()).toContain('Main')
   })
 
-  it('shows this year\'s time without the year, next to the row\'s Details button', () => {
+  it('shows this year\'s time without the year, next to the row\'s Details button on a touch-first desktop', () => {
     const time = cell(mountTable(ADMIN), 'created_at')
     expect(time.get('span').text()).toBe('11-20 06:54:11')
     expect(time.get('button').text()).toBe('usage.requestDetail.button')
+  })
+
+  // As before the plan, a mouse-first desktop (one with a touch screen too) has no "Details": the cells and their hover
+  // tips carry the breakdown, and the cost icon opens tier details.
+  it.each([1280, 1920])('shows only the time on a mouse-first desktop (%ipx)', (width) => {
+    vi.restoreAllMocks()
+    setMedia(width, true)
+    const wrapper = mountTable(ADMIN)
+    expect(cell(wrapper, 'created_at').text()).toBe('11-20 06:54:11')
+    expect(cell(wrapper, 'created_at').find('button').exists()).toBe(false)
+    expect(cell(wrapper, 'cost').find('[data-testid="usage-tier-details"]').exists()).toBe(true)
   })
 
   // The 240px cap is the tablet's (768–1023px): from 1024px the email and the key name show whole, as before the plan.
@@ -198,7 +223,7 @@ describe('UsageTable request detail', () => {
 
 describe('UsageTable on the shared table layout (B)', () => {
   const setPhone = (phone: boolean) => vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
-    matches: query.includes('min-width') ? !phone : true, media: query, onchange: null,
+    matches: query.includes('hover: hover') ? false : query.includes('min-width') ? !phone : true, media: query, onchange: null,
     addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
   }) as unknown as MediaQueryList)
   afterEach(() => { vi.restoreAllMocks() })
@@ -271,7 +296,7 @@ describe('UsageTable after review', () => {
   const setWidth = (width: number) => vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => {
     const min = /min-width:\s*(\d+)px/.exec(query)
     return {
-      matches: min ? width >= Number(min[1]) : true, media: query, onchange: null,
+      matches: query.includes('hover: hover') ? false : min ? width >= Number(min[1]) : true, media: query, onchange: null,
       addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
     } as unknown as MediaQueryList
   })
@@ -377,7 +402,6 @@ describe('UsageTable after review', () => {
     })
     const model = wrapper.get('[data-cell="model"]')
     expect(model.get('[data-testid="usage-model-steps"]').text()).toBe('gpt-6.1-sol')
-    expect(model.get('[data-testid="usage-model-steps"]').attributes('title')).toBe('gpt-6.1-sol')
     expect(model.text()).not.toContain('gpt-6.1-x')
     expect(wrapper.get('[data-cell="reasoning_effort"]').text()).not.toContain('→')
     await wrapper.get('[data-cell="created_at"] button').trigger('click')
@@ -419,7 +443,8 @@ describe('UsageTable after the re-review', () => {
   const media = (() => {
     let width = 1280
     const lists: { query: string; listeners: Set<(e: { matches: boolean }) => void> }[] = []
-    const matches = (query: string) => { const min = /min-width:\s*(\d+)px/.exec(query); return min ? width >= Number(min[1]) : true }
+    // A touch device (an iPad turning from portrait to landscape): no hover.
+    const matches = (query: string) => { if (query.includes('hover: hover')) return false; const min = /min-width:\s*(\d+)px/.exec(query); return min ? width >= Number(min[1]) : true }
     return {
       install() {
         vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => {

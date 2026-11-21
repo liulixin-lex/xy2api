@@ -117,6 +117,15 @@ const DataTableStub = {
   `,
 }
 
+// The request detail opens from "Details" beside the time on a touch-first desktop (a mouse-first one has none, as
+// before the mobile list plan): these tests render that desktop.
+beforeEach(() => {
+  vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+    matches: !query.includes('hover: hover'), media: query, onchange: null,
+    addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+  }) as unknown as MediaQueryList)
+})
+
 /** Opens a row's request detail with its "Details" button and returns the dialog's body. */
 async function openDetail(wrapper: ReturnType<typeof mount>, scope?: string) {
   const root = scope ? wrapper.get(scope) : wrapper
