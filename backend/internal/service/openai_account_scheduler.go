@@ -75,7 +75,7 @@ func WithOpenAISelectionCandidateConstraint(ctx context.Context, originalPriorit
 	if len(candidateFilter) > 0 {
 		constraint.candidateFilter = candidateFilter[0]
 	}
-	return context.WithValue(ctx, openAIRequestCandidateConstraintKey{}, constraint)
+	return context.WithValue(WithOpenAISelectionNoWait(ctx), openAIRequestCandidateConstraintKey{}, constraint)
 }
 
 func openAIRequestCandidateConstraintFrom(ctx context.Context) *openAIRequestCandidateConstraint {

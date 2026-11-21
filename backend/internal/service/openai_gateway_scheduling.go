@@ -1244,6 +1244,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
 	parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
 	req := OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, baseExclusions: parent.baseExclusions, candidateConstraint: parent.candidateConstraint, RequirePrivacySet: s.openAIGroupRequiresPrivacySet(ctx, groupID)}
+	if req.candidateConstraint == nil {
+		req.candidateConstraint = openAIRequestCandidateConstraintFrom(ctx)
+	}
 	req.NoWait = openAISelectionNoWait(ctx)
 	if state, _ := ctx.Value(openAILegacyStickyCapacityKey{}).(*openAILegacyStickyCapacity); state != nil {
 		req.RequiredTransport, req.RequiredImageCapability = state.transport, state.image
@@ -1358,6 +1361,12 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 						if err == nil && result != nil && result.Acquired {
 							selection, selectErr := withOpenAISelectionSlotGuard(result.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
+								if req.candidateConstraint != nil {
+									account = s.constrainedSlotAccount(ctx, req, account)
+									if account == nil {
+										return nil, nil
+									}
+								}
 								selection, err := s.newAcquiredSelectionResult(ctx, account, release)
 								if err != nil {
 									return nil, err
@@ -1368,16 +1377,20 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 							if selectErr != nil {
 								return nil, selectErr
 							}
-							return selection, nil
-						}
-
-						selection, capacityErr := s.selectOpenAIStickyCapacity(ctx, account, openAILegacyStickyCapacityRequest(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil}))
-						if selection != nil && selection.StickyCapacitySpillover {
-							resilience.StateFrom(ctx).NoteStickyBypassReason("capacity_overflow")
+							if selection != nil {
+								return selection, nil
+							}
 						} else {
-							resilience.StateFrom(ctx).NoteStickyBypassReason("concurrency_full")
+							capacityReq := req
+							capacityReq.SkipStickyCapacityRetry = err != nil
+							selection, capacityErr := s.selectOpenAIStickyCapacity(ctx, account, openAILegacyStickyCapacityRequest(ctx, capacityReq))
+							if selection != nil && selection.StickyCapacitySpillover {
+								resilience.StateFrom(ctx).NoteStickyBypassReason("capacity_overflow")
+							} else {
+								resilience.StateFrom(ctx).NoteStickyBypassReason("concurrency_full")
+							}
+							return selection, capacityErr
 						}
-						return selection, capacityErr
 					}
 				}
 			}
@@ -1587,8 +1600,8 @@ func withOpenAISelectionSlotGuard(release func(), finish func(func()) (*AccountS
 // ordinary selector so the next pass can consider it in the same order.
 func (s *OpenAIGatewayService) finishSelectionSlot(ctx context.Context, req OpenAIAccountScheduleRequest, fresh *Account, slot *AcquireResult, trial *selectionTrial, loads map[int64]*AccountLoadInfo) (selected *AccountSelectionResult, retryTrial *Account, err error) {
 	selected, err = withOpenAISelectionSlotGuard(slot.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
-		latest, vetoed, _ := s.SelectionAdmissionVeto(ctx, fresh)
-		if vetoed || latest == nil {
+		latest := s.admitSelectionSlot(ctx, req, fresh)
+		if latest == nil {
 			return nil, nil
 		}
 		if err := ctx.Err(); err != nil {
@@ -1915,6 +1928,36 @@ func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig
 	}
 }
 
+// A constrained retry may only use the authoritative account row read after
+// acquisition. Never replace that row with a scheduling-cache projection.
+func (s *OpenAIGatewayService) constrainedSlotAccount(ctx context.Context, req OpenAIAccountScheduleRequest, candidate *Account) *Account {
+	if s.accountRepo == nil || candidate == nil {
+		return nil
+	}
+	latest, err := s.accountRepo.GetByID(ctx, candidate.ID)
+	if err != nil || latest == nil || latest.ID != candidate.ID {
+		observeSelectionFailure(ctx, candidate.ID, string(SelectionReasonDependencyError), err)
+		return nil
+	}
+	latest, reason := s.recheckSelectionAdmission(ctx, req, latest)
+	if reason != "" {
+		observeSelectionFailure(ctx, candidate.ID, reason, nil)
+		return nil
+	}
+	return latest
+}
+
+func (s *OpenAIGatewayService) admitSelectionSlot(ctx context.Context, req OpenAIAccountScheduleRequest, candidate *Account) *Account {
+	if req.candidateConstraint != nil {
+		return s.constrainedSlotAccount(ctx, req, candidate)
+	}
+	latest, veto, _ := s.SelectionAdmissionVeto(ctx, candidate)
+	if veto {
+		return nil
+	}
+	return latest
+}
+
 // SelectionAdmissionVeto evaluates the account just read by selection without
 // repeating authoritative reads on an immediate slot acquisition.
 func (s *OpenAIGatewayService) SelectionAdmissionVeto(ctx context.Context, account *Account) (*Account, bool, string) {
@@ -1995,6 +2038,9 @@ func (s *OpenAIGatewayService) SelectionAdmissionVetoLatest(ctx context.Context,
 func (s *OpenAIGatewayService) SelectionAdmissionForResult(ctx context.Context, selection *AccountSelectionResult, waited bool) (*Account, bool, string) {
 	if waited || selection.admissionWaited {
 		return s.SelectionAdmissionVetoLatest(ctx, selection.Account)
+	}
+	if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok && req.candidateConstraint != nil {
+		return s.selectionAdmissionVeto(ctx, selection.Account, false)
 	}
 	return s.SelectionAdmissionVeto(ctx, selection.Account)
 }
@@ -2228,7 +2274,9 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 	admitSlot = func(slot *AcquireResult, candidate *Account, recheck bool) (*AccountSelectionResult, error) {
 		return withOpenAISelectionSlotGuard(slot.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
 			fresh := candidate
-			if recheck {
+			if req.candidateConstraint != nil {
+				fresh = s.constrainedSlotAccount(ctx, req, candidate)
+			} else if recheck {
 				if rechecks >= schedquality.BorrowMaxProbes {
 					stopProbes = true
 					return nil, nil
@@ -2236,7 +2284,7 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 				rechecks++
 				fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, candidate, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 			}
-			if fresh != nil && recheck && fresh.Concurrency != candidate.Concurrency {
+			if fresh != nil && (recheck || req.candidateConstraint != nil) && fresh.Concurrency != candidate.Concurrency {
 				// The slot was taken under a stale limit; take it under the current one.
 				release()
 				if acquires >= schedquality.BorrowMaxProbes {
@@ -2256,9 +2304,13 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 			if fresh == nil || !gate.isAccountRequestCompatible(ctx, fresh, req) || !gate.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 				return nil, nil
 			}
-			latest, vetoed, _ := s.SelectionAdmissionVeto(ctx, fresh)
-			if vetoed || latest == nil {
-				return nil, nil
+			latest := fresh
+			if req.candidateConstraint == nil {
+				var vetoed bool
+				latest, vetoed, _ = s.SelectionAdmissionVeto(ctx, fresh)
+				if vetoed || latest == nil {
+					return nil, nil
+				}
 			}
 			selection, err := s.newAcquiredSelectionResult(ctx, latest, release)
 			return markOpenAIStickySpillover(selection, true), err

@@ -144,6 +144,12 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 	}
 	if acquireErr == nil && result != nil && result.Acquired {
 		selection, err := withOpenAISelectionSlotGuard(result.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
+			if req.candidateConstraint != nil {
+				account = s.constrainedSlotAccount(ctx, req, account)
+				if account == nil {
+					return nil, nil
+				}
+			}
 			s.newSelectionTrial(ctx, req, account.ID).touch(ctx, account)
 			if !req.PreserveStickyBinding {
 				_ = s.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.openAIWSSessionStickyTTL(), accountID)
@@ -158,6 +164,9 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 	}
 
 	if NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
+		if req.candidateConstraint != nil {
+			return nil, false, nil
+		}
 		if s.concurrencyService != nil {
 			cfg := s.schedulingConfig()
 			return attachSelectionProfitGate(ctx, &AccountSelectionResult{
