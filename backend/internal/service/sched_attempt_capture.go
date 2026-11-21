@@ -488,6 +488,11 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.Outcome(5), Class: schedquality.ClassClientCancel, Detail: string(resilience.CategoryClientCancel), Usage: a.usage})
 		return
 	}
+	if httpErr != nil && httpErr.Reason == OpenAIConversionIdentityReason {
+		a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Class: schedquality.ClassUnknown,
+			HTTPStatus: a.httpStatus, StatusOrigin: schedquality.OriginUpstream, Detail: string(OpenAIConversionIdentityReason), Usage: a.usage})
+		return
+	}
 	if httpErr != nil {
 		if httpErr.BudgetCutPlan != nil || httpErr.PreDispatchSelectionInvalidated {
 			a.finishRecord(SchedAttemptFinish{Outcome: schedquality.OutcomeAccountFault, Class: schedquality.ClassGateway, HTTPStatus: httpErr.StatusCode, StatusOrigin: schedquality.OriginGateway, Detail: string(resilience.CategoryTransient), Usage: a.usage})

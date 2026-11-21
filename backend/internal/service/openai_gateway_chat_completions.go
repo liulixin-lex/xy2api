@@ -96,6 +96,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
+	conversionRetry := openAIConversionRetryFrom(ctx)
 	var schedCapture *schedAttemptCapture
 	defer func() {
 		rethrowSchedAttemptPanic(schedCapture, recover())
@@ -171,7 +172,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
 		return nil, writeOpenCodeUnsupportedModelError(c, false, routingModel)
 	}
-	switch s.resolveUpstreamProtocolFor(ctx, account, inbound, routingModel) {
+	upstreamProtocol := s.resolveUpstreamProtocolFor(ctx, account, inbound, routingModel)
+	if retry := openAIConversionRetryFrom(ctx); retry != nil && retry.used && !retry.resent && upstreamProtocol != APIProtocolResponses {
+		WriteOpenAIConversionRetryFailure(c, retry.failure, "candidate_protocol")
+		return nil, retry.failure.cause
+	}
+	switch upstreamProtocol {
 	case APIProtocolAnthropic:
 		if convertResponsesShape {
 			return s.forwardResponsesViaNativeAnthropic(ctx, c, account, body, "")
@@ -453,6 +459,9 @@ retryChatResponsesWire:
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
+	if wire := prepareOpenAIConversionWire(ctx, upstreamReq); wire != nil {
+		responsesBody = wire
+	}
 	bindM7ResponsesWireBody(c, account, responsesBody)
 	actualReasoningEffort := extractOpenAIReasoningEffortFromRequest(upstreamReq)
 
@@ -465,7 +474,19 @@ retryChatResponsesWire:
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	if retry := openAIConversionRetryFrom(ctx); retry != nil && retry.used && !retry.resent {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if budget := resilience.StateFrom(ctx).Budget(); budget == nil || !budget.CanAttempt(time.Now()) {
+			WriteOpenAIConversionRetryFailure(c, retry.failure, "budget_exhausted")
+			return nil, retry.failure.cause
+		}
+	}
 	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, responsesBody, clientStream, &schedCapture)
+	if retry := openAIConversionRetryFrom(ctx); retry != nil && retry.used {
+		retry.resent = retry.resent || resp != nil || schedCapture != nil
+	}
 	noteOpenAIRequestRepairResent(ctx, c, account)
 	if firstEvent.expired() {
 		if resp != nil && resp.Body != nil {
@@ -539,7 +560,7 @@ retryChatResponsesWire:
 			}
 			return s.forwardAsChatCompletions(ctx, c, account, retryBody, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
 		}
-		if account.Type == AccountTypeAPIKey &&
+		if (conversionRetry == nil || !conversionRetry.used) && account.Type == AccountTypeAPIKey &&
 			!account.routesByModel() &&
 			openai_compat.ResolveResponsesSupport(account.Extra) == openai_compat.ResponsesSupportUnknown &&
 			!isResponsesEndpointSupportedByStatus(resp.StatusCode) {
@@ -708,6 +729,12 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	if err != nil {
 		var conversion *apicompat.UpstreamConversionError
 		if errors.As(err, &conversion) {
+			if retry := openAIConversionRetryError(c, resp, account, upstreamModel, facts.UsagePresent, conversion.Field, "Invalid upstream response event", err); retry != nil {
+				return nil, retry
+			}
+			if openAIConversionRetryFrom(c.Request.Context()) != nil && c.Request.Context().Err() != nil {
+				return nil, c.Request.Context().Err()
+			}
 			writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolChat, "server_error", conversion.Field, "Invalid upstream response event", err)
 		}
 		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
@@ -776,6 +803,9 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	acc.SupplementResponseOutput(finalResponse)
 
 	if err := acc.Err(); err != nil {
+		if retry := openAIConversionRetryError(c, resp, account, upstreamModel, facts.UsagePresent, "", err.Error(), err); retry != nil {
+			return nil, retry
+		}
 		writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolChat, "server_error", "", err.Error(), err)
 		return nil, err
 	}
@@ -1008,6 +1038,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		pendingPrelude.take()
 		firstEvent.disarm()
 		stopPreludeCancel()
+		if retry := openAIConversionRetryError(c, resp, account, upstreamModel, facts.UsagePresent, "", message, err); retry != nil {
+			conversionErr, streamNonFailoverErr = retry, retry
+			conversionBeforeOutput = true
+			_ = resp.Body.Close()
+			return true
+		}
+		if openAIConversionRetryFrom(c.Request.Context()) != nil && c.Request.Context().Err() != nil {
+			conversionErr, streamNonFailoverErr = c.Request.Context().Err(), c.Request.Context().Err()
+			_ = resp.Body.Close()
+			return true
+		}
 		writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolChat, "server_error", "", message, err)
 		if conversionBeforeOutput {
 			_ = resp.Body.Close()
