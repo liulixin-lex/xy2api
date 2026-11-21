@@ -49,6 +49,7 @@ type OpenAIAccountScheduleRequest struct {
 	// and compact_model_mapping; native remote compaction v2 leaves it false.
 	RequireCompact      bool
 	ExcludedIDs         map[int64]struct{}
+	baseExclusions      map[int64]struct{} // Independent exclusions for owner-guard opportunity checks.
 	candidateConstraint *openAIRequestCandidateConstraint
 	firstOutputAvoided  map[int64]struct{} // Source attribution for the last-resort event.
 }
@@ -363,6 +364,13 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	// A first-output cutoff leaves the owner bound. Only the existing avoidance
 	// scopes belong in request state, which trial selection uses to detect borrowing.
 	state.SetAvoided(avoided)
+	if ordinary && sessionHash != "" {
+		request.baseExclusions = mergeExcluded(origExcluded, avoided)
+		if request.baseExclusions == nil {
+			request.baseExclusions = map[int64]struct{}{}
+		}
+		ctx = context.WithValue(ctx, openAISelectionRequestKey{}, request)
+	}
 	var firstOutputAvoided map[int64]struct{}
 	binding := pendingOpenAIStickyChange(ctx)
 	if ordinary && resilience.Current().SessionOn() && binding.matchesSession(groupID, sessionHash) && !binding.skipCommit && s.resilience != nil && s.resilience.store != nil &&
@@ -543,7 +551,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 		RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 		RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: excludedIDs,
-		candidateConstraint: parent.candidateConstraint,
+		baseExclusions: parent.baseExclusions, candidateConstraint: parent.candidateConstraint,
 	})
 	resilience.StateFrom(ctx).ResetStickyBypassReason()
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
