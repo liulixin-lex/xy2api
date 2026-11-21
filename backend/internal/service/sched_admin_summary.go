@@ -119,20 +119,16 @@ func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualityS
 			}
 			rear := schedRearLines(r.View)
 			if len(rear) > 0 {
-				out.Rear = append(out.Rear, SchedAdminRear{GroupID: r.GroupID, Model: r.Model, Lines: append([]schedquality.Dimension{}, rear...), Until: schedAdminStamp(schedAdminRearUntil(r.View)), Exempt: exempt, Effective: !exempt && effective})
+				line, dimension := schedAdminDeadlineLine(r.View, false)
+				out.Rear = append(out.Rear, SchedAdminRear{Level: line.Level, UntilLine: dimension, GroupID: r.GroupID, Model: r.Model, Lines: append([]schedquality.Dimension{}, rear...), Until: schedAdminStamp(line.Until), Exempt: exempt, Effective: !exempt && effective})
 			}
 			if r.View.Error.Identity == schedquality.IdentityRear {
 				out.Error.Red = true
 			}
 			if len(rear) == 0 && !exempt && effective {
-				var until time.Time
-				for _, l := range []schedquality.LineView{r.View.TTFO, r.View.Error, r.View.Cache} {
-					if l.Trial && (l.TrialUntil.After(until)) {
-						until = l.TrialUntil
-					}
-				}
-				if !until.IsZero() {
-					out.Trial = append(out.Trial, SchedAdminTrial{GroupID: r.GroupID, Model: r.Model, Until: schedAdminStamp(until)})
+				line, dimension := schedAdminDeadlineLine(r.View, true)
+				if !line.TrialUntil.IsZero() {
+					out.Trial = append(out.Trial, SchedAdminTrial{GroupID: r.GroupID, Model: r.Model, Until: schedAdminStamp(line.TrialUntil), Level: line.Level, UntilLine: dimension, TrialStartedAt: schedAdminTime(line.TrialStartedAt)})
 				}
 			}
 		}
@@ -341,7 +337,7 @@ func schedAdminIdentity(v schedquality.LineView) string {
 	return "unknown"
 }
 func schedAdminLine[E any](v schedquality.LineView, verdict schedquality.Verdict, e E, groups []int64, counts schedquality.SampleCounts, last *SchedAdminLastEval) SchedAdminLine[E] {
-	return SchedAdminLine[E]{LastEval: last, SampleCounts: counts, Identity: schedAdminIdentity(v), Level: v.Level, Until: schedAdminTime(v.Until), TrialUntil: schedAdminTime(v.TrialUntil), Verdict: verdict.String(), Evidence: e, SourceGroups: append([]int64{}, groups...)}
+	return SchedAdminLine[E]{LastEval: last, SampleCounts: counts, Identity: schedAdminIdentity(v), Level: v.Level, Until: schedAdminTime(v.Until), TrialUntil: schedAdminTime(v.TrialUntil), TrialStartedAt: schedAdminTime(v.TrialStartedAt), Verdict: verdict.String(), Evidence: e, SourceGroups: append([]int64{}, groups...)}
 }
 func schedAdminErrorEvidence(e schedquality.ErrorAssessment) SchedAdminErrorEvidence {
 	return SchedAdminErrorEvidence{RecoveryOverLimit: e.RecoveryOverLimit, Limit: e.Limit, Clear: e.Clear, Failed: e.Failed, Unknown: e.Unknown, Padded: e.Padded, LowerFail: e.LowerFail, LowerPass: e.LowerPass}
@@ -373,11 +369,24 @@ func SchedAdminGroupModel(r SchedGroupRow, exempt bool) SchedAdminAccountDetailG
 
 // Composite rear ends when the last rear line expires; a concurrent trial does not extend it.
 func schedAdminRearUntil(v schedquality.StateView) time.Time {
+	line, _ := schedAdminDeadlineLine(v, false)
+	return line.Until
+}
+
+// Keep the existing latest-deadline selection and TTFO/error/cache tie order.
+// Every displayed field belongs to that same line.
+func schedAdminDeadlineLine(v schedquality.StateView, trial bool) (schedquality.LineView, schedquality.Dimension) {
+	var chosen schedquality.LineView
+	var dimension schedquality.Dimension
 	var until time.Time
-	for _, l := range []schedquality.LineView{v.TTFO, v.Error, v.Cache} {
-		if l.Identity == schedquality.IdentityRear && l.Until.After(until) {
-			until = l.Until
+	for i, line := range []schedquality.LineView{v.TTFO, v.Error, v.Cache} {
+		eligible, deadline := line.Identity == schedquality.IdentityRear, line.Until
+		if trial {
+			eligible, deadline = line.Trial, line.TrialUntil
+		}
+		if eligible && (dimension == "" || deadline.After(until)) {
+			chosen, dimension, until = line, schedquality.Lines[i], deadline
 		}
 	}
-	return until
+	return chosen, dimension
 }

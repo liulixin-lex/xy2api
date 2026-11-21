@@ -43,6 +43,8 @@ type schedPerfLines struct {
 	Cache schedPerfLine `json:"cache"`
 }
 type schedPerfLine struct {
+	Level          int     `json:"level"`
+	TrialStartedAt *string `json:"trial_started_at"`
 	q.SampleCounts
 	Identity string              `json:"identity"`
 	Until    *string             `json:"until"`
@@ -54,7 +56,7 @@ func perfLine(v q.LineView, counts q.SampleCounts, last *SchedAdminLastEval) sch
 	if v.Trial {
 		until = v.TrialUntil
 	}
-	return schedPerfLine{Identity: schedAdminIdentity(v), Until: schedAdminTime(until), SampleCounts: counts, LastEval: last}
+	return schedPerfLine{Level: v.Level, TrialStartedAt: schedAdminTime(v.TrialStartedAt), Identity: schedAdminIdentity(v), Until: schedAdminTime(until), SampleCounts: counts, LastEval: last}
 }
 
 func (s *SchedQualitySnapshot) performanceLines(key schedQualityKey) schedPerfLines {

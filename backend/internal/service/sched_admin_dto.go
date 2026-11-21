@@ -33,6 +33,8 @@ type SchedAdminAccountSummaryCache struct {
 	Turns int      `json:"turns"`
 }
 type SchedAdminRear struct {
+	Level     int                      `json:"level"`
+	UntilLine schedquality.Dimension   `json:"until_line"`
 	GroupID   int64                    `json:"group_id"`
 	Model     string                   `json:"model"`
 	Lines     []schedquality.Dimension `json:"lines"`
@@ -41,9 +43,12 @@ type SchedAdminRear struct {
 	Effective bool                     `json:"effective"`
 }
 type SchedAdminTrial struct {
-	GroupID int64  `json:"group_id"`
-	Model   string `json:"model"`
-	Until   string `json:"until"`
+	Level          int                    `json:"level"`
+	UntilLine      schedquality.Dimension `json:"until_line"`
+	TrialStartedAt *string                `json:"trial_started_at"`
+	GroupID        int64                  `json:"group_id"`
+	Model          string                 `json:"model"`
+	Until          string                 `json:"until"`
 }
 type SchedAdminAccountSummary struct {
 	AccountID   int64                           `json:"account_id"`
@@ -136,13 +141,14 @@ func SchedAdminLastEvalFromState(r schedquality.LineState) *SchedAdminLastEval {
 type SchedAdminLine[E any] struct {
 	LastEval *SchedAdminLastEval `json:"last_eval"`
 	schedquality.SampleCounts
-	Identity     string  `json:"identity"`
-	Level        int     `json:"level"`
-	Until        *string `json:"until"`
-	TrialUntil   *string `json:"trial_until"`
-	Verdict      string  `json:"verdict"`
-	Evidence     E       `json:"evidence"`
-	SourceGroups []int64 `json:"source_groups"`
+	Identity       string  `json:"identity"`
+	Level          int     `json:"level"`
+	Until          *string `json:"until"`
+	TrialUntil     *string `json:"trial_until"`
+	TrialStartedAt *string `json:"trial_started_at"`
+	Verdict        string  `json:"verdict"`
+	Evidence       E       `json:"evidence"`
+	SourceGroups   []int64 `json:"source_groups"`
 }
 type SchedAdminLines struct {
 	TTFO  SchedAdminLine[schedquality.TTFTEvidence] `json:"ttfo"`
@@ -322,6 +328,11 @@ type SchedAdminDecision struct {
 	Basis   *SchedAdminBasis       `json:"basis,omitempty"`
 }
 type SchedAdminBasis struct {
+	OwnSampleAt60        *bool  `json:"own_sample_at_60,omitempty"`
+	ReleaseReason        string `json:"release_reason,omitempty"`
+	TrialDurationSeconds int64  `json:"trial_duration_seconds,omitempty"`
+	HistoryMissing       bool   `json:"history_missing,omitempty"`
+	MissingDeadline      bool   `json:"missing_deadline,omitempty"`
 	schedquality.SampleCounts
 	TrialSeats   *string                    `json:"trial_seats"`
 	RuleVersion  string                     `json:"rule_version"`
