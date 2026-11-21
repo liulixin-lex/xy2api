@@ -69,7 +69,7 @@
         <template #cell-user="{ row }">
           <!-- At most 240px (it is the frozen first column on tablets and phones): the email cut with "…", whole in its tip
                and in the error's detail; a click on it still opens the balance history. -->
-          <div v-if="row.user_id" class="flex max-lg:max-w-[240px] items-center text-sm" data-testid="error-user-cell">
+          <div v-if="row.user_id" class="table-identity-box flex max-lg:max-w-[240px] items-center text-sm" data-testid="error-user-cell">
             <button
               v-if="userClickable && row.user_email"
               type="button"
