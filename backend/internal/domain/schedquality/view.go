@@ -3,10 +3,10 @@ package schedquality
 import "time"
 
 type LineView struct {
-	Identity          Identity
-	Trial             bool
-	Level             int
-	Until, TrialUntil time.Time `json:",omitzero"`
+	Identity                          Identity
+	Trial                             bool
+	Level                             int
+	Until, TrialUntil, TrialStartedAt time.Time `json:",omitzero"`
 }
 type StateView struct {
 	TTFO, Error, Cache         LineView

@@ -68,7 +68,7 @@ func TestStepCooldownAndReview(t *testing.T) {
 		level  int
 	}{
 		{VerdictFail, ActionRenew, IdentityRear, false, 1},
-		{VerdictPass, ActionRelease, IdentityPass, false, 0},
+		{VerdictPass, ActionTrial, IdentityUnknown, true, 0},
 		{VerdictUnknown, ActionTrial, IdentityUnknown, true, 0},
 	} {
 		next, a := machineStep(frozen, EventReview, tc.v, frozen.Until)
@@ -81,8 +81,8 @@ func TestStepCooldownAndReview(t *testing.T) {
 		if tc.v == VerdictFail && (!next.Entry.Equal(frozen.Until) || !next.LastRear.Equal(frozen.Until)) {
 			t.Fatal("renewal did not restart evidence")
 		}
-		if tc.v == VerdictPass && !next.GoodSince.Equal(frozen.Until) {
-			t.Fatal("review release must start good evidence at the actual release time")
+		if tc.v == VerdictPass && !next.GoodSince.IsZero() {
+			t.Fatal("review must enter trial without a good streak")
 		}
 	}
 	for level := 1; level <= 6; level++ {
@@ -94,6 +94,7 @@ func TestStepCooldownAndReview(t *testing.T) {
 		}
 	}
 	s, _ = machineStep(s, EventReview, VerdictPass, s.Until)
+	s, _ = machineStep(s, EventTrial, VerdictPass, s.Epoch.Add(TrialMinimum))
 	s, action = machineStep(s, EventRegular, VerdictFail, s.EvaluatedAt.Add(RegularInterval))
 	if action != ActionEnter || s.Level != 4 || s.Admissions != 2 {
 		t.Fatal("later entry must escalate and count")
@@ -109,12 +110,12 @@ func TestStepTrialDeadlineEvidenceWins(t *testing.T) {
 			a  Action
 			id Identity
 		}{
-			{VerdictFail, ActionTrialFail, IdentityRear}, {VerdictPass, ActionTrialPass, IdentityPass}, {VerdictUnknown, ActionTrialTimeout, IdentityUnknown},
+			{VerdictFail, ActionTrialFail, IdentityRear}, {VerdictPass, ActionTrialPass, IdentityUnknown}, {VerdictUnknown, ActionTrialTimeout, IdentityUnknown},
 		} {
 			prev := trial
 			prev.Line = line
 			next, a := machineStep(prev, EventTrial, tc.v, prev.TrialUntil)
-			if a != tc.a || next.Identity != tc.id || next.Trial || !next.Epoch.Equal(prev.Epoch) {
+			if a != tc.a || next.Identity != tc.id || next.Trial || !next.Epoch.Equal(prev.TrialUntil) {
 				t.Fatalf("deadline %+v/%s", next, a)
 			}
 			if tc.v == VerdictUnknown && (next.Level != prev.Level || next.Admissions != prev.Admissions) {
@@ -123,7 +124,7 @@ func TestStepTrialDeadlineEvidenceWins(t *testing.T) {
 			if tc.v == VerdictFail && (next.Level != 1 || next.Admissions != 2 || !next.LastRear.Equal(prev.TrialUntil)) {
 				t.Fatal("trial failed to escalate")
 			}
-			if tc.v == VerdictPass && !next.GoodSince.Equal(prev.TrialUntil) {
+			if tc.v == VerdictPass && !next.GoodSince.IsZero() {
 				t.Fatal("trial pass must start good evidence at the actual pass time")
 			}
 		}
@@ -134,67 +135,20 @@ func TestStepTrialDeadlineEvidenceWins(t *testing.T) {
 	}
 }
 
+// Acceptance 4: the local step cannot clear shared history, even after 24h.
 func TestStepLevelClearBoundaries(t *testing.T) {
 	s := machineState(DimensionTTFO)
-	s.Level = 2
-	s.Admissions = 3
-	s.LastRear = machineNow.Add(-time.Hour)
+	s.Level, s.Admissions, s.LastRear = 2, 3, machineNow.Add(-LevelClearQuiet)
 	for i := 0; i <= 6; i++ {
 		next, a := machineStep(s, EventRegular, VerdictPass, machineNow.Add(time.Duration(i)*RegularInterval))
-		if i < 6 && (next.Level != 2 || a != "") {
-			t.Fatal("cleared before 30m")
-		}
-		if i == 6 && (next.Level != 0 || next.Admissions != 0 || a != ActionClear) {
-			t.Fatalf("good clear: %+v/%s", next, a)
+		if next.Level != 2 || next.Admissions != 3 || a != "" {
+			t.Fatalf("local history clear: %+v/%s", next, a)
 		}
 		s = next
 	}
-	s, a := machineStep(s, EventRegular, VerdictFail, s.EvaluatedAt.Add(RegularInterval))
-	if a != ActionEnter || s.Level != 0 || s.Admissions != 1 {
-		t.Fatal("cleared history escalated")
-	}
-	// Unknown interrupts the good run.
-	s = machineState(DimensionTTFO)
-	s.Level = 1
-	s.Admissions = 1
-	s.LastRear = machineNow.Add(-time.Hour)
-	s, _ = machineStep(s, EventRegular, VerdictPass, machineNow)
-	s, _ = machineStep(s, EventRegular, VerdictUnknown, machineNow.Add(25*time.Minute))
-	s, a = machineStep(s, EventRegular, VerdictPass, machineNow.Add(30*time.Minute))
-	if s.Level != 1 || a != "" || !s.GoodSince.Equal(machineNow.Add(30*time.Minute)) {
-		t.Fatal("broken good streak cleared")
-	}
-	for _, level := range []int{0, 3} {
-		s = machineState(DimensionTTFO)
-		s.Level = level
-		s.Admissions = 1
-		s.LastRear = machineNow
-		s.Epoch = machineNow.Add(-time.Minute)
-		deadline := machineNow.Add(LevelClearQuiet)
-		if _, due := Due(s, deadline.Add(-time.Nanosecond), false, false); due {
-			t.Fatal("early quiet clock")
-		}
-		kind, due := Due(s, deadline, false, false)
-		if !due || kind != EventClock {
-			t.Fatal("missing quiet clock, including level zero")
-		}
-		next, a := machineStep(s, kind, VerdictUnknown, deadline)
-		if a != ActionClear || next.Level != 0 || next.Admissions != 0 || !next.Epoch.Equal(s.Epoch) {
-			t.Fatal("quiet clear lost epoch")
-		}
-		next, a = machineStep(next, EventRegular, VerdictFail, deadline.Add(RegularInterval))
-		if a != ActionEnter || next.Level != 0 {
-			t.Fatal("quiet clear retained escalation")
-		}
-		// A regular event shares the quiet deadline; evidence must run first.
-		next, a = machineStep(s, EventRegular, VerdictFail, deadline)
-		if a != ActionEnter || next.Level != min(level+1, 4) || !next.LastRear.Equal(deadline) {
-			t.Fatal("clock took priority over failure")
-		}
-		next, a = machineStep(s, EventRegular, VerdictUnknown, deadline)
-		if a != ActionClear || next.Admissions != 0 {
-			t.Fatal("regular tick swallowed quiet clear")
-		}
+	next, a := machineStep(s, EventRegular, VerdictFail, s.EvaluatedAt.Add(RegularInterval))
+	if next.Level != 3 || a != ActionEnter {
+		t.Fatal("good streak lost history")
 	}
 }
 

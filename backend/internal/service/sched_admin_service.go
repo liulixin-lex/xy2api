@@ -321,7 +321,7 @@ func (s *SchedAdminService) Decisions(ctx context.Context, id int64, limit int, 
 	return append([]SchedAdminDecision{}, rows...), err
 }
 func SchedAdminDecisionBasis(b schedquality.Basis) *SchedAdminBasis {
-	out := &SchedAdminBasis{SampleCounts: b.SampleCounts, TrialSeats: b.TrialSeats, RuleVersion: b.RuleVersion, Line: b.Line, Kind: b.Kind, Cut: schedAdminTime(b.Cut), Threshold: b.Threshold, SourceGroups: append([]int64{}, b.SourceGroups...)}
+	out := &SchedAdminBasis{OwnSampleAt60: b.OwnSampleAt60, ReleaseReason: b.ReleaseReason, TrialDurationSeconds: b.TrialDurationSeconds, HistoryMissing: b.HistoryMissing, MissingDeadline: b.MissingDeadline, SampleCounts: b.SampleCounts, TrialSeats: b.TrialSeats, RuleVersion: b.RuleVersion, Line: b.Line, Kind: b.Kind, Cut: schedAdminTime(b.Cut), Threshold: b.Threshold, SourceGroups: append([]int64{}, b.SourceGroups...)}
 	if b.TTFT != nil {
 		e := *b.TTFT
 		e.Causes = append([]schedquality.RuleBUnknownReason{}, e.Causes...)

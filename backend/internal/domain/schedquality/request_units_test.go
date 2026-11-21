@@ -39,7 +39,7 @@ func TestRequestUnitsReviewUsesFirstStart(t *testing.T) {
 	if action != ActionTrial || next.Identity != IdentityUnknown || !next.Trial || next.Level != 0 {
 		t.Errorf("old requests renewed rear instead of starting trial: %+v / %s", next, action)
 	}
-	if !next.Epoch.Equal(machineNow) || !next.TrialUntil.Equal(machineNow.Add(time.Hour)) {
+	if !next.Epoch.Equal(machineNow) || !next.TrialUntil.Equal(machineNow.Add(TrialDuration)) {
 		t.Error("review did not establish a fresh trial epoch and deadline")
 	}
 }

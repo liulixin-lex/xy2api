@@ -133,8 +133,9 @@ func TestSchedAssessmentClockPreservesRun(t *testing.T) {
 	first, _ := q.Step(r, q.EventRegular, q.VerdictUnknown, b, at)
 	firstDTO := SchedAdminLastEvalFromState(first)
 	require.NotNil(t, firstDTO)
-	cleared, action := q.Step(first, q.EventClock, q.VerdictUnknown, q.Basis{}, clock)
-	require.Equal(t, q.ActionClear, action)
+	group, actions := q.StepGroup([]q.LineState{first}, nil, clock)
+	cleared := group[0]
+	require.Equal(t, q.ActionClear, actions[0])
 	require.Equal(t, clock, cleared.EvaluatedAt)
 	require.Equal(t, firstDTO, SchedAdminLastEvalFromState(cleared))
 	require.Equal(t, firstDTO, SchedAdminLastEvalFromState(first))
@@ -155,7 +156,8 @@ func TestSchedAssessmentClockPreservesRun(t *testing.T) {
 			stale.EvaluatedAt = at.Add(time.Second)
 		}
 		require.Nil(t, SchedAdminLastEvalFromState(stale))
-		cleared, _ := q.Step(stale, q.EventClock, q.VerdictUnknown, q.Basis{}, clock)
+		group, _ := q.StepGroup([]q.LineState{stale}, nil, clock)
+		cleared := group[0]
 		require.Nil(t, SchedAdminLastEvalFromState(cleared))
 		next, _ := q.Step(cleared, q.EventRegular, q.VerdictUnknown, b, at.Add(q.RegularInterval))
 		require.Len(t, next.LastAssessment, 2)

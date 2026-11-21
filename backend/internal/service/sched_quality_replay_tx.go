@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"time"
 
 	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 )
 
 type schedReplayBatch struct {
+	missingHistory   map[q.LineKey]schedMissingHistory
 	previous, states []q.LineState
 	overrides        []SchedOverride
 	resets           map[int64]time.Time
@@ -53,6 +55,7 @@ func (s *SchedQualityEngineService) replayTx(ctx context.Context, tx SchedQualit
 		return nil, err
 	}
 	b.stats = d.replayStats
+	b.missingHistory = d.missingHistory
 	if err = tx.Upsert(changed); err != nil {
 		return nil, err
 	}
@@ -92,6 +95,15 @@ func (s *SchedQualityEngineService) replayTx(ctx context.Context, tx SchedQualit
 // rejudge when applicable, so trial release uses the committed result.
 func (s *SchedQualityEngineService) commitReplay(ctx context.Context, b *schedReplayBatch, final []q.LineState) {
 	slog.DebugContext(ctx, "sched_quality.replay", "component", "sched_quality", "horizon", b.horizon, "batches", b.stats.batches, "assessments", b.stats.assessments)
+	keys := make([]q.LineKey, 0, len(b.missingHistory))
+	for k := range b.missingHistory {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return schedLineLess(keys[i], keys[j]) })
+	for _, k := range keys {
+		m := b.missingHistory[k]
+		slog.InfoContext(ctx, "sched_quality.history_missing", "component", "sched_quality", "account_id", k.AccountID, "model", k.Model, "group_id", k.GroupID, "line", k.Line, "first_at", m.first, "last_at", m.last, "assessments", m.count)
+	}
 	s.processedAt = b.horizon
 	s.window.newFinishedAt = time.Time{}
 	s.releaseEndedTrials(ctx, b.previous, final)

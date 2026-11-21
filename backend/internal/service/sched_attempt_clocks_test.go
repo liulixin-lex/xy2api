@@ -60,10 +60,12 @@ func TestSchedAttemptCensoringEndsAtCutoff(t *testing.T) {
 				require.EqualValues(t, tier.Milliseconds(), *row.CensoredMs)
 
 				row.Switched = true // The previous attempt in this session used another account.
-				counts := schedquality.CountRuleBEvidence([]schedquality.RuleBSample{ruleBSample(row)}, schedquality.RuleBScope{GroupID: 7, AccountID: account.ID, Model: row.Model}, row.FinishedAt, row.StartedAt, 15)
+				counts := schedquality.CountRuleBEvidence([]schedquality.RuleBSample{ruleBSample(row)}, schedquality.RuleBScope{GroupID: 7, AccountID: account.ID, Model: row.Model}, row.FinishedAt, row.StartedAt.Add(-time.Nanosecond), 15)
 				require.EqualValues(t, 1, counts.N)
 				require.Zero(t, counts.K)
 				require.EqualValues(t, 1, counts.X)
+				atCut := schedquality.CountRuleBEvidence([]schedquality.RuleBSample{ruleBSample(row)}, schedquality.RuleBScope{GroupID: 7, AccountID: account.ID, Model: row.Model}, row.FinishedAt, row.StartedAt, 15)
+				require.Zero(t, atCut.N, "the segment origin is exclusive")
 			})
 		})
 	}
@@ -160,7 +162,9 @@ func TestSchedAttemptReusedWSStartsAtRecorderBegin(t *testing.T) {
 	require.Equal(t, new(50), row.FirstEventMs)
 	require.Equal(t, new(14998), row.TTFOMs)
 	require.Equal(t, new(15020), row.FirstAnswerMs)
-	counts := schedquality.CountRuleBEvidence([]schedquality.RuleBSample{ruleBSample(row)}, schedquality.RuleBScope{GroupID: 7, AccountID: account.ID, Model: row.Model}, row.FinishedAt, begin, 15)
+	counts := schedquality.CountRuleBEvidence([]schedquality.RuleBSample{ruleBSample(row)}, schedquality.RuleBScope{GroupID: 7, AccountID: account.ID, Model: row.Model}, row.FinishedAt, begin.Add(-time.Nanosecond), 15)
 	require.EqualValues(t, 1, counts.N)
 	require.Zero(t, counts.K)
+	atCut := schedquality.CountRuleBEvidence([]schedquality.RuleBSample{ruleBSample(row)}, schedquality.RuleBScope{GroupID: 7, AccountID: account.ID, Model: row.Model}, row.FinishedAt, begin, 15)
+	require.Zero(t, atCut.N, "the segment origin is exclusive")
 }

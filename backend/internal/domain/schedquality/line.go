@@ -53,13 +53,14 @@ const (
 )
 
 type Action string // enter renew release trial trial_pass trial_fail trial_timeout reset relax clear，各取同名常量 ActionEnter…ActionClear
-var CooldownLadder = [...]time.Duration{20 * time.Minute, 40 * time.Minute, 60 * time.Minute, 90 * time.Minute, 120 * time.Minute}
+var CooldownLadder = [...]time.Duration{20 * time.Minute, 40 * time.Minute, 80 * time.Minute, 160 * time.Minute, 240 * time.Minute}
 
 const (
-	RegularInterval = 5 * time.Minute
-	TrialDuration   = 60 * time.Minute
-	LevelClearGood  = 30 * time.Minute
-	LevelClearQuiet = 24 * time.Hour
+	RegularInterval  = 5 * time.Minute
+	TrialDuration    = 120 * time.Minute
+	TrialMinimum     = 15 * time.Minute
+	TrialSampleCheck = 60 * time.Minute
+	LevelClearQuiet  = 24 * time.Hour
 )
 
 const (

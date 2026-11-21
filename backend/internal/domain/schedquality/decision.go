@@ -2,7 +2,7 @@ package schedquality
 
 import "time"
 
-const RuleVersion = "3.0"
+const RuleVersion = "3.1"
 
 // TTFTEvidence is the stable, flat representation stored in decision/state JSON
 // and returned by the API. RuleBResult remains the in-memory assessment.
@@ -58,6 +58,12 @@ func NewSampleCounts(local, total int) SampleCounts {
 }
 
 type Basis struct {
+	// Recovery metadata lives in the existing evidence JSON, never in new state columns.
+	OwnSampleAt60        *bool  `json:"own_sample_at_60,omitempty"`
+	ReleaseReason        string `json:"release_reason,omitempty"` // qualified | no_samples | deadline
+	TrialDurationSeconds int64  `json:"trial_duration_seconds,omitempty"`
+	HistoryMissing       bool   `json:"history_missing,omitempty"`
+	MissingDeadline      bool   `json:"missing_deadline,omitempty"`
 	SampleCounts
 	PeerKnown    float64          `json:"-"` // Weighted peer mass for the real assessment summary only.
 	TrialSeats   *string          `json:"trial_seats"`

@@ -238,7 +238,7 @@ func TestEngineRuleChangesAtomicRejudgeAndConflict(t *testing.T) {
 				require.Equal(t, q.IdentityRear, r.Identity)
 				require.Zero(t, r.Level)
 				require.Equal(t, 1, r.Admissions)
-				require.True(t, r.Epoch.IsZero())
+				require.Equal(t, f.now, r.Epoch)
 				require.Equal(t, f.now, r.Entry)
 				require.NotNil(t, r.Basis.TTFT.PRel, "the cleared rear peer must supply usable evidence")
 				var actions []q.Action

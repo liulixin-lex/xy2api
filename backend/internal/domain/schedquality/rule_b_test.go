@@ -323,7 +323,7 @@ func TestRuleBEvidenceBoundaries(t *testing.T) {
 		{"window-inclusive-long-request", noCut, func(s *RuleBSample) { s.AvailableAt, s.StartedAt = time.Unix(5600, 0), time.Unix(-100, 0) }, RuleBCounts{N: 1.0 / 256, S: 1}},
 		{"outside-window", noCut, func(s *RuleBSample) { s.AvailableAt = time.Unix(5600, -1) }, RuleBCounts{}},
 		{"half-life-from-availability", noCut, func(s *RuleBSample) { s.AvailableAt, s.StartedAt = time.Unix(18200, 0), time.Unix(100, 0) }, RuleBCounts{N: .5, S: 1}},
-		{"cut-inclusive", now, func(s *RuleBSample) { s.StartedAt = now }, RuleBCounts{N: 1, S: 1}},
+		{"cut-strict", now, func(s *RuleBSample) { s.StartedAt = now }, RuleBCounts{}},
 		{"started-before-cut", epoch, func(s *RuleBSample) { s.StartedAt = epoch.Add(-time.Nanosecond) }, RuleBCounts{}},
 		{"available-before-cut", epoch, func(s *RuleBSample) { s.AvailableAt = epoch.Add(-time.Nanosecond) }, RuleBCounts{}},
 		{"equal-limit-is-good", noCut, func(s *RuleBSample) { s.TTFOMs = 10000 }, RuleBCounts{N: 1, S: 1}},

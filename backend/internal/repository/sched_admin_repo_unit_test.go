@@ -49,9 +49,16 @@ func TestSchedAdminRepositoryDecisionJSONLegacyAndUntil(t *testing.T) {
 	failed, failAction := schedquality.Step(trial, schedquality.EventTrial, schedquality.VerdictFail, basis, trial.EvaluatedAt.Add(time.Minute))
 	require.Equal(t, schedquality.ActionTrialFail, failAction)
 	require.True(t, failed.TrialUntil.IsZero())
-	released, releaseAction := schedquality.Step(entered, schedquality.EventReview, schedquality.VerdictPass, basis, entered.Until)
-	require.Equal(t, schedquality.ActionRelease, releaseAction)
-	passed, passAction := schedquality.Step(trial, schedquality.EventTrial, schedquality.VerdictPass, basis, trial.EvaluatedAt.Add(time.Minute))
+	reviewed, reviewAction := schedquality.Step(entered, schedquality.EventReview, schedquality.VerdictPass, basis, entered.Until)
+	require.Equal(t, schedquality.ActionTrial, reviewAction)
+	require.Equal(t, trial.TrialUntil, reviewed.TrialUntil)
+	// Historical direct-release rows remain readable although recovery 3.1 no
+	// longer creates them. Keep this decoder fixture independent of new Step.
+	legacyBasis := basis
+	legacyBasis.RuleVersion = "3.0"
+	released := schedquality.LineState{LineKey: key, Identity: schedquality.IdentityPass, EvaluatedAt: entered.Until, Basis: &legacyBasis}
+	releaseAction := schedquality.ActionRelease
+	passed, passAction := schedquality.Step(trial, schedquality.EventTrial, schedquality.VerdictPass, basis, trial.Epoch.Add(schedquality.TrialMinimum))
 	require.Equal(t, schedquality.ActionTrialPass, passAction)
 	timedOut, timeoutAction := schedquality.Step(trial, schedquality.EventTrial, schedquality.VerdictUnknown, basis, trial.TrialUntil)
 	require.Equal(t, schedquality.ActionTrialTimeout, timeoutAction)
@@ -90,6 +97,11 @@ func TestSchedAdminRepositoryDecisionJSONLegacyAndUntil(t *testing.T) {
 			require.Equal(t, c.until.Format(time.RFC3339Nano), items[i]["until"])
 		}
 	}
+	require.Equal(t, "3.0", items[4]["basis"].(map[string]any)["rule_version"])
+	require.Equal(t, "qualified", items[5]["basis"].(map[string]any)["release_reason"])
+	require.EqualValues(t, 900, items[5]["basis"].(map[string]any)["trial_duration_seconds"])
+	require.Equal(t, "deadline", items[6]["basis"].(map[string]any)["release_reason"])
+	require.EqualValues(t, 7200, items[6]["basis"].(map[string]any)["trial_duration_seconds"])
 	require.Nil(t, items[len(cases)]["until"])
 	require.NotContains(t, items[len(cases)], "basis")
 	b := items[0]["basis"].(map[string]any)

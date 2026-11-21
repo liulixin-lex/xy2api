@@ -10,6 +10,11 @@ import (
 	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 )
 
+type schedMissingHistory struct {
+	first, last time.Time
+	count       int
+}
+
 type schedReplayStats struct {
 	batches, assessments int
 }
@@ -46,6 +51,7 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 		return
 	}
 	d.replayStats = schedReplayStats{}
+	d.missingHistory = make(map[q.LineKey]schedMissingHistory)
 	keys, initial := s.rowKeys(d, states)
 	if len(order) > 0 {
 		order[0](keys)
@@ -54,6 +60,7 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 	lower := make(map[q.LineKey]time.Time)
 	rank := make(map[q.LineKey]int)
 	byPair := make(map[SchedAccountModel][]q.LineKey)
+	byGroup := make(map[schedQualityKey][]q.LineKey)
 	newAfter := schedQualitySince(after, horizon.Add(-q.RegularInterval))
 	enabled := keys[:0]
 	for _, k := range keys {
@@ -65,13 +72,18 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 		rows[k] = r
 		start := newAfter
 		if exists {
-			start = schedQualitySince(r.EvaluatedAt, horizon.Add(-schedEvidenceRetention))
+			start = r.EvaluatedAt
+			if start.IsZero() {
+				start = horizon.Add(-schedEvidenceRetention)
+			}
 		}
 		lower[k] = schedQualitySince(start, resets[k.AccountID])
 		rank[k] = len(enabled)
 		enabled = append(enabled, k)
 		pair := SchedAccountModel{k.AccountID, k.Model}
 		byPair[pair] = append(byPair[pair], k)
+		g := schedQualityKey{k.AccountID, k.Model, k.GroupID}
+		byGroup[g] = append(byGroup[g], k)
 	}
 	keys = enabled
 	// Bound all optional Redis reads together while the evaluation transaction holds its lock.
@@ -133,31 +145,58 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 		}
 		return nil
 	}
+	groupRows := func(g schedQualityKey) []q.LineState {
+		var group []q.LineState
+		for _, k := range byGroup[g] {
+			group = append(group, rows[k])
+		}
+		return group
+	}
 	schedule := func(r q.LineState, start time.Time) error {
 		start = schedQualitySince(start, lower[r.LineKey])
 		add := func(at time.Time) {
-			if !at.IsZero() && !at.After(start) {
-				// Expired timers outside the retained window fire at the first
-				// grid strictly after its start, never at their historical time.
-				at = start.UTC().Truncate(schedTrialArrivalInterval).Add(schedTrialArrivalInterval)
-			}
 			if at.After(start) {
 				if e := eventAt(at); e != nil {
 					e.keys[r.LineKey] = true
 				}
 			}
 		}
+		deadline := func(at time.Time) {
+			if at.IsZero() || !at.After(start) {
+				at = horizon
+			}
+			add(at)
+		}
 		switch {
 		case r.Identity == q.IdentityRear:
-			add(r.Until)
+			deadline(r.Until)
 		case r.Trial:
-			add(r.TrialUntil)
-			add(start.Truncate(time.Minute).Add(time.Minute))
+			deadline(r.TrialUntil)
+			if r.TrialUntil.IsZero() {
+				return nil
+			}
+			if !r.Epoch.IsZero() {
+				add(r.Epoch.Add(q.TrialMinimum))
+				add(r.Epoch.Add(q.TrialSampleCheck))
+			}
+			// Missing evidence cannot justify minute-by-minute historical verdicts.
+			minuteStart := schedQualitySince(start, horizon.Add(-schedEvidenceRetention))
+			add(minuteStart.Truncate(time.Minute).Add(time.Minute))
 			return scheduleArrival(SchedAccountModel{r.AccountID, r.Model}, start)
 		default:
-			add(start.UTC().Truncate(q.RegularInterval).Add(q.RegularInterval))
-			if !r.LastRear.IsZero() && (r.Level > 0 || r.Admissions > 0) {
-				add(r.LastRear.Add(q.LevelClearQuiet))
+			regularStart := schedQualitySince(start, horizon.Add(-schedEvidenceRetention))
+			add(regularStart.UTC().Truncate(q.RegularInterval).Add(q.RegularInterval))
+			g := schedQualityKey{r.AccountID, r.Model, r.GroupID}
+			group := groupRows(g)
+			if at := q.QuietDeadline(group); !at.IsZero() {
+				watermark := start
+				for _, sibling := range group {
+					watermark = schedQualitySince(watermark, sibling.EvaluatedAt)
+				}
+				if !at.After(watermark) {
+					at = watermark.Add(time.Microsecond)
+				}
+				add(at)
 			}
 		}
 		return nil
@@ -198,33 +237,71 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 		sort.Slice(eventKeys, func(i, j int) bool { return rank[eventKeys[i]] < rank[eventKeys[j]] })
 		fiveMin := e.at.Equal(e.at.UTC().Truncate(q.RegularInterval))
 		minute := e.at.Equal(e.at.Truncate(time.Minute))
+		// Freeze all assessments before changing any line in this timestamp.
+		inputs := make(map[q.LineKey]q.Evaluation)
+		groups := make(map[schedQualityKey]bool)
+		var groupOrder []schedQualityKey
 		for _, k := range eventKeys {
 			if err = ctx.Err(); err != nil {
 				return
 			}
 			prev := rows[k]
+			// An invalid deadline means due when read, never at an invented
+			// historical minute or a sibling's sample arrival.
+			missingDeadline := prev.Identity == q.IdentityRear && prev.Until.IsZero() || prev.Trial && prev.TrialUntil.IsZero()
+			if missingDeadline && e.at.Before(horizon) {
+				continue
+			}
 			if !e.at.After(lower[k]) || !e.at.After(prev.EvaluatedAt) {
 				continue
 			}
+			g := schedQualityKey{k.AccountID, k.Model, k.GroupID}
+			if !groups[g] {
+				groups[g] = true
+				groupOrder = append(groupOrder, g)
+			}
 			kind, due := q.Due(prev, e.at, fiveMin, minute || e.pairs[SchedAccountModel{k.AccountID, k.Model}])
-			if !due {
-				continue
+			if due {
+				d.replayStats.assessments++
+				v, basis := s.assessLine(d, prev, kind, e.at, resets)
+				if basis.HistoryMissing {
+					missing := d.missingHistory[k]
+					if missing.first.IsZero() {
+						missing.first = e.at
+					}
+					missing.last = e.at
+					missing.count++
+					d.missingHistory[k] = missing
+				}
+				inputs[k] = q.Evaluation{Kind: kind, Verdict: v, Basis: basis}
 			}
-			d.replayStats.assessments++
-			v, basis := s.assessLine(d, prev, kind, e.at, resets)
-			next, action := q.Step(prev, kind, v, basis, e.at)
-			if action == q.ActionTrialTimeout {
-				started := time.Now()
-				basis.TrialSeats = new(s.trialSeats(ctx, prev, seatReadBudget))
-				seatReadBudget -= time.Since(started)
-				next.Basis = &basis
+		}
+		for _, g := range groupOrder {
+			before := groupRows(g)
+			evaluations := make(map[q.Dimension]q.Evaluation)
+			for _, r := range before {
+				if in, ok := inputs[r.LineKey]; ok {
+					evaluations[r.Line] = in
+				}
 			}
-			rows[k] = next
-			if action != "" {
-				decisions = append(decisions, q.Decision{At: e.at, Key: k, Action: action, Level: next.Level, Until: schedDecisionUntil(action, next), Basis: basis})
+			after, actions := q.StepGroup(before, evaluations, e.at)
+			for i, next := range after {
+				prev, action := before[i], actions[i]
+				if action == q.ActionTrialTimeout {
+					started := time.Now()
+					next.Basis.TrialSeats = new(s.trialSeats(ctx, prev, seatReadBudget))
+					seatReadBudget -= time.Since(started)
+				}
+				rows[next.LineKey] = next
+				if action != "" {
+					decisions = append(decisions, q.Decision{At: e.at, Key: next.LineKey, Action: action, Level: next.Level, Until: schedDecisionUntil(action, next), Basis: *next.Basis})
+				}
 			}
-			if err = schedule(next, e.at); err != nil {
-				return
+			// All siblings have committed their local transition before clocks read them.
+			for _, next := range after {
+				if err = schedule(next, e.at); err != nil {
+					return
+				}
 			}
 		}
 		for pair := range e.pairs {
