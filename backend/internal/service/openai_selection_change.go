@@ -199,17 +199,17 @@ const stickyAbandonIdentityConflict = "identity_conflict"
 func AbandonOpenAIStickyForwardForIdentityConflict(ctx context.Context, accountID int64) {
 	state := resilience.StateFrom(ctx)
 	change := pendingOpenAIStickyChange(ctx)
-	if state == nil || change == nil || change.target != accountID {
+	if state == nil || change == nil {
 		return
 	}
 	change.mu.Lock()
-	if change.done {
+	if change.done || change.target != accountID {
 		change.mu.Unlock()
 		return
 	}
 	change.reason = stickyAbandonIdentityConflict
 	change.completeLocked(ctx, false, false, false)
-	state.SetStickyChange(nil)
+	state.ClearStickyChangeIf(change)
 }
 
 func pendingOpenAIStickyChange(ctx context.Context) *openAIStickyChange {

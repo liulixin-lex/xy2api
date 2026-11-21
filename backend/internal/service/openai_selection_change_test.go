@@ -197,3 +197,23 @@ func TestFailedChangeTargetCannotReturnThroughLastResort(t *testing.T) {
 	require.Nil(t, selected, "a failed change target is unavailable even when all other accounts are down")
 	require.Empty(t, f.attempts)
 }
+
+func TestIdentityConflictRetiresOnlyClaimedPlan(t *testing.T) {
+	f := selectionNewSessionFixture()
+	ctx := selectionReviewContext()
+	st := resilience.StateFrom(ctx)
+	lease := &selectionReleaseBarrier{selectionTrialLeaseFake: newSelectionTrialLeaseFake(), entered: make(chan struct{}), proceed: make(chan struct{}), blocked: "r:one"}
+	first := &openAIStickyChange{kind: "create", target: 1, trial: &selectionTrialReservation{leases: lease, account: 1, member: "r:one"}}
+	next := &openAIStickyChange{kind: "owner_released", target: 2, groupID: 7, session: "session", key: f.binding.key, expected: StickySessionBinding{AccountID: f.owner.ID, Generation: "g1"}, ttl: time.Minute, cache: f.binding}
+	st.SetStickyChange(first)
+	done := make(chan struct{})
+	go func() { defer close(done); AbandonOpenAIStickyForwardForIdentityConflict(ctx, 1) }()
+	<-lease.entered
+	st.SetStickyChange(next)
+	close(lease.proceed)
+	<-done
+	CompleteOpenAIStickyChange(ctx, 2, true, false)
+	t.Logf("new_plan_retained=%t owner=%d", pendingOpenAIStickyChange(ctx) == next, f.binding.owner)
+	require.Same(t, next, pendingOpenAIStickyChange(ctx))
+	require.EqualValues(t, 2, f.binding.owner)
+}

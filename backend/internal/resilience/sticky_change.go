@@ -19,6 +19,18 @@ func (s *RequestState) SetStickyChange(change any) {
 	s.mu.Unlock()
 }
 
+// ClearStickyChangeIf retires only the plan that the caller settled.
+func (s *RequestState) ClearStickyChangeIf(expected any) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stickyChange == expected {
+		s.stickyChange = nil
+	}
+}
+
 // VoluntarySwitchVetoLogged reports whether this request has already logged a veto.
 func (s *RequestState) VoluntarySwitchVetoLogged() bool {
 	if s == nil {
