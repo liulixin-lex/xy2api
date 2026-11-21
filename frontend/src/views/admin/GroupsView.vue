@@ -3584,12 +3584,8 @@
               <label class="text-sm text-gray-600 dark:text-gray-400"
                 >{{ t("admin.groups.accountFilters.oauthOnly") }}</label
               >
-              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                {{
-                  editForm.require_oauth_only
-                    ? t("admin.groups.accountFilters.oauthOnlyEnabled")
-                    : t("admin.groups.accountFilters.disabled")
-                }}
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5" data-test="edit-oauth-only-hint">
+                {{ editOAuthOnlyHint }}
               </p>
             </div>
             <Toggle v-model="editForm.require_oauth_only" />
@@ -5750,6 +5746,15 @@ const editForm = reactive({
 // 下限框里是读不出数的内容（type=number 时 value 为 ""）：不当成留空，校验不通过，编辑时也不提交清除。
 const createFloorUnreadable = ref(false);
 const editFloorUnreadable = ref(false);
+
+// “仅允许 OAuth 账号”打开时，已在组内的 API Key 账号不受影响、照常调度，只是不能再新加入：提示还有几个。
+const editOAuthOnlyHint = computed(() => {
+  if (!editForm.require_oauth_only) return t("admin.groups.accountFilters.disabled");
+  const n = editingGroup.value?.oauth_only_mismatch_count ?? 0;
+  return n > 0
+    ? t("admin.groups.accountFilters.oauthOnlyMismatch", { n })
+    : t("admin.groups.accountFilters.oauthOnlyEnabled");
+});
 
 // 编辑弹窗里填了最低上游倍率（OpenAI 分组）：利润开关关闭时也显示预览，只看与下限有关的几行。
 const editFloorSet = computed(

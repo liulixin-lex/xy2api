@@ -47,8 +47,6 @@ export default {
         cache: 'Cache',
       },
       placeUntil: {
-        rear: 'Rear until {time}',
-        trial: 'Trial until {time}',
         exempt: 'Exempt until {time}',
       },
       ref: {
@@ -281,6 +279,12 @@ export default {
       error: 'Error line',
       cache: 'Cache line',
     },
+    // A stay wraps only at its dots: the words between them are held together by no-break spaces.
+    stay: {
+      rear: 'step\u00a0{level} · review\u00a0{time}',
+      trial: 'from\u00a0{start} · ends\u00a0by\u00a0{end}',
+      line: '{line} · {stay}',
+    },
     ttftRule: {
       title: 'First-output judging',
       hint: 'Applies to every OpenAI group. Judged on the first useful output against the front accounts of the same group and model; with fewer samples the estimate leans towards the group as a whole.',
@@ -410,7 +414,7 @@ export default {
         cacheAny: 'Turns that continued a session on this same account: the share of input read from cache, by tokens; below, the number of turns. Red under the group\'s cache minimum',
         timeouts: 'Share of attempts on this account cut off at the first-output time limit and sent elsewhere; below, how many',
         switches: 'Times a session on this account was moved to another account; each move starts the cache over. Below, how many were released by the profit floor; open the row for every reason',
-        score: 'Lower is better: the excess in points, shrunk: the account\'s slow first sends minus the expected ones, over comparable first sends plus 20, times 100, worked out over every group with the gate on. {use}Below, its place among scored accounts of the same priority and model',
+        score: 'Lower is better: the excess in points, shrunk: the account\'s slow first sends minus the expected ones, over comparable first sends plus 20, times 100, worked out over every group with the gate on. {use} Below, its place among scored accounts of the same priority and model',
         now: 'The current verdicts of the first-output, error and cache lines in that order: filled circle pass, filled square rear, ring trial, dash unknown',
       },
       expected: 'expected {rate}',
@@ -432,8 +436,7 @@ export default {
         fast: 'Clearly faster: the slow share\'s cautious upper bound {upper} is below the expected {expected}',
         cacheLow: 'Large deviation: cache on continued turns {rate} is under the group\'s minimum {min}',
       },
-      scoreUse: 'A new session goes first to an account scored clearly lower than the one it would otherwise get (lower by 3.0 or more), with the same priority and no higher price. ',
-      scoreUseFull: 'A new session goes first to an account scored clearly lower than the one it would otherwise get (lower by 3.0 or more), with the same priority and no higher price. In each 15-minute slot, an account takes no more of these sessions than a quarter of the first sends it got in the last 15 minutes. Sessions that already have an account are not affected.',
+      scoreUse: 'For reading only: it takes no part in picking accounts.',
       detail: {
         first: 'First output',
         cache: 'Cache',
@@ -466,6 +469,7 @@ export default {
         notMember: 'No longer in the group: not judged.',
         gateOff: 'This snapshot did not count the group (its quality gate was off at the time, or the group was created after it): not judged.',
         elsewhere: '{line}: no samples in this group; the evidence comes entirely from other groups.',
+        stay: '{line}: {place}, {stay}.',
       },
       switchReason: {
         handoff: 'first-output timeout handoff',
@@ -474,8 +478,6 @@ export default {
         profit_floor: 'profit floor release',
         other: 'other',
       },
-      rearUntil: 'reviewed at {time}',
-      trialUntil: 'trial ends at {time}',
     },
     noAction: {
       short: {
@@ -498,7 +500,6 @@ export default {
       counts: ' ({have} / {need})',
       none: 'no assessment recorded yet',
       since: ', for {duration}',
-      trialEnds: '; the trial ends at {time}',
     },
     duration: {
       minutes: '{m} min',

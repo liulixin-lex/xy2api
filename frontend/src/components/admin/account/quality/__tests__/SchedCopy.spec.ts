@@ -134,4 +134,12 @@ describe('quality UI copy', () => {
     expect(kindName('auto_states', t, te)).toBe('自动状态')
     expect(zhSched.schedQuality.result.skipped).toBe('未执行')
   })
+
+  // Plan item 11: new sessions no longer follow the score; no quality copy says they do.
+  it('says nowhere that a new session goes by the score', () => {
+    const strings = (node: unknown): string[] =>
+      typeof node === 'string' ? [node] : node && typeof node === 'object' ? Object.values(node).flatMap(strings) : []
+    expect(strings(zhSched).filter((text) => text.includes('新会话'))).toEqual([])
+    expect(strings(enSched).filter((text) => /new session/i.test(text))).toEqual([])
+  })
 })

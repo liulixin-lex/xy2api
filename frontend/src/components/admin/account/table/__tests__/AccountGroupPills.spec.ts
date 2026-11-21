@@ -30,15 +30,24 @@ const mountPills = (count: number, withQuality: Quality | boolean = true) => mou
     quality: withQuality === true ? quality : withQuality || null
   }
 })
-const back = (groupId: number, model: string, lines: Quality['rear'][number]['lines'], until: string) =>
-  ({ group_id: groupId, model, lines, until, exempt: false, effective: true })
+type Dim = Quality['rear'][number]['until_line']
+/** A model at the back: `lines` there, the one ending last (`untilLine`, the first by default) at `level` until `until`. */
+const back = (groupId: number, model: string, lines: Dim[], until: string, level = 0, untilLine = lines[0]) =>
+  ({ group_id: groupId, model, lines, until_line: untilLine, until, level, exempt: false, effective: true })
+/** A model on trial: the trial ending last, on `line`, from `start` to `until` at the latest. */
+const onTrial = (groupId: number, model: string, line: Dim, start: string, until: string) =>
+  ({ group_id: groupId, model, until_line: line, trial_started_at: start, until })
+/** What the mocked t writes for a key and its params. */
+const tk = (key: string, params: Record<string, unknown>) => `${key}:${JSON.stringify(params)}`
+const rearText = (level: number, until: string) => tk('admin.schedQuality.stay.rear', { level, time: formatShortTime(until) })
+const trialText = (start: string, end: string) => tk('admin.schedQuality.stay.trial', { start: formatShortTime(start), end: formatShortTime(end) })
+const named = (dim: Dim, stay: string) => tk('admin.schedQuality.stay.line', { line: `admin.schedQuality.dim.${dim}`, stay })
 const inMinutes = (m: number) => new Date(Date.now() + m * 60_000).toISOString()
 /** The card the zone's tip shows (its v-tip value, called as the tip does when it shows). */
 const cardOf = (el: { element: Element }) => {
   const value = (el.element as HTMLElement & { __tipText?: TipContent | (() => TipContent) }).__tipText
   return typeof value === 'function' ? value() : value
 }
-const backIn = expect.stringMatching(/^admin\.accounts\.table\.pillBackUntil:/)
 const layer = { modal: false, root: () => null, panel: () => null }
 const tipShown = () => document.getElementById('sq-tip')?.hidden === false
 /** Leaves whatever was hovered, hovers the zone for the tip's delay (fake timers) and says whether a tip shows. */
@@ -167,10 +176,12 @@ describe('AccountGroupPills', () => {
   })
 
   // Tip cards (12.7): data and state words only, the same card on both zones.
-  it('shows the group\'s name and state on both zones; at the back a row per model with why and when it is back', () => {
+  it('shows the group\'s name and state on both zones; at the back a row per model with why, its step and review', () => {
+    const astraEnd = inMinutes(15)
+    const dueEnd = inMinutes(-1)
     const wrapper = mountPills(2, baseQuality({
       group_status: statuses({ 2: 'rear' }),
-      rear: [back(2, 'gpt-6-astra', ['ttfo', 'error'], inMinutes(15)), back(2, 'gpt-5', ['cache'], inMinutes(-1))]
+      rear: [back(2, 'gpt-6-astra', ['ttfo', 'error'], astraEnd, 2, 'error'), back(2, 'gpt-5', ['cache'], dueEnd)]
     }))
     const [ok, atBack] = wrapper.findAll('[data-test="group-pill"]')
     expect(cardOf(ok.get('[data-test="group-pill-dot"]'))).toEqual({
@@ -182,22 +193,34 @@ describe('AccountGroupPills', () => {
       title: 'Group 2',
       chip: { text: 'admin.accounts.table.dotStates.back', tone: 'back', dot: true },
       rows: [
-        ['Astra', { text: 'admin.accounts.table.dimReasons.ttfo、admin.accounts.table.dimReasons.error', tone: 'back' }, backIn],
-        ['gpt-5', { text: 'admin.accounts.table.dimReasons.cache', tone: 'back' }, '']
+        // Two lines at the back: the step and review sit on the row of the error line, the one that ends last; the
+        // other line is under it.
+        ['Astra', { text: 'admin.accounts.table.dimReasons.error', tone: 'back' }, rearText(3, astraEnd)],
+        ['', { text: 'admin.accounts.table.dimReasons.ttfo', tone: 'back' }, ''],
+        // A review already due still shows its time: the account stays at the back until the review is done.
+        ['gpt-5', { text: 'admin.accounts.table.dimReasons.cache', tone: 'back' }, rearText(1, dueEnd)]
       ]
     })
   })
 
-  it('shows a trial\'s models and end, an exemption\'s end and reason, the TTFT samples while unknown, and a stop\'s reason, source and end', async () => {
-    const trialEnd = inMinutes(40)
+  it('shows a trial\'s line, start and latest end, an exemption\'s end and reason, why unknown, and a stop\'s reason, source and end', async () => {
+    // An old 60-minute trial and a new 120-minute one: each shows its own start and end, not one worked back from the
+    // other; one at its end is still shown until the engine ends it.
+    const oldStart = inMinutes(-20)
+    const oldEnd = inMinutes(40)
+    const newStart = inMinutes(-121)
+    const newEnd = inMinutes(-1)
     const trial = mountPills(1, baseQuality({
       group_status: statuses({ 1: 'trial' }),
-      trial: [{ group_id: 1, model: 'gpt-6-astra', until: trialEnd }, { group_id: 1, model: 'gpt-5', until: inMinutes(-1) }, { group_id: 2, model: 'gpt-5', until: trialEnd }]
+      trial: [onTrial(1, 'gpt-6-astra', 'ttfo', oldStart, oldEnd), onTrial(1, 'gpt-5', 'cache', newStart, newEnd), onTrial(2, 'gpt-5', 'error', oldStart, oldEnd)]
     }))
     expect(cardOf(trial.get('[data-test="group-pill-dot"]'))).toEqual({
       title: 'Group 1',
       chip: { text: 'admin.accounts.table.dotStates.trial', tone: 'info', dot: true },
-      rows: [['Astra', `admin.accounts.table.tip.trialUntil:{"time":"${formatShortTime(trialEnd)}"}`], ['gpt-5', '']]
+      rows: [
+        ['Astra', { text: 'admin.schedQuality.dim.ttfo', tone: 'info' }, trialText(oldStart, oldEnd)],
+        ['gpt-5', { text: 'admin.schedQuality.dim.cache', tone: 'info' }, trialText(newStart, newEnd)]
+      ]
     })
     const exempt = mountPills(1, baseQuality({ exemptions: [{ group_id: 0, expires_at: null, reason: '试用' }] }))
     expect(cardOf(exempt.get('[data-test="group-pill-dot"]'))).toMatchObject({
@@ -231,13 +254,23 @@ describe('AccountGroupPills', () => {
 
   it('lists each folded group under "+N" with its dot, state and end; without quality data names only; "+" has no tip', () => {
     const expires = inMinutes(120)
-    const wrapper = mountPills(11, baseQuality({ group_status: statuses({ 10: 'rear' }), rear: [back(10, 'gpt-6.1-sol', ['error'], inMinutes(5))], exemptions: [{ group_id: 11, expires_at: expires, reason: '' }] }))
+    const rearEnd = inMinutes(5)
+    const start = inMinutes(-30)
+    const lastEnd = inMinutes(90)
+    const wrapper = mountPills(12, baseQuality({
+      group_status: statuses({ 10: 'rear', 12: 'trial' }),
+      rear: [back(10, 'gpt-6.1-sol', ['error'], rearEnd)],
+      // The group's model that ends last.
+      trial: [onTrial(12, 'gpt-a', 'cache', start, inMinutes(30)), onTrial(12, 'gpt-b', 'error', start, lastEnd), onTrial(12, 'gpt-c', 'ttfo', start, inMinutes(60))],
+      exemptions: [{ group_id: 11, expires_at: expires, reason: '' }]
+    }))
     expect(cardOf(wrapper.get('[data-test="group-pill-more-text"]'))).toEqual({
-      title: 'admin.accounts.table.pillMore:{"n":3}',
+      title: 'admin.accounts.table.pillMore:{"n":4}',
       rows: [
         ['Group 9', { text: 'admin.accounts.table.dotStates.ok', tone: 'ok', dot: true }, ''],
-        ['Group 10', { text: 'admin.accounts.table.dotStates.back', tone: 'back', dot: true }, backIn],
-        ['Group 11', { text: 'admin.accounts.table.dotStates.exempt', tone: 'exempt', dot: true }, formatShortTime(expires)]
+        ['Group 10', { text: 'admin.accounts.table.dotStates.back', tone: 'back', dot: true }, named('error', rearText(1, rearEnd))],
+        ['Group 11', { text: 'admin.accounts.table.dotStates.exempt', tone: 'exempt', dot: true }, formatShortTime(expires)],
+        ['Group 12', { text: 'admin.accounts.table.dotStates.trial', tone: 'info', dot: true }, named('error', trialText(start, lastEnd))]
       ]
     })
     const plain = mountPills(10, false)

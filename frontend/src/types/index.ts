@@ -688,6 +688,8 @@ export interface AdminGroup extends Group {
   account_count?: number
   active_account_count?: number
   rate_limited_account_count?: number
+  /** “仅允许 OAuth 账号”打开时，组内现有的 API Key 账号数（不能再新加入，现有的照常调度）。 */
+  oauth_only_mismatch_count?: number
 
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   default_mapped_model?: string

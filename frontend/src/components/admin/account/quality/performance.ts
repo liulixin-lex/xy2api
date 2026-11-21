@@ -4,8 +4,9 @@
  * excess, extra slow, ranks, the red and green marks and the order are worked out here. The minimums only decide
  * what is shown; they change nothing in scheduling.
  */
-import type { BackendDim, BackendLastEval, BackendPerfGroup, BackendPerfRow, BackendSwitchReason } from '@/api/admin/schedQualityTypes'
+import type { BackendDim, BackendLastEval, BackendPerfGroup, BackendPerfLine, BackendPerfRow, BackendSwitchReason } from '@/api/admin/schedQualityTypes'
 import { fmtDuration } from '@/utils/schedQualityFormat'
+import { rearStay, trialStay } from './qualityPanel'
 
 /** First sends (and sessions) before a slow share is shown: the score's own minimum. */
 export const MIN_FIRST = 20
@@ -314,17 +315,20 @@ export function fmtShortfall(have: number, need: number): { have: string; need: 
 
 /**
  * The main reason of an assessment, long ("判不了：同组同模型其他号的样本不够（8 / 20），已持续 2 小时 50 分"), whether
- * it acted or not; the counts and the duration only when the backend sent them, the trial's end only when known.
+ * it acted or not; the counts and the duration only when the backend sent them.
  */
-export function reasonLong(latest: BackendLastEval, t: Translate, te: HasKey, options: { trialEnd?: string | null; formatTime?: (at: string) => string } = {}): string {
+export function reasonLong(latest: BackendLastEval, t: Translate, te: HasKey): string {
   const key = `admin.schedQuality.noAction.long.${latest.reason}`
   const known = te(key)
   const counts = latest.have != null && latest.need != null ? t('admin.schedQuality.noAction.counts', fmtShortfall(latest.have, latest.need)) : ''
   let text = known ? t(key, { counts }) : t('admin.schedQuality.noAction.long.other')
-  if (latest.reason === 'trial_open' && options.trialEnd && options.formatTime) {
-    text += t('admin.schedQuality.noAction.trialEnds', { time: options.formatTime(options.trialEnd) })
-  }
   const lasted = Date.parse(latest.at) - Date.parse(latest.since)
   if (Number.isFinite(lasted) && lasted >= 60_000) text += t('admin.schedQuality.noAction.since', { duration: fmtDuration(lasted, t) })
   return text
+}
+
+/** A line's stay at the rear (its step and review) or on trial (its start and latest end); empty otherwise. */
+export function lineStayText(line: BackendPerfLine, t: Translate): string {
+  if (line.identity === 'rear') return rearStay(t, line.level, line.until)
+  return line.identity === 'trial' ? trialStay(t, line.trial_started_at, line.until) : ''
 }

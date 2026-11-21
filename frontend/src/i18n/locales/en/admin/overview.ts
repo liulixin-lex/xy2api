@@ -961,7 +961,8 @@ export default {
       accountFilters: {
         title: 'Account Filter Controls',
         oauthOnly: 'Only allow OAuth accounts',
-        oauthOnlyEnabled: 'Enabled — API Key accounts will be excluded',
+        oauthOnlyEnabled: 'Enabled — no new API Key accounts',
+        oauthOnlyMismatch: 'Enabled — no new API Key accounts; {n} already in can still be scheduled',
         privacySetOnly: 'Only allow accounts with privacy protection set',
         privacySetOnlyEnabled: 'Enabled — accounts with unset Privacy will be excluded',
         disabled: 'Disabled'

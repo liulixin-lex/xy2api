@@ -8,6 +8,7 @@ import GroupSchedBoard from '../GroupSchedBoard.vue'
 import perfSource from '../GroupSchedPerformance.vue?raw'
 import { closeSchedBoard, markSchedChanged, openSchedBoard, setSchedBoardModel, setSchedBoardView, useSchedLayers } from '@/composables/useSchedLayers'
 import { withSchedHost } from '@/components/admin/account/quality/__tests__/schedLayerHost'
+import { formatShortTime } from '@/components/admin/account/table/accountTime'
 
 const api = vi.hoisted(() => ({ groupBoard: vi.fn(), groupsSummary: vi.fn(), groupPerformance: vi.fn(), accountPerformance: vi.fn() }))
 vi.mock('@/api/admin/schedQuality', () => ({ default: api }))
@@ -177,7 +178,9 @@ describe('GroupSchedBoard 12-hour view', () => {
     await click('[data-sq-perf-expand="18:483:gpt-x"]')
     const detail = () => document.querySelector('[data-sq-perf-detail="18:483:gpt-x"]')
     expect(detail()).not.toBeNull()
-    expect(detail()!.querySelector('[data-sq-perf-detail-item="score"]')!.textContent).toContain('admin.schedQuality.perf.scoreUseFull')
+    // Plan item 11: the score is for reading only; nothing says new sessions follow it.
+    expect(detail()!.querySelector('[data-sq-perf-detail-item="score"]')!.textContent).toMatch(/admin\.schedQuality\.perf\.scoreUse$/)
+    expect((document.querySelector('[data-sq-perf-sort="score"]') as unknown as { __tipText: string }).__tipText).toBe('admin.schedQuality.perf.tip.score:{"use":"admin.schedQuality.perf.scoreUse"}')
     // Never assessed: each line says there is no assessment on record.
     expect(detail()!.querySelector('[data-sq-perf-detail-item="verdict"]')!.textContent).toContain('admin.schedQuality.perf.detail.evalNone')
     await markSchedChanged()
@@ -243,6 +246,37 @@ describe('GroupSchedBoard 12-hour view', () => {
     const mark = row(483).querySelector<HTMLElement>('[data-sq-perf-line="ttfo"]')!
     expect(mark.getAttribute('aria-label')).toMatch(/^admin\.schedQuality\.dim\.ttfo · admin\.schedQuality\.identity\.unknown · admin\.schedQuality\.noAction\.long\.peer_short/)
     expect(row(615).querySelector('[data-sq-perf-why]')).toBeNull()
+  })
+
+  // Plan item 8: the stay as the line has it, the trial's start sent by the backend (60- and 120-minute trials coexist).
+  it('gives a rear line its step and review and a trial line its start and latest end, in the mark\'s tip and the detail', async () => {
+    const at = (m: number) => new Date(Date.parse('2026-11-19T12:00:00Z') + m * 60_000).toISOString()
+    const value = answer()
+    value.rows[0].lines = {
+      ttfo: { identity: 'rear', level: 2, until: at(40), trial_started_at: null, last_eval: lastEval({ acted: true, action: 'renew', reason: 'over' }) },
+      // An old 60-minute trial with an open verdict, and a new 120-minute one.
+      error: { identity: 'trial', level: 0, until: at(30), trial_started_at: at(-30), last_eval: lastEval({ reason: 'trial_open' }) },
+      cache: { identity: 'trial', level: 0, until: at(90), trial_started_at: at(-30), last_eval: null }
+    }
+    // Back from a trial that passed: unknown until new evidence, no stay.
+    value.rows[1].lines = { ttfo: unknown(lastEval({ acted: true, action: 'trial_pass', reason: 'over' })), error: pass, cache: pass }
+    api.groupPerformance.mockResolvedValue(value)
+    await openPerf()
+    const rear = `admin.schedQuality.stay.rear:${JSON.stringify({ level: 3, time: formatShortTime(at(40)) })}`
+    const trial = (end: number) => `admin.schedQuality.stay.trial:${JSON.stringify({ start: formatShortTime(at(-30)), end: formatShortTime(at(end)) })}`
+    const tip = (id: number, dim: string) => row(id).querySelector<HTMLElement>(`[data-sq-perf-line="${dim}"]`)!.getAttribute('aria-label')!
+    expect(tip(483, 'ttfo').endsWith(` · ${rear}`)).toBe(true)
+    expect(tip(483, 'error')).toBe(`admin.schedQuality.dim.error · admin.schedQuality.identity.trial · admin.schedQuality.noAction.long.trial_open:{"counts":"admin.schedQuality.noAction.counts:{\\"have\\":\\"8\\",\\"need\\":\\"20\\"}"}admin.schedQuality.noAction.since:{"duration":"admin.schedQuality.duration.hoursMinutes:{\\"h\\":2,\\"m\\":50}"} · ${trial(30)}`)
+    expect(tip(483, 'cache')).toBe(`admin.schedQuality.dim.cache · admin.schedQuality.identity.trial · ${trial(90)}`)
+    expect(row(615).querySelector('[data-sq-perf-line="ttfo"]')!.getAttribute('data-identity')).toBe('unknown')
+    expect(tip(615, 'ttfo')).not.toContain('admin.schedQuality.stay.')
+    await click('[data-sq-perf-expand="18:483:gpt-x"]')
+    const verdict = document.querySelector('[data-sq-perf-detail="18:483:gpt-x"] [data-sq-perf-detail-item="verdict"]')!
+    const said = (dim: string, place: string, stay: string) =>
+      `admin.schedQuality.perf.detail.stay:${JSON.stringify({ line: `admin.schedQuality.lineName.${dim}`, place: `admin.schedQuality.identity.${place}`, stay })}`
+    expect(Array.from(verdict.querySelectorAll('.pdet__line'), (el) => el.textContent).filter((text) => text!.startsWith('admin.schedQuality.perf.detail.stay'))).toEqual([
+      said('ttfo', 'rear', rear), said('error', 'trial', trial(30)), said('cache', 'trial', trial(90))
+    ])
   })
 
   // Review item 10: the page's first load and the opening run the same task at once; one request goes out. A quality
