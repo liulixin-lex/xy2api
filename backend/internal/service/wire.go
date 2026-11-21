@@ -903,13 +903,6 @@ func ProvideOpenAISelectionBoard(openai *OpenAIGatewayService, engine *SchedQual
 		}
 		return trialCheckingView{View: view, SchedTrialRoundReader: reader}
 	}, engine.leases)
-	board.performance = func() (newPickSnapshot, time.Time) {
-		snapshot := engine.PerformanceSnapshot()
-		if snapshot == nil {
-			return nil, time.Time{}
-		}
-		return snapshot, snapshot.at
-	}
 	return board
 }
 

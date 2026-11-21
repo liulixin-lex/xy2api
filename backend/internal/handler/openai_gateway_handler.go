@@ -1481,7 +1481,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		}
 		reqLog.Debug("openai_messages.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
 		selectNext := func(selectionCtx context.Context, selectionExcluded map[int64]struct{}) (*service.AccountSelectionResult, service.OpenAIAccountScheduleDecision, error) {
-			selectionCtx = service.WithOpenAIMessagesForwardModel(selectionCtx, openAIChannelForwardModel(channelMappingMsg, reqModel), effectiveMappedModel)
 			return h.gatewayService.SelectAccountWithSchedulerForCapability(
 				selectionCtx,
 				apiKey.GroupID,
