@@ -368,11 +368,6 @@ func SchedAdminGroupModel(r SchedGroupRow, exempt bool) SchedAdminAccountDetailG
 }
 
 // Composite rear ends when the last rear line expires; a concurrent trial does not extend it.
-func schedAdminRearUntil(v schedquality.StateView) time.Time {
-	line, _ := schedAdminDeadlineLine(v, false)
-	return line.Until
-}
-
 // Keep the existing latest-deadline selection and TTFO/error/cache tie order.
 // Every displayed field belongs to that same line.
 func schedAdminDeadlineLine(v schedquality.StateView, trial bool) (schedquality.LineView, schedquality.Dimension) {
