@@ -18,6 +18,7 @@ import type {
   BackendLine
 } from '@/api/admin/schedQualityTypes'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
+import { DASH, SCHED_DIMS } from '@/utils/schedQualityFormat'
 
 export type PanelPlace = 'stopped' | 'exempt' | 'rear' | 'trial' | 'front'
 
@@ -64,6 +65,15 @@ export function groupPlace(detail: PlaceDetail, group: BackendDetailGroup, model
 
 const DIMS: BackendDim[] = ['ttfo', 'error', 'cache']
 
+/** An end to compare: a missing or unreadable one comes before every known one. */
+export const endTime = (time: string | null | undefined) => {
+  const ms = time ? Date.parse(time) : Number.NaN
+  return Number.isFinite(ms) ? ms : -Infinity
+}
+
+/** The line an answer names, when it is one of the three (an older backend names none). */
+export const knownDim = (value: unknown): BackendDim | null => (SCHED_DIMS.includes(value as BackendDim) ? (value as BackendDim) : null)
+
 /**
  * The line a rear or trial place shows: of the lines that hold the group there, the one that ends last (the place
  * lasts till then), and how many hold it; null for the other places.
@@ -71,22 +81,27 @@ const DIMS: BackendDim[] = ['ttfo', 'error', 'cache']
 export function placeLine(row: BackendGroupModel | undefined, place: PanelPlace): { dim: BackendDim; line: BackendLine; held: number } | null {
   if (!row || (place !== 'rear' && place !== 'trial')) return null
   const held = DIMS.filter((dim) => row.lines[dim].identity === place)
-  const end = (dim: BackendDim) => {
-    const time = place === 'rear' ? row.lines[dim].until : row.lines[dim].trial_until
-    return time ? Date.parse(time) : -Infinity
-  }
+  const end = (dim: BackendDim) => endTime(place === 'rear' ? row.lines[dim].until : row.lines[dim].trial_until)
   const dim = held.reduce<BackendDim | null>((last, item) => (last === null || end(item) > end(last) ? item : last), null)
   return dim === null ? null : { dim, line: row.lines[dim], held: held.length }
 }
 
 type Translate = (key: string, values?: Record<string, unknown>) => string
 
-/** A rear stay as shown: its step (the backend's 0..4 as 1..5) and when it is reviewed. */
-export const rearStay = (t: Translate, level: number, until: string | null) =>
-  t('admin.schedQuality.stay.rear', { level: level + 1, time: formatShortTime(until) })
+/** The highest rear stay step the backend sends (shown as 第 5 档). */
+const MAX_LEVEL = 4
+
+/**
+ * A rear stay as shown: its step (the backend's 0..4 as 1..5) and when it is reviewed. A step that is not one of those
+ * (missing from an older answer) reads as a dash; the review time shows all the same.
+ */
+export const rearStay = (t: Translate, level: number | null | undefined, until: string | null | undefined) => {
+  const step = typeof level === 'number' && Number.isInteger(level) && level >= 0 && level <= MAX_LEVEL ? level + 1 : DASH
+  return t('admin.schedQuality.stay.rear', { level: step, time: formatShortTime(until) })
+}
 
 /** A trial as shown: when it started and when it ends at the latest (it may end sooner). */
-export const trialStay = (t: Translate, start: string | null, end: string | null) =>
+export const trialStay = (t: Translate, start: string | null | undefined, end: string | null | undefined) =>
   t('admin.schedQuality.stay.trial', { start: formatShortTime(start), end: formatShortTime(end) })
 
 /** A stay with the line it is of named before it. */

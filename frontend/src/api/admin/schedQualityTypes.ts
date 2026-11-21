@@ -53,11 +53,11 @@ export interface BackendRear {
   model: string
   /** The lines at the rear. */
   lines: BackendDim[]
-  /** The line with the latest end, whose end and stay step these are. */
-  until_line: BackendDim
+  /** The line with the latest end, whose end and stay step these are; absent from an older backend's answer. */
+  until_line?: BackendDim | null
   until: string
-  /** Stay step, 0..4 (shown as 1..5). */
-  level: number
+  /** Stay step, 0..4 (shown as 1..5); absent from an older backend's answer. */
+  level?: number | null
   exempt: boolean
   /**
    * The record really puts the account at the back of the group: not exempt, quality scheduling switched on, its
@@ -70,8 +70,9 @@ export interface BackendRear {
 export interface BackendTrial {
   group_id: number
   model: string
-  until_line: BackendDim
-  trial_started_at: string
+  /** Absent from an older backend's answer, as is the start. */
+  until_line?: BackendDim | null
+  trial_started_at?: string | null
   /** The trial's end at the latest (it may end sooner). */
   until: string
 }
@@ -197,8 +198,8 @@ export interface BackendLine<D extends BackendDim = BackendDim> extends BackendS
   level: number
   /** End of the rear stay. */
   until: string | null
-  /** Start of the trial. */
-  trial_started_at: string | null
+  /** Start of the trial; absent from an older backend's answer. */
+  trial_started_at?: string | null
   /** End of the trial at the latest (it may end sooner). */
   trial_until: string | null
   verdict: BackendVerdict
@@ -542,10 +543,10 @@ export interface BackendPerfGroup {
  */
 export interface BackendPerfLine extends BackendSampleCounts {
   identity: BackendIdentity
-  /** Rear stay step, 0..4 (20, 40, 80, 160, 240 minutes). */
-  level: number
+  /** Rear stay step, 0..4 (20, 40, 80, 160, 240 minutes); with the trial's start, absent from an older backend's answer. */
+  level?: number | null
   until: string | null
-  trial_started_at: string | null
+  trial_started_at?: string | null
   last_eval: BackendLastEval | null
 }
 

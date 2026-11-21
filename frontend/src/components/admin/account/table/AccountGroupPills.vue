@@ -137,10 +137,10 @@ import { iqModelLabel } from '@/components/admin/account/iqCheckPresentation'
 import { usePointerCoarse } from '@/composables/usePointerCoarse'
 import { qualityOpenerKey } from '@/composables/useSchedLayers'
 import type { Account, AdminGroup } from '@/types'
-import type { BackendRear, BackendTrial } from '@/api/admin/schedQualityTypes'
-import { lineStay, rearStay, trialStay } from '@/components/admin/account/quality/qualityPanel'
+import type { BackendDim, BackendRear, BackendTrial } from '@/api/admin/schedQualityTypes'
+import { endTime, knownDim, lineStay, rearStay, trialStay } from '@/components/admin/account/quality/qualityPanel'
 import { anyOverlayOpen, overlaysClosed } from '@/utils/overlayStack'
-import { kindName } from '@/utils/schedQualityFormat'
+import { DASH, kindName } from '@/utils/schedQualityFormat'
 import { hideTip, showTipNow, vTip, type TipCard, type TipCell, type TipContent, type TipTone } from '@/utils/tip'
 import { groupPillText, isLatinPillText } from '@/utils/groupAlias'
 import { groupDotState, splitPills, worstDotState, type AccountQualityView, type GroupDotState } from './accountGroups'
@@ -210,15 +210,29 @@ const restWorst = computed(() => {
   return worst ? states.find((item) => item.state === worst)! : null
 })
 
-const lineName = (dim: BackendRear['until_line']) => t(`admin.schedQuality.dim.${dim}`)
-const reasonCell = (dim: BackendRear['until_line']): TipCell => ({ text: t(`admin.accounts.table.dimReasons.${dim}`), tone: 'back' })
+const lineName = (dim: BackendDim) => t(`admin.schedQuality.dim.${dim}`)
+const reasonCell = (lines: BackendDim[]): TipCell => ({ text: lines.map((line) => t(`admin.accounts.table.dimReasons.${line}`)).join('、'), tone: 'back' })
 /** "第 3 档 · 15:30 复核": the step and review of the line at the back that ends last. */
 const rearEnd = (item: BackendRear) => rearStay(t, item.level, item.until)
 /** "15:10 起 · 最晚 17:10": when the trial that ends last started, and when it ends at the latest. */
 const trialEnd = (item: BackendTrial) => trialStay(t, item.trial_started_at, item.until)
-/** The group's model that ends last. */
-const lastOf = <T extends { group_id: number; until: string }>(items: T[], group: AdminGroup) =>
-  items.filter((item) => item.group_id === group.id).reduce<T | undefined>((last, item) => (!last || Date.parse(item.until) > Date.parse(last.until) ? item : last), undefined)
+/** A stay with its line named before it, when the answer says which line it is of. */
+const namedEnd = (line: unknown, stay: string) => {
+  const dim = knownDim(line)
+  return dim ? lineStay(t, lineName(dim), stay) : stay
+}
+/**
+ * A model at the back: its line that ends last with the step and review on the first row, its other lines at the back
+ * under it. An older answer does not say which line that is: the lines are listed together beside the stay.
+ */
+function rearRows(item: BackendRear): (string | TipCell)[][] {
+  const last = knownDim(item.until_line)
+  if (!last) return [[iqModelLabel(item.model), reasonCell(item.lines), rearEnd(item)]]
+  return [[iqModelLabel(item.model), reasonCell([last]), rearEnd(item)], ...item.lines.filter((line) => line !== last).map((line) => ['', reasonCell([line]), ''])]
+}
+/** The group's model that ends last; one with a known end before any without. */
+const lastOf = <T extends { group_id: number; until?: string | null }>(items: T[], group: AdminGroup) =>
+  items.filter((item) => item.group_id === group.id).reduce<T | undefined>((last, item) => (!last || endTime(item.until) > endTime(last.until) ? item : last), undefined)
 
 const exemptionOf = (quality: AccountQualityView, group: AdminGroup) =>
   quality.exemptions.find((item) => item.group_id === group.id) ?? quality.exemptions.find((item) => item.group_id === 0)
@@ -235,15 +249,15 @@ function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
   if (state === 'back') {
     return (quality.rear ?? [])
       .filter((item) => item.group_id === group.id)
-      .flatMap((item) => [
-        [iqModelLabel(item.model), reasonCell(item.until_line), rearEnd(item)],
-        ...item.lines.filter((line) => line !== item.until_line).map((line) => ['', reasonCell(line), ''])
-      ])
+      .flatMap(rearRows)
   }
   if (state === 'trial') {
     return (quality.trial ?? [])
       .filter((item) => item.group_id === group.id)
-      .map((item) => [iqModelLabel(item.model), { text: lineName(item.until_line), tone: 'info' }, trialEnd(item)])
+      .map((item) => {
+        const line = knownDim(item.until_line)
+        return [iqModelLabel(item.model), line ? { text: lineName(line), tone: 'info' } : { text: DASH, tone: 'muted' }, trialEnd(item)]
+      })
   }
   if (state === 'exempt') {
     const exemption = exemptionOf(quality, group)
@@ -298,9 +312,9 @@ function moreTip(): TipCard {
       const rear = state === 'back' ? lastOf(quality.rear ?? [], group) : undefined
       const trial = state === 'trial' ? lastOf(quality.trial ?? [], group) : undefined
       const end = rear
-        ? lineStay(t, lineName(rear.until_line), rearEnd(rear))
+        ? namedEnd(rear.until_line, rearEnd(rear))
         : trial
-          ? lineStay(t, lineName(trial.until_line), trialEnd(trial))
+          ? namedEnd(trial.until_line, trialEnd(trial))
           : state === 'exempt'
             ? exemptEnd(exemptionOf(quality, group)?.expires_at)
             : ''

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { createI18n } from 'vue-i18n'
+import zh from '@/i18n/locales/zh'
+import en from '@/i18n/locales/en'
+import { formatShortTime } from '@/components/admin/account/table/accountTime'
 
 import type { BackendDecision, BackendDetailGroup, BackendGroupModel } from '@/api/admin/schedQualityTypes'
 import { basis, cacheEvidence, errorEvidence, groupModel, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
-import { basisFigures, evidenceCauses, groupPlace, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeLine } from '../qualityPanel'
+import { basisFigures, evidenceCauses, groupPlace, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeLine, rearStay } from '../qualityPanel'
 import { groupDotState } from '@/components/admin/account/table/accountGroups'
 
 const group = (id: number, rows: BackendGroupModel[], exempt = false): BackendDetailGroup => ({
@@ -63,6 +67,32 @@ describe('quality panel place', () => {
     expect(placeLine(row, 'trial')).toEqual({ dim: 'cache', line: row.lines.cache, held: 1 })
     expect(placeLine(row, 'front')).toBeNull()
     expect(placeLine(undefined, 'rear')).toBeNull()
+  })
+
+  // Astra review of fe, 3 and suggestion 2: an end that is missing or unreadable comes before every known one.
+  it('takes a known end over one that is missing or unreadable, before or after it', () => {
+    for (const unknownEnd of ['', 'not a time', null]) {
+      for (const [first, second] of [['ttfo', 'error'], ['error', 'ttfo']] as const) {
+        const row = groupModel('a', { ttfo: 'rear', error: 'rear' })
+        Object.assign(row.lines[first], { until: unknownEnd })
+        Object.assign(row.lines[second], { until: '2026-11-16T10:50:00Z' })
+        expect(placeLine(row, 'rear')?.dim).toBe(second)
+      }
+    }
+  })
+
+  // Astra review of fe, 1: 0..4 are 第 1–5 档; anything else (missing from an older answer) is not made into a step.
+  it.each(['zh', 'en'] as const)('%s: shows the steps 1 to 5 for levels 0 to 4, and a dash for any other level with the review time kept', (locale) => {
+    const { t } = createI18n({ legacy: false, locale, messages: { zh, en } }).global
+    const until = '2026-11-19T10:40:00Z'
+    const step = (level: string) => (locale === 'zh' ? `第\u00a0${level}\u00a0档` : `step\u00a0${level}`)
+    for (let level = 0; level <= 4; level++) expect(rearStay(t, level, until)).toContain(step(String(level + 1)))
+    for (const level of [undefined, null, -1, 5, 1.5, Number.NaN]) {
+      const shown = rearStay(t, level, until)
+      expect(shown).toContain(step('—'))
+      expect(shown).toContain(formatShortTime(until))
+      expect(shown).not.toMatch(/NaN|undefined|null/)
+    }
   })
 
   it('takes the trial that ends last, whatever its start: three lines on trial from three starts', () => {
