@@ -84,8 +84,8 @@
             </div>
             <!-- Amount details: unfold when there is an amount and fold away when it is cleared, so nothing below jumps -->
             <div
-              :class="['!mt-0 grid transition-[grid-template-rows,opacity] duration-200 ease-out', validAmount > 0 ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0']"
-              :inert="validAmount <= 0 || undefined"
+              :class="['!mt-0 grid transition-[grid-template-rows,opacity] duration-200 ease-out', amountPayable ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0']"
+              :inert="!amountPayable || undefined"
               data-testid="recharge-summary"
             >
               <div class="min-h-0 overflow-hidden">
@@ -749,6 +749,10 @@ const canSubmit = computed(() =>
     && selectedLimit.value?.available !== false
 )
 
+// An amount no method takes is treated like no amount: the details fold away and the (disabled) button names only
+// the action; the note inside the field is all that is said about it. Display only: limits and amounts are untouched.
+const amountPayable = computed(() => validAmount.value > 0 && !amountError.value)
+
 // The note inside the amount field. Method limits apply to the pay base, which a discount tier makes lower than the
 // typed amount, so a "too low / too high" note names the nearest amount the user can actually type and submit
 // (worked back through the same quote, to the cent). When that cannot be confirmed, the note names the limit on the
@@ -790,18 +794,21 @@ const amountHint = computed(() => {
 
 // Display copies of the detail rows only: they glide to a new value instead of jumping. Never used for the button,
 // the amount field, validation or the order.
-const shownAmount = useTweenedNumber(() => validAmount.value)
-const shownDiscount = useTweenedNumber(() => discountAmount.value)
-const shownFee = useTweenedNumber(() => feeAmount.value)
-const shownTotal = useTweenedNumber(() => totalAmount.value)
-const shownBonus = useTweenedNumber(() => bonusQuote.value.bonus)
-const shownCredited = useTweenedNumber(() => creditedAmount.value)
+// While the details are folded away the figures read as zero, so they keep the last figure as they fold and the next
+// payable amount appears as it is rather than gliding from an out-of-range one.
+const shownWhenPayable = (value: () => number) => useTweenedNumber(() => (amountPayable.value ? value() : 0))
+const shownAmount = shownWhenPayable(() => validAmount.value)
+const shownDiscount = shownWhenPayable(() => discountAmount.value)
+const shownFee = shownWhenPayable(() => feeAmount.value)
+const shownTotal = shownWhenPayable(() => totalAmount.value)
+const shownBonus = shownWhenPayable(() => bonusQuote.value.bonus)
+const shownCredited = shownWhenPayable(() => creditedAmount.value)
 
 // The button is what the user confirms, so it shows the exact total that will be ordered, never a gliding figure.
-// Without an amount the (disabled) button names the action only, not a zero total.
+// Without a payable amount the (disabled) button names the action only.
 const rechargeButtonText = computed(() => {
   const action = t(selectedMethod.value === 'stripe_hosted' ? 'payment.hostedPay' : 'payment.createOrder')
-  return totalAmount.value > 0 ? `${action} ${formatSelectedPaymentAmount(totalAmount.value)}` : action
+  return amountPayable.value ? `${action} ${formatSelectedPaymentAmount(totalAmount.value)}` : action
 })
 
 const subPaymentAmount = computed(() => {
