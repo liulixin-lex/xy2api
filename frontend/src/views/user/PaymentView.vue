@@ -764,7 +764,8 @@ const amountHint = computed(() => {
   return amountError.value
 })
 
-// Display copies of the detail figures: they glide to a new value instead of jumping (display only, never submitted).
+// Display copies of the detail rows only: they glide to a new value instead of jumping. Never used for the button,
+// the amount field, validation or the order.
 const shownAmount = useTweenedNumber(() => validAmount.value)
 const shownDiscount = useTweenedNumber(() => discountAmount.value)
 const shownFee = useTweenedNumber(() => feeAmount.value)
@@ -772,10 +773,11 @@ const shownTotal = useTweenedNumber(() => totalAmount.value)
 const shownBonus = useTweenedNumber(() => bonusQuote.value.bonus)
 const shownCredited = useTweenedNumber(() => creditedAmount.value)
 
+// The button is what the user confirms, so it shows the exact total that will be ordered, never a gliding figure.
 // Without an amount the (disabled) button names the action only, not a zero total.
 const rechargeButtonText = computed(() => {
   const action = t(selectedMethod.value === 'stripe_hosted' ? 'payment.hostedPay' : 'payment.createOrder')
-  return totalAmount.value > 0 ? `${action} ${formatSelectedPaymentAmount(shownTotal.value)}` : action
+  return totalAmount.value > 0 ? `${action} ${formatSelectedPaymentAmount(totalAmount.value)}` : action
 })
 
 const subPaymentAmount = computed(() => {

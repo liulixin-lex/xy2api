@@ -947,6 +947,30 @@ describe('PaymentView recharge form details', () => {
     expect(createOrder.mock.calls[0][0]).toMatchObject({ amount: 10, payment_type: 'wxpay', order_type: 'balance' })
   })
 
+  it('prices the button with the exact total while the detail rows are still gliding', async () => {
+    // A frame clock that never ticks: every glide stays at its first frame.
+    vi.stubGlobal('requestAnimationFrame', () => 1)
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    try {
+      const wrapper = await mountRecharge()
+      const input = wrapper.getComponent(AmountInput)
+      input.vm.$emit('update:modelValue', 10)
+      await flushPromises()
+      input.vm.$emit('update:modelValue', 500)
+      await flushPromises()
+
+      const paymentRow = wrapper.get('[data-testid="recharge-summary"] dd')
+      expect(paymentRow.text()).toBe(formatPaymentAmount(10, 'CNY'))
+      expect(wrapper.get('[data-testid="recharge-submit"]').text()).toBe(`payment.createOrder ${formatPaymentAmount(500, 'CNY')}`)
+
+      input.vm.$emit('submit')
+      await flushPromises()
+      expect(createOrder.mock.calls[0][0]).toMatchObject({ amount: 500 })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('never places an order from a button inside the admin notice or help text', async () => {
     const wrapper = await mountRecharge({
       recharge_bonus_notice: '<button>活动详情</button>',
