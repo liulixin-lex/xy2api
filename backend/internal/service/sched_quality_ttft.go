@@ -261,8 +261,28 @@ func schedTrialOwnSample(d *schedQualityData, r q.LineState, check time.Time) *b
 			return new(true)
 		}
 	}
+	rows := d.samples[pair]
+	if r.Line == q.DimensionCache {
+		// Reuse the cache assessment's predecessor mask at the original check,
+		// including local completions that had not reached the ledger then.
+		unavailable := make(schedPredecessorIndex)
+		for _, a := range d.running {
+			if !a.StartedAt.After(check) {
+				unavailable.add(a)
+			}
+		}
+		for _, samples := range d.samples {
+			for _, a := range samples {
+				if !a.StartedAt.After(check) && schedAvailableAt(a).After(check) {
+					unavailable.add(a)
+				}
+			}
+		}
+		unavailable.sort()
+		rows = maskRunningCachePredecessors(rows, unavailable, d.previous)
+	}
 	var visible []q.AttemptSample
-	for _, a := range d.samples[pair] {
+	for _, a := range rows {
 		if !a.FinishedAt.IsZero() && !schedAvailableAt(a).After(check) {
 			visible = append(visible, a)
 		}

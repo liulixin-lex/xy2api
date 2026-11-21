@@ -365,3 +365,30 @@ func TestRecoveryDiagnosticLogsAfterCommit(t *testing.T) {
 		}
 	}
 }
+
+// Acceptance 6: quality's temporary predecessor mask also applies to the
+// original-hour sample check, including a completion still waiting for insertion.
+func TestRecoveryOwnCacheSampleUsesPredecessorMask(t *testing.T) {
+	f := newQualityFixture(t)
+	origin := f.now
+	check := origin.Add(time.Hour)
+	current := engineSamples(1, origin.Add(time.Minute), false)[0]
+	current.SessionKey = "session"
+	current.Continuation = true
+	current.InputTokens = new(1)
+	current.CacheReadTokens = new(99)
+	current.CacheCreationTokens = new(0)
+	for _, finished := range []bool{false, true} {
+		previous := current
+		previous.AttemptID = "unmerged"
+		previous.StartedAt = origin.Add(-time.Minute)
+		previous.FinishedAt = time.Time{}
+		if finished {
+			previous.FinishedAt = origin.Add(30 * time.Second)
+		}
+		d := &schedQualityData{observedSince: origin.Add(-time.Hour), samples: map[SchedAccountModel][]q.AttemptSample{{1, current.Model}: {current}}, running: map[string]q.AttemptSample{previous.AttemptID: previous}}
+		r := q.LineState{LineKey: q.LineKey{AccountID: 1, Model: current.Model, Line: q.DimensionCache}, Epoch: origin}
+		require.Equal(t, new(false), schedTrialOwnSample(d, r, check))
+		require.True(t, d.samples[SchedAccountModel{1, current.Model}][0].Continuation, "raw evidence remains immutable")
+	}
+}
