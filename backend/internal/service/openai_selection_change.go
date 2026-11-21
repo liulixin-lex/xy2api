@@ -150,7 +150,6 @@ type openAIStickyChange struct {
 	ttl                      time.Duration
 	cache                    OpenAIStickyVersionedCache
 	dualWriteLegacy          bool
-	newPickMissing           bool // Explicit miss on every binding key, captured before selection.
 	skipCommit               bool // The snapshot read failed; keep all selection writes suppressed.
 	// ownerReleased: selection hit a branch that deletes the owner's binding
 	// (hard unavailable, failure streak). Only then may an ordinary placement
@@ -245,25 +244,13 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 	expected, err := cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
 	legacy := s.openAILegacySessionCacheKey(ctx, session)
 	fallback := s.openAISessionHashReadOldFallbackEnabled()
-	missing := stickyLookupMissing(expected.AccountID, err)
 	if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok {
 		if legacy != "" && (fallback || s.openAISessionHashDualWriteOldEnabled()) {
 			expected, err = aliases.ResolveSessionBinding(ctx, derefGroupID(groupID), key, legacy, fallback)
-			missing = missing && stickyLookupMissing(expected.AccountID, err)
 		}
 	} else if (err == nil && expected.AccountID <= 0 || errors.Is(err, ErrStickySessionNotFound)) && fallback && legacy != "" {
 		key = legacy
 		expected, err = cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
-		missing = missing && stickyLookupMissing(expected.AccountID, err)
-	}
-	if missing && legacy != "" && !fallback {
-		missing = false
-		if s.newPickNeedsAliasRead(ctx, derefGroupID(groupID), session) {
-			// The normal resolver ignores the alias when legacy adoption is off.
-			// This read must neither adopt it nor change the existing CAS plan.
-			old, oldErr := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), legacy)
-			missing = stickyLookupMissing(old, oldErr)
-		}
 	}
 	unreadable := err != nil && !errors.Is(err, ErrStickySessionNotFound)
 	kind := "migrate"
@@ -279,7 +266,6 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 		kind: kind, expected: expected, ttl: s.openAIStickyBindingTTL(groupID), cache: cache,
 		dualWriteLegacy: s.openAISessionHashDualWriteOldEnabled(),
 		skipCommit:      unreadable,
-		newPickMissing:  isFirstNewPickSelection(ctx) && missing,
 		resetAt:         s.resilience.sessionAccountResetAt,
 		leases:          s.selectionTrialLeases(), trialSession: session, ownerLookup: s.selectionTrialOwner,
 	})

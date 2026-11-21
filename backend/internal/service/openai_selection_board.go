@@ -14,12 +14,10 @@ import (
 // OpenAISelectionBoard uses the gateway's admission, view and ordering.
 // It never acquires slots or records full observations.
 type OpenAISelectionBoard struct {
-	service      *OpenAIGatewayService
-	leases       SchedTrialLeases
-	performance  func() (newPickSnapshot, time.Time)
-	newPickLimit newPickLimit
-	view         func() schedquality.View
-	now          func() time.Time
+	service *OpenAIGatewayService
+	leases  SchedTrialLeases
+	view    func() schedquality.View
+	now     func() time.Time
 }
 
 var _ SchedSelectionBoard = (*OpenAISelectionBoard)(nil)
