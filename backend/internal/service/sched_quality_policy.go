@@ -99,9 +99,11 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 			s.policies[group] = record
 		}
 		s.policies[groupID] = result.SchedPolicyRecord
-		states, result.Cleared, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool {
+		var rejudgeDecisions []schedquality.Decision
+		states, result.Cleared, rejudgeDecisions, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool {
 			return k.GroupID == groupID && slices.Contains(result.RelaxedLines, k.Line)
 		}, func(k schedquality.LineKey) bool { return k.GroupID == groupID && !p.Enabled })
+		batch.decisions = append(batch.decisions, rejudgeDecisions...)
 		return e
 	})
 	if err != nil {
@@ -159,7 +161,9 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 		}
 		s.rule = result.SchedTTFTRuleRecord
 		if result.Change == schedquality.RuleBRelaxed || result.Change == schedquality.RuleBMixed {
-			states, result.Cleared, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool { return k.Line == schedquality.DimensionTTFO }, func(schedquality.LineKey) bool { return false })
+			var rejudgeDecisions []schedquality.Decision
+			states, result.Cleared, rejudgeDecisions, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool { return k.Line == schedquality.DimensionTTFO }, func(schedquality.LineKey) bool { return false })
+			batch.decisions = append(batch.decisions, rejudgeDecisions...)
 		}
 		return e
 	})
@@ -176,7 +180,7 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 
 // rejudge first clears every affected row, then freezes that entire cleared
 // population, then evaluates. No intermediate configuration can be published.
-func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityData, states []schedquality.LineState, resets map[int64]time.Time, relax, remove func(schedquality.LineKey) bool) ([]schedquality.LineState, int, error) {
+func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityData, states []schedquality.LineState, resets map[int64]time.Time, relax, remove func(schedquality.LineKey) bool) ([]schedquality.LineState, int, []schedquality.Decision, error) {
 	keys, rows := s.rowKeys(d, states)
 	old := make(map[schedquality.LineKey]schedquality.LineState)
 	for _, r := range states {
@@ -252,19 +256,19 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 		}
 	}
 	if err := tx.Delete(deleted); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	if err := tx.Upsert(changed); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	if err := tx.InsertDecisions(decisions); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	out := make([]schedquality.LineState, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, r)
 	}
-	return out, cleared, nil
+	return out, cleared, decisions, nil
 }
 
 func (s *SchedQualityEngineService) refreshConfig(ctx context.Context, now time.Time) error {

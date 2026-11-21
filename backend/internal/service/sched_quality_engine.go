@@ -410,6 +410,8 @@ func (s *SchedQualityEngineService) countDecision(action schedquality.Action) {
 		s.obs.Count("released", 1)
 	case schedquality.ActionTrial:
 		s.obs.Count("trial", 1)
+	case schedquality.ActionRelax:
+		s.obs.Count("relax", 1)
 	case schedquality.ActionClear:
 		s.obs.Count("clear", 1)
 	}
