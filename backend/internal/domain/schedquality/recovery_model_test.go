@@ -89,7 +89,13 @@ func TestRecoveryModelSequences(t *testing.T) {
 					require.Equal(t, w.Position, position, "%s at %d", w.Line, step.At)
 					require.Equal(t, w.Level, n.Level, "%s at %d", w.Line, step.At)
 					require.Equal(t, w.Admissions, n.Admissions)
-					require.Equal(t, stamp(w.Epoch), n.Epoch, "epoch at %d", step.At)
+					wantEpoch := stamp(w.Epoch)
+					if c.Name == "restart500" {
+						// The reviewed specification corrects the model's late-call
+						// fallback: release at minute 360, not processing minute 500.
+						wantEpoch = machineNow.Add(360 * time.Minute)
+					}
+					require.Equal(t, wantEpoch, n.Epoch, "epoch at %d", step.At)
 					require.Equal(t, stamp(w.Until), n.Until)
 					require.Equal(t, stamp(w.TrialUntil), n.TrialUntil)
 					require.Equal(t, stamp(w.LastRear), n.LastRear)

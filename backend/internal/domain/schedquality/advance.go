@@ -138,6 +138,9 @@ func enterRear(s *LineState, at time.Time, escalate bool) {
 }
 
 func releaseTrial(s *LineState, basis *Basis, at time.Time, reason string) {
+	if reason == "deadline" && !s.TrialUntil.IsZero() && s.TrialUntil.Before(at) {
+		at = s.TrialUntil
+	}
 	basis.ReleaseReason = reason
 	basis.TrialDurationSeconds = int64(at.Sub(s.Epoch) / time.Second)
 	s.Identity, s.Trial, s.Epoch = IdentityUnknown, false, at
@@ -151,20 +154,23 @@ type Evaluation struct {
 	Basis   Basis
 }
 
-// QuietDeadline exists only while the whole group is normal. A level-zero
-// admission is still history; a stale LastRear alone is not.
+// QuietDeadline exists only while the whole group is normal and retains history.
+// A relaxed line's last failure still delays clearing its siblings' history;
+// timestamps alone cannot recreate the clock after all history has cleared.
 func QuietDeadline(rows []LineState) time.Time {
 	var last time.Time
+	hasHistory := false
 	for _, r := range rows {
 		if r.Identity == IdentityRear || r.Trial {
 			return time.Time{}
 		}
-		if (r.Level > 0 || r.Admissions > 0) && r.LastRear.After(last) {
+		hasHistory = hasHistory || r.Level > 0 || r.Admissions > 0
+		if r.LastRear.After(last) {
 			last = r.LastRear
 		}
 	}
-	if last.IsZero() {
-		return last
+	if !hasHistory || last.IsZero() {
+		return time.Time{}
 	}
 	return last.Add(LevelClearQuiet)
 }
