@@ -473,14 +473,14 @@ retryChatResponsesWire:
 	// saved send. FCO operates on that final wire and updates the saved send,
 	// while leaving the first builder result intact for candidate validation.
 	if send.fcoRewritten && fcoCompat != nil {
-		fcoCompat.rewritten = true
+		fcoCompat.rewritten, fcoCompat.summary = true, send.fcoSummary
 	}
 	send.wire, err = fcoCompat.prepare(upstreamReq, send.wire)
 	if err != nil {
 		return nil, err
 	}
 	if fcoCompat != nil && fcoCompat.rewritten {
-		send.responsesInput, send.fcoRewritten = send.wire, true
+		send.responsesInput, send.fcoRewritten, send.fcoSummary = send.wire, true, fcoCompat.summary
 		chatStreamBodyBytes = len(send.wire)
 		if conversionRetry != nil {
 			conversionRetry.conversionSendBody = send

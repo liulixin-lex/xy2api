@@ -876,3 +876,53 @@ func fcoAccountEvents(value any, accountID int64) []*OpsUpstreamErrorEvent {
 	}
 	return events
 }
+
+func TestFCOEscapedNamespaceDoesNotRewrite(t *testing.T) {
+	body := []byte(strings.Replace(fcoWireInput, `"agent"`, `"\u0061gent"`, 1))
+	for _, path := range fcoWirePaths {
+		for _, mode := range []string{resilience.FCOCompatModeReactive, resilience.FCOCompatModeProactive, resilience.FCOCompatModeOff} {
+			t.Run(path+"/"+mode, func(t *testing.T) {
+				svc, account, req, up := newFCOWireFixture(t, path, mode)
+				snapshot := NewOpenAIFCOCompatSnapshot(resilience.Current(), body)
+				require.False(t, snapshot.IngressMayCarryCandidates)
+				req.ctx = WithOpenAIFCOCompatSnapshot(req.ctx, snapshot)
+				req.c.Request = req.c.Request.WithContext(req.ctx)
+				_, err := callFCOWire(path, svc, req, account, body, 1)
+				require.Error(t, err)
+				require.Len(t, up.bodies, 1)
+				require.Equal(t, "function_call_output", gjson.GetBytes(up.bodies[0], "input.1.type").String())
+				require.Zero(t, req.budget.Attempts())
+				if mode == resilience.FCOCompatModeOff {
+					require.NotContains(t, req.rec.Body.String(), openAIFCOUnsupportedCode)
+				} else {
+					require.Contains(t, req.rec.Body.String(), openAIFCOUnsupportedCode)
+				}
+			})
+		}
+	}
+}
+
+// The builder can change the representation after the ingress prefilter. Check
+// the actual wire even when the ingress snapshot did contain both literals.
+func TestFCORewriteRequiresLiteralsOnFinalWire(t *testing.T) {
+	for _, mode := range []string{resilience.FCOCompatModeReactive, resilience.FCOCompatModeProactive} {
+		t.Run(mode, func(t *testing.T) {
+			_, account, req, _ := newFCOWireFixture(t, "responses", mode)
+			body := []byte(fcoWireInput)
+			wire := bytes.Replace(body, []byte(`"agent"`), []byte(`"\u0061gent"`), 1)
+			r, err := http.NewRequestWithContext(req.ctx, http.MethodPost, "https://relay.example/v1/responses", bytes.NewReader(wire))
+			require.NoError(t, err)
+			attempt := armOpenAIFCOCompat(req.ctx, req.c, account, body, true, 0)
+			_, err = attempt.prepare(r, body)
+			require.NoError(t, err)
+			actual, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.Equal(t, wire, actual)
+			response := fcoHTTPError(400, fcoWireRefusal)
+			next, unsupported := attempt.afterHTTP(req.ctx, req.c, account, body, []byte(fcoWireRefusal), response)
+			require.Nil(t, next)
+			require.True(t, unsupported)
+			require.Zero(t, req.budget.Attempts())
+		})
+	}
+}

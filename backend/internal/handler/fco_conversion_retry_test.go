@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,8 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/repository"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -33,6 +38,15 @@ func (u *fcoConversionUpstream) Do(req *http.Request, proxy string, account int6
 		require.Equal(u.t, len(wire), resilience.StateFrom(req.Context()).AttemptProfile().BodyBytes)
 	}
 	return resp, err
+}
+
+func fcoCoreSentCount() int64 {
+	for _, row := range resilience.Snapshot(time.Hour) {
+		if row.Name == resilience.MetricFCOCompat && row.Label == "core:map:sent" {
+			return row.Count
+		}
+	}
+	return 0
 }
 
 func TestFCOAndConversionRetryEndToEnd(t *testing.T) {
@@ -78,6 +92,7 @@ func TestFCOAndConversionRetryEndToEnd(t *testing.T) {
 				c.Request.Body = io.NopCloser(strings.NewReader(body))
 				c.Request.ContentLength = int64(len(body))
 				service.InstallDeliveryTracking(c, time.Now())
+				before := fcoCoreSentCount()
 				h.ChatCompletions(c)
 				require.Equal(t, wantAccounts, up.accounts, rec.Body.String())
 				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
@@ -89,6 +104,7 @@ func TestFCOAndConversionRetryEndToEnd(t *testing.T) {
 					mappedStart = 1
 					require.Equal(t, "function_call_output", gjson.GetBytes(up.bodies[0], "input.1.type").String())
 				}
+				require.EqualValues(t, len(up.bodies)-mappedStart, fcoCoreSentCount()-before, "each actual mapped dispatch is counted")
 				for _, wire := range up.bodies[mappedStart:] {
 					require.Equal(t, "message", gjson.GetBytes(wire, "input.1.type").String())
 					require.Equal(t, "<external_browser_info>fixture context</external_browser_info>", gjson.GetBytes(wire, "input.1.content.0.text").String())
@@ -140,4 +156,85 @@ func TestFCOConversionRetryHonorsCandidateGate(t *testing.T) {
 			require.Equal(t, "candidate_wire", event["skip_reason"])
 		})
 	}
+}
+
+func TestFCOConversionRetryWithSchedulerProjection(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			for _, skip := range []bool{false, true} {
+				for _, mode := range []string{resilience.FCOCompatModeProactive, resilience.FCOCompatModeReactive} {
+					t.Run(fmt.Sprintf("batch=%t/stream=%t/skip=%t/%s", batch, stream, skip, mode), func(t *testing.T) {
+						withHandlerResilience(t, func(s *resilience.Settings) { s.FCOCompat.Mode = mode })
+						count := 2
+						if skip {
+							count = 5
+						}
+						up := &conversionRetryUpstream{responses: []string{conversionConflictStream(false), conversionSuccessStream}, statuses: []int{200, 200}}
+						want := []int64{1, int64(count)}
+						if mode == resilience.FCOCompatModeReactive {
+							up.responses = append([]string{`{"error":{"message":"function_call_output requires call_id on HTTP requests"}}`}, up.responses...)
+							up.statuses = append([]int{400}, up.statuses...)
+							want = append([]int64{1}, want...)
+						}
+						h := newFCOProjectionHandler(t, up, count, batch)
+						body := fmt.Sprintf(`{"model":"gpt-4.1","stream":%t,"input":[{"role":"user","content":"hello"},{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"context"}]}`, stream)
+						c, rec := newOpenAIResponsesFailoverTestContext(t, budgetCtx(t, resilience.KindText, 3131))
+						c.Request.URL.Path = "/v1/chat/completions"
+						c.Request.Body = io.NopCloser(strings.NewReader(body))
+						c.Request.ContentLength = int64(len(body))
+						service.InstallDeliveryTracking(c, time.Now())
+						h.ChatCompletions(c)
+						result := rec.Body.String()
+						require.Equal(t, http.StatusOK, rec.Code, result)
+						require.Equal(t, want, up.accounts, result)
+						require.Contains(t, result, "retry-success")
+						require.Equal(t, up.bodies[len(want)-2], up.bodies[len(want)-1])
+						require.Equal(t, "message", gjson.GetBytes(up.bodies[len(want)-1], "input.1.type").String())
+					})
+				}
+			}
+		}
+	}
+}
+
+func newFCOProjectionHandler(t *testing.T, up service.HTTPUpstream, count int, batch bool) *OpenAIGatewayHandler {
+	t.Helper()
+	accounts := make([]service.Account, count)
+	for i := range accounts {
+		a := &accounts[i]
+		*a = service.Account{ID: int64(i + 1), Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{3131}}
+		conversionAPIKey(a)
+		a.Credentials["base_url"] = "https://relay.example"
+		if i > 0 && i < count-1 {
+			if i%2 == 0 {
+				a.Credentials["base_url"] = "https://api.openai.com"
+			} else {
+				a.Extra[service.OpenAIFCOCompatExtraKey] = resilience.FCOCompatModeOff
+			}
+		}
+	}
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cache := repository.NewSchedulerCache(client)
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = batch
+	bucket := service.SchedulerBucket{Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	ctx := context.Background()
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, token, accounts))
+	projection, hit, err := cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.True(t, hit)
+	require.Len(t, projection, count)
+	for _, a := range projection {
+		require.NotContains(t, a.Credentials, "base_url")
+		require.NotContains(t, a.Extra, service.OpenAIFCOCompatExtraKey)
+	}
+	repo := openAIImagesFailoverAccountRepo{accounts: accounts}
+	// A cache miss cannot silently load the complete candidate list from the fixture.
+	snapshot := service.NewSchedulerSnapshotService(cache, nil, nil, nil, cfg)
+	concurrency := service.NewConcurrencyService(repository.NewConcurrencyCache(client, 10, 60))
+	return conversionHandlerForAccounts(t, up, repo, cfg, snapshot, concurrency)
 }

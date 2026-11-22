@@ -43,11 +43,12 @@ type openAIFCOCompatAttempt struct {
 	mode              string
 	quota             *openAIFCOReplayQuota
 	wire              bool
+	sourceCandidate   bool
 	wireCandidate     bool
 	rewritten         bool
 	getSentBody       func() (io.ReadCloser, error)
 	summary           FCOCompatSummary
-	mapped, replayed  bool
+	replayed          bool
 	terminalCompleted bool
 	refusal           *OpsUpstreamErrorEvent
 	refusalSequence   uint64
@@ -90,7 +91,10 @@ func armOpenAIFCOCompat(ctx context.Context, c *gin.Context, account *Account, b
 		}
 		c.Set(openAIFCOReplayKey, quota)
 	}
-	attempt := &openAIFCOCompatAttempt{snapshot: snapshot, accountID: account.ID, mode: mode, quota: quota}
+	// A WS continuation can add history absent from this turn's input. Check
+	// the expanded payload before the HTTP bridge decodes escaped literals.
+	sourceCandidate := snapshot.IngressMayCarryCandidates || turn > 0 && hasOpenAIFCOLiterals(body)
+	attempt := &openAIFCOCompatAttempt{snapshot: snapshot, accountID: account.ID, mode: mode, quota: quota, sourceCandidate: sourceCandidate}
 	if c != nil {
 		c.Set(openAIFCOAttemptKey, attempt)
 	}
@@ -142,6 +146,12 @@ func (a *openAIFCOCompatAttempt) buildContext(ctx context.Context) context.Conte
 	return ctx
 }
 
+// hasOpenAIFCOLiterals is the common ingress and wire prefilter. A spelling
+// that uses JSON escapes to represent either marker intentionally skips repair.
+func hasOpenAIFCOLiterals(body []byte) bool {
+	return bytes.Contains(body, fcoIngressCandidateMarker) && bytes.Contains(body, fcoIngressAgentMarker)
+}
+
 // prepare runs after the builder: the actual endpoint gates the feature. It
 // reads GetBody only when proactive mode has a candidate, and returns rewritten
 // bytes so capture and subsequent repairs stay in sync.
@@ -152,12 +162,12 @@ func (a *openAIFCOCompatAttempt) prepare(req *http.Request, body []byte) ([]byte
 		return body, nil
 	}
 	a.wire = true
-	a.wireCandidate = bytes.Contains(body, fcoIngressCandidateMarker)
+	a.wireCandidate = a.sourceCandidate && hasOpenAIFCOLiterals(body)
 	a.getSentBody = req.GetBody
 	wire := body
 	changed := false
 	if (a.mode == resilience.FCOCompatModeProactive || a.quota.confirmedRewrite.Load()) && !a.snapshot.IngressHasDuplicateMembers &&
-		a.wireCandidate && bytes.Contains(body, fcoIngressAgentMarker) && req.GetBody != nil {
+		a.wireCandidate && req.GetBody != nil {
 		// Only an item in the agent namespace can match, so ordinary paired
 		// tool outputs do not pay for a body copy and a rewrite pass.
 		reader, err := req.GetBody()
@@ -169,7 +179,7 @@ func (a *openAIFCOCompatAttempt) prepare(req *http.Request, body []byte) ([]byte
 			if err != nil {
 				wire = body
 				logOpenAIFCONormalizeError(req.Context())
-			} else {
+			} else if hasOpenAIFCOLiterals(wire) {
 				next, summary, normalizeErr := normalizeOpenAIFCOBody(wire, a.snapshot.Rules)
 				if normalizeErr != nil {
 					logOpenAIFCONormalizeError(req.Context())
@@ -247,11 +257,15 @@ func (a *openAIFCOCompatAttempt) afterHTTP(ctx context.Context, c *gin.Context, 
 		PreOutputKeepaliveCommitted(c) || c != nil && c.Request != nil && c.Request.Context().Err() != nil {
 		return nil, false
 	}
+	canMap := false
 	if a.wireCandidate {
-		sent = a.readSentBody(ctx, sent)
+		if wire, ok := a.readSentBody(ctx); ok {
+			sent = wire
+			canMap = hasOpenAIFCOLiterals(wire)
+		}
 	}
 	replay := false
-	if a.wireCandidate && a.mode == resilience.FCOCompatModeReactive && !a.snapshot.IngressHasDuplicateMembers && !a.quota.used {
+	if canMap && a.mode == resilience.FCOCompatModeReactive && !a.snapshot.IngressHasDuplicateMembers && !a.quota.used {
 		candidate, summary, err := normalizeOpenAIFCOBody(sent, a.snapshot.Rules)
 		if err != nil {
 			logOpenAIFCONormalizeError(ctx)
@@ -279,22 +293,22 @@ func (a *openAIFCOCompatAttempt) afterHTTP(ctx context.Context, c *gin.Context, 
 	return nil, true
 }
 
-func (a *openAIFCOCompatAttempt) readSentBody(ctx context.Context, fallback []byte) []byte {
+func (a *openAIFCOCompatAttempt) readSentBody(ctx context.Context) ([]byte, bool) {
 	if a == nil || a.getSentBody == nil {
-		return fallback
+		return nil, false
 	}
 	reader, err := a.getSentBody()
 	if err != nil {
 		logOpenAIFCONormalizeError(ctx)
-		return fallback
+		return nil, false
 	}
 	defer func() { _ = reader.Close() }()
 	body, err := io.ReadAll(reader)
 	if err != nil {
 		logOpenAIFCONormalizeError(ctx)
-		return fallback
+		return nil, false
 	}
-	return body
+	return body, true
 }
 
 func logOpenAIFCONormalizeError(ctx context.Context) {
@@ -318,8 +332,7 @@ func (a *openAIFCOCompatAttempt) dispatched(ctx context.Context, account *Accoun
 			a.refusal = nil
 		}
 	}
-	if !a.mapped && a.summary.Matched > 0 && (resp != nil || a.wrote != nil && a.wrote.Load() || resent) {
-		a.mapped = true
+	if a.rewritten && a.summary.Matched > 0 && (resp != nil || a.wrote != nil && a.wrote.Load() || resent) {
 		resilience.RecordConversionNotices(ctx, apicompat.ConversionNotice{Field: "input[].function_call_output", Action: "map"})
 		a.observe(ctx, "sent")
 	}

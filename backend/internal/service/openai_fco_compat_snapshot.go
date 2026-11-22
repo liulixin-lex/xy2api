@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 
 	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
@@ -51,8 +50,7 @@ func NewOpenAIFCOCompatSnapshot(cfg *resilience.Settings, ingressBody []byte) Op
 		adminNames = cfg.FCOCompat.AdminNames
 	}
 	rewritePossible := cfg.FCOCompatMode() != resilience.FCOCompatModeOff &&
-		bytes.Contains(ingressBody, fcoIngressCandidateMarker) &&
-		bytes.Contains(ingressBody, fcoIngressAgentMarker)
+		hasOpenAIFCOLiterals(ingressBody)
 	return OpenAIFCOCompatSnapshot{
 		Settings:                   cfg,
 		Rules:                      DefaultOpenAIFCORules(adminNames),

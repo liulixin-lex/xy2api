@@ -1975,6 +1975,11 @@ func (s *OpenAIGatewayService) constrainedSlotAccount(ctx context.Context, req O
 		req.candidateConstraint.changedLimits[candidate.ID] = struct{}{}
 		return nil // This slot (possibly unlimited) was admitted under a different limit.
 	}
+	// Only the full row carries both the upstream URL and the account's FCO override.
+	if state := openAIConversionRetryFrom(ctx); state != nil && state.used && state.fcoRewritten && !openAIFCOConversionReplayAllowed(ctx, latest) {
+		state.wireRejected.Store(true)
+		return nil
+	}
 	latest, reason := s.recheckSelectionAdmission(ctx, req, latest)
 	if reason != "" {
 		observeSelectionFailure(ctx, candidate.ID, reason, nil)
