@@ -244,6 +244,26 @@ func MarkOpsStreamFailure(c *gin.Context, errType, code, message string, intende
 	})
 }
 
+// PromoteOpsStreamFailure records a failure that must count towards the SLA.
+// An in-band error the request already recorded keeps its attribution and is
+// only made to count; otherwise the failure is recorded as given.
+func PromoteOpsStreamFailure(c *gin.Context, errType, code, message string, intendedStatus int) {
+	if c == nil {
+		return
+	}
+	if GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
+		if existing, ok := GetOpsStreamError(c); ok {
+			existing.CountTowardsSLA = true
+			if existing.IntendedStatus < http.StatusBadRequest {
+				existing.IntendedStatus = intendedStatus
+			}
+			c.Set(OpsStreamErrorKey, existing)
+			return
+		}
+	}
+	MarkOpsStreamFailure(c, errType, code, message, intendedStatus)
+}
+
 // MarkOpsStreamErrorValue 以完整的 OpsStreamError 记录一次带内错误，供需要
 // RequestScoped / NonStream 等附加语义的调用方使用；首个标记生效的规则不变。
 // 调用方只填 ErrType / Code / Message / IntendedStatus / CountTowardsSLA / RequestScoped / NonStream。

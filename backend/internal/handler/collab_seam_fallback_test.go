@@ -104,6 +104,67 @@ func TestCollabSeamLostCommitmentIsRecordedAsTheSavedFailure(t *testing.T) {
 	}
 }
 
+// The existing path's own stream error marker does not keep a lost commitment
+// from being recorded as the failure it was.
+func TestCollabSeamLostCommitmentPromotesTheExistingMarker(t *testing.T) {
+	withHandlerResilience(t, nil)
+	setupOpsErrorLogTestQueue(t, 2)
+	defer resetOpsErrorLoggerStateForTest(t)
+	c, wire := seamTestTracked()
+	capture := acquireOpsCaptureWriter(c.Writer)
+	capture.setContext(c)
+	c.Writer = capture
+	defer releaseOpsCaptureWriter(capture)
+	withSeam(c, func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
+		c.Header("Content-Type", "application/json")
+		wire.err = io.ErrClosedPipe
+		_, _ = c.Writer.WriteString(seamTestJSON)
+		wire.err = nil
+	}, func() {
+		c.Header("Content-Type", "text/event-stream")
+		_, _ = c.Writer.WriteString(": comment\n")
+		require.True(t, service.WriteTargetProtocolError(c, service.PreOutputProtocolResponses, http.StatusBadGateway, "server_error", "saved_code", "", "saved"))
+	})
+	markers := service.GetOpsStreamErrors(c)
+	require.Len(t, markers, 1, "the existing marker is promoted, not joined by a second")
+	require.Equal(t, "saved", markers[0].Message)
+	recordOpsErrorAfterRequest(c, service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil), capture)
+	require.Len(t, opsErrorLogQueue, 1)
+	require.Equal(t, http.StatusBadGateway, (<-opsErrorLogQueue).entry.StatusCode)
+}
+
+// A status change after a withheld error that stopped being rescuable lets
+// the error go, and is then ignored as it is today.
+func TestCollabSeamRevocationReleasesOnWriteHeader(t *testing.T) {
+	c, wire := seamTestTracked()
+	eligible := seamTestFlag(true)
+	withSeamWhen(c, nil, eligible, func(*collabSeam) {
+		seamTestExistingError(c)()
+		eligible.Store(false)
+		c.Writer.WriteHeader(http.StatusServiceUnavailable)
+		require.Equal(t, seamTestHTTPFail, wire.Body.String())
+	})
+	require.Equal(t, http.StatusBadGateway, wire.Code)
+}
+
+// A takeover cannot deliver under a status that forbids a body: it is no
+// delivery, and the response is still uncommitted for the saved error.
+func TestCollabSeamTakeoverUnderABodilessStatus(t *testing.T) {
+	server := newSeamTestServer(t)
+	for _, status := range []int{http.StatusNoContent, http.StatusNotModified} {
+		got := server.do(t, func(c *gin.Context) {
+			withSeam(c, func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
+				c.Header("Content-Type", "application/json")
+				c.Writer.WriteHeader(status)
+				_, _ = c.Writer.WriteString(seamTestJSON)
+			}, seamTestExistingError(c))
+		})
+		require.Equal(t, http.StatusBadGateway, got.status, status)
+		require.Equal(t, seamTestHTTPFail, got.body, status)
+		require.Equal(t, "7", got.header.Get("Retry-After"), status)
+	}
+}
+
 // The seam joins a takeover's parts, so a copied length must not cut them off.
 func TestCollabSeamTakeoverDropsACopiedLength(t *testing.T) {
 	server := newSeamTestServer(t)

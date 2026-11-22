@@ -212,7 +212,7 @@ func collabSeamRecordLost(c *gin.Context, saved *collabWithheld, status int) {
 		}
 		status = inferStreamFailureStatus(c, parsed)
 	}
-	service.MarkOpsStreamFailure(c, parsed.ErrorType, parsed.Code, parsed.Message, status)
+	service.PromoteOpsStreamFailure(c, parsed.ErrorType, parsed.Code, parsed.Message, status)
 }
 
 // resetAttempt prepares for the next attempt of a takeover. It does nothing

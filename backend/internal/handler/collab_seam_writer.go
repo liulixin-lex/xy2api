@@ -127,7 +127,14 @@ func (w *collabSeamWriter) WriteHeader(code int) {
 	defer w.mu.Unlock()
 	// Once bytes are withheld the response counts as written, and gin ignores
 	// a status change after that.
-	if w.current() == collabSeamHolding || w.unsent() > 0 {
+	switch {
+	case w.current() == collabSeamHolding:
+		if w.yield() {
+			w.ResponseWriter.WriteHeader(code)
+		}
+		return
+	case w.unsent() > 0:
+		w.releasePrefix()
 		return
 	}
 	w.ResponseWriter.WriteHeader(code)
@@ -190,6 +197,17 @@ func (w *collabSeamWriter) write(kind collabSeamOpKind, data []byte) (int, error
 		return len(data), nil
 	}
 	return w.pass(kind, data)
+}
+
+// releasePrefix sends what was held back as rescuable once it no longer is.
+func (w *collabSeamWriter) releasePrefix() {
+	if w.current() != collabSeamWatching || w.unsent() == 0 || w.intercepts() {
+		return
+	}
+	if _, err := w.forward(collabSeamWrite, w.pending[w.sent:]); err != nil {
+		w.set(collabSeamPassing)
+	}
+	w.sent = len(w.pending)
 }
 
 // yield lets a withheld error go once it is not rescuable any more.
@@ -383,6 +401,11 @@ func (w *collabSeamWriter) writeFrames(kind collabSeamOpKind, data []byte, commi
 // response first counted as written.
 func (w *collabSeamWriter) forward(kind collabSeamOpKind, data []byte) (n int, err error) {
 	if w.quiet {
+		if !collabSeamBodyAllowed(w.Status()) {
+			// Nothing of a takeover can reach the client under this status, and
+			// trying would commit the response in place of the saved error.
+			return 0, http.ErrBodyNotAllowed
+		}
 		// A takeover's parts are joined here, so a length it copied may be wrong.
 		w.Header().Del("Content-Length")
 		w.commitHeader.Del("Content-Length")
@@ -463,13 +486,7 @@ func (w *collabSeamWriter) commitOnly(kind collabSeamOpKind) {
 		w.hold(kind, nil)
 		return
 	}
-	if w.current() == collabSeamWatching && w.unsent() > 0 && !w.intercepts() {
-		// Held back as rescuable, which it no longer is.
-		if _, err := w.forward(collabSeamWrite, w.pending[w.sent:]); err != nil {
-			w.set(collabSeamPassing)
-		}
-		w.sent = len(w.pending)
-	}
+	w.releasePrefix()
 	if w.current() == collabSeamWatching && !w.ResponseWriter.Written() {
 		if len(w.pending) == 0 && w.Status() >= http.StatusBadRequest && w.intercepts() {
 			w.hold(kind, nil)
@@ -635,6 +652,10 @@ func collabSeamSetHeader(dst, src http.Header) {
 	for key, values := range src {
 		dst[key] = append([]string(nil), values...)
 	}
+}
+
+func collabSeamBodyAllowed(status int) bool {
+	return (status < 100 || status > 199) && status != http.StatusNoContent && status != http.StatusNotModified
 }
 
 func collabSeamEventStream(header http.Header) bool {
