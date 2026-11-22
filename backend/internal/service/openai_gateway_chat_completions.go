@@ -550,7 +550,10 @@ retryChatResponsesWire:
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
 			closeAttempt()
-			return s.forwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
+			// Re-sign the current Responses request; restarting at Chat ingress
+			// would discard the repairs and tool mapping of a replayed send.
+			ctx = markAgentIdentityTaskRecoveryTried(ctx)
+			goto retryChatResponsesWire
 		}
 		if retryBody, reason, changed, repairErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, repairBody, respBody); repairErr == nil &&
 			changed && rejectedFieldRetryState.Allow(retryBody) {

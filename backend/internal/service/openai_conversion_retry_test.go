@@ -9,10 +9,12 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
@@ -381,6 +383,69 @@ func TestConversionRetryStickyBoundary(t *testing.T) {
 				require.False(t, state.Avoided(target.ID))
 			}
 			require.Equal(t, f.owner.ID, f.binding.owner)
+		})
+	}
+}
+
+func TestChatAgentIdentityRefreshPreservesRepairedResponses(t *testing.T) {
+	const body = `{"model":"gpt-5.4","stream":false,"input":[{"type":"message","role":"user","status":"completed","content":[{"type":"input_text","text":"hello"}]}],"tools":[{"type":"function","name":"python","parameters":{"type":"object"}}]}`
+	for _, route := range []string{"same_account", "after_switch"} {
+		t.Run(route, func(t *testing.T) {
+			var registrations atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				registrations.Add(1)
+				_, _ = io.WriteString(w, `{"task_id":"task-new"}`)
+			}))
+			defer server.Close()
+			oldBase := openAIAgentIdentityAuthAPIBaseURL
+			openAIAgentIdentityAuthAPIBaseURL = server.URL
+			t.Cleanup(func() { openAIAgentIdentityAuthAPIBaseURL = oldBase })
+
+			key, private := newTestAgentIdentityKey(t)
+			agent := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{
+				"auth_mode": OpenAIAuthModeAgentIdentity, "agent_runtime_id": key.runtimeID, "agent_private_key": private, "task_id": "task-old", "chatgpt_account_id": "shared",
+			}}
+			first := agent
+			up := &httpUpstreamRecorder{responses: []*http.Response{newJSONResponse(400, `{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[0].status'.","param":"input[0].status"}}`)}}
+			sse := func(events ...string) *http.Response {
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: " + strings.Join(events, "\n\ndata: ") + "\n\n"))}
+			}
+			if route == "after_switch" {
+				first = &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "fixture", "chatgpt_account_id": "shared"}}
+				up.responses = append(up.responses, sse(
+					`{"type":"response.output_item.added","output_index":0,"item":{"id":"a","type":"message","role":"assistant","content":[]}}`,
+					`{"type":"response.output_item.added","output_index":0,"item":{"id":"b","type":"message","role":"assistant","content":[]}}`,
+				))
+			}
+			up.responses = append(up.responses, newJSONResponse(401, `{"error":{"code":"invalid_task_id"}}`),
+				sse(`{"type":"response.completed","response":{"id":"result","status":"completed","output":[{"id":"item","type":"function_call","call_id":"call","name":"python__sub2api","arguments":"{}","status":"completed"}]}}`))
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: &agentIdentityForwardRepo{account: agent}, httpUpstream: up}
+			c, _ := conversionRetryTestContext(t, body)
+			_, err := svc.ForwardAsChatCompletions(c.Request.Context(), c, first, []byte(body), "", "")
+			want := 3
+			if route == "after_switch" {
+				var f *UpstreamFailoverError
+				require.ErrorAs(t, err, &f)
+				require.Equal(t, OpenAIConversionIdentityReason, f.Reason)
+				require.True(t, svc.StartOpenAIConversionRetry(c, first, f))
+				request := OpenAIAccountScheduleRequest{RequestedModel: "gpt-5.4", candidateConstraint: openAIRequestCandidateConstraintFrom(c.Request.Context())}
+				require.Empty(t, requestCandidateConstraintFailure(request, agent))
+				_, err = svc.ForwardAsChatCompletions(c.Request.Context(), c, agent, []byte(body), "", "")
+				want = 4
+			}
+			require.NoError(t, err)
+			require.Len(t, up.bodies, want)
+			require.EqualValues(t, 1, registrations.Load())
+			require.Equal(t, "task-new", agent.GetCredential("task_id"))
+			require.Equal(t, "task-old", decodeAgentAssertionTask(t, up.requests[want-2].Header.Get("Authorization")))
+			require.Equal(t, "task-new", decodeAgentAssertionTask(t, up.requests[want-1].Header.Get("Authorization")))
+			require.True(t, gjson.GetBytes(up.bodies[0], "input.0.status").Exists())
+			require.False(t, gjson.GetBytes(up.bodies[1], "input.0.status").Exists())
+			require.Equal(t, "python__sub2api", gjson.GetBytes(up.bodies[1], "tools.0.name").String())
+			require.Equal(t, "python", codexToolNameReverseFromContext(c)["python__sub2api"])
+			for _, wire := range up.bodies[2:] {
+				require.Equal(t, up.bodies[1], wire, "credential refresh must preserve the repaired bytes")
+			}
 		})
 	}
 }
