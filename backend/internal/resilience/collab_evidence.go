@@ -8,6 +8,7 @@ type CollabEvidenceInput struct {
 	HTTPStatus    int
 	WrappedStatus int
 	Source        CollabEvidenceSource
+	Event         string // raw SSE event, required to validate proxy.upstream_error
 	Shape         CollabRequestShape
 }
 
@@ -62,12 +63,6 @@ type NoopCollabEvidenceClassifier struct{}
 
 func (NoopCollabEvidenceClassifier) Classify(in CollabEvidenceInput) CollabEvidence {
 	return CollabEvidence{Grade: CollabEvidenceGradeUnclaimed, Family: CollabFamilyNone, Ownership: CollabOwnershipClassNone, Source: in.Source}
-}
-
-// ClassifyCollabEvidence is deliberately unclaimed until the classifier is
-// implemented. Callers keep their existing error and repair behavior.
-func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
-	return NoopCollabEvidenceClassifier{}.Classify(in)
 }
 
 // The classifier extracts only the raw identifier. The controller resolves it
