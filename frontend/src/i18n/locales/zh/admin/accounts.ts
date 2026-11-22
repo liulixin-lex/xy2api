@@ -1294,7 +1294,7 @@ export default {
           '仅对 OpenAI API Key 的 Images 非流式响应生效。上游返回的图片缺少 b64_json 但带 url 时，网关下载该 url 并以 base64 回填 b64_json（url 保留），兼容按官方接口实现的客户端；下载失败则原样返回。',
         fcoCompatMode: '独立 function_call_output 兼容',
         fcoCompatModeDesc:
-          '覆盖网关韧性设置里的全局模式：关闭为不处理；被动重放为上游以该原因拒绝后改写并重试一次；主动改写为发往第三方中转前直接改写。总开关关闭或全局为“关闭”时，本账号同样不处理。base_url 为官方地址的账号不处理；本项不影响内容审计。',
+          '覆盖网关韧性设置里的全局模式：关闭为不处理；被动重放为上游以该原因拒绝后改写并重试一次；主动改写为发往第三方中转前直接改写。总开关关闭或全局为“关闭”时，本账号同样不处理。base_url 为官方地址的账号不处理；本项不影响内容审计：这类条目只按全局模式参与关键词拦截，不计入也不触发语义审计。',
         fcoCompatModeInherit: '继承全局',
         fcoCompatModeOff: '关闭',
         fcoCompatModeReactive: '被动重放',

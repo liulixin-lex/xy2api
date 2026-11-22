@@ -45,8 +45,8 @@ func TestOpenAIFCOCompatOutboundTextMatchesNormalizer(t *testing.T) {
 	require.Equal(t, 3, wrapped, "both templates are covered")
 }
 
-// Moderation folds whitespace in all of its input. Through the real extraction
-// and normalization, a matched item must yield exactly the text
+// Moderation folds whitespace in all of its input. Through the real keyword
+// extraction and normalization, a matched item must yield exactly the text
 // normalizeOpenAIFCOBody sends, folded the same way.
 func TestOpenAIFCOCompatModeratedTextMatchesRewrittenText(t *testing.T) {
 	rules := DefaultOpenAIFCORules([]string{"custom_ctx"})
@@ -71,7 +71,7 @@ func TestOpenAIFCOCompatModeratedTextMatchesRewrittenText(t *testing.T) {
 			require.NotEmpty(t, want)
 
 			semantic, keyword := fcoModerationExtract(fcoModerationContext(cfg, body), ContentModerationProtocolOpenAIResponses, body)
-			require.Equal(t, want, semantic.Text)
+			require.Empty(t, semantic.Text)
 			require.Equal(t, want, keyword)
 		})
 	}

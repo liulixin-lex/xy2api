@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"unicode/utf8"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
@@ -218,14 +218,21 @@ func fcoModerationContext(cfg *resilience.Settings, body []byte) context.Context
 // fcoModerationExtract returns the semantic input and the keyword text both
 // checks of ContentModerationService.Check would extract for ctx.
 func fcoModerationExtract(ctx context.Context, protocol string, body []byte) (ContentModerationInput, string) {
-	fco := openAIFCOModerationFromContext(ctx)
-	semantic := extractContentModerationInput(protocol, body, true, fco)
+	semantic := ExtractContentModerationInput(protocol, body)
 	semantic.Normalize()
-	return semantic, extractContentModerationKeywordTextWithFCO(protocol, body, fco)
+	return semantic, openAIFCOModerationFromContext(ctx).keywordText(protocol, body)
+}
+
+// moderationBaseline returns the semantic input and the keyword text of the
+// earlier extraction kept in content_moderation_baseline_ref_test.go.
+func moderationBaseline(protocol string, body []byte) (ContentModerationInput, string) {
+	semantic := baselineExtractModerationInput(protocol, body, true)
+	semantic.Normalize()
+	return semantic, baselineExtractModerationInput(protocol, body, false).Text
 }
 
 func TestModerationFCOSharedRules(t *testing.T) {
-	// One turn: every item after the assistant reply belongs to it.
+	// Every item after the assistant reply is in the trailing window.
 	multi := []byte(`{"model":"gpt-5.1","input":[
 		{"type":"message","role":"assistant","content":[{"type":"output_text","text":"assistant reply"}]},
 		{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"  page one  "},
@@ -252,7 +259,7 @@ func TestModerationFCOSharedRules(t *testing.T) {
 	unmatched := []string{"assistant reply", "unknown five", "with id six", "empty id seven", "array eight", "object nine", "namespace ten", "no namespace eleven"}
 	active := fcoModerationSettings(resilience.FCOCompatModeReactive, "custom_ctx")
 
-	t.Run("every matched item of the turn once in input order across layers", func(t *testing.T) {
+	t.Run("every matched item of the window once in input order across layers", func(t *testing.T) {
 		ctx := fcoModerationContext(active, multi)
 		fco := openAIFCOModeration{}
 		require.Empty(t, fco.texts(gjson.GetBytes(multi, "input")), "the zero value adds nothing")
@@ -261,17 +268,17 @@ func TestModerationFCOSharedRules(t *testing.T) {
 
 		semantic, keyword := fcoModerationExtract(ctx, ContentModerationProtocolOpenAIResponses, multi)
 		want := normalizeContentModerationText(strings.Join(append([]string{"latest question"}, wantTexts...), "\n"))
-		require.Equal(t, want, semantic.Text, "the latest user content stays first, matched items follow")
-		require.Equal(t, want, keyword)
+		require.Equal(t, "latest question", semantic.Text, "the semantic check never gets the items")
+		require.Equal(t, want, keyword, "the latest user content stays first, matched items follow")
 		for _, text := range unmatched {
-			require.NotContains(t, semantic.Text, text)
+			require.NotContains(t, keyword, text)
 		}
 		// Proactive is active as well; only off disables the added extraction.
-		semantic, _ = fcoModerationExtract(fcoModerationContext(fcoModerationSettings(resilience.FCOCompatModeProactive, "custom_ctx"), multi), ContentModerationProtocolOpenAIResponses, multi)
-		require.Equal(t, want, semantic.Text)
+		_, keyword = fcoModerationExtract(fcoModerationContext(fcoModerationSettings(resilience.FCOCompatModeProactive, "custom_ctx"), multi), ContentModerationProtocolOpenAIResponses, multi)
+		require.Equal(t, want, keyword)
 	})
 
-	t.Run("only the current turn window is added", func(t *testing.T) {
+	t.Run("only the trailing window is added", func(t *testing.T) {
 		const bi = `{"type":"function_call_output","namespace":"agent","name":"browser_info","output":%q}`
 		item := func(output string) string { return fmt.Sprintf(bi, output) }
 		user := func(text string) string {
@@ -281,49 +288,92 @@ func TestModerationFCOSharedRules(t *testing.T) {
 			return fmt.Sprintf(`{"type":"message","role":"assistant","content":[{"type":"output_text","text":%q}]}`, text)
 		}
 		wrap := func(output string) string { return "<external_browser_info>" + output + "</external_browser_info>" }
-		cases := []struct {
-			name  string
-			items []string
-			want  []string
-		}{
+		const (
+			call   = `{"type":"function_call","call_id":"call_0","name":"shell","arguments":"{}"}`
+			result = `{"type":"function_call_output","call_id":"call_0","output":"tool result"}`
+		)
+		type windowCase struct {
+			name     string
+			items    []string
+			question string   // the user text both checks extract
+			added    []string // what only the keyword check gets
+		}
+		cases := []windowCase{
 			{
-				name:  "full history adds only the last turn",
-				items: []string{item("turn one"), user("q1"), assistant("a1"), item("turn two"), user("q2"), assistant("a2"), item("turn three"), user("q3")},
-				want:  []string{"q3", wrap("turn three")},
+				name:     "full history adds only the last turn",
+				items:    []string{item("turn one"), user("q1"), assistant("a1"), item("turn two"), user("q2"), assistant("a2"), item("turn three"), user("q3")},
+				question: "q3",
+				added:    []string{wrap("turn three")},
+			},
+			{
+				name:     "thread start with context before the user message",
+				items:    []string{`{"type":"message","role":"developer","content":"permissions"}`, item("first context"), user("environment"), item("second context"), user("q")},
+				question: "q",
+				added:    []string{wrap("first context"), wrap("second context")},
+			},
+			{
+				name:  "thread start with context after the user message",
+				items: []string{user("q"), item("first context")},
+				added: []string{wrap("first context")},
 			},
 			{
 				name:  "context before and after the user message",
 				items: []string{user("q1"), item("old after"), assistant("a1"), item("now before"), user("q2"), item("now after")},
-				want:  []string{wrap("now before"), wrap("now after")},
+				added: []string{wrap("now before"), wrap("now after")},
 			},
 			{
-				name: "continuation keeps the turn of the last user message",
+				name:  "only standalone items",
+				items: []string{item("first"), item("second")},
+				added: []string{wrap("first"), wrap("second")},
+			},
+			{
+				name:  "continuation ending in paired tool outputs adds nothing",
+				items: []string{item("turn context"), user("q"), call, result},
+			},
+			{
+				name:  "continuation with parallel calls adds nothing",
+				items: []string{user("q"), item("turn context"), call, call, result, `{"type":"custom_tool_call_output","call_id":"call_1","output":"patched"}`},
+			},
+			{
+				name: "continuation adds only what arrived after the last model output",
 				items: []string{
 					user("q1"), assistant("a1"),
 					`{"type":"function_call_output","namespace":"agent","name":"ide_context","output":"turn ide"}`, user("q2"),
 					`{"type":"function_call_output","namespace":"agent","name":"goal_objective","output":"turn goal"}`,
-					`{"type":"reasoning","summary":[]}`,
-					`{"type":"function_call","call_id":"call_1","name":"shell","arguments":"{}"}`,
-					`{"type":"function_call_output","call_id":"call_1","output":"tool result"}`,
+					`{"type":"reasoning","summary":[]}`, call, result,
 					item("after the tool call"),
 				},
-				want: []string{"<external_ide_context>turn ide</external_ide_context>", "<external_goal_objective>turn goal</external_goal_objective>"},
+				added: []string{wrap("after the tool call")},
+			},
+			{
+				name:  "new items between and after tool outputs",
+				items: []string{user("q"), call, call, result, item("between"), result, item("after")},
+				added: []string{wrap("between"), wrap("after")},
+			},
+			{
+				name:  "an item from an earlier continuation is not added again",
+				items: []string{user("q"), call, result, item("seen before"), call, result},
+			},
+			{
+				name:     "a user message steering a tool loop",
+				items:    []string{item("turn context"), user("q"), call, result, item("steer context"), user("steer")},
+				question: "steer",
+				added:    []string{wrap("steer context")},
 			},
 			{
 				name: "without a user message the trailing run is the window",
 				items: []string{
-					item("old"), assistant("a"),
-					`{"type":"function_call","call_id":"call_2","name":"shell","arguments":"{}"}`,
-					`{"type":"function_call_output","call_id":"call_2","output":"tool result"}`,
+					item("old"), assistant("a"), call, result,
 					`{"type":"function_call_output","namespace":"agent","name":"terminal_info","output":"tail term"}`,
 					item("tail page"),
 				},
-				want: []string{"<external_terminal_info>tail term</external_terminal_info>", wrap("tail page")},
+				added: []string{"<external_terminal_info>tail term</external_terminal_info>", wrap("tail page")},
 			},
 			{
-				name:  "a message without a type is a message",
-				items: []string{assistant("a"), item("typed"), `{"role":"developer","content":"note"}`, item("after note"), `{"role":"user","content":"untyped question"}`},
-				want:  []string{"untyped question", wrap("typed"), wrap("after note")},
+				name:     "a message without a type is a message",
+				items:    []string{assistant("a"), item("typed"), `{"role":"developer","content":"note"}`, item("after note"), `{"role":"user","content":"untyped question"}`},
+				question: "untyped question",
+				added:    []string{wrap("typed"), wrap("after note")},
 			},
 		}
 		for _, boundary := range []struct{ label, item string }{
@@ -336,16 +386,21 @@ func TestModerationFCOSharedRules(t *testing.T) {
 			{"item_reference", `{"type":"item_reference","id":"msg_1"}`},
 			{"string element", `"bare string element"`},
 			{"number element", `42`},
+			{"array element", `[{"role":"user","content":"nested"}]`},
 			{"null element", `null`},
 		} {
-			cases = append(cases, struct {
-				name  string
-				items []string
-				want  []string
-			}{
-				name:  "bounded by " + boundary.label,
-				items: []string{item("outside"), boundary.item, item("inside"), user("q")},
-				want:  []string{"q", wrap("inside")},
+			cases = append(cases, windowCase{
+				name:     "bounded by " + boundary.label,
+				items:    []string{item("outside"), boundary.item, item("inside"), user("q")},
+				question: "q",
+				added:    []string{wrap("inside")},
+			}, windowCase{
+				name:  "bounded without a user message by " + boundary.label,
+				items: []string{user("q"), item("outside"), boundary.item, item("inside")},
+				added: []string{wrap("inside")},
+			}, windowCase{
+				name:  "closed at the end by " + boundary.label,
+				items: []string{user("q"), item("outside"), boundary.item},
 			})
 		}
 		for _, tc := range cases {
@@ -353,9 +408,8 @@ func TestModerationFCOSharedRules(t *testing.T) {
 				body := []byte(`{"model":"gpt-5.1","input":[` + strings.Join(tc.items, ",") + `]}`)
 				require.True(t, gjson.ValidBytes(body))
 				semantic, keyword := fcoModerationExtract(fcoModerationContext(active, body), ContentModerationProtocolOpenAIResponses, body)
-				want := normalizeContentModerationText(strings.Join(tc.want, "\n"))
-				require.Equal(t, want, semantic.Text)
-				require.Equal(t, want, keyword)
+				require.Equal(t, tc.question, semantic.Text, "the semantic check never gets the items")
+				require.Equal(t, normalizeContentModerationText(strings.Join(append([]string{tc.question}, tc.added...), "\n")), keyword)
 			})
 		}
 	})
@@ -366,10 +420,9 @@ func TestModerationFCOSharedRules(t *testing.T) {
 			[]byte(`{"input":{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"object input"}}`),
 		} {
 			semantic, keyword := fcoModerationExtract(fcoModerationContext(active, body), ContentModerationProtocolOpenAIResponses, body)
-			legacy := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
-			legacy.Normalize()
-			require.Equal(t, legacy, semantic)
-			require.Equal(t, extractContentModerationKeywordText(ContentModerationProtocolOpenAIResponses, body), keyword)
+			wantSemantic, wantKeyword := moderationBaseline(ContentModerationProtocolOpenAIResponses, body)
+			require.Equal(t, wantSemantic, semantic)
+			require.Equal(t, wantKeyword, keyword)
 		}
 	})
 
@@ -381,9 +434,12 @@ func TestModerationFCOSharedRules(t *testing.T) {
 		semantic, keyword := fcoModerationExtract(fcoModerationContext(active, body), ContentModerationProtocolOpenAIResponses, body)
 		want := normalizeContentModerationText("latest question\n<external_browser_info>" + long + "</external_browser_info>\n<external_terminal_info>second TAIL-TERM</external_terminal_info>")
 		require.Equal(t, want, keyword, "the keyword check sees the whole window")
-		require.True(t, strings.HasPrefix(semantic.Text, "latest question <external_browser_info>xxx"), "user content comes first")
-		require.Equal(t, maxModerationInputRunes, utf8.RuneCountInString(semantic.Text), "the semantic check keeps its existing budget")
-		require.NotContains(t, semantic.Text, "TAIL-MARKER")
+		require.Equal(t, "latest question", semantic.Text)
+
+		// User text beyond the semantic limit does not push the items out either.
+		body = []byte(`{"input":[` + fmt.Sprintf(`{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"after a long question"},{"role":"user","content":%q}`, long) + `]}`)
+		_, keyword = fcoModerationExtract(fcoModerationContext(active, body), ContentModerationProtocolOpenAIResponses, body)
+		require.Equal(t, long+" <external_browser_info>after a long question</external_browser_info>", keyword)
 	})
 
 	t.Run("chat native input uses the same recognizer", func(t *testing.T) {
@@ -392,8 +448,18 @@ func TestModerationFCOSharedRules(t *testing.T) {
 			{"type":"function_call_output","namespace":"agent","name":"mystery_name","output":"chat unknown"}
 		]}`)
 		semantic, keyword := fcoModerationExtract(fcoModerationContext(active, native), ContentModerationProtocolOpenAIChat, native)
-		require.Equal(t, "<external_untrusted_context>chat context</external_untrusted_context>", semantic.Text)
-		require.Equal(t, semantic.Text, keyword)
+		require.Empty(t, semantic.Text)
+		require.Equal(t, "<external_untrusted_context>chat context</external_untrusted_context>", keyword)
+
+		continued := []byte(`{"model":"gpt-5.1","input":[
+			{"type":"function_call_output","namespace":"agent","name":"untrusted_context","output":"earlier context"},
+			{"type":"function_call","call_id":"call_1","name":"shell","arguments":"{}"},
+			{"type":"function_call_output","call_id":"call_1","output":"tool result"},
+			{"type":"function_call_output","namespace":"agent","name":"terminal_info","output":"new term"}
+		]}`)
+		semantic, keyword = fcoModerationExtract(fcoModerationContext(active, continued), ContentModerationProtocolOpenAIChat, continued)
+		require.Empty(t, semantic.Text)
+		require.Equal(t, "<external_terminal_info>new term</external_terminal_info>", keyword, "chat input has the same trailing window")
 
 		// With messages the request is not Responses shaped and input is not sent.
 		withMessages := []byte(`{"model":"gpt-5.1","messages":[{"role":"user","content":"chat question"}],"input":[
@@ -404,16 +470,29 @@ func TestModerationFCOSharedRules(t *testing.T) {
 		require.Equal(t, "chat question", keyword)
 	})
 
-	t.Run("keyword and semantic checks get the same added content", func(t *testing.T) {
+	t.Run("other protocols add nothing", func(t *testing.T) {
+		body := []byte(`{"input":[{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"page"}]}`)
+		for _, protocol := range moderationComparisonProtocols {
+			if protocol == ContentModerationProtocolOpenAIResponses || protocol == ContentModerationProtocolOpenAIChat {
+				continue
+			}
+			_, keyword := fcoModerationExtract(fcoModerationContext(active, body), protocol, body)
+			require.NotContains(t, keyword, "<external_", protocol)
+		}
+	})
+
+	t.Run("the added text bypasses the reminder filter", func(t *testing.T) {
 		body := []byte(`{"input":[{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"<system-reminder>page reminder</system-reminder> rest"}]}`)
 		semantic, keyword := fcoModerationExtract(fcoModerationContext(active, body), ContentModerationProtocolOpenAIResponses, body)
-		require.Equal(t, "<external_browser_info><system-reminder>page reminder</system-reminder> rest</external_browser_info>", semantic.Text,
+		require.Empty(t, semantic.Text)
+		require.Equal(t, "<external_browser_info><system-reminder>page reminder</system-reminder> rest</external_browser_info>", keyword,
 			"the outbound text is user text, so the reminder filter does not drop it")
-		require.Equal(t, semantic.Text, keyword)
 	})
 
 	t.Run("nothing is added when the snapshot disables rewriting", func(t *testing.T) {
 		duplicate := []byte(`{"input":[{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"dup page","output":"dup page"},{"role":"user","content":"hi"}]}`)
+		escaped := []byte(`{"input":[{"type":"function_call_output","namespace":"\u0061gent","name":"browser_info","output":"escaped page"}]}`)
+		require.False(t, NewOpenAIFCOCompatSnapshot(active, escaped).IngressMayCarryCandidates)
 		masterOff := fcoModerationSettings(resilience.FCOCompatModeProactive, "custom_ctx")
 		masterOff.Enabled = false
 		cases := []struct {
@@ -426,15 +505,15 @@ func TestModerationFCOSharedRules(t *testing.T) {
 			{"nil settings", fcoModerationContext(nil, multi), multi},
 			{"no snapshot in context", context.Background(), multi},
 			{"duplicate member at ingress", fcoModerationContext(active, duplicate), duplicate},
+			{"no candidate marker at ingress", fcoModerationContext(active, escaped), escaped},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				for _, protocol := range []string{ContentModerationProtocolOpenAIResponses, ContentModerationProtocolOpenAIChat} {
 					semantic, keyword := fcoModerationExtract(tc.ctx, protocol, tc.body)
-					legacy := ExtractContentModerationInput(protocol, tc.body)
-					legacy.Normalize()
-					require.Equal(t, legacy, semantic, "audit input must match the behavior without the fco extraction")
-					require.Equal(t, extractContentModerationKeywordText(protocol, tc.body), keyword)
+					wantSemantic, wantKeyword := moderationBaseline(protocol, tc.body)
+					require.Equal(t, wantSemantic, semantic, "audit input must match the behavior without the fco extraction")
+					require.Equal(t, wantKeyword, keyword)
 				}
 			})
 		}
@@ -442,8 +521,8 @@ func TestModerationFCOSharedRules(t *testing.T) {
 		// without the duplicate still adds nothing.
 		ctx := fcoModerationContext(active, duplicate)
 		rebuilt := []byte(`{"input":[{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"dup page"},{"role":"user","content":"hi"}]}`)
-		semantic, _ := fcoModerationExtract(ctx, ContentModerationProtocolOpenAIResponses, rebuilt)
-		require.Equal(t, "hi", semantic.Text)
+		_, keyword := fcoModerationExtract(ctx, ContentModerationProtocolOpenAIResponses, rebuilt)
+		require.Equal(t, "hi", keyword)
 	})
 
 	t.Run("a settings reload after ingress does not change the audited rules", func(t *testing.T) {
@@ -458,8 +537,8 @@ func TestModerationFCOSharedRules(t *testing.T) {
 		resilience.Publish(*fcoModerationSettings(resilience.FCOCompatModeOff, "beta_name"))
 
 		semantic, keyword := fcoModerationExtract(ctx, ContentModerationProtocolOpenAIResponses, body)
-		require.Equal(t, "<external_alpha_name>alpha output</external_alpha_name>", semantic.Text)
-		require.Equal(t, semantic.Text, keyword)
+		require.Empty(t, semantic.Text)
+		require.Equal(t, "<external_alpha_name>alpha output</external_alpha_name>", keyword)
 	})
 }
 
@@ -469,7 +548,7 @@ func TestModerationFCOSharedRulesThroughCheck(t *testing.T) {
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"latest question"}]}
 	]}`)
 	active := fcoModerationContext(fcoModerationSettings(resilience.FCOCompatModeReactive), body)
-	newService := func(t *testing.T, keywords []string) (*ContentModerationService, func() []string) {
+	newService := func(t *testing.T, keywords []string, configure ...func(*ContentModerationConfig)) (*ContentModerationService, func() []string) {
 		t.Helper()
 		var mu sync.Mutex
 		inputs := []string{}
@@ -490,6 +569,9 @@ func TestModerationFCOSharedRulesThroughCheck(t *testing.T) {
 		cfg.BaseURL = server.URL
 		cfg.APIKeys = []string{"sk-test"}
 		cfg.BlockedKeywords = keywords
+		for _, set := range configure {
+			set(cfg)
+		}
 		rawCfg, err := json.Marshal(cfg)
 		require.NoError(t, err)
 		svc := NewContentModerationService(&contentModerationTestSettingRepo{values: map[string]string{
@@ -534,9 +616,72 @@ func TestModerationFCOSharedRulesThroughCheck(t *testing.T) {
 		require.Equal(t, []string{"follow-up question", "latest question"}, inputs())
 	})
 
+	t.Run("keyword check sees an item that arrives after tool outputs", func(t *testing.T) {
+		svc, inputs := newService(t, []string{"forbidden-marker"})
+		const loop = `{"type":"message","role":"user","content":"run it"},
+			{"type":"function_call","call_id":"call_1","name":"shell","arguments":"{}"},
+			{"type":"function_call_output","call_id":"call_1","output":"tool result"},
+			{"type":"function_call_output","namespace":"agent","name":"terminal_info","output":"term with forbidden-marker"}`
+		settings := fcoModerationSettings(resilience.FCOCompatModeReactive)
+		arrived := []byte(`{"input":[` + loop + `]}`)
+		require.True(t, check(t, svc, fcoModerationContext(settings, arrived), arrived).Blocked)
+
+		continued := []byte(`{"input":[` + loop + `,
+			{"type":"function_call","call_id":"call_2","name":"shell","arguments":"{}"},
+			{"type":"function_call_output","call_id":"call_2","output":"next result"}]}`)
+		require.False(t, check(t, svc, fcoModerationContext(settings, continued), continued).Blocked, "the next continuation does not check it again")
+		require.Empty(t, inputs(), "neither request calls semantic moderation")
+	})
+
 	t.Run("semantic check", func(t *testing.T) {
 		svc, inputs := newService(t, nil)
 		check(t, svc, active, body)
-		require.Equal(t, []string{"latest question <external_browser_info>turn page with forbidden-marker</external_browser_info>"}, inputs())
+		require.Equal(t, []string{"latest question"}, inputs())
+	})
+
+	t.Run("items neither join nor trigger the semantic check", func(t *testing.T) {
+		const page = `{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"page text"}`
+		bodies := [][]byte{
+			[]byte(`{"input":[` + page + `]}`),
+			[]byte(`{"input":[` + page + `,{"role":"user","content":"question"}]}`),
+			[]byte(`{"input":[{"role":"user","content":"question"},` + page + `]}`),
+			[]byte(`{"input":[{"role":"user","content":"q"},{"type":"function_call","call_id":"c"},{"type":"function_call_output","call_id":"c","output":"r"},` + page + `]}`),
+		}
+		// Every route to semantic moderation: after a keyword miss, without a
+		// keyword check, and asynchronously. The latter two ignore keywords.
+		for name, configure := range map[string]func(*ContentModerationConfig){
+			"keyword and api": func(cfg *ContentModerationConfig) { cfg.BlockedKeywords = []string{"never-matches"} },
+			"api only": func(cfg *ContentModerationConfig) {
+				cfg.BlockedKeywords = []string{"page text"}
+				cfg.KeywordBlockingMode = ContentModerationKeywordModeAPIOnly
+			},
+			"observe": func(cfg *ContentModerationConfig) {
+				cfg.BlockedKeywords = []string{"page text"}
+				cfg.Mode = ContentModerationModeObserve
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				for _, body := range bodies {
+					want := []string{}
+					if semantic := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body); !semantic.IsEmpty() {
+						require.NotContains(t, semantic.Text, "page text")
+						want = append(want, semantic.Text)
+					}
+					for _, mode := range []string{"", resilience.FCOCompatModeOff, resilience.FCOCompatModeReactive, resilience.FCOCompatModeProactive} {
+						svc, inputs := newService(t, nil, configure)
+						ctx := context.Background()
+						if mode != "" {
+							ctx = fcoModerationContext(fcoModerationSettings(mode), body)
+						}
+						require.False(t, check(t, svc, ctx, body).Blocked)
+						if name == "observe" {
+							require.Equal(t, int64(len(want)), svc.asyncEnqueued.Load())
+							require.Eventually(t, func() bool { return len(inputs()) == len(want) }, 5*time.Second, 10*time.Millisecond)
+						}
+						require.Equal(t, want, inputs(), "mode %q, body %s", mode, body)
+					}
+				}
+			})
+		}
 	})
 }

@@ -1182,7 +1182,7 @@ export default {
           'Only applies to non-streaming Images responses of OpenAI API Key accounts. When an upstream image item has a url but no b64_json, the gateway downloads the url and fills b64_json with its base64 content (url is kept) for clients built on the official API; the response is returned unchanged if the download fails.',
         fcoCompatMode: 'Standalone function_call_output compatibility',
         fcoCompatModeDesc:
-          'Overrides the global mode in the gateway resilience settings: Off does nothing; Replay on rejection rewrites and retries once after the upstream rejects a request for this reason; Rewrite proactively rewrites before sending to a third-party relay. With the master switch off or the global mode Off, this account is not handled either. Accounts whose base URL is the official API are not handled; this setting does not change content moderation.',
+          'Overrides the global mode in the gateway resilience settings: Off does nothing; Replay on rejection rewrites and retries once after the upstream rejects a request for this reason; Rewrite proactively rewrites before sending to a third-party relay. With the master switch off or the global mode Off, this account is not handled either. Accounts whose base URL is the official API are not handled; this setting does not change content moderation: these items go through keyword blocking by the global mode only and neither count toward nor trigger semantic moderation.',
         fcoCompatModeInherit: 'Inherit global',
         fcoCompatModeOff: 'Off',
         fcoCompatModeReactive: 'Replay on rejection',

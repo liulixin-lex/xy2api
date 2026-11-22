@@ -101,13 +101,18 @@ func (u *fcoE2EUpstream) DoWithTLS(req *http.Request, proxy string, accountID in
 }
 
 // Count the real adapter calls, without replacing moderation. Keyword+API
-// mode lets a local moderation endpoint observe the actual normalized input
+// mode lets a local moderation endpoint observe the actual semantic input
 // after a non-matching keyword check. Keyword hits are observed in real logs.
+// A keyword-only probe gets the same call and blocks on any vowel, so its log
+// excerpt is the text the keyword check inspected.
 type fcoE2EAudit struct {
 	fcoAuditCapture
 	engine      securityaudit.LegacyEngine
+	probe       securityaudit.LegacyEngine
+	probeLogs   chan service.ContentModerationLog
 	mu          sync.Mutex
 	inputs      []string
+	keywords    []string
 	logs        chan service.ContentModerationLog
 	beforeCheck func()
 }
@@ -117,7 +122,33 @@ func (a *fcoE2EAudit) Check(ctx context.Context, req securityaudit.Request) (*se
 	if a.beforeCheck != nil {
 		a.beforeCheck()
 	}
+	keyword, err := a.probeKeywordText(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	a.keywords = append(a.keywords, keyword)
+	a.mu.Unlock()
 	return a.engine.Check(ctx, req)
+}
+
+func (a *fcoE2EAudit) probeKeywordText(ctx context.Context, req securityaudit.Request) (string, error) {
+	decision, err := a.probe.Check(ctx, req)
+	if err != nil || decision == nil || !decision.Blocked {
+		return "", err
+	}
+	select {
+	case log := <-a.probeLogs:
+		return log.InputExcerpt, nil
+	case <-time.After(5 * time.Second):
+		return "", fmt.Errorf("keyword probe log was not recorded")
+	}
+}
+
+func (a *fcoE2EAudit) snapshotKeywords() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.keywords...)
 }
 
 func (a *fcoE2EAudit) snapshotInputs() []string {
@@ -138,7 +169,7 @@ func (r *fcoE2EModerationRepo) CreateLog(_ context.Context, log *service.Content
 
 func newFCOE2EAudit(t *testing.T, keyword string) *fcoE2EAudit {
 	t.Helper()
-	a := &fcoE2EAudit{logs: make(chan service.ContentModerationLog, 16)}
+	a := &fcoE2EAudit{logs: make(chan service.ContentModerationLog, 16), probeLogs: make(chan service.ContentModerationLog, 16)}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
 			Input string `json:"input"`
@@ -155,18 +186,22 @@ func newFCOE2EAudit(t *testing.T, keyword string) *fcoE2EAudit {
 		_, _ = io.WriteString(w, `{"results":[{"flagged":false,"category_scores":{}}]}`)
 	}))
 	t.Cleanup(server.Close)
-	cfg, err := json.Marshal(service.ContentModerationConfig{
-		Enabled: true, Mode: service.ContentModerationModePreBlock,
-		BaseURL: server.URL, APIKeys: []string{"sk-fixture"}, Model: "omni-moderation-latest",
-		AllGroups: true, SampleRate: 100, BlockStatus: http.StatusForbidden, BlockMessage: "fixture keyword blocked",
-		BlockedKeywords: []string{keyword}, KeywordBlockingMode: service.ContentModerationKeywordModeKeywordAndAPI,
-	})
-	require.NoError(t, err)
-	settings := &contentModerationHandlerSettingRepo{values: map[string]string{
-		service.SettingKeyRiskControlEnabled: "true", service.SettingKeyContentModerationConfig: string(cfg),
-	}}
-	svc := service.NewContentModerationService(settings, &fcoE2EModerationRepo{logs: a.logs}, nil, nil, nil, nil, nil, nil)
-	a.engine = securityaudit.NewLegacyModerationAdapter(svc)
+	newEngine := func(logs chan service.ContentModerationLog, mode string, keywords ...string) securityaudit.LegacyEngine {
+		cfg, err := json.Marshal(service.ContentModerationConfig{
+			Enabled: true, Mode: service.ContentModerationModePreBlock,
+			BaseURL: server.URL, APIKeys: []string{"sk-fixture"}, Model: "omni-moderation-latest",
+			AllGroups: true, SampleRate: 100, BlockStatus: http.StatusForbidden, BlockMessage: "fixture keyword blocked",
+			BlockedKeywords: keywords, KeywordBlockingMode: mode,
+		})
+		require.NoError(t, err)
+		settings := &contentModerationHandlerSettingRepo{values: map[string]string{
+			service.SettingKeyRiskControlEnabled: "true", service.SettingKeyContentModerationConfig: string(cfg),
+		}}
+		svc := service.NewContentModerationService(settings, &fcoE2EModerationRepo{logs: logs}, nil, nil, nil, nil, nil, nil)
+		return securityaudit.NewLegacyModerationAdapter(svc)
+	}
+	a.engine = newEngine(a.logs, service.ContentModerationKeywordModeKeywordAndAPI, keyword)
+	a.probe = newEngine(a.probeLogs, service.ContentModerationKeywordModeKeywordOnly, "a", "e", "i", "o", "u")
 	return a
 }
 
@@ -215,13 +250,14 @@ func requireFCOE2ERewrite(t *testing.T, before, after []byte, index int, name, o
 	require.Equal(t, want, after, "only the standalone item may change")
 }
 
-func requireFCOE2EAudit(t *testing.T, audit *fcoE2EAudit, texts ...string) {
+// requireFCOE2EAudit checks the one moderation call of a request: the text the
+// keyword check inspected, and what the semantic endpoint received (nothing
+// means it was not called).
+func requireFCOE2EAudit(t *testing.T, audit *fcoE2EAudit, keyword string, semantic ...string) {
 	t.Helper()
 	require.Len(t, audit.snapshotCalls(), 1, "one real moderation call per HTTP request")
-	for i := range texts {
-		texts[i] = strings.Join(strings.Fields(texts[i]), " ")
-	}
-	require.Equal(t, texts, audit.snapshotInputs())
+	require.Equal(t, []string{strings.Join(strings.Fields(keyword), " ")}, audit.snapshotKeywords())
+	require.Equal(t, semantic, audit.snapshotInputs())
 }
 
 func TestFCOE2EReactiveAuditsOnce(t *testing.T) {
@@ -249,14 +285,14 @@ func TestFCOE2EKeywordBlocksBeforeSendAndSkipsHistory(t *testing.T) {
 				requireFCOE2ESuccess(t, rec, false)
 				require.Len(t, up.bodies, 2)
 				requireFCOE2ERewrite(t, up.bodies[0], up.bodies[1], 1, "browser_info", "page forbidden_marker")
-				requireFCOE2EAudit(t, audit, "new question")
+				requireFCOE2EAudit(t, audit, "new question", "new question")
 				return
 			}
 			require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 			require.Equal(t, "content_policy_violation", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 			require.Equal(t, "fixture keyword blocked", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 			require.Empty(t, up.bodies)
-			requireFCOE2EAudit(t, audit)
+			requireFCOE2EAudit(t, audit, fcoE2EWrapped("browser_info", "page forbidden_marker"))
 			select {
 			case log := <-audit.logs:
 				require.Equal(t, service.ContentModerationActionKeywordBlock, log.Action)
@@ -295,7 +331,7 @@ func TestFCOE2EOffPreservesWireAndError(t *testing.T) {
 	require.JSONEq(t, string(up.replies[0]), rec.Body.String(), "off returns the upstream error unchanged, without the new error code")
 	require.Contains(t, rec.Body.String(), "function_call_output requires call_id on HTTP requests")
 	require.False(t, gjson.GetBytes(rec.Body.Bytes(), "error.code").Exists())
-	requireFCOE2EAudit(t, audit)
+	requireFCOE2EAudit(t, audit, "")
 }
 
 func TestFCOE2EUnsupportedName(t *testing.T) {
@@ -308,7 +344,7 @@ func TestFCOE2EUnsupportedName(t *testing.T) {
 	require.Equal(t, "upstream_standalone_tool_output_unsupported", gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
 	require.Equal(t, "invalid_request_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 	require.False(t, gjson.GetBytes(rec.Body.Bytes(), "error.param").Exists())
-	requireFCOE2EAudit(t, audit)
+	requireFCOE2EAudit(t, audit, "")
 }
 
 func TestFCOE2EAdminNames(t *testing.T) {
@@ -344,7 +380,7 @@ func TestFCOE2EAccountOverride(t *testing.T) {
 				require.Equal(t, http.StatusBadRequest, rec.Code)
 				require.Equal(t, []byte(body), up.bodies[0])
 				require.JSONEq(t, string(up.replies[0]), rec.Body.String())
-				requireFCOE2EAudit(t, audit)
+				requireFCOE2EAudit(t, audit, "")
 				return
 			}
 			requireFCOE2ESuccess(t, rec, false)
@@ -392,7 +428,7 @@ func TestFCOE2EDuplicateIngressMember(t *testing.T) {
 			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 			require.Len(t, up.bodies, 1)
 			require.Equal(t, gjson.Get(body, "input").Raw, gjson.GetBytes(up.bodies[0], "input").Raw)
-			requireFCOE2EAudit(t, audit)
+			requireFCOE2EAudit(t, audit, "")
 		})
 	}
 }
@@ -523,5 +559,32 @@ func TestFCOE2EWSHTTPBridgeTurnReplay(t *testing.T) {
 	require.Equal(t, "follow-up question", gjson.GetBytes(up.bodies[2], "input.2.content").String())
 	require.Len(t, audit.snapshotCalls(), 2)
 	require.Equal(t, []string{"first_turn", "subsequent_turn"}, []string{audit.snapshotCalls()[0].stage, audit.snapshotCalls()[1].stage})
-	require.Equal(t, []string{strings.Join(strings.Fields(fcoE2EWrapped("browser_info", fcoE2EOutput)), " "), "follow-up question"}, audit.snapshotInputs())
+	require.Equal(t, []string{strings.Join(strings.Fields(fcoE2EWrapped("browser_info", fcoE2EOutput)), " "), "follow-up question"}, audit.snapshotKeywords())
+	require.Equal(t, []string{"follow-up question"}, audit.snapshotInputs())
+}
+
+// The semantic endpoint receives the user's words only, and in a tool loop the
+// keyword check inspects just the items that are new in the request.
+func TestFCOE2EAuditWindow(t *testing.T) {
+	const (
+		call   = `{"type":"function_call","call_id":"call_1","name":"shell","arguments":"{}"}`
+		result = `{"type":"function_call_output","call_id":"call_1","output":"tool result"}`
+	)
+	page, late := fcoE2EItem("browser_info", "turn page"), fcoE2EItem("terminal_info", "late term")
+	for _, tc := range []struct {
+		name     string
+		items    []string
+		keyword  string
+		semantic []string
+	}{
+		{"context before the user message", []string{page, fcoE2EUser}, "hello " + fcoE2EWrapped("browser_info", "turn page"), []string{"hello"}},
+		{"continuation", []string{page, fcoE2EUser, call, result}, "", nil},
+		{"continuation with a new item", []string{page, fcoE2EUser, call, result, late}, fcoE2EWrapped("terminal_info", "late term"), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router, _, audit := newFCOE2EFixture(t, resilience.FCOCompatModeReactive, fcorelay.VersionV0224, "never_matches", service.Account{}, nil)
+			requireFCOE2ESuccess(t, captureRequest(router, "/v1/responses", fcoE2EBody(tc.items...)), false)
+			requireFCOE2EAudit(t, audit, tc.keyword, tc.semantic...)
+		})
+	}
 }
