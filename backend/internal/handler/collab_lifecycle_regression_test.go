@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gin-contrib/sse"
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
+	"github.com/tidwall/gjson"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -268,5 +270,55 @@ func TestCollabRegressionContinuationPartialAndOverflow(t *testing.T) {
 	n, err = w.WriteString("data: " + strings.Repeat("x", collabSeamQuietLimit))
 	if n != 0 || !errors.Is(err, io.ErrShortBuffer) {
 		t.Fatalf("overflow count=%d err=%v", n, err)
+	}
+}
+
+func TestCollabContinuationFramesDecode(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n"} {
+		for _, width := range []int{1, 4096} {
+			t.Run(fmt.Sprintf("newline=%q/width=%d", newline, width), func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				w := newCollabSeamWriter(c.Writer, seamTestAlways)
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.set(collabSeamPassing)
+				w.takeover.Store(true)
+				w.prelude = collabDeliveredPrelude{ID: "resp_previous", Created: true, CreatedAt: 10, NextSequence: 4}
+				wire := strings.Join([]string{
+					"event: response.output_text.delta",
+					`data: {"type":"response.output_text.delta","delta":"text\nmore","sequence_number":0}`,
+					"",
+					"event: response.completed",
+					`data: {"type":"response.completed",`,
+					`data: "response":{"id":"resp_upstream",`,
+					`data: "created_at":20,"status":"completed"},"sequence_number":1}`,
+					"", "",
+				}, newline)
+				for len(wire) > 0 {
+					size := min(width, len(wire))
+					n, err := w.WriteString(wire[:size])
+					if err != nil || n != size {
+						t.Fatalf("write %d: %d %v", size, n, err)
+					}
+					wire = wire[size:]
+				}
+				events, err := sse.Decode(strings.NewReader(rec.Body.String()))
+				if err != nil || len(events) != 2 {
+					t.Fatalf("decode: events=%d err=%v", len(events), err)
+				}
+				for i, event := range events {
+					payload, ok := event.Data.(string)
+					if !ok || !json.Valid([]byte(payload)) {
+						t.Fatalf("event %d is not JSON: %v", i, event.Data)
+					}
+					if got := gjson.Get(payload, "sequence_number").Int(); got != int64(i+4) {
+						t.Fatalf("sequence=%d", got)
+					}
+					if i == 1 && (event.Event != "response.completed" || gjson.Get(payload, "response.id").String() != "resp_previous" || gjson.Get(payload, "response.created_at").Int() != 10) {
+						t.Fatalf("bad completed event: %s", payload)
+					}
+				}
+			})
+		}
 	}
 }

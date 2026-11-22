@@ -568,12 +568,16 @@ func (w *collabSeamWriter) continuePrelude(data []byte) []byte {
 				continue
 			}
 			if len(bytes.TrimSpace(line)) > 0 {
-				out = append(out, line...)
+				out = append(out, bytes.TrimRight(line, "\r\n")...)
+				out = append(out, '\n')
 			}
 		}
-		out = append(out, "data: "...)
-		out = append(out, next...)
-		out = append(out, '\n', '\n')
+		for _, line := range bytes.Split(next, []byte{'\n'}) {
+			out = append(out, "data: "...)
+			out = append(out, line...)
+			out = append(out, '\n')
+		}
+		out = append(out, '\n')
 	}
 	return out
 }
