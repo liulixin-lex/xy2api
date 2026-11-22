@@ -153,8 +153,8 @@ func TestCollabObservationJSONShape(t *testing.T) {
 	require.NoError(t, err)
 	var fields map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(encoded, &fields))
-	require.Len(t, fields, 27)
-	for _, key := range []string{"v", "thread", "tree", "parent", "role", "request_kind", "route", "client", "version_state", "client_version", "covered", "initial_reason", "stop_reason", "final_mode", "sends", "send_total", "send_overflow", "mixed", "deliveries", "deliveries_overflow", "replacements", "local_count", "execution", "events", "input_transformations", "hints", "truncated"} {
+	require.Len(t, fields, 34)
+	for _, key := range []string{"untracked", "counts", "deliveries_total", "events_total", "events_overflow", "hints_total", "hints_overflow", "v", "thread", "tree", "parent", "role", "request_kind", "route", "client", "version_state", "client_version", "covered", "initial_reason", "stop_reason", "final_mode", "sends", "send_total", "send_overflow", "mixed", "deliveries", "deliveries_overflow", "replacements", "local_count", "execution", "events", "input_transformations", "hints", "truncated"} {
 		require.Contains(t, fields, key)
 	}
 	require.Equal(t, "null", string(fields["input_transformations"]))

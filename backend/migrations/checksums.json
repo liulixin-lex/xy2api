@@ -367,6 +367,7 @@
     "320_ops_metrics_e2e_first_output.sql": "21a53f79046ec61ea69b70559c5eb9863a27873e4024406d510cb7e32a35ad1d",
     "321_sched_line_last_assessment.sql": "cf3d4a36968330b9c88783316f0fdc07e51e5e07eb96b9e10ec5a9075bcaa343",
     "322_openai_group_tier_policy.sql": "0f67f4e8f75c5f0452e39400dd886cc7466eaea0f94be934f6096bdef0a77def",
-    "323_usage_billing_tier_worker_protocol.sql": "22180163d540ec2b79de2a728630c4731e117f8bf61f686da6089fc7d16cdedc"
+    "323_usage_billing_tier_worker_protocol.sql": "22180163d540ec2b79de2a728630c4731e117f8bf61f686da6089fc7d16cdedc",
+    "324_collab_observation.sql": "136900335a65f2b70f04dac9bc750675bb01d0d4fd5995d320a8b22b3d239fd6"
   }
 }

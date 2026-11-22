@@ -45616,6 +45616,8 @@ type UsageLogMutation struct {
 	appenddegradations            jsontext.Value
 	pricing_source                *jsontext.Value
 	appendpricing_source          jsontext.Value
+	collab_observation            *jsontext.Value
+	appendcollab_observation      jsontext.Value
 	service_tier_details          *jsontext.Value
 	appendservice_tier_details    jsontext.Value
 	profit_basis                  *jsontext.Value
@@ -46687,6 +46689,71 @@ func (m *UsageLogMutation) ResetPricingSource() {
 	m.pricing_source = nil
 	m.appendpricing_source = nil
 	delete(m.clearedFields, usagelog.FieldPricingSource)
+}
+
+// SetCollabObservation sets the "collab_observation" field.
+func (m *UsageLogMutation) SetCollabObservation(j jsontext.Value) {
+	m.collab_observation = &j
+	m.appendcollab_observation = nil
+}
+
+// CollabObservation returns the value of the "collab_observation" field in the mutation.
+func (m *UsageLogMutation) CollabObservation() (r jsontext.Value, exists bool) {
+	v := m.collab_observation
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCollabObservation returns the old "collab_observation" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldCollabObservation(ctx context.Context) (v jsontext.Value, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCollabObservation is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCollabObservation requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCollabObservation: %w", err)
+	}
+	return oldValue.CollabObservation, nil
+}
+
+// AppendCollabObservation adds j to the "collab_observation" field.
+func (m *UsageLogMutation) AppendCollabObservation(j jsontext.Value) {
+	m.appendcollab_observation = append(m.appendcollab_observation, j...)
+}
+
+// AppendedCollabObservation returns the list of values that were appended to the "collab_observation" field in this mutation.
+func (m *UsageLogMutation) AppendedCollabObservation() (jsontext.Value, bool) {
+	if len(m.appendcollab_observation) == 0 {
+		return nil, false
+	}
+	return m.appendcollab_observation, true
+}
+
+// ClearCollabObservation clears the value of the "collab_observation" field.
+func (m *UsageLogMutation) ClearCollabObservation() {
+	m.collab_observation = nil
+	m.appendcollab_observation = nil
+	m.clearedFields[usagelog.FieldCollabObservation] = struct{}{}
+}
+
+// CollabObservationCleared returns if the "collab_observation" field was cleared in this mutation.
+func (m *UsageLogMutation) CollabObservationCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldCollabObservation]
+	return ok
+}
+
+// ResetCollabObservation resets all changes to the "collab_observation" field.
+func (m *UsageLogMutation) ResetCollabObservation() {
+	m.collab_observation = nil
+	m.appendcollab_observation = nil
+	delete(m.clearedFields, usagelog.FieldCollabObservation)
 }
 
 // SetServiceTierDetails sets the "service_tier_details" field.
@@ -50684,7 +50751,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 85)
+	fields := make([]string, 0, 86)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -50735,6 +50802,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.pricing_source != nil {
 		fields = append(fields, usagelog.FieldPricingSource)
+	}
+	if m.collab_observation != nil {
+		fields = append(fields, usagelog.FieldCollabObservation)
 	}
 	if m.service_tier_details != nil {
 		fields = append(fields, usagelog.FieldServiceTierDetails)
@@ -50982,6 +51052,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.Degradations()
 	case usagelog.FieldPricingSource:
 		return m.PricingSource()
+	case usagelog.FieldCollabObservation:
+		return m.CollabObservation()
 	case usagelog.FieldServiceTierDetails:
 		return m.ServiceTierDetails()
 	case usagelog.FieldProfitBasis:
@@ -51161,6 +51233,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldDegradations(ctx)
 	case usagelog.FieldPricingSource:
 		return m.OldPricingSource(ctx)
+	case usagelog.FieldCollabObservation:
+		return m.OldCollabObservation(ctx)
 	case usagelog.FieldServiceTierDetails:
 		return m.OldServiceTierDetails(ctx)
 	case usagelog.FieldProfitBasis:
@@ -51424,6 +51498,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPricingSource(v)
+		return nil
+	case usagelog.FieldCollabObservation:
+		v, ok := value.(jsontext.Value)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCollabObservation(v)
 		return nil
 	case usagelog.FieldServiceTierDetails:
 		v, ok := value.(jsontext.Value)
@@ -52417,6 +52498,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldPricingSource) {
 		fields = append(fields, usagelog.FieldPricingSource)
 	}
+	if m.FieldCleared(usagelog.FieldCollabObservation) {
+		fields = append(fields, usagelog.FieldCollabObservation)
+	}
 	if m.FieldCleared(usagelog.FieldServiceTierDetails) {
 		fields = append(fields, usagelog.FieldServiceTierDetails)
 	}
@@ -52610,6 +52694,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldPricingSource:
 		m.ClearPricingSource()
+		return nil
+	case usagelog.FieldCollabObservation:
+		m.ClearCollabObservation()
 		return nil
 	case usagelog.FieldServiceTierDetails:
 		m.ClearServiceTierDetails()
@@ -52810,6 +52897,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldPricingSource:
 		m.ResetPricingSource()
+		return nil
+	case usagelog.FieldCollabObservation:
+		m.ResetCollabObservation()
 		return nil
 	case usagelog.FieldServiceTierDetails:
 		m.ResetServiceTierDetails()

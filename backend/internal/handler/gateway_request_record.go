@@ -65,9 +65,10 @@ func finishUnbilledGatewayRequest(c *gin.Context, key *service.APIKey, model str
 		profitBasis = nil
 	}
 	row := &service.GatewayUnbilledRequest{
-		ProfitBasis:    profitBasis,
-		DispatchPhases: resilience.StateFrom(c.Request.Context()).Timing().DispatchPhases,
-		RequestScope:   meta.RequestScope, UsageObserved: meta.UsageObserved, UsageSource: meta.UsageSource, TerminalEventSeen: meta.TerminalEventSeen, TerminalEventValid: meta.TerminalEventValid, ResponseBodyType: meta.ResponseBodyType, ConversionNotices: meta.ConversionNotices,
+		ProfitBasis:       profitBasis,
+		CollabObservation: resilience.NormalizeCollabObservationJSON(meta.CollabObservation),
+		DispatchPhases:    resilience.StateFrom(c.Request.Context()).Timing().DispatchPhases,
+		RequestScope:      meta.RequestScope, UsageObserved: meta.UsageObserved, UsageSource: meta.UsageSource, TerminalEventSeen: meta.TerminalEventSeen, TerminalEventValid: meta.TerminalEventValid, ResponseBodyType: meta.ResponseBodyType, ConversionNotices: meta.ConversionNotices,
 		RequestID: meta.RequestID, CreatedAt: meta.StartedAt, UserID: key.UserID, APIKeyID: key.ID, GroupID: key.GroupID,
 		Model: model, Stream: stream, RequestType: &requestType, Result: meta.Result, ErrorClass: meta.ErrorClass,
 		HTTPStatus: &status, Switches: meta.Switches, Fallback: meta.Fallback, Takeover: meta.Takeover,

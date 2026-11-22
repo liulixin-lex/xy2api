@@ -126,7 +126,7 @@ func TestGatewayUnbilledAndOpsDegradationsReadBack(t *testing.T) {
 			notices := []apicompat.ConversionNotice{{Field: "stop", Action: "omit"}, {Field: "reasoning.effort", Action: "map"}}
 			row := &service.GatewayUnbilledRequest{RequestID: "failed-no-usage", CreatedAt: time.Now(), Result: result, ConversionNotices: notices, ProfitBasis: json.RawMessage(`{"vetoes":[{"account_id":8,"sell":1,"upstream":0.1,"source":"stored","ceiling":null,"floor":0.4,"verdict":"profit_floor"}]}`)}
 			capture := &noticeArgument{}
-			args := make([]driver.Value, 30)
+			args := make([]driver.Value, 31)
 			for i := range args {
 				args[i] = sqlmock.AnyArg()
 			}
@@ -137,6 +137,7 @@ func TestGatewayUnbilledAndOpsDegradationsReadBack(t *testing.T) {
 			profitCapture := &noticeArgument{}
 			args[28] = profitCapture
 			args[29] = nil // dispatch_phases is absent in this unbilled fixture.
+			args[30] = nil // collab_observation is absent.
 			mock.ExpectExec("INSERT INTO gateway_unbilled_requests").WithArgs(args...).WillReturnResult(sqlmock.NewResult(1, 1))
 			repo := newUsageLogRepositoryWithSQL(nil, db)
 			require.NoError(t, repo.CreateUnbilledRequest(context.Background(), row))

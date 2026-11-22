@@ -12,6 +12,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -27,7 +28,7 @@ const adminRequestsCTE = `WITH requests AS (
 		upstream_model_mismatch, origin_group_id, upstream_model, model_mapping_chain, image_count,
 		end_to_end_first_output_ms, first_token_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens,
 		cache_creation_tokens, total_cost, actual_cost, account_stats_cost, account_rate_multiplier,
-		inbound_endpoint, upstream_endpoint
+		inbound_endpoint, upstream_endpoint, collab_observation
 	FROM usage_logs
 	UNION ALL
 	SELECT 'unbilled', id, request_id, result, switches, fallback, takeover,
@@ -35,7 +36,7 @@ const adminRequestsCTE = `WITH requests AS (
 		request_type, stream, request_type=3, NULL, NULL, NULL,
 		NULL, NULL, NULL, NULL, 0,
 		first_output_ms, NULL, duration_ms, input_tokens, NULL, cache_read_tokens,
-		cache_creation_tokens, NULL, NULL, NULL, NULL, NULL, NULL
+		cache_creation_tokens, NULL, NULL, NULL, NULL, NULL, NULL, collab_observation
 	FROM gateway_unbilled_requests
 ) `
 
@@ -74,7 +75,7 @@ func (r *usageLogRepository) ListAdminRequests(ctx context.Context, params pagin
 	}
 	query := adminRequestsCTE + `SELECT source, id, gateway_request_id, result, switches, fallback, takeover,
 		created_at, user_id, api_key_id, account_id, group_id, model, request_type, stream,
-		end_to_end_first_output_ms, first_token_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
+		end_to_end_first_output_ms, first_token_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, collab_observation
 		FROM requests ` + where + " ORDER BY " + adminRequestOrderBy(params)
 	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
 	rows, err := r.sql.QueryContext(ctx, query, append(args, limit+1, params.Offset())...)
@@ -83,26 +84,10 @@ func (r *usageLogRepository) ListAdminRequests(ctx context.Context, params pagin
 	}
 	items := make([]service.AdminUsageRecord, 0, limit)
 	for rows.Next() {
-		var row service.AdminUsageRecord
-		var accountID *int64
-		var requestType *int16
-		l := &row.Log
-		if err := rows.Scan(&row.Source, &l.ID, &row.GatewayRequestID, &row.Result, &row.Switches, &row.Fallback, &row.Takeover,
-			&l.CreatedAt, &l.UserID, &l.APIKeyID, &accountID, &l.GroupID, &l.Model, &requestType, &l.Stream,
-			&l.EndToEndFirstOutputMs, &l.FirstTokenMs, &l.DurationMs, &row.InputTokens, &row.OutputTokens, &row.CacheReadTokens, &row.CacheCreationTokens); err != nil {
+		row, err := scanAdminUsageRequest(rows)
+		if err != nil {
 			_ = rows.Close()
 			return nil, nil, err
-		}
-		if accountID != nil {
-			l.AccountID = *accountID
-		}
-		if requestType != nil {
-			l.RequestType = service.RequestTypeFromInt16(*requestType)
-		}
-		l.OpenAIWSMode = l.RequestType == service.RequestTypeWSV2
-		l.RequestedModel = l.Model
-		if row.GatewayRequestID != nil {
-			l.RequestID = *row.GatewayRequestID
 		}
 		items = append(items, row)
 	}
@@ -281,4 +266,30 @@ func (r *usageLogRepository) RequestAttempts(ctx context.Context, requestID stri
 		result = append(result, row)
 	}
 	return result, rows.Err()
+}
+
+func scanAdminUsageRequest(scanner interface{ Scan(...any) error }) (service.AdminUsageRecord, error) {
+	var row service.AdminUsageRecord
+	var accountID *int64
+	var requestType *int16
+	var collabObservation []byte
+	l := &row.Log
+	if err := scanner.Scan(&row.Source, &l.ID, &row.GatewayRequestID, &row.Result, &row.Switches, &row.Fallback, &row.Takeover,
+		&l.CreatedAt, &l.UserID, &l.APIKeyID, &accountID, &l.GroupID, &l.Model, &requestType, &l.Stream,
+		&l.EndToEndFirstOutputMs, &l.FirstTokenMs, &l.DurationMs, &row.InputTokens, &row.OutputTokens, &row.CacheReadTokens, &row.CacheCreationTokens, &collabObservation); err != nil {
+		return service.AdminUsageRecord{}, err
+	}
+	l.CollabObservation = resilience.NormalizeCollabObservationJSON(collabObservation)
+	if accountID != nil {
+		l.AccountID = *accountID
+	}
+	if requestType != nil {
+		l.RequestType = service.RequestTypeFromInt16(*requestType)
+	}
+	l.OpenAIWSMode = l.RequestType == service.RequestTypeWSV2
+	l.RequestedModel = l.Model
+	if row.GatewayRequestID != nil {
+		l.RequestID = *row.GatewayRequestID
+	}
+	return row, nil
 }

@@ -18,6 +18,15 @@ const (
 // Pointer counts distinguish unobserved (null) from observed zero. This is the
 // shared persisted document; request bytes and raw identifiers live elsewhere.
 type CollabObservation struct {
+	// Counts includes deduplicated observations even when their detail is trimmed.
+	// Untracked occurrences are excluded because uniqueness could not be checked.
+	Untracked            CollabUntrackedCounts       `json:"untracked"`
+	Counts               *CollabObservationCounts    `json:"counts"`
+	DeliveriesTotal      int                         `json:"deliveries_total"`
+	EventsTotal          int                         `json:"events_total"`
+	EventsOverflow       int                         `json:"events_overflow"`
+	HintsTotal           int                         `json:"hints_total"`
+	HintsOverflow        int                         `json:"hints_overflow"`
 	V                    int                         `json:"v"`
 	Thread               CollabDigest                `json:"thread"`
 	Tree                 CollabDigest                `json:"tree"`
@@ -127,3 +136,44 @@ type NoopCollabObserver struct{}
 func (NoopCollabObserver) SealSend(CollabSendObservation) bool       { return false }
 func (NoopCollabObserver) ObserveDelivery(CollabDeliveryObservation) {}
 func (NoopCollabObserver) Freeze() *CollabObservation                { return nil }
+
+// Classified totals have fixed enum keys. Nullable call/marker totals sum only
+// observed counts; nil means no send observed that field. Counts=nil identifies
+// older documents whose discarded detail cannot be reconstructed.
+type CollabObservationCounts struct {
+	Actions           map[CollabAction]int          `json:"actions"`
+	Results           map[CollabSendResult]int      `json:"results"`
+	RawPlans          map[CollabPlanOutcome]int     `json:"raw_plans"`
+	RawReasons        map[CollabPlanReason]int      `json:"raw_reasons"`
+	Plans             map[CollabPlanOutcome]int     `json:"plans"`
+	PlanReasons       map[CollabPlanReason]int      `json:"plan_reasons"`
+	Eligibility       map[CollabEligibility]int     `json:"eligibility"`
+	RestoreErrors     map[CollabRestoreError]int    `json:"restore_errors"`
+	MarkerReasons     map[CollabMarkerReason]int    `json:"marker_reasons"`
+	DeliveryPositions map[CollabPosition]int        `json:"delivery_positions"`
+	DeliveryForms     map[CollabForm]int            `json:"delivery_forms"`
+	DeliveryKinds     map[CollabMessageKind]int     `json:"delivery_kinds"`
+	DeliveryClasses   map[CollabItemClass]int       `json:"delivery_classes"`
+	DeliveryOutcomes  map[CollabDeliveryOutcome]int `json:"delivery_outcomes"`
+	DeliveryEvidence  map[CollabEvidenceGrade]int   `json:"delivery_evidence"`
+	DeliveryStages    map[CollabStage]int           `json:"delivery_stages"`
+	DeliveryScopes    map[CollabScope]int           `json:"delivery_scopes"`
+	EventSources      map[CollabEventSource]int     `json:"event_sources"`
+	HintKinds         map[CollabHintKind]int        `json:"hint_kinds"`
+	HintCooldowns     map[CollabCooldown]int        `json:"hint_cooldowns"`
+	HintAttempts      map[CollabHintAttempt]int     `json:"hint_attempts"`
+	CallCount         *int                          `json:"call_count"`
+	Marker            CollabMarkerCounts            `json:"marker"`
+	DeliveryBytes     int64                         `json:"delivery_bytes"`
+	HintSelectable    int                           `json:"hint_selectable"`
+	HintIsCurrent     int                           `json:"hint_is_current"`
+}
+
+// Untracked counts observation occurrences, not unique sends or deliveries.
+// It is separate from detail overflow and must not enter delivery reconciliation.
+type CollabUntrackedCounts struct {
+	Sends           int `json:"sends"`
+	Deliveries      int `json:"deliveries"`
+	Events          int `json:"events"`
+	Transformations int `json:"transformations"`
+}

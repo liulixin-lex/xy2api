@@ -218,6 +218,12 @@ func (_c *UsageLogCreate) SetPricingSource(v jsontext.Value) *UsageLogCreate {
 	return _c
 }
 
+// SetCollabObservation sets the "collab_observation" field.
+func (_c *UsageLogCreate) SetCollabObservation(v jsontext.Value) *UsageLogCreate {
+	_c.mutation.SetCollabObservation(v)
+	return _c
+}
+
 // SetServiceTierDetails sets the "service_tier_details" field.
 func (_c *UsageLogCreate) SetServiceTierDetails(v jsontext.Value) *UsageLogCreate {
 	_c.mutation.SetServiceTierDetails(v)
@@ -1521,6 +1527,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldPricingSource, field.TypeJSON, value)
 		_node.PricingSource = value
 	}
+	if value, ok := _c.mutation.CollabObservation(); ok {
+		_spec.SetField(usagelog.FieldCollabObservation, field.TypeJSON, value)
+		_node.CollabObservation = value
+	}
 	if value, ok := _c.mutation.ServiceTierDetails(); ok {
 		_spec.SetField(usagelog.FieldServiceTierDetails, field.TypeJSON, value)
 		_node.ServiceTierDetails = value
@@ -2213,6 +2223,24 @@ func (u *UsageLogUpsert) UpdatePricingSource() *UsageLogUpsert {
 // ClearPricingSource clears the value of the "pricing_source" field.
 func (u *UsageLogUpsert) ClearPricingSource() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldPricingSource)
+	return u
+}
+
+// SetCollabObservation sets the "collab_observation" field.
+func (u *UsageLogUpsert) SetCollabObservation(v jsontext.Value) *UsageLogUpsert {
+	u.Set(usagelog.FieldCollabObservation, v)
+	return u
+}
+
+// UpdateCollabObservation sets the "collab_observation" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateCollabObservation() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldCollabObservation)
+	return u
+}
+
+// ClearCollabObservation clears the value of the "collab_observation" field.
+func (u *UsageLogUpsert) ClearCollabObservation() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldCollabObservation)
 	return u
 }
 
@@ -3897,6 +3925,27 @@ func (u *UsageLogUpsertOne) UpdatePricingSource() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearPricingSource() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearPricingSource()
+	})
+}
+
+// SetCollabObservation sets the "collab_observation" field.
+func (u *UsageLogUpsertOne) SetCollabObservation(v jsontext.Value) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCollabObservation(v)
+	})
+}
+
+// UpdateCollabObservation sets the "collab_observation" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateCollabObservation() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCollabObservation()
+	})
+}
+
+// ClearCollabObservation clears the value of the "collab_observation" field.
+func (u *UsageLogUpsertOne) ClearCollabObservation() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearCollabObservation()
 	})
 }
 
@@ -5963,6 +6012,27 @@ func (u *UsageLogUpsertBulk) UpdatePricingSource() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearPricingSource() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearPricingSource()
+	})
+}
+
+// SetCollabObservation sets the "collab_observation" field.
+func (u *UsageLogUpsertBulk) SetCollabObservation(v jsontext.Value) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetCollabObservation(v)
+	})
+}
+
+// UpdateCollabObservation sets the "collab_observation" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateCollabObservation() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateCollabObservation()
+	})
+}
+
+// ClearCollabObservation clears the value of the "collab_observation" field.
+func (u *UsageLogUpsertBulk) ClearCollabObservation() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearCollabObservation()
 	})
 }
 

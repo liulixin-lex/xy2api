@@ -15,6 +15,8 @@ import (
 // GatewayUnbilledRequest belongs here only when no billing task was arranged.
 // RequestID is the gateway UUID, never a billing or client correlation key.
 type GatewayUnbilledRequest struct {
+	// CollabObservation is internal accounting metadata; only the admin DTO exposes it.
+	CollabObservation  json.RawMessage `json:"collab_observation,omitempty"`
 	ProfitBasis        json.RawMessage
 	DispatchPhases     json.RawMessage
 	RequestScope       resilience.GatewayRequestScope
@@ -79,6 +81,7 @@ func applyGatewayRequestMetadata(ctx context.Context, row *UsageLog) {
 	row.TerminalEventValid = cloneUsageFactValue(meta.TerminalEventValid)
 	row.ResponseBodyType = cloneUsageFactValue(meta.ResponseBodyType)
 	row.ProfitBasis = marshalProfitBasis(meta.ProfitBasis)
+	row.CollabObservation = resilience.NormalizeCollabObservationJSON(meta.CollabObservation)
 	row.ConversionNotices = copyConversionNotices(meta.ConversionNotices)
 }
 

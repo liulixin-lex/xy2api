@@ -216,3 +216,19 @@ bodies and final bytes; `CollabSendState.BodyDigest` replaces `Body`;
 `CollabLearning.Timing`; `CollabNamedItem.MatchCount`/`Item`;
 `CollabSchedulingFlags.TreeHintImmediateOnly`; typed body and rejection digest domains; `CollabDispositionLookup.TerminalRejections`;
 `CollabRecordMutation.TerminalRejection`; saved-terminal and user-waiter policy fields.
+
+## Observation aggregate additions
+
+CollabObservation now includes Counts (*CollabObservationCounts), DeliveriesTotal,
+EventsTotal, EventsOverflow, HintsTotal and HintsOverflow. The counts document
+preserves all fixed-enum classifications, nullable call/marker sums, delivery
+bytes, and selectable/current hint totals before item or byte caps. Overflow
+details remain unavailable to per-delivery reconciliation. These additive fields
+retain observation version 2; older truncated records can have Counts=nil.
+
+The existing single/batch usage and unbilled inserts bind canonical observation
+JSON directly. Invalid UTF-8, NUL escapes, invalid surrogate pairs, excessive
+depth and malformed optional documents bind NULL. Read-back allows 128 KiB of
+formatting overhead, then enforces 32 KiB on the canonical document. No second
+database write or asynchronous queue participates. Billing freeze unwraps the
+standard SafeCollabObserver only for the local bounded accumulator.
