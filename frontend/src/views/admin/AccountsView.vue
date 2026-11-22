@@ -922,13 +922,19 @@ const handleSelectAllResults = async () => {
     if (version === selectionRequestVersion) selectingAllResults.value = false
   }
 }
+// allOpenAIAPIKey is true only when every target is known to be an OpenAI API key account: the platforms and types
+// above come from the visible rows or a 100-row preview, so they can miss targets on other pages.
 type BulkEditTarget =
-  | { mode: 'selected'; accountIds: number[]; selectedPlatforms: AccountPlatform[]; selectedTypes: AccountType[] }
-  | { mode: 'filtered'; filters: ReturnType<typeof buildFilterSnapshot>; previewCount: number; selectedPlatforms: AccountPlatform[]; selectedTypes: AccountType[] }
+  | { mode: 'selected'; accountIds: number[]; selectedPlatforms: AccountPlatform[]; selectedTypes: AccountType[]; allOpenAIAPIKey: boolean }
+  | { mode: 'filtered'; filters: ReturnType<typeof buildFilterSnapshot>; previewCount: number; selectedPlatforms: AccountPlatform[]; selectedTypes: AccountType[]; allOpenAIAPIKey: boolean }
 const showBulkEdit = ref(false)
 const bulkEditTarget = ref<BulkEditTarget | null>(null)
 const openBulkEditSelected = () => {
-  bulkEditTarget.value = { mode: 'selected', accountIds: [...selIds.value], selectedPlatforms: [...selPlatforms.value], selectedTypes: [...selTypes.value] }
+  const ids = [...selIds.value]
+  const visible = selectedRows.value
+  const allOpenAIAPIKey = ids.length > 0 && visible.length === ids.length &&
+    visible.every((account) => account.platform === 'openai' && account.type === 'apikey')
+  bulkEditTarget.value = { mode: 'selected', accountIds: ids, selectedPlatforms: [...selPlatforms.value], selectedTypes: [...selTypes.value], allOpenAIAPIKey }
   showBulkEdit.value = true
 }
 const openBulkEditFiltered = async () => {
@@ -939,7 +945,8 @@ const openBulkEditFiltered = async () => {
     filters: snapshot,
     previewCount: preview.total,
     selectedPlatforms: [...new Set(preview.items.map((account) => account.platform))],
-    selectedTypes: [...new Set(preview.items.map((account) => account.type))]
+    selectedTypes: [...new Set(preview.items.map((account) => account.type))],
+    allOpenAIAPIKey: snapshot.platform === 'openai' && snapshot.type === 'apikey'
   }
   showBulkEdit.value = true
 }

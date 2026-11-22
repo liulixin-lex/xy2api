@@ -21,6 +21,11 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
+	fcoCompat := armOpenAIFCOCompat(ctx, c, account, body, true, 0)
+	if fcoCompat != nil {
+		ctx = WithOpenAIFCOCompatSnapshot(ctx, fcoCompat.snapshot)
+	}
+	defer func() { fcoCompat.completed(ctx, result, forwardErr) }()
 	ctx, tierAttempt := withOpenAITierAttempt(ctx, body)
 	defer func() {
 		tierAttempt.finish(result)
@@ -1162,7 +1167,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				upstreamCtx, releaseUpstreamCtx, attemptStart.Add(firstOutputTimeout), firstOutputPlan,
 			)
 		}
-		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, reqStream, promptCacheKey, isCodexCLI)
+		upstreamReq, err := s.buildUpstreamRequest(fcoCompat.buildContext(upstreamCtx), c, account, body, token, reqStream, promptCacheKey, isCodexCLI)
 		if headerGuard == nil {
 			releaseUpstreamCtx()
 		}
@@ -1173,6 +1178,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, err
 		}
 
+		body, err = fcoCompat.prepare(upstreamReq, body)
+		if err != nil {
+			if headerGuard != nil {
+				headerGuard.close()
+			}
+			return nil, err
+		}
+		if fcoCompat != nil && fcoCompat.rewritten {
+			requestView, reqBody = newOpenAIRequestView(body), nil
+			requestRepair.setBody(body)
+		}
 		reasoningEffort = extractOpenAIReasoningEffortFromRequest(upstreamReq)
 
 		// Get proxy URL
@@ -1184,6 +1200,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Send request
 		upstreamStart := time.Now()
 		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
+		fcoCompat.dispatched(ctx, account, resp)
 		noteOpenAIRequestRepairResent(ctx, c, account)
 		if rejectedFieldRetryEvent != nil {
 			if boundary, sent := resilience.StateFrom(ctx).OpsUpstreamSendBoundary(account.ID); sent && rejectedFieldRetrySequence > 0 && boundary >= rejectedFieldRetrySequence {
@@ -1230,10 +1247,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Handle error response
 		if resp.StatusCode >= 400 {
 			respBody := s.readUpstreamErrorBody(resp)
-			observeOpenAIFCOHTTPError(ctx, c, body, respBody, resp.StatusCode, DefaultOpenAIFCORules(nil))
+			observeOpenAIFCOHTTPError(ctx, c, body, respBody, resp.StatusCode, fcoCompat.rules(ctx))
 			schedCapture.finishHTTP(resp, respBody)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			if next, unsupported := fcoCompat.afterHTTP(ctx, c, account, body, respBody, resp); unsupported {
+				return nil, writeOpenAIFCOUnsupported(c)
+			} else if next != nil {
+				body, requestView, reqBody = next, newOpenAIRequestView(next), nil
+				requestRepair.setBody(body)
+				continue
+			}
 			if failure := s.learnOpenAIStreamOnlyHTTPFailure(ctx, c, account, upstreamReq, resp, respBody, resilience.CapabilityProtocolResponses); failure != nil {
 				return nil, failure
 			}
@@ -1357,7 +1381,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if bytes.Contains(body, []byte("function_call_output")) {
-			observeOpenAIFCOSuccess(ctx, body, DefaultOpenAIFCORules(nil))
+			observeOpenAIFCOSuccess(ctx, body, fcoCompat.rules(ctx))
 		}
 
 		if mapping, ok := openAIResponsesClientToolMapping(c); ok && isEventStreamResponse(resp.Header) {

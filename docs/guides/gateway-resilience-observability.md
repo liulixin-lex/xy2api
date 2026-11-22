@@ -126,6 +126,7 @@ COMMIT;
 | `resilience.post_output_failure` | 已输出后的上游失败，含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却 |
 | `resilience.state_rejection` | 请求级会话状态拒绝，含 `family`、`path`、`stage` 等，不记正文；HTTP 续接细分为 `continuation_owner_mismatch`、`http_continuation_unsupported`、`tool_output_missing_call_id`、`upstream_continuation_expired`，本地拒绝的 `stage=local`，尚未选中账号时不伪造账号字段 |
 | `resilience.fco_shape` | Responses 出站独立 `function_call_output` 的结构摘要；只记录数量和有限枚举（层、名称桶、call_id/output 形态、previous_response_id、出站重复键），不记录正文、ID 或 URL。 |
+| `resilience.fco_compat` | 独立 `function_call_output` 的改写与重试：`layer`（`core`、`ext`、`admin`）、`action`（`map`）、`outcome`（`sent` 已发出改写后的请求、`completed` 改写后的请求正常完成、`normalize_error` 改写失败按原样发送）；不记录正文、ID 或条目名原值。指标 `fco_compat` 只有一个标签，改写记为 `层:map:结果`（如 `core:map:sent`），形状观测记为 `refusal_<文案变体>` 和 `success_sample`。 |
 | `resilience.collab_plaintext` | 协作消息明文化遇到冲突、异常计数或转换后被拒 |
 | `resilience.web_search_history_rejected` | 补 web_search 声明重放后仍失败 |
 | `resilience.wrapped_error_malformed` | 识别到形似中转包装帧但字段不一致的错误帧 |
@@ -314,6 +315,8 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 访问日志（组件 `http.access`）也带 `gateway_request_id`，取同一个本地 ID；客户端传来的同名请求头不会改变它，没有经过网关的请求（如管理接口）不带这个字段，原有的 `request_id` 不变。访问日志是否写入系统日志仍由运维监控“系统日志”里的“将访问日志写入数据库”决定（默认关）。
 
 Responses 拒参修复（包括流内修复）在既有上游错误事件中记录 `rejected_field` 与 `resent`：字段只保存已识别的协议字段或结构路径，不保存参数值。允许修复、重建请求或消耗预算本身不代表重发；只有后续对应账号实际越过发送边界才将该事件的 `resent` 设为 true，未发送时保留 false。现有重试预算不变。上游拒绝 `max_output_tokens` 后删除该字段重发，会在请求级 `degradations` 中记录 `max_output_tokens/omit`；它表示输出上限已省略，重发事实以对应事件为准。
+
+独立 `function_call_output` 被改写并实际发出后，请求级 `degradations` 记一项 `input[].function_call_output` / `map`。兼容模式未关闭、账号在生效范围内、尚未向客户端输出时，上游以该原因拒绝（错误不带与之冲突的 `param`）会记一条上游错误事件，带 `reason=fco_standalone_rejected` 和结构摘要 `fco_shape`；改写后的请求实际重发才将 `resent` 设为 true。
 
 转换中省略、映射或补入默认值的参数记录为请求级 `degradations`：每项为字段路径和动作，`omit` 表示省略，`map` 表示改成目标能表达的值，`default` 表示补入默认值。使用记录、未计费请求记录与错误记录保留同一份降级信息，不含参数值，不添加响应头。
 

@@ -14,20 +14,29 @@ func ExtractContentModerationText(protocol string, body []byte) string {
 }
 
 func ExtractContentModerationInput(protocol string, body []byte) ContentModerationInput {
-	return extractContentModerationInput(protocol, body, true)
+	return extractContentModerationInput(protocol, body, true, openAIFCOModeration{})
 }
 
 // Keyword checks share semantic moderation's current-user boundaries, but must
 // inspect client-supplied reminder blocks as ordinary user text.
 func extractContentModerationKeywordText(protocol string, body []byte) string {
-	return extractContentModerationInput(protocol, body, false).Text
+	return extractContentModerationKeywordTextWithFCO(protocol, body, openAIFCOModeration{})
+}
+
+func extractContentModerationKeywordTextWithFCO(protocol string, body []byte, fco openAIFCOModeration) string {
+	return extractContentModerationInput(protocol, body, false, fco).Text
 }
 
 type moderationTextCollector struct {
 	filterReminders bool
 }
 
-func extractContentModerationInput(protocol string, body []byte, filterReminders bool) ContentModerationInput {
+// extractContentModerationInput collects the latest user content for protocol.
+// For OpenAI Responses input, fco then adds the outbound text of each
+// standalone function_call_output in the current turn that an outbound
+// attempt may rewrite into user text. Those texts bypass the reminder filter
+// so keyword and semantic checks see the same added content.
+func extractContentModerationInput(protocol string, body []byte, filterReminders bool, fco openAIFCOModeration) ContentModerationInput {
 	collector := moderationTextCollector{filterReminders: filterReminders}
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return ContentModerationInput{}
@@ -38,9 +47,17 @@ func extractContentModerationInput(protocol string, body []byte, filterReminders
 	case ContentModerationProtocolAnthropicMessages:
 		collector.collectLastAnthropicUserMessage(gjson.GetBytes(body, "messages"), &parts, &images)
 	case ContentModerationProtocolOpenAIChat:
-		collector.collectLastRoleMessage(gjson.GetBytes(body, "messages"), "user", &parts, &images)
+		messages := gjson.GetBytes(body, "messages")
+		collector.collectLastRoleMessage(messages, "user", &parts, &images)
+		if !messages.Exists() {
+			// Chat without messages forwards its Responses input natively, and
+			// that input is rewritten like a Responses request.
+			parts = append(parts, fco.texts(gjson.GetBytes(body, "input"))...)
+		}
 	case ContentModerationProtocolOpenAIResponses:
-		collector.collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
+		input := gjson.GetBytes(body, "input")
+		collector.collectLastResponsesInput(input, &parts, &images)
+		parts = append(parts, fco.texts(input)...)
 	case ContentModerationProtocolGemini:
 		collector.collectLastGeminiContent(gjson.GetBytes(body, "contents"), &parts, &images)
 	case ContentModerationProtocolOpenAIImages:
@@ -236,6 +253,52 @@ func (collector moderationTextCollector) collectLastResponsesInput(input gjson.R
 			}
 		}
 	}
+}
+
+// responsesCurrentTurnWindow returns the half-open range [start, end) of the
+// current turn in a Responses input array: the run of consecutive non-model
+// items around the last user message. The user message is judged by
+// isResponsesUserTextItem, the test collectLastResponsesInput applies to the
+// last item, with reminder blocks counting as text so the keyword and
+// semantic checks share one window. Without a user message the window is the
+// run of non-model items at the end of the array.
+func responsesCurrentTurnWindow(items []gjson.Result) (int, int) {
+	userText := moderationTextCollector{}
+	anchor := -1
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].IsObject() && userText.isResponsesUserTextItem(items[i]) {
+			anchor = i
+			break
+		}
+	}
+	start, end := len(items), len(items)
+	if anchor >= 0 {
+		start, end = anchor, anchor+1
+	}
+	for start > 0 && isResponsesNonModelItem(items[start-1]) {
+		start--
+	}
+	for end < len(items) && isResponsesNonModelItem(items[end]) {
+		end++
+	}
+	return start, end
+}
+
+// isResponsesNonModelItem reports whether a Responses input item came from
+// the client side of a turn: a message whose role is not assistant (a message
+// may omit its type), or any tool output (*_output). Everything else,
+// including non-object elements, is model output and bounds a turn.
+func isResponsesNonModelItem(item gjson.Result) bool {
+	if !item.IsObject() {
+		return false
+	}
+	typ := item.Get("type")
+	if typ.Type == gjson.String && strings.HasSuffix(typ.String(), "_output") {
+		return true
+	}
+	role := item.Get("role")
+	isMessage := typ.Type == gjson.String && typ.String() == "message" || !typ.Exists() && role.Type == gjson.String
+	return isMessage && strings.ToLower(strings.TrimSpace(role.String())) != "assistant"
 }
 
 func (collector moderationTextCollector) isResponsesUserTextItem(item gjson.Result) bool {

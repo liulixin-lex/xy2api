@@ -1292,6 +1292,13 @@ export default {
         imagesUrlToB64Json: '生图结果 URL 转 base64',
         imagesUrlToB64JsonDesc:
           '仅对 OpenAI API Key 的 Images 非流式响应生效。上游返回的图片缺少 b64_json 但带 url 时，网关下载该 url 并以 base64 回填 b64_json（url 保留），兼容按官方接口实现的客户端；下载失败则原样返回。',
+        fcoCompatMode: '独立 function_call_output 兼容',
+        fcoCompatModeDesc:
+          '覆盖网关韧性设置里的全局模式：关闭为不处理；被动重放为上游以该原因拒绝后改写并重试一次；主动改写为发往第三方中转前直接改写。总开关关闭或全局为“关闭”时，本账号同样不处理。base_url 为官方地址的账号不处理；本项不影响内容审计。',
+        fcoCompatModeInherit: '继承全局',
+        fcoCompatModeOff: '关闭',
+        fcoCompatModeReactive: '被动重放',
+        fcoCompatModeProactive: '主动改写',
         endpointCapabilities: '端点能力',
         endpointCapabilitiesDesc:
           '用于调度筛选。文本端点会跟随上方 Responses API 支持显示为 Responses、Chat Completions 或自动模式；Embeddings 独立控制 /v1/embeddings。',

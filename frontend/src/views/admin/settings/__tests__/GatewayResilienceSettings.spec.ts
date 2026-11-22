@@ -40,7 +40,8 @@ function settings(): Settings {
     reservation: { cache_aware_estimate: true, output_p99_cap: true },
     stream: { prelude_staging: true, native_prelude_whitelist: true, strict_terminal: true },
     capability: { stream_only_learning: true, learn_ttl_seconds: 21600 },
-    collaboration_plaintext: { enabled: false, models: [] }
+    collaboration_plaintext: { enabled: false, models: [] },
+    fco_compat: { mode: 'reactive', admin_names: [] }
   }
 }
 
@@ -296,6 +297,158 @@ describe('gateway resilience settings', () => {
     expect(disabled('codexRetryAfterCap')).toBe(true)
     // Existing fields keep their behaviour.
     expect(disabled('negativeCache')).toBe(false)
+  })
+  it('renders the fco compat defaults: reactive mode, an empty name list and one hint per mode', async () => {
+    const w = mountSettings(); await flushPromises()
+    const card = w.get('[data-testid="resilience-card-fcoCompat"]')
+    for (const key of ['Hint', 'Scope']) expect(card.text()).toContain(`admin.resilience.settings.sections.fcoCompat${key}`)
+    for (const mode of ['off', 'reactive', 'proactive']) {
+      expect(card.text()).toContain(`admin.resilience.settings.fcoCompatModes.${mode}Hint`)
+    }
+    const checked = (mode: string) => card.get<HTMLInputElement>(`[data-testid="resilience-field-fcoCompatMode-${mode}"]`).element.checked
+    expect([checked('off'), checked('reactive'), checked('proactive')]).toEqual([false, true, false])
+    expect(card.get('[data-testid="resilience-fcoCompatNames-count"]').text()).toBe('0/64')
+    expect(card.find('[data-testid="resilience-fcoCompatNames-empty"]').exists()).toBe(true)
+    expect(card.get('[data-testid="resilience-fcoCompatName-add"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-testid="resilience-save"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('switches the fco compat mode and saves it with the document', async () => {
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-testid="resilience-field-fcoCompatMode-proactive"]').setValue(true)
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    const expected = settings()
+    expected.fco_compat.mode = 'proactive'
+    expect(mocks.save).toHaveBeenCalledWith(expected)
+    expect(w.get<HTMLInputElement>('[data-testid="resilience-field-fcoCompatMode-proactive"]').element.checked).toBe(true)
+  })
+
+  it('greys out the fco compat mode while the master switch is off', async () => {
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-testid="resilience-enabled"]').trigger('click')
+    for (const mode of ['off', 'reactive', 'proactive']) {
+      expect(w.get(`[data-testid="resilience-field-fcoCompatMode-${mode}"]`).attributes('disabled')).toBeDefined()
+    }
+  })
+
+  it('adds valid fco compat names sorted, refuses invalid, reserved and duplicate ones, and saves the list', async () => {
+    const w = mountSettings(); await flushPromises()
+    const input = w.get<HTMLInputElement>('[data-testid="resilience-field-fcoCompatName"]')
+    const add = w.get('[data-testid="resilience-fcoCompatName-add"]')
+    const errorText = () => w.find('[data-testid="resilience-fcoCompatName-error"]')
+
+    for (const name of ['tool_zeta', 'Tool_Alpha', 'tool_beta']) {
+      await input.setValue(name)
+      await add.trigger('click')
+      expect(errorText().exists()).toBe(false)
+      expect(input.element.value).toBe('')
+    }
+    // Enter adds too.
+    await input.setValue('x'.repeat(128))
+    await input.trigger('keydown', { key: 'Enter' })
+    expect(w.get('[data-testid="resilience-fcoCompatNames-count"]').text()).toBe('4/64')
+
+    for (const [name, problem] of [
+      [' padded', 'invalid'], ['tool-dash', 'invalid'], ['名字', 'invalid'], ['x'.repeat(129), 'invalid'],
+      ['browser_info', 'reserved'], ['codex_apps_selected_page_part_1_of_2', 'reserved'], ['codex_apps_selected_page_part_', 'reserved'],
+      ['tool_zeta', 'duplicate']
+    ]) {
+      await input.setValue(name)
+      await add.trigger('click')
+      expect(errorText().text()).toBe(`admin.resilience.settings.fcoCompatNameErrors.${problem}`)
+      expect(input.element.value).toBe(name)
+    }
+    // Typing clears the message.
+    await input.setValue('tool_new')
+    expect(errorText().exists()).toBe(false)
+
+    await w.get('[data-testid="resilience-fcoCompatName-remove-tool_beta"]').trigger('click')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    const expected = settings()
+    expected.fco_compat.admin_names = ['Tool_Alpha', 'tool_zeta', 'x'.repeat(128)]
+    expect(mocks.save).toHaveBeenCalledWith(expected)
+    expect(w.text()).toContain('admin.resilience.settings.saved')
+  })
+
+  it('stops adding fco compat names at the cap', async () => {
+    const full = settings()
+    full.fco_compat.admin_names = Array.from({ length: 64 }, (_, i) => `name_${String(i).padStart(2, '0')}`)
+    mocks.get.mockResolvedValueOnce({ settings: full, defaults: settings() })
+    const w = mountSettings(); await flushPromises()
+    expect(w.get('[data-testid="resilience-fcoCompatNames-count"]').text()).toBe('64/64')
+    await w.get('[data-testid="resilience-field-fcoCompatName"]').setValue('one_more')
+    await w.get('[data-testid="resilience-fcoCompatName-add"]').trigger('click')
+    expect(w.get('[data-testid="resilience-fcoCompatName-error"]').text()).toBe('admin.resilience.settings.fcoCompatNameErrors.full')
+    expect(w.get('[data-testid="resilience-fcoCompatNames-count"]').text()).toBe('64/64')
+  })
+
+  it('rejects an invalid fco compat document from the advanced JSON before saving', async () => {
+    for (const [fco, message] of [
+      [{ mode: 'passive', admin_names: [] }, 'invalidFcoCompatMode'],
+      [{ mode: 'reactive', admin_names: ['proposed_plan'] }, 'fcoCompatNameErrors.reserved'],
+      [{ mode: 'reactive', admin_names: ['bad name'] }, 'fcoCompatNameErrors.invalid'],
+      [{ mode: 'reactive', admin_names: ['ok', 7] }, 'fcoCompatNameErrors.invalid'],
+      [{ mode: 'reactive', admin_names: Array.from({ length: 65 }, (_, i) => `name_${i}`) }, 'invalidFcoCompatNamesCount'],
+      [{ mode: 'reactive', admin_names: 'name' }, 'invalidJson']
+    ] as const) {
+      mocks.save.mockClear()
+      const w = mountSettings(); await flushPromises()
+      const next = { ...settings(), stall: { enabled: true, text_stall_seconds: 90 }, fco_compat: fco }
+      await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify(next))
+      await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+      await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+      expect(mocks.save).not.toHaveBeenCalled()
+      expect(w.text()).toContain(`admin.resilience.settings.${message}`)
+    }
+  })
+
+  it('applies an advanced JSON without the fco compat section and keeps the current one', async () => {
+    const current = settings()
+    current.fco_compat = { mode: 'off', admin_names: ['tool_kept'] }
+    mocks.get.mockResolvedValueOnce({ settings: current, defaults: settings() })
+    const w = mountSettings(); await flushPromises()
+    const legacy: Partial<Settings> = settings()
+    delete legacy.fco_compat
+    legacy.stall = { enabled: true, text_stall_seconds: 90 }
+    await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify(legacy))
+    await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+    expect(w.text()).not.toContain('admin.resilience.settings.invalidJson')
+    expect((w.get('[data-testid="resilience-field-textStall"]').element as HTMLInputElement).value).toBe('90')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    const expected = settings()
+    expected.stall.text_stall_seconds = 90
+    expected.fco_compat = { mode: 'off', admin_names: ['tool_kept'] }
+    expect(mocks.save).toHaveBeenCalledWith(expected)
+  })
+
+  it('renders the fco compat defaults when the server answer has no such section', async () => {
+    const legacy: Partial<Settings> = settings()
+    delete legacy.fco_compat
+    const legacyDefaults: Partial<Settings> = settings()
+    delete legacyDefaults.fco_compat
+    mocks.get.mockResolvedValueOnce({ settings: legacy, defaults: legacyDefaults })
+    const w = mountSettings(); await flushPromises()
+    expect(w.find('[data-testid="resilience-save"]').exists()).toBe(true)
+    expect(w.get<HTMLInputElement>('[data-testid="resilience-field-fcoCompatMode-reactive"]').element.checked).toBe(true)
+    expect(w.get('[data-testid="resilience-fcoCompatNames-count"]').text()).toBe('0/64')
+    expect(w.get('[data-testid="resilience-save"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('counts the de-duplicated names of an applied advanced JSON, as the server stores them', async () => {
+    const w = mountSettings(); await flushPromises()
+    const next = settings()
+    next.fco_compat.admin_names = [...Array.from({ length: 64 }, () => 'a'), 'Zed', 'a']
+    await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify(next))
+    await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+    expect(w.get('[data-testid="resilience-fcoCompatNames-count"]').text()).toBe('2/64')
+    await w.get('[data-testid="resilience-field-fcoCompatName"]').setValue('b')
+    await w.get('[data-testid="resilience-fcoCompatName-add"]').trigger('click')
+    expect(w.find('[data-testid="resilience-fcoCompatName-error"]').exists()).toBe(false)
+    expect(w.get('[data-testid="resilience-fcoCompatNames-count"]').text()).toBe('3/64')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    const expected = settings()
+    expected.fco_compat.admin_names = ['Zed', 'a', 'b']
+    expect(mocks.save).toHaveBeenCalledWith(expected)
   })
 })
 

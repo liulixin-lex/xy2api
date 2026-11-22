@@ -917,9 +917,11 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"configured_models", cfg.ModelFilter.Models)
 		return allow, nil
 	}
+	// Resolved once so the keyword and semantic checks add the same texts.
+	fcoModeration := openAIFCOModerationFromContext(ctx)
 	if cfg.Mode == ContentModerationModePreBlock {
 		if cfg.KeywordBlockingMode != ContentModerationKeywordModeAPIOnly && len(cfg.BlockedKeywords) > 0 {
-			keywordText := extractContentModerationKeywordText(input.Protocol, input.Body)
+			keywordText := extractContentModerationKeywordTextWithFCO(input.Protocol, input.Body, fcoModeration)
 			if keyword, hit := runtimeSnapshot.matchBlockedKeyword(keywordText); hit {
 				metricAction := ContentModerationActionKeywordBlock
 				if input.riskControlLogOnly {
@@ -962,7 +964,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			return allow, nil
 		}
 	}
-	content := ExtractContentModerationInput(input.Protocol, input.Body)
+	content := extractContentModerationInput(input.Protocol, input.Body, true, fcoModeration)
 	if content.IsEmpty() {
 		slog.Info("content_moderation.skip_empty_input",
 			"user_id", input.UserID,

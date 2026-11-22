@@ -93,6 +93,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
+	// The first frame was audited with the snapshot the handler stored, and a
+	// failover retry of a later turn re-enters with that turn's snapshot. Each
+	// frame read below gets its own snapshot in parseClientPayload.
+	firstFCOSnapshot := OpenAIFCOCompatSnapshotOrCurrent(ctx, firstClientMessage)
+	ctx = WithOpenAIFCOCompatSnapshot(ctx, firstFCOSnapshot)
+	setOpenAIFCOCompatWSTurnSnapshot(c, 1, firstFCOSnapshot)
 
 	// 预取一次 OpenAI Fast Policy settings，绑定到 ctx，让该 WS session
 	// 内所有帧的 evaluateOpenAIFastPolicy 调用复用同一份快照，避免每帧
@@ -202,6 +208,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		imageInputSize           string
 		payloadBytes             int
 		requestedReasoningEffort *string
+		fcoSnapshot              OpenAIFCOCompatSnapshot
 	}
 	ingressSessionOriginalModel := ""
 
@@ -238,6 +245,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		if !gjson.ValidBytes(trimmed) {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
+		}
+		// Every later turn binds to the settings at the time its frame arrived and
+		// to the frame as the client sent it, before any normalization below.
+		fcoSnapshot := firstFCOSnapshot
+		if turn > 1 {
+			fcoSnapshot = NewOpenAIFCOCompatSnapshot(resilience.Current(), trimmed)
 		}
 
 		values := gjson.GetManyBytes(trimmed, "type", "model", "prompt_cache_key", "previous_response_id")
@@ -485,6 +498,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		normalized = policyApplied
 		ingressSessionOriginalModel = originalModel
+		if turn > 1 {
+			setOpenAIFCOCompatWSTurnSnapshot(c, turn, fcoSnapshot)
+		}
 
 		return openAIWSClientPayload{
 			tier:                     tier,
@@ -499,6 +515,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			imageInputSize:           imageInputSize,
 			payloadBytes:             len(normalized),
 			requestedReasoningEffort: requestedReasoningEffort,
+			fcoSnapshot:              fcoSnapshot,
 		}, nil
 	}
 
@@ -622,6 +639,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			// Resolve from the client frame before bridge replay or sanitization.
 			turnHasEncryptedContent = openAIEncryptedContentForWSTurn(currentBridgePayload.rawForHash, turnHasEncryptedContent)
 			postOutputCtx := withOpenAIEncryptedContentTurnGuard(ctx, turnHasEncryptedContent)
+			// The HTTP send of this turn uses the snapshot its frame was audited with.
+			postOutputCtx = WithOpenAIFCOCompatSnapshot(postOutputCtx, currentBridgePayload.fcoSnapshot)
 			if turnState != "" && c != nil && c.Request != nil {
 				c.Request.Header.Set(openAIWSTurnStateHeader, turnState)
 			}

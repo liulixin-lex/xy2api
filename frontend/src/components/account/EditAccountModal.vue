@@ -2045,6 +2045,26 @@
         </button>
       </div>
 
+      <!-- OpenAI APIKey standalone function_call_output compatibility -->
+      <div
+        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
+        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="min-w-0">
+          <label class="input-label mb-0">{{ t('admin.accounts.openai.fcoCompatMode') }}</label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.fcoCompatModeDesc') }}
+          </p>
+        </div>
+        <div class="w-44 flex-shrink-0">
+          <Select
+            v-model="openAIFCOCompatMode"
+            :options="openAIFCOCompatModeOptions"
+            data-testid="openai-fco-compat-mode-select"
+          />
+        </div>
+      </div>
+
       <div
         v-if="account?.type === 'apikey'"
         class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -3213,6 +3233,13 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
+import {
+  applyFCOCompatAccountMode,
+  extraForFCOCompatAccount,
+  fcoCompatAccountModeOptions,
+  readFCOCompatAccountMode,
+  type FCOCompatAccountMode
+} from '@/utils/fcoCompat'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
@@ -3814,6 +3841,8 @@ const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 // Images 非流式响应缺 b64_json 时由网关下载 url 回填（仅 OpenAI API Key）。
 const openAIImagesUrlToB64JsonEnabled = ref(false)
+// 独立 function_call_output 兼容的账号覆盖；inherit 表示不写键、跟随全局。
+const openAIFCOCompatMode = ref<FCOCompatAccountMode>('inherit')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
@@ -3957,6 +3986,7 @@ const openAICompactModeOptions = computed(() => [
 const planTypeOptions = computed(() =>
   buildPlanTypeOptions(editPlanType.value, t('admin.accounts.openai.planTypeClear'))
 )
+const openAIFCOCompatModeOptions = computed(() => fcoCompatAccountModeOptions(t))
 const openAIResponsesModeOptions = computed(() => [
   { value: 'auto', label: t('admin.accounts.openai.responsesModeAuto') },
   { value: 'force_responses', label: t('admin.accounts.openai.responsesModeForceResponses') },
@@ -4306,6 +4336,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   editPlanType.value = ''
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
+  openAIFCOCompatMode.value = 'inherit'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -4332,6 +4363,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
     if (newAccount.type === 'apikey') {
       openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
+      openAIFCOCompatMode.value = readFCOCompatAccountMode(extra)
       openAIEndpointCapabilities.value = readOpenAIEndpointCapabilities(
         newAccount.credentials as Record<string, unknown> | undefined
       )
@@ -5862,6 +5894,7 @@ const handleSubmit = async () => {
         } else {
           delete newExtra.images_url_to_b64_json
         }
+        applyFCOCompatAccountMode(newExtra, openAIFCOCompatMode.value)
 		}
 		if (autoPause5hThreshold.value != null && autoPause5hThreshold.value > 0) {
 			newExtra.auto_pause_5h_threshold = autoPause5hThreshold.value / 100
@@ -6009,6 +6042,15 @@ const handleSubmit = async () => {
         delete newExtra.upstream_request_id_header
       }
       updatePayload.extra = newExtra
+    }
+
+    // Checked on the final extra: only OpenAI API key accounts show the fco compat override.
+    if (updatePayload.extra) {
+      updatePayload.extra = extraForFCOCompatAccount(
+        updatePayload.extra as Record<string, unknown>,
+        props.account.platform,
+        props.account.type
+      )
     }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

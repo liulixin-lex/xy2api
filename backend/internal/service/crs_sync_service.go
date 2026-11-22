@@ -267,6 +267,9 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 	if err != nil {
 		return nil, err
 	}
+	// An override value the gateway does not accept is ignored rather than
+	// failing the account, so the merge below keeps a valid local value.
+	sanitizeCRSExportFCOCompat(exported)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -371,6 +374,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			credentials = mergeMap(existing.Credentials, credentials)
 		}
 		reconcileCRSUpstreamBillingProbeExtra(existing, PlatformAnthropic, targetType, credentials, extra)
+		SanitizeOpenAIFCOCompatExtra(extra)
 
 		if existing == nil {
 			if !shouldCreateAccount(src.ID, selectedSet) {
@@ -509,6 +513,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			credentials = mergeMap(existing.Credentials, credentials)
 		}
 		reconcileCRSUpstreamBillingProbeExtra(existing, PlatformAnthropic, AccountTypeAPIKey, credentials, extra)
+		SanitizeOpenAIFCOCompatExtra(extra)
 
 		if existing == nil {
 			if !shouldCreateAccount(src.ID, selectedSet) {
@@ -672,6 +677,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			credentials = mergeMap(existing.Credentials, credentials)
 		}
 		reconcileCRSUpstreamBillingProbeExtra(existing, PlatformOpenAI, AccountTypeOAuth, credentials, extra)
+		SanitizeOpenAIFCOCompatExtra(extra)
 
 		if existing == nil {
 			if !shouldCreateAccount(src.ID, selectedSet) {
@@ -823,6 +829,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			credentials = mergeMap(existing.Credentials, credentials)
 		}
 		reconcileCRSUpstreamBillingProbeExtra(existing, PlatformOpenAI, AccountTypeAPIKey, credentials, extra)
+		SanitizeOpenAIFCOCompatExtra(extra)
 
 		if existing == nil {
 			if !shouldCreateAccount(src.ID, selectedSet) {
@@ -953,6 +960,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			credentials = mergeMap(existing.Credentials, credentials)
 		}
 		reconcileCRSUpstreamBillingProbeExtra(existing, PlatformGemini, AccountTypeOAuth, credentials, extra)
+		SanitizeOpenAIFCOCompatExtra(extra)
 
 		if existing == nil {
 			if !shouldCreateAccount(src.ID, selectedSet) {
@@ -1083,6 +1091,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			credentials = mergeMap(existing.Credentials, credentials)
 		}
 		reconcileCRSUpstreamBillingProbeExtra(existing, PlatformGemini, AccountTypeAPIKey, credentials, extra)
+		SanitizeOpenAIFCOCompatExtra(extra)
 
 		if existing == nil {
 			if !shouldCreateAccount(src.ID, selectedSet) {
@@ -1608,4 +1617,31 @@ func (s *CRSSyncService) PreviewFromCRS(ctx context.Context, input SyncFromCRSIn
 	}
 
 	return result, nil
+}
+
+// sanitizeCRSExportFCOCompat drops override values the gateway would reject
+// from every exported account before they are merged.
+func sanitizeCRSExportFCOCompat(exported *crsExportResponse) {
+	if exported == nil {
+		return
+	}
+	data := &exported.Data
+	for i := range data.ClaudeAccounts {
+		SanitizeOpenAIFCOCompatExtra(data.ClaudeAccounts[i].Extra)
+	}
+	for i := range data.ClaudeConsoleAccounts {
+		SanitizeOpenAIFCOCompatExtra(data.ClaudeConsoleAccounts[i].Extra)
+	}
+	for i := range data.OpenAIOAuthAccounts {
+		SanitizeOpenAIFCOCompatExtra(data.OpenAIOAuthAccounts[i].Extra)
+	}
+	for i := range data.OpenAIResponsesAccounts {
+		SanitizeOpenAIFCOCompatExtra(data.OpenAIResponsesAccounts[i].Extra)
+	}
+	for i := range data.GeminiOAuthAccounts {
+		SanitizeOpenAIFCOCompatExtra(data.GeminiOAuthAccounts[i].Extra)
+	}
+	for i := range data.GeminiAPIKeyAccounts {
+		SanitizeOpenAIFCOCompatExtra(data.GeminiAPIKeyAccounts[i].Extra)
+	}
 }

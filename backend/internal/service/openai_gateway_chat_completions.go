@@ -96,6 +96,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	compatPromptCacheTenantIsolated bool,
 	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	if c != nil {
+		c.Set(openAIFCOAttemptKey, (*openAIFCOCompatAttempt)(nil))
+	}
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	conversionRetry := openAIConversionRetryFrom(ctx)
 	var schedCapture *schedAttemptCapture
@@ -196,6 +199,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		}
 		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
+	fcoCompat := armOpenAIFCOCompat(ctx, c, account, body, isResponsesShape, 0)
+	defer func() { fcoCompat.completed(ctx, schedResult, schedErr) }()
 	// 上游为 Responses（含 adaptive 下 Responses 形状入站且供应商有原生
 	// Responses 端点）：走下方 Chat Completions ↔ Responses 转换链。
 	SetActualOpenAIUpstreamEndpoint(c, openAIResponsesUpstreamEndpoint)
@@ -229,6 +234,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if projectionErr != nil {
 		return nil, projectionErr
 	}
+	chatBodyForRawFallback := body
+	chatStreamBodyBytes := len(body)
 	if err := json.Unmarshal(body, &chatReq); err != nil {
 		return nil, err
 	}
@@ -452,7 +459,7 @@ retryChatResponsesWire:
 	if err != nil {
 		return nil, err
 	}
-	upstreamReq, wire, err := s.buildUpstreamRequestWithBody(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
+	upstreamReq, wire, err := s.buildUpstreamRequestWithBody(fcoCompat.buildContext(upstreamCtx), c, account, responsesBody, token, true, promptCacheKey, false)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
@@ -462,10 +469,27 @@ retryChatResponsesWire:
 	if err != nil {
 		return nil, err
 	}
+	// Conversion replay first verifies the ordinary builder, then installs its
+	// saved send. FCO operates on that final wire and updates the saved send,
+	// while leaving the first builder result intact for candidate validation.
+	if send.fcoRewritten && fcoCompat != nil {
+		fcoCompat.rewritten = true
+	}
+	send.wire, err = fcoCompat.prepare(upstreamReq, send.wire)
+	if err != nil {
+		return nil, err
+	}
+	if fcoCompat != nil && fcoCompat.rewritten {
+		send.responsesInput, send.fcoRewritten = send.wire, true
+		chatStreamBodyBytes = len(send.wire)
+		if conversionRetry != nil {
+			conversionRetry.conversionSendBody = send
+		}
+	}
 	// Keep local repairs before builder injection. A replay has already been
 	// converted (and may have been repaired); never restart it from ingress.
 	responsesBody, toolNames = send.responsesInput, send.reverse
-	repairResponses := conversionRetry != nil && conversionRetry.used || requestRepair != nil && requestRepair.encryptedTried
+	repairResponses := send.fcoRewritten || conversionRetry != nil && conversionRetry.used || requestRepair != nil && requestRepair.encryptedTried
 	repairBody := body
 	if repairResponses {
 		repairBody = responsesBody
@@ -495,6 +519,7 @@ retryChatResponsesWire:
 		resendStart = time.Now()
 	}
 	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, send.wire, clientStream, &schedCapture)
+	fcoCompat.dispatched(ctx, account, resp)
 	if !resendStart.IsZero() {
 		// Only this candidate send counts, including a dial that returned no response.
 		sent := resilience.StateFrom(ctx).SessionDispatchStart(ctx, account.ID)
@@ -534,8 +559,17 @@ retryChatResponsesWire:
 	if resp.StatusCode >= 400 {
 		_ = firstEvent.disarm()
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
-		observeOpenAIFCOHTTPError(ctx, c, responsesBody, respBody, resp.StatusCode, DefaultOpenAIFCORules(nil))
+		observeOpenAIFCOHTTPError(ctx, c, send.wire, respBody, resp.StatusCode, fcoCompat.rules(ctx))
 		schedCapture.finishHTTP(resp, respBody)
+		if next, unsupported := fcoCompat.afterHTTP(ctx, c, account, send.wire, respBody, resp); unsupported {
+			return nil, writeOpenAIFCOUnsupported(c)
+		} else if next != nil {
+			responsesBody = next
+			requestRepair.setBody(next)
+			closeAttempt()
+			ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
+			goto retryChatResponsesWire
+		}
 		if rejection := s.handleM7EncryptedFailure(ctx, c, account, respBody, resp.StatusCode, false, false); rejection != nil {
 			if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, rejection); ok {
 				responsesBody = next
@@ -570,6 +604,7 @@ retryChatResponsesWire:
 			)
 			if repairResponses {
 				responsesBody = retryBody
+				requestRepair.setBody(retryBody)
 				goto retryChatResponsesWire
 			}
 			return s.forwardAsChatCompletions(ctx, c, account, retryBody, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
@@ -583,22 +618,22 @@ retryChatResponsesWire:
 				zap.Int("upstream_status", resp.StatusCode),
 				zap.String("upstream_message", upstreamMsg),
 			)
-			return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+			return s.forwardAsRawChatCompletions(ctx, c, account, chatBodyForRawFallback, defaultMappedModel)
 		}
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr
 		}
 		return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
 	}
-	if bytes.Contains(responsesBody, []byte("function_call_output")) {
-		observeOpenAIFCOSuccess(ctx, responsesBody, DefaultOpenAIFCORules(nil))
+	if bytes.Contains(send.wire, []byte("function_call_output")) {
+		observeOpenAIFCOSuccess(ctx, send.wire, fcoCompat.rules(ctx))
 	}
 
 	// 9. Handle normal response
 	var result *OpenAIForwardResult
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleChatStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime, len(body))
+		result, handleErr = s.handleChatStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime, chatStreamBodyBytes)
 	} else {
 		result, handleErr = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}

@@ -3510,6 +3510,26 @@
         </button>
       </div>
 
+      <!-- OpenAI APIKey standalone function_call_output compatibility -->
+      <div
+        v-if="form.platform === 'openai' && accountCategory === 'apikey'"
+        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="min-w-0">
+          <label class="input-label mb-0">{{ t('admin.accounts.openai.fcoCompatMode') }}</label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.fcoCompatModeDesc') }}
+          </p>
+        </div>
+        <div class="w-44 flex-shrink-0">
+          <Select
+            v-model="openAIFCOCompatMode"
+            :options="openAIFCOCompatModeOptions"
+            data-testid="openai-fco-compat-mode-select"
+          />
+        </div>
+      </div>
+
       <div>
         <div class="flex items-center justify-between">
           <div>
@@ -4003,6 +4023,12 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
+import {
+  applyFCOCompatAccountMode,
+  extraForFCOCompatAccount,
+  fcoCompatAccountModeOptions,
+  type FCOCompatAccountMode
+} from '@/utils/fcoCompat'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
@@ -4184,14 +4210,19 @@ const access = useAdminAccessStore()
 const showUpstreamAddress = computed(() => access.can('accounts.upstream_address'))
 const canAdjustBalance = computed(() => access.can('users.balance_adjust'))
 const canPlaceGroups = computed(() => access.can('accounts:manage'))
-const operatorCreatePayload = <T extends object>(payload: T): T =>
-  access.isOperator
+// Every create request passes through here, so the fco compat override is checked once on the final payload.
+const operatorCreatePayload = <T extends object>(input: T): T => {
+  const fields = input as { platform?: unknown; type?: unknown; extra?: Record<string, unknown> }
+  const extra = extraForFCOCompatAccount(fields.extra, fields.platform, fields.type)
+  const payload = extra === fields.extra ? input : ({ ...input, extra } as T)
+  return access.isOperator
     ? (applyOperatorAccountPayloadRules(payload as Record<string, unknown>, {
         mode: 'create',
         networkLocked: !showUpstreamAddress.value,
         canAdjustBalance: canAdjustBalance.value
       }) as T)
     : payload
+}
 
 const hideAccountLongContextBilling = computed(() => {
   return accountLongContextOverrideHasNoEffect(form.group_ids, props.groups)
@@ -4575,6 +4606,7 @@ const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 // Images 非流式响应缺 b64_json 时由网关下载 url 回填（仅 OpenAI API Key）。
 const openAIImagesUrlToB64JsonEnabled = ref(false)
+const openAIFCOCompatMode = ref<FCOCompatAccountMode>('inherit')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
@@ -4656,6 +4688,7 @@ const openAICompactModeOptions = computed(() => [
   { value: 'force_on', label: t('admin.accounts.openai.compactModeForceOn') },
   { value: 'force_off', label: t('admin.accounts.openai.compactModeForceOff') }
 ])
+const openAIFCOCompatModeOptions = computed(() => fcoCompatAccountModeOptions(t))
 const openAIResponsesModeOptions = computed(() => [
   { value: 'auto', label: t('admin.accounts.openai.responsesModeAuto') },
   { value: 'force_responses', label: t('admin.accounts.openai.responsesModeForceResponses') },
@@ -5071,6 +5104,7 @@ watch(
     headerOverrideEnabled.value = false
     headerOverrideRows.value = []
     openAIImagesUrlToB64JsonEnabled.value = false
+    openAIFCOCompatMode.value = 'inherit'
     grokOAuthCustomBaseUrlEnabled.value = false
     grokOAuthBaseUrl.value = ''
     // Reset OAuth states
@@ -5504,6 +5538,7 @@ const resetForm = () => {
   headerOverrideEnabled.value = false
   headerOverrideRows.value = []
   openAIImagesUrlToB64JsonEnabled.value = false
+  openAIFCOCompatMode.value = 'inherit'
   grokOAuthCustomBaseUrlEnabled.value = false
   grokOAuthBaseUrl.value = ''
   interceptWarmupRequests.value = false
@@ -5647,6 +5682,8 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   } else {
     delete extra.images_url_to_b64_json
   }
+  // Inherit is the default and removes the key rather than storing an empty value.
+  applyFCOCompatAccountMode(extra, accountCategory.value === 'apikey' ? openAIFCOCompatMode.value : 'inherit')
 
   return Object.keys(extra).length > 0 ? extra : undefined
 }

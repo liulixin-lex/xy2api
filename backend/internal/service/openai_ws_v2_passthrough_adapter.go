@@ -1236,6 +1236,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if requestModelForThisFrame == "" {
 					requestModelForThisFrame = capturedSessionModel
 				}
+				// The handler audits this turn in BeforeRequest with the snapshot of
+				// the frame as the client sent it.
+				setOpenAIFCOCompatWSTurnSnapshot(c, turnNo, NewOpenAIFCOCompatSnapshot(resilience.Current(), originalPayload))
 				if hooks != nil && hooks.BeforeRequest != nil {
 					if err := hooks.BeforeRequest(turnNo, payload, requestModelForThisFrame); err != nil {
 						return payload, nil, err

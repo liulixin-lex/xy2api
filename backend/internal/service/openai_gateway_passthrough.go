@@ -136,6 +136,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	reqStream bool,
 	startTime time.Time,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	fcoCompat := armOpenAIFCOCompat(ctx, c, account, body, true, 0)
+	defer func() { fcoCompat.completed(ctx, schedResult, schedErr) }()
 	var schedCapture *schedAttemptCapture
 	defer func() {
 		rethrowSchedAttemptPanic(schedCapture, recover())
@@ -431,7 +433,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if firstOutputTimeout > 0 {
 			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, attemptStart.Add(firstOutputTimeout), firstOutputPlan)
 		}
-		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
+		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(fcoCompat.buildContext(upstreamCtx), c, account, body, token)
 		if headerGuard == nil {
 			releaseUpstreamCtx()
 		}
@@ -442,10 +444,21 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, buildErr
 		}
 
+		body, err = fcoCompat.prepare(upstreamReq, body)
+		if err != nil {
+			if headerGuard != nil {
+				headerGuard.close()
+			}
+			return nil, err
+		}
+		if fcoCompat != nil && fcoCompat.rewritten {
+			requestRepair.setBody(body)
+		}
 		reasoningEffort = extractOpenAIReasoningEffortFromRequest(upstreamReq)
 
 		upstreamStart := time.Now()
 		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
+		fcoCompat.dispatched(ctx, account, resp)
 		noteOpenAIRequestRepairResent(ctx, c, account)
 		if rejectedFieldRetryEvent != nil {
 			if boundary, sent := resilience.StateFrom(ctx).OpsUpstreamSendBoundary(account.ID); sent && rejectedFieldRetrySequence > 0 && boundary >= rejectedFieldRetrySequence {
@@ -479,10 +492,17 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			// Peek only to identify an invalid task. Restore the body so the existing
 			// passthrough error handling sees the same response after recovery fails.
 			probeBody := s.readUpstreamErrorBody(resp)
-			observeOpenAIFCOHTTPError(ctx, c, body, probeBody, resp.StatusCode, DefaultOpenAIFCORules(nil))
+			observeOpenAIFCOHTTPError(ctx, c, body, probeBody, resp.StatusCode, fcoCompat.rules(ctx))
 			schedCapture.finishHTTP(resp, probeBody)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
+			if next, unsupported := fcoCompat.afterHTTP(ctx, c, account, body, probeBody, resp); unsupported {
+				return nil, writeOpenAIFCOUnsupported(c)
+			} else if next != nil {
+				body = next
+				requestRepair.setBody(body)
+				continue
+			}
 			if repairErr := newHTTPEncryptedContentRepairSignal(ctx, c, account, body, probeBody, extractUpstreamErrorMessage(probeBody), resp.StatusCode, false); repairErr != nil {
 				if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, repairErr); ok {
 					body = next
@@ -559,7 +579,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 		}
 		if bytes.Contains(body, []byte("function_call_output")) {
-			observeOpenAIFCOSuccess(ctx, body, DefaultOpenAIFCORules(nil))
+			observeOpenAIFCOSuccess(ctx, body, fcoCompat.rules(ctx))
 		}
 
 		if mapping, ok := openAIResponsesClientToolMapping(c); ok && isEventStreamResponse(resp.Header) {

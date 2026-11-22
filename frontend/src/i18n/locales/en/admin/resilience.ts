@@ -42,7 +42,10 @@ export default {
         collaborationPlaintext: 'Collaboration messages in plaintext',
         collaborationPlaintextHint: 'Eligible new Codex collaboration messages (spawn_agent, send_message, followup_task) are delivered in plaintext when the upstream returns no ciphertext and the gateway does not veto them, reducing collaboration errors after account switches. Existing conversation history is not repaired.',
         collaborationPlaintextScope: 'Applies when a Codex client uses native Responses HTTP, the model is listed below, and the account switch is on, or the conversation on an API key account already carries the plaintext collaboration marker (session continuity).',
-        collaborationPlaintextOff: 'Turning it off stops conversion for later requests while responses in progress are still restored; conversations that already used it may be rejected by some upstreams and need a new conversation.'
+        collaborationPlaintextOff: 'Turning it off stops conversion for later requests while responses in progress are still restored; conversations that already used it may be rejected by some upstreams and need a new conversation.',
+        fcoCompat: 'Standalone function_call_output compatibility',
+        fcoCompatHint: 'Codex clients send named function_call_output items without a call_id (agent namespace), which some third-party relays reject with a 400. Items whose name is in the built-in list or in the list below are rewritten into a plain user message, with the original content wrapped in an <external_name> tag.',
+        fcoCompatScope: 'Applies only to Responses requests that OpenAI API key accounts send to third-party relays; an account can override the mode on its edit page. With the master switch off or Off selected here, no account is handled. While the mode is not Off, listed items next to the last user message go through content moderation, whichever account type the request ends up on.'
       },
       fields: {
         balancePause: 'Initial pause (s)',
@@ -68,7 +71,13 @@ export default {
         learnTtlHint: 'Default 21600 (6 hours); it clears itself when it expires, and a change applies only to states learned afterwards. It can also be cleared by hand in the status column of the account list.',
         collaborationModels: 'Verified models',
         collaborationModelsHint: 'One per line, matched against the actual outbound model after model mapping (case-insensitive). Up to 16, each at most 128 characters; duplicates are merged. Models not listed are left unchanged.',
-        collaborationModelsEmpty: 'The list is empty, so no request is converted even with the switch on.'
+        collaborationModelsEmpty: 'The list is empty, so no request is converted even with the switch on.',
+        fcoCompatMode: 'Mode',
+        fcoCompatNames: 'Additional item names',
+        fcoCompatNamesHint: 'Agent-namespace item names to rewrite besides the built-in list: letters, digits or underscores, 1–128 characters, case-sensitive and not trimmed. At most {max}, sorted on save; names owned by built-in rules cannot be added.',
+        fcoCompatNamesEmpty: 'No names added; only the built-in list applies.',
+        fcoCompatAdd: 'Add',
+        fcoCompatRemove: 'Remove {name}'
       },
       switches: {
         postOutputRebind: 'Rebind on the first failure after output',
@@ -82,6 +91,20 @@ export default {
         failedFrameRetryAfter: 'Retry time on response.failed',
         failedFrameRetryAfterHint: 'A response.failed made by the gateway carries a retry-after when it helps: none or 1 s with a healthy alternative; 2–10 s when no account is healthy and the recovery time is known; never after a turn cap, low balance, a content refusal or a failure that is not retryable (unknown model, request or auth errors). Needs "Error semantics and storm protection" on; off never adds it.'
       },
+      fcoCompatModes: {
+        off: 'Off',
+        offHint: 'Requests are forwarded unchanged.',
+        reactive: 'Replay on rejection',
+        reactiveHint: 'After the upstream rejects a request for this reason, rewrite it and retry once on the same account.',
+        proactive: 'Rewrite proactively',
+        proactiveHint: 'Rewrite before sending to a third-party relay, without waiting for a rejection.'
+      },
+      fcoCompatNameErrors: {
+        invalid: 'Names may only use letters, digits or underscores, 1–128 characters, with no spaces',
+        reserved: 'This name is handled by a built-in rule and cannot be added',
+        duplicate: 'This name is already in the list',
+        full: 'At most {max} names can be added'
+      },
       advanced: 'Advanced (full JSON)',
       advancedHint: 'Contains every setting; the server validates it on save and rejects invalid documents.',
       applyAdvanced: 'Apply JSON to the form',
@@ -94,7 +117,9 @@ export default {
       reload: 'Reload',
       invalidNumber: '{field} must be an integer between {min} and {max}',
       invalidCollaborationModelsCount: 'Verified models: at most {max}',
-      invalidCollaborationModelLength: 'Each verified model must be at most {max} characters'
+      invalidCollaborationModelLength: 'Each verified model must be at most {max} characters',
+      invalidFcoCompatMode: 'Mode must be Off, Replay on rejection or Rewrite proactively',
+      invalidFcoCompatNamesCount: 'At most {max} additional names'
     },
     panel: {
       title: 'Gateway Resilience',

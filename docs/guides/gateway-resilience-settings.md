@@ -86,7 +86,8 @@
   "fallback_group": { "enabled": true, "return_stable_seconds": 120, "binding_ttl_seconds": 600 },
   "reservation": { "cache_aware_estimate": true, "output_p99_cap": true },
   "stream": { "prelude_staging": true, "native_prelude_whitelist": true, "strict_terminal": true },
-  "capability": { "stream_only_learning": true, "learn_ttl_seconds": 21600 }
+  "capability": { "stream_only_learning": true, "learn_ttl_seconds": 21600 },
+  "fco_compat": { "mode": "reactive", "admin_names": [] }
 }
 ```
 
@@ -227,3 +228,26 @@ Anthropic 上游（原生 Messages 与协议转换）的 `ping` 和 SSE 注释�
 |---|---|---|---|
 | `stream_only_learning` | true | 布尔 | 仅流式账号学习 |
 | `learn_ttl_seconds` | 21600 | 600–86400 | 学习结果有效期；修改只影响之后新学到的记录 |
+
+### 独立 function_call_output 兼容 `fco_compat`
+
+Codex 客户端会发出不带 `call_id` 的具名 `function_call_output`（`namespace` 为 `agent`），部分第三方中转会以 400 拒绝这类请求。这一节配置网关如何把内置名单与管理员追加名单中的条目改写为普通用户消息。
+
+| 字段 | 默认 | 范围 | 说明 |
+|---|---|---|---|
+| `mode` | `reactive` | `off`、`reactive`、`proactive` | `off` 不处理；`reactive` 在上游以该原因拒绝后改写并在同一账号重试一次；`proactive` 发往第三方中转前直接改写 |
+| `admin_names` | `[]` | 最多 64 条，每条匹配 `^[A-Za-z0-9_]{1,128}$` | 追加的 `agent` 命名空间条目名。区分大小写，不去首尾空白（带空白即不合法）；重复项合并，保存后按字典序排列 |
+
+- 内置规则占用的名字不能追加：`browser_info`、`goal_objective`、`untrusted_context`、`ide_context`、`untrusted_content`、`proposed_plan`、`terminal_info`、`browser_tabs`、`codex_apps_open_page`，以及所有以 `codex_apps_selected_page_part_` 开头的名字。
+- `PUT` 时本节字段同样“未提交即保留当前值”；一旦提交就必须合法：`mode` 只能是上述三个字符串之一（空串、`null` 或其他类型返回 400），`admin_names` 必须是字符串数组（整体为 `null` 或含非字符串元素返回 400），整节为 `null` 也返回 400。库中文档缺少本节、本节为 `null` 或 `admin_names` 为 `null` 时仍按默认值补齐。
+- 账号级覆盖：OpenAI API Key 账号的 `extra.openai_fco_compat_mode` 取 `off`、`reactive` 或 `proactive`；缺失或为 `null` 时继承本节的 `mode`，其他值在创建、编辑、更新 extra 和批量编辑时被拒绝（错误码 `OPENAI_FCO_COMPAT_MODE_INVALID`）。账号编辑页的“继承全局”会删除该键，批量编辑写入 `null`。
+- 批量编辑只要带了该键（含 `null`），展开筛选条件后的全部目标都必须是 OpenAI API Key 账号，否则整批拒绝（错误码 `OPENAI_BULK_TARGET_INVALID`），一个都不写。
+- CRS 同步与复制账号遇到不合法的值时删除该键（即继承全局），不让同步或复制失败；同步时本地已有的合法值保留。
+- 生效模式：总开关 `enabled` 关闭或本节 `mode` 为 `off` 时，所有账号一律按 `off` 处理，账号覆盖不能绕过；否则账号覆盖优先于本节的 `mode`。
+- 生效范围：只处理实际走 HTTP Responses 出口、平台为 OpenAI、类型为 API Key、`base_url` 指向第三方中转的账号（WebSocket 入站经桥接走 HTTP 出站时同样适用）。OAuth、官方直连（`api.openai.com` 及其子域、Azure OpenAI）、compact 请求和 Chat / Anthropic 协议上游不处理。
+- 改写内容：命中的条目原位替换为一条 `role=user` 的消息，文本为 `<external_名称>原 output</external_名称>`（页面快照类在标签内各加一个换行），其余条目的字节不变。只改写 `call_id` 缺失或为 `null`、`output` 为字符串的条目；`call_id` 为空串或空白、`output` 为数组或对象的条目保持原样。内置名单里除 `untrusted_content`、`proposed_plan` 外的名字以及追加名单要求 `output` 去掉首尾空白后非空；两类页面快照还要求 `output` 符合页面快照格式。请求里任何一层有重复的 JSON 成员时整个请求不改写。
+- `reactive` 的重试：每个入站请求（WebSocket 为每一轮）最多一次，在同一账号上进行，计入请求的重试预算；已经向客户端输出内容（含首包前的保活帧）或客户端已断开时不重试。一次请求里证实需要改写之后，这次请求后续换到的账号直接按改写后的内容发送。
+- `reactive` 与 `proactive` 的取舍：`reactive` 只在被拒后才改写，被拒的那次请求要完整上传两遍；同一会话里中转有时拒绝、有时放行原形，发出的历史前缀随之变化，会降低上游提示缓存的命中。`proactive` 每次都改写，前缀稳定、不重发，适合长期使用。
+- 仍被拒绝时：上游以该原因拒绝而网关已没有可做的改写（条目不在名单内、改写后仍被拒、重试额度已用完），客户端收到 400 / `upstream_standalone_tool_output_unsupported`，见[客户端约定](gateway-resilience-client.md)。`off` 以及不在生效范围内的账号仍原样返回上游的错误。
+- 内容审计：`mode` 不为 `off` 时，紧挨最后一条用户消息、中间没有模型输出的那段连续条目里命中名单的条目，会以改写后的文本一并进入内容审计（关键词与语义审计；语义审计沿用原有的长度上限，用户内容在前）。这一步发生在选择账号之前，只看全局 `mode`：无论请求最终发往哪类账号、账号是否单独覆盖、是否真的被改写，都会审计。历史轮次里的条目、工具调用之后才出现的条目不审计。这些条目是客户端自动附带的上下文（浏览器、终端、IDE 等），其中出现违禁内容同样会拦截请求并计入自动封禁的统计；`mode` 设为 `off` 可撤回这项审计。安全审计的提示词检查（prompt guard）不读取这些条目。
+- 回滚到不含本节的旧版本后，如果在旧版本的管理页再保存一次韧性设置，本节内容会丢失，升级回来后需要重新填写。

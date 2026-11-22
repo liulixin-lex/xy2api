@@ -124,7 +124,7 @@ const PaginationStub = {
 
 const BulkEditAccountModalStub = {
   props: ['show', 'target'],
-  template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'"></div>'
+  template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'" :data-all-openai-apikey="String(target?.allOpenAIAPIKey)"></div>'
 }
 
 describe('admin AccountsView bulk edit scope', () => {
@@ -201,6 +201,72 @@ describe('admin AccountsView bulk edit scope', () => {
 
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('filtered')
+  })
+
+  it('confirms OpenAI API key targets only when every target is known', async () => {
+    const openAIKeys = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `key-${i + 1}`, platform: 'openai', type: 'apikey', status: 'active' }))
+    listAccounts.mockResolvedValue({ items: openAIKeys, total: 101, page: 1, page_size: 100, pages: 2 })
+    const wrapper = mount(AccountsView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: {
+            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          AccountTableActions: { template: '<div><slot name="beforeCreate" /><slot name="after" /></div>' },
+          AccountTableFilters: { template: '<div></div>' },
+          AccountBulkActionsBar: AccountBulkActionsBarStub,
+          AccountActionMenu: true,
+          ImportDataModal: true,
+          ReAuthAccountModal: true,
+          AccountTestModal: true,
+          AccountStatsModal: true,
+          ScheduledTestsPanel: true,
+          SyncFromCrsModal: true,
+          TempUnschedStatusModal: true,
+          ErrorPassthroughRulesModal: true,
+          TLSFingerprintProfilesModal: true,
+          CreateAccountModal: true,
+          EditAccountModal: true,
+          BulkEditAccountModal: BulkEditAccountModalStub,
+          PlatformTypeBadge: true,
+          AccountCapacityCell: true,
+          AccountStatusIndicator: true,
+          AccountTodayStatsCell: true,
+          AccountGroupsCell: true,
+          AccountUsageCell: true,
+          Icon: true
+        }
+      }
+    })
+
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      openBulkEditFiltered: () => Promise<void>
+      openBulkEditSelected: () => void
+      setSelectedIds: (ids: number[]) => void
+      filters: Record<string, string>
+    }
+    const confirmed = () => wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-all-openai-apikey')
+
+    // A 100-row preview of 101 results proves nothing about the last one.
+    await vm.openBulkEditFiltered(); await flushPromises()
+    expect(confirmed()).toBe('false')
+    vm.filters.platform = 'openai'
+    vm.filters.type = 'apikey'
+    await vm.openBulkEditFiltered(); await flushPromises()
+    expect(confirmed()).toBe('true')
+
+    vm.setSelectedIds([1, 2]); await flushPromises()
+    vm.openBulkEditSelected(); await flushPromises()
+    expect(confirmed()).toBe('true')
+    // A selected ID that is not on this page has no known platform or type.
+    vm.setSelectedIds([1, 999]); await flushPromises()
+    vm.openBulkEditSelected(); await flushPromises()
+    expect(confirmed()).toBe('false')
   })
 
   it('renders the created_at column once the saved column settings show it', async () => {

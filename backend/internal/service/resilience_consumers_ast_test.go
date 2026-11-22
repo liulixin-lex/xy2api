@@ -126,6 +126,7 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 		},
 		"ConsumeInPlaceRetry": {
 			"internal/service/openai_conversion_retry.go:OpenAIGatewayService.StartOpenAIConversionRetry":       1,
+			"internal/service/openai_fco_compat_runtime.go:openAIFCOCompatAttempt.afterHTTP":                    1,
 			"internal/service/antigravity_gateway_retry.go:AntigravityGatewayService.antigravityRetryLoop":      3,
 			"internal/service/openai_encrypted_content_http.go:planHTTPEncryptedContentRepair":                  1,
 			"internal/service/openai_m3.go:openAIM3Attempt.learn":                                               1,
@@ -172,6 +173,7 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 func TestAttemptProfileCallsitesASTU12(t *testing.T) {
 	got := productionResilienceCallsites(t, "SetAttemptProfile", false)
 	want := map[string]int{
+		"internal/service/openai_fco_compat_runtime.go:openAIFCOCompatAttempt.prepare":                                              1,
 		"internal/handler/openai_chat_completions.go:OpenAIGatewayHandler.ChatCompletions":                                          1,
 		"internal/handler/openai_gateway_handler.go:OpenAIGatewayHandler.Messages":                                                  1,
 		"internal/handler/openai_gateway_handler.go:OpenAIGatewayHandler.Responses":                                                 1,

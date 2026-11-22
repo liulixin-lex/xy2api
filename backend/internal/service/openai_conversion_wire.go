@@ -15,6 +15,9 @@ import (
 type conversionSendBody struct {
 	wire, responsesInput []byte
 	reverse              map[string]string
+	// FCO repair retains final wire as responsesInput; rebuilding it must skip
+	// group prompt injection, including after a conversion retry changes account.
+	fcoRewritten bool
 }
 
 type openAIConversionWire struct {
@@ -44,6 +47,9 @@ func (s *OpenAIGatewayService) conversionWirePath(ctx context.Context, a, creden
 }
 
 func (s *OpenAIGatewayService) matchesConversionWire(ctx context.Context, a *Account, state *openAIConversionRetryState) bool {
+	if state.fcoRewritten && !openAIFCOConversionReplayAllowed(ctx, a) {
+		return false
+	}
 	credential := a
 	if state.scoped && a.IsShadow() {
 		var err error
@@ -77,7 +83,8 @@ func (s *OpenAIGatewayService) prepareOpenAIConversionWire(ctx context.Context, 
 		return send, nil
 	}
 	if state.pendingReplay {
-		if len(send.wire) == 0 || !bytes.Equal(send.wire, state.first) {
+		if len(send.wire) == 0 || !bytes.Equal(send.wire, state.first) ||
+			state.fcoRewritten && !openAIFCOConversionReplayAllowed(ctx, account) {
 			WriteOpenAIConversionRetryFailure(c, state.failure, "candidate_wire")
 			return conversionSendBody{}, state.failure.cause
 		}

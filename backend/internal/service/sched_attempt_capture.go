@@ -576,6 +576,7 @@ func (a *schedAttemptCapture) finishUnfinished() {
 	}
 }
 func observeSchedPayload(c *gin.Context, data []byte, eventType ...string) {
+	observeOpenAIFCOCompletion(c, data, eventType...)
 	if c == nil || c.Request == nil {
 		return
 	}
