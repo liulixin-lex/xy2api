@@ -11,22 +11,37 @@ type CollabRecordsCache interface {
 	CollabRecords() resilience.CollabSharedRecordsStore
 }
 
-func (s *OpenAIGatewayService) initCollabRecords() {
-	var shared resilience.CollabSharedRecordsStore
-	if cache, ok := s.cache.(CollabRecordsCache); ok {
-		shared = cache.CollabRecords()
-	}
-	s.collabRecords = resilience.NewSafeCollabRecordsStore(resilience.NewMemoryCollabRecordsStore(), shared, 1024)
-}
+// Explicit access is for an enabled records/ladder path; constructor and off
+// paths never call it. The mutex also prevents initialization after shutdown.
+func (s *OpenAIGatewayService) initCollabRecords() { s.CollabRecords() }
 func (s *OpenAIGatewayService) CollabRecords() *resilience.SafeCollabRecordsStore {
 	if s == nil {
 		return nil
 	}
+	s.collabRecordsMu.Lock()
+	defer s.collabRecordsMu.Unlock()
+	if s.collabRecordsClosed {
+		return nil
+	}
+	if s.collabRecords == nil {
+		var shared resilience.CollabSharedRecordsStore
+		if cache, ok := s.cache.(CollabRecordsCache); ok {
+			shared = cache.CollabRecords()
+		}
+		s.collabRecords = resilience.NewSafeCollabRecordsStore(resilience.NewMemoryCollabRecordsStore(), shared, 1024)
+	}
 	return s.collabRecords
 }
 func (s *OpenAIGatewayService) CloseCollabRecords() {
-	if s != nil && s.collabRecords != nil {
-		s.collabRecords.Close()
+	if s == nil {
+		return
+	}
+	s.collabRecordsMu.Lock()
+	s.collabRecordsClosed = true
+	store := s.collabRecords
+	s.collabRecordsMu.Unlock()
+	if store != nil {
+		store.Close()
 	}
 }
 

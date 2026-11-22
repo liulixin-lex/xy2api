@@ -30,6 +30,7 @@ type collabDeliveredCall struct {
 type CollabRecordDelivery struct {
 	resilience.NoopCollabDeliveryConsumer
 	service       *OpenAIGatewayService
+	store         *resilience.SafeCollabRecordsStore
 	input         CollabRecordDeliveryInput
 	calls         map[resilience.CollabDigest]collabDeliveredCall
 	closed        bool
@@ -43,10 +44,14 @@ func (s *OpenAIGatewayService) NewCollabRecordDelivery(in CollabRecordDeliveryIn
 	if !in.HasTools && !in.AgentCiphertext {
 		return nil
 	}
-	if s == nil || s.collabRecords == nil || !in.Settings.CollabRecordsOn() {
+	if s == nil || !in.Settings.CollabRecordsOn() {
 		return nil
 	}
-	return &CollabRecordDelivery{service: s, input: in, calls: make(map[resilience.CollabDigest]collabDeliveredCall)}
+	store := s.CollabRecords()
+	if store == nil {
+		return nil
+	}
+	return &CollabRecordDelivery{service: s, store: store, input: in, calls: make(map[resilience.CollabDigest]collabDeliveredCall)}
 }
 func (c *CollabRecordDelivery) accepts(e resilience.CollabDeliveryEvent) bool {
 	switch e.EventType {
@@ -90,7 +95,7 @@ func (c *CollabRecordDelivery) AboutToWrite(ctx context.Context, e resilience.Co
 				}
 			}
 			record := resilience.CollabIssuedRecord{Scope: c.input.Scope, Call: id, Digest: c.service.CollabDigest(resilience.CollabDigestDomainCiphertext, message), Account: c.input.Account, Site: c.input.Site, ExplicitlyEncrypted: explicit, Generation: e.Generation, ExpiresAt: expiry}
-			snapshot.token, _ = c.service.collabRecords.PendingIssued(ctx, record)
+			snapshot.token, _ = c.store.PendingIssued(ctx, record)
 		}
 		c.calls[id] = snapshot
 		c.frameCalls = append(c.frameCalls, id)
@@ -112,16 +117,16 @@ func (c *CollabRecordDelivery) Written(ctx context.Context, e resilience.CollabD
 		}
 		if !matched {
 			if v.token.Token != "" {
-				c.service.collabRecords.VoidIssued(ctx, v.token)
+				c.store.VoidIssued(ctx, v.token)
 			}
 			delete(c.calls, id)
 			continue
 		}
 		if v.token.Token != "" {
-			c.service.collabRecords.ConfirmIssued(ctx, v.token)
+			c.store.ConfirmIssued(ctx, v.token)
 		}
 		if v.plaintext.Call != "" {
-			c.service.collabRecords.PlaintextDelivered(ctx, v.plaintext)
+			c.store.PlaintextDelivered(ctx, v.plaintext)
 		}
 		v.written = true
 		c.calls[id] = v
@@ -135,7 +140,7 @@ func (c *CollabRecordDelivery) Completed(ctx context.Context, e resilience.Colla
 	}
 	for _, v := range c.calls {
 		if !v.written && v.token.Token != "" {
-			c.service.collabRecords.VoidIssued(ctx, v.token)
+			c.store.VoidIssued(ctx, v.token)
 		}
 	}
 	c.closed = true
@@ -217,11 +222,15 @@ func (c *CollabRecordDelivery) eachCall(e resilience.CollabDeliveryEvent, visit 
 // unchanged ciphertext items. The boolean means normal upstream completion,
 // not HTTP success, a local ending or an abandoned optional send.
 func (s *OpenAIGatewayService) RecordCollabConsumed(ctx context.Context, settings *resilience.Settings, normal bool, account resilience.CollabDigest, unchanged []resilience.CollabDeliveryKey) {
-	if len(unchanged) == 0 || !normal || s == nil || s.collabRecords == nil || !settings.CollabRecordsOn() {
+	if len(unchanged) == 0 || !normal || s == nil || !settings.CollabRecordsOn() {
+		return
+	}
+	store := s.CollabRecords()
+	if store == nil {
 		return
 	}
 	expires := time.Now().Add(resilience.CollabRecordTTL)
 	for _, key := range unchanged {
-		s.collabRecords.Consumed(ctx, resilience.CollabConsumedRecord{Key: key, Account: account, ExpiresAt: expires})
+		store.Consumed(ctx, resilience.CollabConsumedRecord{Key: key, Account: account, ExpiresAt: expires})
 	}
 }

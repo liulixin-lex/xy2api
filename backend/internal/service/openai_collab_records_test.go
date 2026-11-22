@@ -168,7 +168,7 @@ func TestCollabRecordStoreFailuresPreserveFinalBytesAndOutcome(t *testing.T) {
 	for _, mode := range []string{"absent", "slow", "error", "panic"} {
 		t.Run(mode, func(t *testing.T) {
 			s := collabRecordTestService(t)
-			s.CloseCollabRecords()
+			s.collabRecords.Close()
 			var shared resilience.CollabSharedRecordsStore
 			if mode != "absent" {
 				shared = &collabDeliverySharedFailure{mode: mode}
@@ -176,7 +176,9 @@ func TestCollabRecordStoreFailuresPreserveFinalBytesAndOutcome(t *testing.T) {
 			s.collabRecords = resilience.NewSafeCollabRecordsStore(resilience.NewMemoryCollabRecordsStore(), shared, 32)
 			in := collabRecordTestInput()
 			hooks := &resilience.CollabDeliveryHooks{}
-			hooks.Register(s.NewCollabRecordDelivery(in))
+			consumer := s.NewCollabRecordDelivery(in)
+			require.NotNil(t, consumer)
+			hooks.Register(consumer)
 			frame := collabCallFrame(t, `{"message":"cipher"}`, "")
 			event := resilience.CollabDeliveryEvent{Generation: 1, SendSeq: 1, Sequence: 1, Executable: true, EventType: "response.output_item.done", Successful: true}
 			output := httptest.NewRecorder()
