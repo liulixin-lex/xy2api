@@ -633,20 +633,20 @@ type sessionFailureRecorder struct {
 // AvoidOpenAIStateAccount records a request-scoped state repair avoidance
 // without incrementing the account failure streak or health counters.
 func (s *OpenAIGatewayService) AvoidOpenAIStateAccount(ctx context.Context, groupID int64, sessionHash string, accountID int64) {
+	if s == nil || s.resilience == nil || s.resilience.store == nil || sessionHash == "" || accountID <= 0 {
+		resilience.StateFrom(ctx).AddAvoided(accountID)
+		return
+	}
 	if b := openAICollabBindingFrom(ctx); b != nil && b.affinity.groupID == groupID && (sessionHash == b.scope || sessionHash == b.session) {
 		avoid := time.Duration(resilience.Current().Session.AvoidSeconds) * time.Second
 		if avoid <= 0 {
 			avoid = 10 * time.Minute
 		}
 		b.avoid(ctx, accountID, time.Now().Add(avoid))
-		_ = b.deleteOwner(ctx, accountID)
+		_ = s.deleteStickySessionAccountIDIfOwner(ctx, &groupID, b.session, accountID)
 		return
 	}
 
-	if s == nil || s.resilience == nil || s.resilience.store == nil || sessionHash == "" || accountID <= 0 {
-		resilience.StateFrom(ctx).AddAvoided(accountID)
-		return
-	}
 	avoid := time.Duration(resilience.Current().Session.AvoidSeconds) * time.Second
 	if avoid <= 0 {
 		avoid = 10 * time.Minute

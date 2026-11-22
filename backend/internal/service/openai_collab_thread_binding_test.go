@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"math/rand"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -76,8 +77,7 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 		session = "v2:shared-session"
 	}
 	owner := c.bound
-	unsupported := c.mode == 2 || c.mode == 3
-	if on || unsupported {
+	if on {
 		owner = 1
 	}
 	if owner > 0 {
@@ -99,12 +99,13 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 	}
 	if c.avoid {
 		scope := session
-		if on || unsupported {
+		if on {
 			scope = "child-execution"
 		}
 		require.NoError(t, f.svc.resilience.store.AddSessionAvoid(ctx, 7, scope, 1, time.Minute))
 	}
 	leases := newSelectionTrialLeaseFake()
+	NewOpenAISelectionBoard(f.svc, func() schedquality.View { return f.view }, leases)
 	switch c.mode {
 	case 1:
 		f.view.States[fakeSchedViewKey{7, 2, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
@@ -139,12 +140,8 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 		ctx = WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
 		ctx = prepareAffinityTest(f, ctx, session)
 		b := openAICollabBindingFrom(ctx)
-		if unsupported {
-			require.Nil(t, b)
-		} else {
-			require.NotNil(t, b)
-			require.NoError(t, b.write(ctx, c.bound, time.Hour))
-		}
+		require.NotNil(t, b)
+		require.NoError(t, b.write(ctx, c.bound, time.Hour))
 	}
 	start := time.Now()
 	result, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", session, "m", nil, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true)
@@ -159,7 +156,7 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 			result.ReleaseFunc()
 		}
 	}
-	if on && !unsupported {
+	if on {
 		for key, value := range before {
 			require.Equal(t, value, f.cache.sessionBindings[key], "tree or alias changed: %s", key)
 		}
@@ -169,7 +166,29 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 			}
 		}
 	}
-	return fmt.Sprintf("%s elapsed=%v attempts=%v", out, time.Since(start), f.attempts)
+	member := TrialLeaseSessionMember(session)
+	if on {
+		member = TrialLeaseSessionMember(openAICollabBindingFrom(ctx).key)
+	}
+	requestMember := TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID())
+	calls := make([]string, len(leases.calls))
+	for i, call := range leases.calls {
+		call = strings.ReplaceAll(call, requestMember, "request")
+		calls[i] = strings.ReplaceAll(call, member, "binding")
+	}
+	held := make([]string, 0, len(leases.held))
+	for key, present := range leases.held {
+		if present {
+			key = strings.ReplaceAll(key, requestMember, "request")
+			held = append(held, strings.ReplaceAll(key, member, "binding"))
+		}
+	}
+	sort.Strings(held)
+	pending := "none"
+	if change := pendingOpenAIStickyChange(ctx); change != nil {
+		pending = fmt.Sprintf("%s/%s/%d/%t/%t", change.kind, change.reason, change.target, change.ownerReleased, change.done)
+	}
+	return fmt.Sprintf("%s elapsed=%v attempts=%v leases=%v held=%v pending=%s bypass=%t", out, time.Since(start), f.attempts, calls, held, pending, resilience.StateFrom(ctx).StickyBypassChangesBinding())
 }
 
 func TestCollabThreadBindingGeneratedOracle(t *testing.T) {
@@ -371,8 +390,9 @@ func TestCollabThreadBindingExcludedDimensions(t *testing.T) {
 			case "trials":
 				f.svc.selectionBoard.leases = newSelectionTrialLeaseFake()
 			}
-			require.False(t, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "shared-session", platform, transport, native))
-			require.Nil(t, openAICollabBindingFrom(ctx))
+			active := f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "shared-session", platform, transport, native)
+			require.Equal(t, mode == "trials", active)
+			require.Equal(t, active, openAICollabBindingFrom(ctx) != nil)
 		})
 	}
 }

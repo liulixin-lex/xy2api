@@ -167,6 +167,9 @@ func (t *selectionTrial) memberFor(ctx context.Context, account int64) string {
 	if account != t.owner {
 		return t.requestMember
 	}
+	if b := collabBindingFor(ctx, t.request.GroupID, t.request.SessionHash); b != nil && b.present() {
+		return TrialLeaseSessionMember(b.key)
+	}
 	return t.member
 }
 
@@ -175,7 +178,7 @@ func (t *selectionTrial) touch(ctx context.Context, account *Account) {
 	if t.leases == nil || t.request.SessionHash == "" || !t.isTrialIn(t.service.selectionView(), derefGroupID(t.request.GroupID), account, now) {
 		return
 	}
-	if err := t.leases.Touch(ctx, account.ID, OpenAIAttemptModel(account, t.request.RequestedModel), derefGroupID(t.request.GroupID), t.member, now); err != nil {
+	if err := t.leases.Touch(ctx, account.ID, OpenAIAttemptModel(account, t.request.RequestedModel), derefGroupID(t.request.GroupID), t.memberFor(ctx, account.ID), now); err != nil {
 		slog.WarnContext(ctx, "sched_quality.trial_touch_failed", "component", "sched_quality", "account_id", account.ID, "error", err)
 	}
 }
@@ -199,7 +202,7 @@ func (t *selectionTrial) reserve(ctx context.Context, account *Account, full boo
 		acquired, generation, err := t.leases.Acquire(ctx, account.ID, model, gid, member, observedAt)
 		known = err == nil
 		if err == nil && acquired {
-			r := &selectionTrialReservation{leases: t.leases, account: account.ID, group: gid, model: model, member: member, request: t.request.SessionHash == "" || t.borrowing(ctx), session: TrialLeaseSessionMember(t.request.SessionHash), now: t.service.selectionNow}
+			r := &selectionTrialReservation{leases: t.leases, account: account.ID, group: gid, model: model, member: member, request: t.request.SessionHash == "" || t.borrowing(ctx), session: openAITrialBindingMember(ctx, t.request.GroupID, t.request.SessionHash), now: t.service.selectionNow}
 			guardSelectionReservation(ctx, r)
 			r.rememberRound(view, generation)
 			return r, true
@@ -311,7 +314,7 @@ func (s *OpenAIGatewayService) releaseDeletedTrialOwner(ctx context.Context, gro
 	stateCtx, cancel := resilienceStateContext(ctx)
 	defer cancel()
 	if account := s.selectionTrialOwner(stateCtx, owner); account != nil {
-		releaseSelectionTrial(stateCtx, s.selectionTrialLeases(), owner, OpenAIAttemptModel(account, req.RequestedModel), derefGroupID(groupID), TrialLeaseSessionMember(session))
+		releaseSelectionTrial(stateCtx, s.selectionTrialLeases(), owner, OpenAIAttemptModel(account, req.RequestedModel), derefGroupID(groupID), openAITrialBindingMember(ctx, groupID, session))
 	}
 }
 

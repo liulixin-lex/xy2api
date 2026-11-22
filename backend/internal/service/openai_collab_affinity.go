@@ -110,7 +110,7 @@ func NoteOpenAICollabCiphertextFailure(ctx context.Context, accountID int64, avo
 		return false
 	}
 	b.avoid(ctx, accountID, avoidUntil)
-	_ = b.deleteOwner(ctx, accountID)
+	_ = b.service.deleteStickySessionAccountIDIfOwner(ctx, &b.affinity.groupID, b.session, accountID)
 	return true
 }
 

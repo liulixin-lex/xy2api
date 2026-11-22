@@ -234,6 +234,11 @@ func releasePendingOpenAIStickyOwner(ctx context.Context, groupID *int64, sessio
 	}
 	change := pendingOpenAIStickyChange(ctx)
 	change.mu.Lock()
+	// A completed child placement no longer defers later terminal cleanup.
+	if _, thread := change.cache.(collabThreadVersionedCache); thread && change.done {
+		change.mu.Unlock()
+		return false
+	}
 	if owner == change.expected.AccountID {
 		change.ownerReleased = true
 	}
@@ -677,7 +682,11 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 		// Without the owner's mapping, let the member expire instead of removing
 		// a member under the client model, which may name a different upstream key.
 		if model != "" {
-			releaseSelectionTrial(ctx, change.leases, change.expected.AccountID, model, change.groupID, TrialLeaseSessionMember(change.trialSessionKey()))
+			member := TrialLeaseSessionMember(change.trialSessionKey())
+			if cache, ok := change.cache.(collabThreadVersionedCache); ok {
+				member = TrialLeaseSessionMember(cache.b.key)
+			}
+			releaseSelectionTrial(ctx, change.leases, change.expected.AccountID, model, change.groupID, member)
 		}
 	}
 	if change.dualWriteLegacy && change.expected.LegacyKey != "" {
