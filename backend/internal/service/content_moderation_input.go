@@ -38,7 +38,12 @@ func extractContentModerationInput(protocol string, body []byte, filterReminders
 	case ContentModerationProtocolAnthropicMessages:
 		collector.collectLastAnthropicUserMessage(gjson.GetBytes(body, "messages"), &parts, &images)
 	case ContentModerationProtocolOpenAIChat:
-		collector.collectLastRoleMessage(gjson.GetBytes(body, "messages"), "user", &parts, &images)
+		if messages := gjson.GetBytes(body, "messages"); messages.Exists() {
+			collector.collectLastRoleMessage(messages, "user", &parts, &images)
+		} else {
+			// Chat without messages forwards its input as a Responses request.
+			collector.collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
+		}
 	case ContentModerationProtocolOpenAIResponses:
 		collector.collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
 	case ContentModerationProtocolGemini:
@@ -216,17 +221,13 @@ func (collector moderationTextCollector) collectLastResponsesInput(input gjson.R
 	case input.Type == gjson.String:
 		collector.addModerationText(parts, input.String())
 	case input.IsArray():
-		array := input.Array()
-		if len(array) == 0 {
+		item, ok := lastResponsesUserTextItem(input.Array())
+		if !ok {
 			return
 		}
-		last := array[len(array)-1]
-		if !collector.isResponsesUserTextItem(last) {
-			return
-		}
-		collector.collectContentValue(last.Get("content"), parts, images)
-		if last.Get("type").String() == "input_text" || last.Get("text").Exists() {
-			collector.collectContentValue(last, parts, images)
+		collector.collectContentValue(item.Get("content"), parts, images)
+		if item.Get("type").String() == "input_text" || item.Get("text").Exists() {
+			collector.collectContentValue(item, parts, images)
 		}
 	case input.IsObject():
 		if collector.isResponsesUserTextItem(input) {
@@ -236,6 +237,28 @@ func (collector moderationTextCollector) collectLastResponsesInput(input gjson.R
 			}
 		}
 	}
+}
+
+// lastResponsesUserTextItem picks the item of a Responses input array to
+// moderate: the last item when it is user text, whatever its type, and
+// otherwise the last user text item in the trailing window. A tool output
+// inside the window is never the user's words. Reminder blocks count as text
+// here, so the keyword and semantic checks read the same item.
+func lastResponsesUserTextItem(items []gjson.Result) (gjson.Result, bool) {
+	if len(items) == 0 {
+		return gjson.Result{}, false
+	}
+	unfiltered := moderationTextCollector{}
+	if last := items[len(items)-1]; unfiltered.isResponsesUserTextItem(last) {
+		return last, true
+	}
+	window := responsesTrailingWindow(items)
+	for i := len(window) - 1; i >= 0; i-- {
+		if !isResponsesToolOutputItem(window[i]) && unfiltered.isResponsesUserTextItem(window[i]) {
+			return window[i], true
+		}
+	}
+	return gjson.Result{}, false
 }
 
 // responsesTrailingWindow returns the run of consecutive non-model items at
@@ -277,13 +300,18 @@ func isResponsesNonModelItem(item gjson.Result) bool {
 	if !item.IsObject() {
 		return false
 	}
-	typ := item.Get("type")
-	if typ.Type == gjson.String && strings.HasSuffix(typ.String(), "_output") {
+	if isResponsesToolOutputItem(item) {
 		return true
 	}
+	typ := item.Get("type")
 	role := item.Get("role")
 	isMessage := typ.Type == gjson.String && typ.String() == "message" || !typ.Exists() && role.Type == gjson.String
 	return isMessage && strings.ToLower(strings.TrimSpace(role.String())) != "assistant"
+}
+
+func isResponsesToolOutputItem(item gjson.Result) bool {
+	typ := item.Get("type")
+	return typ.Type == gjson.String && strings.HasSuffix(typ.String(), "_output")
 }
 
 func (collector moderationTextCollector) isResponsesUserTextItem(item gjson.Result) bool {
