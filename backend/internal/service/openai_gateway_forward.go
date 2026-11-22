@@ -851,8 +851,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if lineage := s.beginOpenAIM3(c, lineageEntryBody); lineage != nil {
 			lineageSessionHash = lineage.session
 		}
-		if stripped, count := s.stripHTTPInvalidEncryptedContent(body, lineageGroupID, lineageSessionHash, account.ID, credentialVersion); count > 0 {
-			body, requestView, reqBody = stripped, newOpenAIRequestView(stripped), nil
+		if resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+			if stripped, count := s.stripHTTPInvalidEncryptedContent(body, lineageGroupID, lineageSessionHash, account.ID, credentialVersion); count > 0 {
+				body, requestView, reqBody = stripped, newOpenAIRequestView(stripped), nil
+			}
 		}
 	}
 	SetOpsUpstreamModel(c, upstreamModel)
@@ -1255,6 +1257,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Handle error response
 		if resp.StatusCode >= 400 {
 			respBody := s.readUpstreamErrorBody(resp)
+			if signal := collabPreemptLossless(ctx, c, account, respBody, resp.StatusCode, ""); signal != nil {
+				_ = resp.Body.Close()
+				return nil, signal
+			}
 			observeOpenAIFCOHTTPError(ctx, c, body, respBody, resp.StatusCode, fcoCompat.rules(ctx))
 			schedCapture.finishHTTP(resp, respBody)
 			_ = resp.Body.Close()
@@ -1655,6 +1661,9 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 // group prompt or normalize stream after the caller's original body was read.
 // Missing replayable request bytes make learning unsafe, so skip it then.
 func (s *OpenAIGatewayService) learnOpenAIStreamOnlyHTTPFailure(ctx context.Context, c *gin.Context, account *Account, request *http.Request, response *http.Response, errorBody []byte, protocol string) *UpstreamFailoverError {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return nil
+	}
 	if !resilience.Current().StreamOnlyLearningOn() || account == nil || response == nil || response.StatusCode != http.StatusBadRequest ||
 		request == nil || request.URL == nil || request.GetBody == nil || isExplicitOpenAICompactContext(c) || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
 		return nil
