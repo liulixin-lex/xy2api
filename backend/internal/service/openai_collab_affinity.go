@@ -133,7 +133,7 @@ func (s *OpenAIGatewayService) AvoidOpenAICollabStateAccount(ctx context.Context
 		}
 		if NoteOpenAICollabCiphertextFailure(ctx, accountID, time.Now().Add(avoid)) {
 			a := openAICollabAffinityFrom(ctx)
-			session = openAITerminalRejectionSession(ctx, "collab-thread-v1:"+string(a.identity.Thread))
+			session = openAITerminalRejectionSession(ctx, "collab-thread-v1:"+string(a.identity.Scope.Tenant)+":"+string(a.identity.Thread))
 		}
 	}
 	s.AvoidOpenAIStateAccount(ctx, groupID, session, accountID)

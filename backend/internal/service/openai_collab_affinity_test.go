@@ -316,6 +316,28 @@ func TestCollabAffinityRejectionWrapperKeepsExistingTiming(t *testing.T) {
 	}
 }
 
+func TestCollabAffinityAvoidanceFallbackRetainsTenant(t *testing.T) {
+	withResilienceSettings(t, nil)
+	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+	s := resilience.NewCollabTreeAffinity(32, time.Hour)
+	settings := collabAffinitySettings()
+	first := collabAffinityIdentity("child", "root")
+	second := first
+	second.Scope.Tenant = "another-tenant"
+	for _, identity := range []resilience.CollabTreeHint{first, second} {
+		ctx := WithOpenAICollabTreeAffinity(selectionReviewContext(), s, settings, 7, identity, resilience.CollabRoleChild, true)
+		f.svc.AvoidOpenAICollabStateAccount(ctx, 7, "shared-session", 1, true)
+		avoided, err := f.svc.resilience.store.SessionAvoid(ctx, 7, "collab-thread-v1:"+string(identity.Scope.Tenant)+":"+string(identity.Thread))
+		require.NoError(t, err)
+		require.Contains(t, avoided, int64(1))
+		if identity == first {
+			other, err := f.svc.resilience.store.SessionAvoid(ctx, 7, "collab-thread-v1:"+string(second.Scope.Tenant)+":"+string(second.Thread))
+			require.NoError(t, err)
+			require.Empty(t, other)
+		}
+	}
+}
+
 func TestCollabAffinityLeaseSuppressesPendingQualityMigration(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, hard := range []bool{false, true} {
