@@ -123,7 +123,6 @@ func TestCollabIngressAdversarialScaling(t *testing.T) {
 	// checks are covered by the generated metadata fixtures.
 	for _, kind := range []string{"escape_letters", "escape_controls", "c", "n", "backslashes", "nesting", "short_strings"} {
 		t.Run(kind, func(t *testing.T) {
-			var previous time.Duration
 			var previousWork, previousGrowth int64
 			for _, size := range []int{128 << 10, 256 << 10, 512 << 10} {
 				body := collabAdversarialBody(size, kind)
@@ -142,16 +141,21 @@ func TestCollabIngressAdversarialScaling(t *testing.T) {
 				if previousGrowth > 0 && growth > 2*previousGrowth+4096 {
 					t.Errorf("doubling added work grew from %d to %d", previousGrowth, growth)
 				}
-				elapsed := collabMeasure(func() { InspectCollabIngress(body, CollabIngressValidationPassed) }, 3)
-				t.Logf("bytes=%d elapsed=%s work=%d", len(body), elapsed, work)
-				if previous > 0 && elapsed > previous*3+100*time.Microsecond {
-					t.Errorf("doubling input grew from %s to %s", previous, elapsed)
-				}
-				previous = elapsed
+				t.Logf("bytes=%d work=%d", len(body), work)
 				if previousWork > 0 {
 					previousGrowth = growth
 				}
 				previousWork = work
+			}
+			// Wall time between sizes 16 times apart: linear costs about 16 times,
+			// quadratic about 256. Shared test machines are noisy, so the bound is
+			// wide and each side is the best of several runs.
+			small, large := collabAdversarialBody(256<<10, kind), collabAdversarialBody(4<<20, kind)
+			fast := collabMeasure(func() { InspectCollabIngress(small, CollabIngressValidationPassed) }, 5)
+			slow := collabMeasure(func() { InspectCollabIngress(large, CollabIngressValidationPassed) }, 2)
+			t.Logf("256 KiB %s, 4 MiB %s", fast, slow)
+			if slow > 48*fast+2*time.Millisecond {
+				t.Errorf("16 times the input took %s against %s", slow, fast)
 			}
 		})
 	}
