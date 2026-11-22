@@ -343,6 +343,9 @@ gateway:
   # Docker 用户可将宿主机文件挂载到 /app/data/codex-instructions.md.tmpl，
   # 然后把本字段指向该路径。
   forced_codex_instructions_template_file: ""
+  # Preserve GPT-6.2 Chat system messages in their original positions as
+  # developer messages when bridging OpenAI Chat Completions to Responses.
+  gpt62_chat_system_as_developer: false
   # OpenAI 透传模式是否放行客户端超时头（如 x-stainless-timeout）
   # 默认 false：过滤超时头，降低上游提前断流风险。
   openai_passthrough_allow_timeout_headers: false

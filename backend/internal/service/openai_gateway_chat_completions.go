@@ -279,6 +279,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		responsesBody []byte
 		err           error
 	)
+	systemAsDeveloper := !isResponsesShape && account.Platform == PlatformOpenAI && isGPT62 &&
+		s.cfg != nil && s.cfg.Gateway.GPT62ChatSystemAsDeveloper
+	groupPromptProtocol := GroupPromptResponses
 	if isResponsesShape {
 		responsesBody, err = sjson.SetBytes(body, "model", upstreamModel)
 		if err != nil {
@@ -332,6 +335,14 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		// Normal path: convert Chat Completions → Responses.
 		// ChatCompletionsToResponses always sets Stream=true (upstream always streams).
 		chatReq.Model = upstreamModel
+		if systemAsDeveloper {
+			groupPromptProtocol = groupPromptResponsesDeveloper
+			for i := range chatReq.Messages {
+				if chatReq.Messages[i].Role == "system" {
+					chatReq.Messages[i].Role = "developer"
+				}
+			}
+		}
 		responsesReq, err = apicompat.ChatCompletionsToResponsesWithOptions(&chatReq, m7ConversionOptions(ctx))
 		if err != nil {
 			return nil, fmt.Errorf("convert chat completions to responses: %w", err)
@@ -465,7 +476,7 @@ retryChatResponsesWire:
 	if err != nil {
 		return nil, err
 	}
-	upstreamReq, wire, err := s.buildUpstreamRequestWithBody(fcoCompat.buildContext(upstreamCtx), c, account, responsesBody, token, true, promptCacheKey, false)
+	upstreamReq, wire, err := s.buildUpstreamRequestWithBody(fcoCompat.buildContext(upstreamCtx), c, account, responsesBody, token, true, promptCacheKey, false, groupPromptProtocol)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)

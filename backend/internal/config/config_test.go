@@ -752,6 +752,17 @@ func TestLoadDefaultBatchImageQueueDisabled(t *testing.T) {
 	require.False(t, cfg.BatchImage.QueueEnabled)
 }
 
+func TestLoadGPT62ChatSystemAsDeveloper(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.Gateway.GPT62ChatSystemAsDeveloper)
+	t.Setenv("GATEWAY_GPT62_CHAT_SYSTEM_AS_DEVELOPER", "true")
+	cfg, err = Load()
+	require.NoError(t, err)
+	require.True(t, cfg.Gateway.GPT62ChatSystemAsDeveloper)
+}
+
 func TestLoadIdempotencyConfigFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("IDEMPOTENCY_OBSERVE_ONLY", "false")
