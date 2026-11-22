@@ -384,6 +384,8 @@ func TestModerationFCOSharedRules(t *testing.T) {
 			{"reasoning", `{"type":"reasoning","summary":[{"type":"summary_text","text":"thinking"}]}`},
 			{"web_search_call", `{"type":"web_search_call","id":"ws_1","status":"completed"}`},
 			{"item_reference", `{"type":"item_reference","id":"msg_1"}`},
+			{"empty object", `{}`},
+			{"unknown type", `{"type":"future_item","role":"developer","content":"unknown"}`},
 			{"string element", `"bare string element"`},
 			{"number element", `42`},
 			{"array element", `[{"role":"user","content":"nested"}]`},
@@ -401,6 +403,37 @@ func TestModerationFCOSharedRules(t *testing.T) {
 			}, windowCase{
 				name:  "closed at the end by " + boundary.label,
 				items: []string{user("q"), item("outside"), boundary.item},
+			})
+		}
+		for _, transparent := range []struct{ label, item string }{
+			{"additional_tools", `{"type":"additional_tools","role":"developer","tools":[{"type":"function","name":"lookup"}]}`},
+			{"additional_tools shaped like an item", `{"type":"additional_tools","role":"developer","namespace":"agent","name":"browser_info","output":"declared","content":"declared"}`},
+			{"compaction_trigger", `{"type":"compaction_trigger"}`},
+			{"compaction_trigger shaped like an item", `{"type":"compaction_trigger","namespace":"agent","name":"browser_info","output":"triggered"}`},
+		} {
+			cases = append(cases, windowCase{
+				name:  transparent.label + " right after the user message",
+				items: []string{user("q"), transparent.item, item("late")},
+				added: []string{wrap("late")},
+			}, windowCase{
+				name:  transparent.label + " after a standalone item",
+				items: []string{user("q"), item("first"), transparent.item, item("second")},
+				added: []string{wrap("first"), wrap("second")},
+			}, windowCase{
+				name:  transparent.label + " last after a standalone item",
+				items: []string{user("q"), item("page"), transparent.item},
+				added: []string{wrap("page")},
+			}, windowCase{
+				name:  transparent.label + " last after the user message adds nothing itself",
+				items: []string{assistant("a"), user("q"), transparent.item},
+			}, windowCase{
+				name:     transparent.label + " before the user message",
+				items:    []string{item("page"), transparent.item, user("q")},
+				question: "q",
+				added:    []string{wrap("page")},
+			}, windowCase{
+				name:  transparent.label + " does not reopen an earlier turn",
+				items: []string{item("old"), user("q"), call, result, transparent.item},
 			})
 		}
 		for _, tc := range cases {
@@ -523,6 +556,30 @@ func TestModerationFCOSharedRules(t *testing.T) {
 		rebuilt := []byte(`{"input":[{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"dup page"},{"role":"user","content":"hi"}]}`)
 		_, keyword := fcoModerationExtract(ctx, ContentModerationProtocolOpenAIResponses, rebuilt)
 		require.Equal(t, "hi", keyword)
+	})
+
+	// Items that spell type or namespace with JSON escapes are outside the
+	// rewrite. A request whose only items are spelled that way gets no added
+	// keyword text.
+	t.Run("escaped type or namespace", func(t *testing.T) {
+		for name, fields := range map[string]string{
+			"namespace": `"type":"function_call_output","namespace":"\u0061gent"`,
+			"type":      `"type":"function_call_\u006futput","namespace":"agent"`,
+			"both":      `"type":"function_call_\u006futput","namespace":"\u0061gent"`,
+		} {
+			t.Run(name, func(t *testing.T) {
+				escaped := `{` + fields + `,"name":"browser_info","output":"escaped page"}`
+				for _, input := range []string{escaped, `{"role":"user","content":"question"},` + escaped, escaped + `,{"role":"user","content":"question"}`} {
+					body := []byte(`{"input":[` + input + `]}`)
+					for _, mode := range []string{resilience.FCOCompatModeReactive, resilience.FCOCompatModeProactive} {
+						_, keyword := fcoModerationExtract(fcoModerationContext(fcoModerationSettings(mode), body), ContentModerationProtocolOpenAIResponses, body)
+						_, wantKeyword := moderationBaseline(ContentModerationProtocolOpenAIResponses, body)
+						require.Equal(t, wantKeyword, keyword, "%s %s", mode, body)
+						require.NotContains(t, keyword, "escaped page")
+					}
+				}
+			})
+		}
 	})
 
 	t.Run("a settings reload after ingress does not change the audited rules", func(t *testing.T) {

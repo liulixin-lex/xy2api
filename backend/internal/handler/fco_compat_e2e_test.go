@@ -304,6 +304,21 @@ func TestFCOE2EKeywordBlocksBeforeSendAndSkipsHistory(t *testing.T) {
 	}
 }
 
+func TestFCOE2EKeywordSeesPastTransparentItems(t *testing.T) {
+	for name, trailing := range map[string]string{
+		"additional_tools":   `{"type":"additional_tools","role":"developer","tools":[]}`,
+		"compaction_trigger": `{"type":"compaction_trigger"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			router, up, audit := newFCOE2EFixture(t, resilience.FCOCompatModeReactive, fcorelay.VersionV0220, "forbidden_marker", service.Account{}, nil)
+			rec := captureRequest(router, "/v1/responses", fcoE2EBody(fcoE2EUser, fcoE2EItem("browser_info", "page forbidden_marker"), trailing))
+			require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+			require.Empty(t, up.bodies)
+			requireFCOE2EAudit(t, audit, fcoE2EWrapped("browser_info", "page forbidden_marker"))
+		})
+	}
+}
+
 func TestFCOE2EProactive(t *testing.T) {
 	for _, tc := range []struct{ version, name string }{
 		{fcorelay.VersionV0220, "browser_info"}, {fcorelay.VersionV0224, "terminal_info"},

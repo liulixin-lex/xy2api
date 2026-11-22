@@ -34,6 +34,8 @@ func TestExtractContentModerationInputMatchesBaseline(t *testing.T) {
 		`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}`,
 		`{"type":"input_text","text":"bare text"}`,
 		`{"type":"reasoning","summary":[]}`,
+		`{"type":"additional_tools","role":"developer","tools":[]}`,
+		`{"type":"compaction_trigger"}`,
 		`"bare string"`,
 	}
 	bodies := []string{

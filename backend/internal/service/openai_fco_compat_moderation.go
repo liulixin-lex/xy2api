@@ -22,9 +22,9 @@ func openAIFCOCompatOutboundText(match FCOCompatMatch, output string) string {
 // function_call_output items an outbound attempt may send as user text. The
 // zero value is disabled and adds nothing.
 //
-// Only the keyword check reads them. They are context the client generates,
-// which semantic moderation flags falsely, so they neither join its input nor
-// cause a semantic call.
+// Only the keyword check reads the output text added here. It is context the
+// client generates, which semantic moderation flags falsely, so it neither
+// joins the semantic input nor causes a semantic call.
 //
 // The keyword check covers the matched items in the trailing window of the
 // input the entry point received, the items that are new in this request.
