@@ -286,9 +286,9 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 		loads, _ = s.concurrencyService.GetAccountsLoadBatchFresh(ctx, selectionLoadRequests(candidates))
 	}
 	candidates = s.selectionAvailable(ctx, candidates, loads)
-	session.recheck = func(ctx context.Context, a *Account) *Account {
+	session.recheck = func(ctx context.Context, a *Account, slot *AcquireResult) *Account {
 		if req.candidateConstraint != nil {
-			return s.constrainedSlotAccount(ctx, req, a)
+			return s.constrainedSlotAccount(ctx, req, a, slot)
 		}
 		fresh := s.recheckSelectionAccount(ctx, req, a)
 		if fresh == nil {

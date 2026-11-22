@@ -60,6 +60,7 @@ type openAIRequestCandidateConstraint struct {
 	actualModel       string
 	excludedAccountID int64
 	candidateFilter   func(*Account) bool
+	changedLimits     map[int64]struct{} // Only this public selection; skip stale slots in later internal passes.
 }
 
 type openAIRequestCandidateConstraintKey struct{}
@@ -94,6 +95,9 @@ func requestCandidateConstraintFailure(req OpenAIAccountScheduleRequest, account
 	if account == nil || constraint.actualModel == "" || constraint.excludedAccountID <= 0 ||
 		account.ID == constraint.excludedAccountID || account.Priority != constraint.originalPriority ||
 		OpenAIAttemptModel(account, req.RequestedModel) != constraint.actualModel {
+		return "request_candidate_constraint"
+	}
+	if _, rejected := constraint.changedLimits[account.ID]; rejected {
 		return "request_candidate_constraint"
 	}
 	if constraint.candidateFilter != nil && !constraint.candidateFilter(account) {
@@ -612,7 +616,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 			RequiredImageCapability: requiredImageCapability,
 			RequireCompact:          requireCompact,
 			ExcludedIDs:             excludedIDs,
-			candidateConstraint:     openAIRequestCandidateConstraintFrom(ctx),
+			candidateConstraint:     parent.candidateConstraint,
 			RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
 		})
 		if err != nil {

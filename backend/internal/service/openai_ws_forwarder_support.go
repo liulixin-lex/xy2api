@@ -482,7 +482,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	if acquireErr == nil && result != nil && result.Acquired {
 		return withOpenAISelectionSlotGuard(result.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
 			if req.candidateConstraint != nil {
-				account = s.constrainedSlotAccount(ctx, req, account)
+				account = s.constrainedSlotAccount(ctx, req, account, result)
 				if account == nil {
 					return nil, nil
 				}

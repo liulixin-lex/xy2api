@@ -27,7 +27,7 @@ type selectionSession struct {
 	bindings          gatewaySessionBindingReader
 	marks             *fullMarks
 	bindingTTL        time.Duration
-	recheck           func(context.Context, *Account) *Account
+	recheck           func(context.Context, *Account, *AcquireResult) *Account
 	resetAt           func(int64) time.Time
 	leases            SchedTrialLeases
 	vetoOpportunity   func(string, map[int64]struct{}, map[int64]struct{}, func(*Account) bool) *Account
@@ -236,7 +236,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		if ctx.Err() != nil {
 			return nil
 		}
-		target := s.recheck(ctx, item.account)
+		target := s.recheck(ctx, item.account, nil)
 		if target == nil || !s.candidateAllowed(s.view(), groupID, model, owner, target, migrate, req, s.now()) {
 			continue
 		}
@@ -259,10 +259,10 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 				}
 			}()
 			selected, _ := withOpenAISelectionSlotGuard(slot.ReleaseFunc, func(slotRelease func()) (*AccountSelectionResult, error) {
-				latest := s.recheck(ctx, target)
+				latest := s.recheck(ctx, target, slot)
 				latestOwner := owner
 				if !migrate {
-					latestOwner = s.recheck(ctx, owner)
+					latestOwner = s.recheck(ctx, owner, nil)
 				}
 				now, view = s.now(), s.view()
 				allowed := latest != nil && latestOwner != nil && s.candidateAllowed(view, groupID, model, latestOwner, latest, migrate, req, now)

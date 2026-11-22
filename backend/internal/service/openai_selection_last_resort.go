@@ -150,7 +150,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		if err == nil && result != nil && result.Acquired {
 			rejected := false
 			selection, err := withOpenAISelectionSlotGuard(result.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
-				latest := s.admitSelectionSlot(gateCtx, req, acc)
+				latest := s.admitSelectionSlot(gateCtx, req, acc, result)
 				if latest == nil {
 					rejected = true
 					return nil, nil
