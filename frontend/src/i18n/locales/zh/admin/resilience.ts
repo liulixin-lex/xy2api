@@ -42,7 +42,10 @@ export default {
         collaborationPlaintext: '协作消息明文化',
         collaborationPlaintextHint: '符合条件的新 Codex 协作消息（spawn_agent、send_message、followup_task）在上游未返回密文、网关未否决时以明文投递，减少换号后的协作会话报错。不修复已有会话历史。',
         collaborationPlaintextScope: '生效条件：Codex 客户端经原生 Responses HTTP 请求、模型在下方清单内，且账号开关开启，或 API Key 账号上的会话历史已带协作明文标记（会话连续性）。',
-        collaborationPlaintextOff: '关闭后，后续请求停止转换，进行中的响应仍会还原；已用过的会话在部分上游可能被拒绝，需新开会话。'
+        collaborationPlaintextOff: '关闭后，后续请求停止转换，进行中的响应仍会还原；已用过的会话在部分上游可能被拒绝，需新开会话。',
+        fcoCompat: '独立 function_call_output 兼容',
+        fcoCompatHint: 'Codex 客户端会发出不带 call_id 的具名 function_call_output（agent 命名空间），部分第三方中转会以 400 拒绝。名字在内置名单或下方追加名单中的条目改写为普通用户消息，原内容包在 <external_名称> 标签里。',
+        fcoCompatScope: '只作用于 OpenAI API Key 账号发往第三方中转的 Responses 请求，账号可在编辑页单独覆盖模式。总开关关闭或这里选“关闭”时，所有账号一律不处理。模式未关闭时，请求末尾新到的名单内条目会在选号之前参与关键词检查（需站点配置拦截关键词、处于前置拦截模式且审计策略不是“仅 API”），命中时按站点现有的关键词规则处理（拦截或仅记录）；兼容层追加的这类条目的 output 文本只做关键词检查，不计入也不触发语义审计。是否检查只看全局模式，与请求最终发往哪类账号无关；选“关闭”可撤回。'
       },
       fields: {
         balancePause: '首次暂停时长（秒）',
@@ -68,7 +71,13 @@ export default {
         learnTtlHint: '默认 21600（6 小时），到期自动恢复；修改只影响之后新学到的记录。也可在账号列表的状态列手动清除。',
         collaborationModels: '已验证模型',
         collaborationModelsHint: '每行一个，按模型映射后的实际出站模型匹配（不区分大小写）。最多 16 个，每个不超过 128 个字符，重复项自动合并；不在清单中的模型不转换。',
-        collaborationModelsEmpty: '清单为空，开关打开也不会转换任何请求。'
+        collaborationModelsEmpty: '清单为空，开关打开也不会转换任何请求。',
+        fcoCompatMode: '模式',
+        fcoCompatNames: '追加条目名',
+        fcoCompatNamesHint: '内置名单之外需要改写的 agent 命名空间条目名：英文字母、数字或下划线，1–128 个字符，区分大小写，不去首尾空白。最多 {max} 个，保存后按字典序排列；内置规则已占用的名字不能追加。',
+        fcoCompatNamesEmpty: '未追加，只按内置名单处理。',
+        fcoCompatAdd: '添加',
+        fcoCompatRemove: '移除 {name}'
       },
       switches: {
         postOutputRebind: '输出后首次失败即改绑',
@@ -82,6 +91,20 @@ export default {
         failedFrameRetryAfter: 'response.failed 附带重试时间',
         failedFrameRetryAfterHint: '网关合成的 response.failed 按情况附带 retry-after：有健康备选时不带或只带 1 秒；没有健康账号且能算出恢复时间时带 2–10 秒；回合封顶、余额不足、内容拒绝，以及模型不存在、请求或鉴权错误等不可重试的失败都不带。需要“错误语义与防风暴”开启；关闭后不带。'
       },
+      fcoCompatModes: {
+        off: '关闭',
+        offHint: '不处理，请求原样转发。',
+        reactive: '被动重放',
+        reactiveHint: '上游以该原因拒绝后，改写并在同一账号重试一次。',
+        proactive: '主动改写',
+        proactiveHint: '发往第三方中转前直接改写，不等上游拒绝。'
+      },
+      fcoCompatNameErrors: {
+        invalid: '条目名只能由英文字母、数字或下划线组成，1–128 个字符，不能带空白',
+        reserved: '该名字由内置规则处理，不能追加',
+        duplicate: '该名字已在列表中',
+        full: '最多追加 {max} 个条目名'
+      },
       advanced: '高级（完整 JSON）',
       advancedHint: '包含全部配置项；保存时由服务端校验，未通过不会生效。',
       applyAdvanced: '应用 JSON 到表单',
@@ -94,7 +117,9 @@ export default {
       reload: '重新加载',
       invalidNumber: '{field} 需为 {min}–{max} 之间的整数',
       invalidCollaborationModelsCount: '已验证模型最多 {max} 个',
-      invalidCollaborationModelLength: '每个已验证模型不超过 {max} 个字符'
+      invalidCollaborationModelLength: '每个已验证模型不超过 {max} 个字符',
+      invalidFcoCompatMode: '模式需为关闭、被动重放或主动改写',
+      invalidFcoCompatNamesCount: '追加条目名最多 {max} 个'
     },
     panel: {
       title: '网关韧性',

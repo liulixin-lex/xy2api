@@ -1415,6 +1415,81 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_responses_supported).toBe(true)
   })
 
+  it('loads the fco compat override and removes the key when set back to inherit', async () => {
+    const account = buildAccount()
+    account.extra = { openai_fco_compat_mode: 'proactive', openai_responses_supported: true }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const select = wrapper.get<HTMLSelectElement>('[data-testid="openai-fco-compat-mode-select"]')
+    expect(select.element.value).toBe('proactive')
+    expect(Array.from(select.element.options).map((option) => option.value)).toEqual(['inherit', 'off', 'reactive', 'proactive'])
+
+    await select.setValue('inherit')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_fco_compat_mode')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_responses_supported).toBe(true)
+  })
+
+  it('writes the fco compat override and drops an unknown stored value', async () => {
+    for (const [stored, chosen] of [[undefined, 'off'], ['bogus', 'reactive'], ['off', 'proactive']] as const) {
+      const account = buildAccount()
+      account.extra = stored === undefined ? {} : { openai_fco_compat_mode: stored }
+      updateAccountMock.mockReset()
+      checkMixedChannelRiskMock.mockReset()
+      checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+      updateAccountMock.mockResolvedValue(account)
+
+      const wrapper = mountModal(account)
+      const select = wrapper.get<HTMLSelectElement>('[data-testid="openai-fco-compat-mode-select"]')
+      expect(select.element.value).toBe(stored === 'off' ? 'off' : 'inherit')
+      await select.setValue(chosen)
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+      expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_fco_compat_mode).toBe(chosen)
+      wrapper.unmount()
+    }
+  })
+
+  it('drops a leftover fco compat value from accounts that cannot show it', async () => {
+    for (const [platform, type, credentials] of [
+      ['openai', 'oauth', { access_token: 'token' }],
+      ['anthropic', 'apikey', { api_key: 'sk-test', base_url: 'https://api.anthropic.com' }]
+    ] as const) {
+      for (const stored of ['proactive', true]) {
+        const account = { ...buildAccount(), platform, type, credentials: { ...credentials }, extra: { openai_fco_compat_mode: stored, kept_flag: true } }
+        updateAccountMock.mockReset()
+        checkMixedChannelRiskMock.mockReset()
+        checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+        updateAccountMock.mockResolvedValue(account)
+
+        const wrapper = mountModal(account)
+        await wrapper.get('form#edit-account-form input[type="text"]').setValue('renamed')
+        await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+        await flushPromises()
+
+        expect(updateAccountMock, `${platform}/${type}`).toHaveBeenCalledTimes(1)
+        const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+        expect(extra, `${platform}/${type}`).toBeDefined()
+        expect(extra, `${platform}/${type}`).not.toHaveProperty('openai_fco_compat_mode')
+        expect(extra?.kept_flag).toBe(true)
+        wrapper.unmount()
+      }
+    }
+  })
+
+  it('shows the fco compat override only on OpenAI API key accounts', async () => {
+    const oauth = { ...buildAccount(), type: 'oauth', credentials: { access_token: 'token' } }
+    expect(mountModal(oauth).find('[data-testid="openai-fco-compat-mode-select"]').exists()).toBe(false)
+    const anthropic = { ...buildAccount(), platform: 'anthropic' }
+    expect(mountModal(anthropic).find('[data-testid="openai-fco-compat-mode-select"]').exists()).toBe(false)
+  })
+
   it('submits OpenAI APIKey endpoint capabilities from credentials', async () => {
     const account = buildAccount()
     account.credentials.openai_capabilities = ['chat_completions']

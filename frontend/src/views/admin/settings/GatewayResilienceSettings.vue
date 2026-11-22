@@ -136,6 +136,84 @@
             >{{ t('admin.resilience.settings.fields.collaborationModelsEmpty') }}</p>
           </div>
         </div>
+
+        <div class="rounded-xl border border-gray-200 p-4 lg:col-span-2 dark:border-dark-600" data-testid="resilience-card-fcoCompat">
+          <div class="min-w-0">
+            <p class="font-medium text-gray-900 dark:text-white">{{ t('admin.resilience.settings.sections.fcoCompat') }}</p>
+            <p class="mt-1 max-w-prose text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.settings.sections.fcoCompatHint') }}</p>
+            <p class="mt-1 max-w-prose text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.settings.sections.fcoCompatScope') }}</p>
+          </div>
+          <fieldset class="mt-3">
+            <legend class="input-label">{{ t('admin.resilience.settings.fields.fcoCompatMode') }}</legend>
+            <div class="grid gap-2 sm:grid-cols-3">
+              <label
+                v-for="mode in FCO_COMPAT_MODES"
+                :key="mode"
+                class="flex cursor-pointer items-start gap-2 rounded-lg border border-gray-200 px-3 py-2 dark:border-dark-600"
+                :data-testid="`resilience-fcoCompat-mode-${mode}`"
+              >
+                <input
+                  v-model="draft.fco_compat.mode"
+                  type="radio"
+                  name="resilience-fco-compat-mode"
+                  :value="mode"
+                  class="mt-0.5 text-primary-600 focus:ring-primary-500"
+                  :disabled="saving || !draft.enabled"
+                  :data-testid="`resilience-field-fcoCompatMode-${mode}`"
+                >
+                <span class="min-w-0">
+                  <span class="block text-sm text-gray-900 dark:text-white">{{ t(`admin.resilience.settings.fcoCompatModes.${mode}`) }}</span>
+                  <span class="mt-0.5 block text-xs text-gray-500 dark:text-dark-400">{{ t(`admin.resilience.settings.fcoCompatModes.${mode}Hint`) }}</span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+          <div class="mt-3 max-w-xl">
+            <div class="flex items-baseline justify-between gap-3">
+              <label for="resilience-fcoCompatName" class="input-label">{{ t('admin.resilience.settings.fields.fcoCompatNames') }}</label>
+              <span class="text-xs tabular-nums text-gray-500 dark:text-dark-400" data-testid="resilience-fcoCompatNames-count">{{ draft.fco_compat.admin_names.length }}/{{ FCO_COMPAT_MAX_ADMIN_NAMES }}</span>
+            </div>
+            <div class="flex gap-2">
+              <input
+                id="resilience-fcoCompatName"
+                v-model="fcoNameInput"
+                type="text"
+                class="input font-mono text-xs"
+                :disabled="saving"
+                spellcheck="false"
+                autocomplete="off"
+                :aria-invalid="fcoNameError ? 'true' : undefined"
+                aria-describedby="resilience-fcoCompatName-hint"
+                data-testid="resilience-field-fcoCompatName"
+                @keydown.enter.prevent="addFCOName"
+              >
+              <button type="button" class="btn btn-secondary shrink-0" :disabled="saving || !fcoNameInput" data-testid="resilience-fcoCompatName-add" @click="addFCOName">{{ t('admin.resilience.settings.fields.fcoCompatAdd') }}</button>
+            </div>
+            <p v-if="fcoNameError" role="alert" class="mt-1 text-xs text-red-700 dark:text-red-300" data-testid="resilience-fcoCompatName-error">{{ fcoNameError }}</p>
+            <p id="resilience-fcoCompatName-hint" class="input-hint">{{ t('admin.resilience.settings.fields.fcoCompatNamesHint', { max: FCO_COMPAT_MAX_ADMIN_NAMES }) }}</p>
+            <div v-if="draft.fco_compat.admin_names.length" class="mt-2 flex flex-wrap gap-2" data-testid="resilience-fcoCompatNames">
+              <span
+                v-for="name in draft.fco_compat.admin_names"
+                :key="name"
+                class="inline-flex max-w-full items-center gap-1.5 rounded-md bg-gray-100 px-2.5 py-1.5 text-xs text-gray-700 dark:bg-dark-600 dark:text-gray-200"
+              >
+                <span class="break-all font-mono">{{ name }}</span>
+                <button
+                  type="button"
+                  class="shrink-0 rounded text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                  :disabled="saving"
+                  :aria-label="t('admin.resilience.settings.fields.fcoCompatRemove', { name })"
+                  :title="t('admin.resilience.settings.fields.fcoCompatRemove', { name })"
+                  :data-testid="`resilience-fcoCompatName-remove-${name}`"
+                  @click="removeFCOName(name)"
+                >
+                  <Icon name="x" size="xs" :stroke-width="2" />
+                </button>
+              </span>
+            </div>
+            <p v-else class="mt-2 text-xs text-gray-500 dark:text-dark-400" data-testid="resilience-fcoCompatNames-empty">{{ t('admin.resilience.settings.fields.fcoCompatNamesEmpty') }}</p>
+          </div>
+        </div>
       </div>
 
       <details class="border-t border-gray-100 pt-5 dark:border-dark-700" @toggle="onAdvancedToggle">
@@ -165,7 +243,14 @@ import { RouterLink } from 'vue-router'
 import { adminAPI } from '@/api/admin'
 import type { GatewayResilienceSettings } from '@/api/admin/resilience'
 import Toggle from '@/components/common/Toggle.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import {
+  FCO_COMPAT_MAX_ADMIN_NAMES,
+  FCO_COMPAT_MODES,
+  fcoCompatAdminNameProblem,
+  isFCOCompatMode
+} from '@/utils/fcoCompat'
 
 type Settings = GatewayResilienceSettings
 
@@ -203,6 +288,8 @@ const advancedText = ref('')
 const loading = ref(false), saving = ref(false), loaded = ref(false), loadFailed = ref(false), saved = ref(false)
 const error = ref('')
 const collabModelsText = ref('')
+const fcoNameInput = ref('')
+const fcoNameError = ref('')
 let disposed = false
 
 // Mirrors resilience.CollaborationPlaintextSettings validation; the server stays authoritative.
@@ -289,6 +376,27 @@ watch(collabModelsText, (text) => {
   if (draft.value) draft.value.collaboration_plaintext.models = parseCollabModels(text)
 })
 
+watch(fcoNameInput, () => { fcoNameError.value = '' })
+
+// The list stays sorted like the server stores it (byte order), so a save round-trip is not dirty.
+function addFCOName() {
+  if (!draft.value || !fcoNameInput.value) return
+  const name = fcoNameInput.value
+  const names = draft.value.fco_compat.admin_names
+  const problem = fcoCompatAdminNameProblem(name, names)
+  if (problem) {
+    fcoNameError.value = t(`admin.resilience.settings.fcoCompatNameErrors.${problem}`, { max: FCO_COMPAT_MAX_ADMIN_NAMES })
+    return
+  }
+  draft.value.fco_compat.admin_names = [...names, name].sort()
+  fcoNameInput.value = ''
+}
+
+function removeFCOName(name: string) {
+  if (!draft.value) return
+  draft.value.fco_compat.admin_names = draft.value.fco_compat.admin_names.filter((item) => item !== name)
+}
+
 function syncCollabModelsText() {
   collabModelsText.value = draft.value?.collaboration_plaintext.models.join('\n') ?? ''
 }
@@ -297,7 +405,11 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-function isSettings(value: unknown): value is Settings {
+// fco_compat is checked apart: documents saved before it existed have no such section.
+type SettingsDocument = Omit<Settings, 'fco_compat'> & { fco_compat?: unknown }
+type FCOCompatSection = Settings['fco_compat']
+
+function isSettings(value: unknown): value is SettingsDocument {
   if (!value || typeof value !== 'object') return false
   const s = value as Partial<Settings>
   return typeof s.enabled === 'boolean' && !!s.budget && !!s.keepalive && !!s.errors && !!s.disconnect &&
@@ -305,11 +417,24 @@ function isSettings(value: unknown): value is Settings {
     !!s.failure && !!s.stream && !!s.capability && Array.isArray(s.collaboration_plaintext?.models)
 }
 
+// The mode is checked on save; the names are checked where they enter the draft.
+function isFCOCompatSection(value: unknown): value is FCOCompatSection {
+  return !!value && typeof value === 'object' && Array.isArray((value as Partial<FCOCompatSection>).admin_names)
+}
+
+const fcoCompatDefaults = (): FCOCompatSection => ({ mode: 'reactive', admin_names: [] })
+
+// A server answer without a usable section renders with the defaults (mirrors resilience.Defaults).
+function withFCOCompat(doc: SettingsDocument): Settings {
+  return { ...doc, fco_compat: isFCOCompatSection(doc.fco_compat) ? doc.fco_compat : fcoCompatDefaults() }
+}
+
 function accept(settings: Settings, defaultSettings?: Settings) {
   draft.value = clone(settings)
   baseline.value = JSON.stringify(draft.value)
   advancedText.value = JSON.stringify(draft.value, null, 2)
   syncCollabModelsText()
+  fcoNameError.value = ''
   if (defaultSettings) defaults.value = clone(defaultSettings)
 }
 
@@ -327,14 +452,37 @@ function onAdvancedToggle(event: Event) {
 
 function applyAdvanced() {
   error.value = ''
+  let parsed: unknown
   try {
-    const parsed: unknown = JSON.parse(advancedText.value)
-    if (!isSettings(parsed)) throw new Error('shape')
-    draft.value = clone(parsed)
-    syncCollabModelsText()
+    parsed = JSON.parse(advancedText.value)
   } catch {
-    error.value = t('admin.resilience.settings.invalidJson')
+    parsed = undefined
   }
+  if (!draft.value || !isSettings(parsed)) {
+    error.value = t('admin.resilience.settings.invalidJson')
+    return
+  }
+  // A document without the section (saved before it existed) keeps the current one.
+  const fco = parsed.fco_compat === undefined ? clone(draft.value.fco_compat) : parsed.fco_compat
+  if (!isFCOCompatSection(fco)) {
+    error.value = t('admin.resilience.settings.invalidJson')
+    return
+  }
+  // Check every name, then de-duplicate and sort like the server, so the count and the cap see the stored list.
+  for (const name of fco.admin_names as unknown[]) {
+    const problem = typeof name === 'string' ? fcoCompatAdminNameProblem(name, []) : 'invalid'
+    if (problem) {
+      error.value = t(`admin.resilience.settings.fcoCompatNameErrors.${problem}`, { max: FCO_COMPAT_MAX_ADMIN_NAMES })
+      return
+    }
+  }
+  const names = [...new Set(fco.admin_names)].sort()
+  if (names.length > FCO_COMPAT_MAX_ADMIN_NAMES) {
+    error.value = t('admin.resilience.settings.invalidFcoCompatNamesCount', { max: FCO_COMPAT_MAX_ADMIN_NAMES })
+    return
+  }
+  draft.value = clone({ ...parsed, fco_compat: { ...fco, admin_names: names } })
+  syncCollabModelsText()
 }
 
 function resetDefaults() {
@@ -361,6 +509,17 @@ function validate(settings: Settings): string {
   if (tooLong !== undefined) {
     return t('admin.resilience.settings.invalidCollaborationModelLength', { max: COLLAB_MODEL_MAX_CHARS })
   }
+  // Every entry point already checks the names; this is the last check before the server's.
+  const fco = settings.fco_compat
+  if (!isFCOCompatMode(fco.mode)) return t('admin.resilience.settings.invalidFcoCompatMode')
+  const names = fco.admin_names
+  if (names.length > FCO_COMPAT_MAX_ADMIN_NAMES) {
+    return t('admin.resilience.settings.invalidFcoCompatNamesCount', { max: FCO_COMPAT_MAX_ADMIN_NAMES })
+  }
+  for (const name of names) {
+    const problem = typeof name === 'string' ? fcoCompatAdminNameProblem(name, []) : 'invalid'
+    if (problem) return t(`admin.resilience.settings.fcoCompatNameErrors.${problem}`, { max: FCO_COMPAT_MAX_ADMIN_NAMES })
+  }
   return ''
 }
 
@@ -371,7 +530,7 @@ async function load() {
     const result = await adminAPI.resilience.getSettings()
     if (disposed) return
     if (!isSettings(result?.settings)) throw new Error('unexpected gateway resilience settings')
-    accept(result.settings, result.defaults)
+    accept(withFCOCompat(result.settings), isSettings(result.defaults) ? withFCOCompat(result.defaults) : undefined)
     loaded.value = true
   } catch {
     if (!disposed) loadFailed.value = true
@@ -393,7 +552,7 @@ async function save() {
     const result = await adminAPI.resilience.updateSettings(clone(draft.value))
     if (disposed) return
     if (!isSettings(result?.settings)) throw new Error('unexpected gateway resilience settings')
-    accept(result.settings, result.defaults)
+    accept(withFCOCompat(result.settings), isSettings(result.defaults) ? withFCOCompat(result.defaults) : undefined)
     saved.value = true
   } catch (cause) {
     if (!disposed) error.value = extractApiErrorMessage(cause, t('admin.resilience.settings.saveFailed'))

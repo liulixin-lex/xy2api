@@ -238,6 +238,54 @@ func (collector moderationTextCollector) collectLastResponsesInput(input gjson.R
 	}
 }
 
+// responsesTrailingWindow returns the run of consecutive non-model items at
+// the end of a Responses input array: what the client added after the last
+// model output. A request that continues a tool loop ends with a window of
+// tool outputs only, and an array that ends with model output has none.
+//
+// Two item types are transparent: the window spans them, but nothing is read
+// from them. additional_tools declares tools with a developer role and may
+// sit between or after client items (Codex Responses Lite), and
+// compaction_trigger has to be the last item, where Codex appends it to a
+// compaction request. Neither is model output, and stopping at them would
+// hide what the client just added.
+//
+// Every other type still bounds the window, item_reference, empty objects and
+// unknown types included: they may be or point to model output, and crossing
+// them would moderate content of earlier turns again.
+func responsesTrailingWindow(items []gjson.Result) []gjson.Result {
+	start := len(items)
+	for start > 0 && (isResponsesNonModelItem(items[start-1]) || isResponsesTransparentItem(items[start-1])) {
+		start--
+	}
+	return items[start:]
+}
+
+func isResponsesTransparentItem(item gjson.Result) bool {
+	if !item.IsObject() {
+		return false
+	}
+	typ := item.Get("type")
+	return typ.Type == gjson.String && (typ.String() == "additional_tools" || typ.String() == "compaction_trigger")
+}
+
+// isResponsesNonModelItem reports whether a Responses input item came from
+// the client side of a turn: a message whose role is not assistant (a message
+// may omit its type), or any tool output (*_output). Everything else,
+// including non-object elements, counts as model output.
+func isResponsesNonModelItem(item gjson.Result) bool {
+	if !item.IsObject() {
+		return false
+	}
+	typ := item.Get("type")
+	if typ.Type == gjson.String && strings.HasSuffix(typ.String(), "_output") {
+		return true
+	}
+	role := item.Get("role")
+	isMessage := typ.Type == gjson.String && typ.String() == "message" || !typ.Exists() && role.Type == gjson.String
+	return isMessage && strings.ToLower(strings.TrimSpace(role.String())) != "assistant"
+}
+
 func (collector moderationTextCollector) isResponsesUserTextItem(item gjson.Result) bool {
 	role := strings.ToLower(strings.TrimSpace(item.Get("role").String()))
 	if role == "user" {

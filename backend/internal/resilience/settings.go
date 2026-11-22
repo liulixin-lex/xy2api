@@ -8,6 +8,7 @@ package resilience
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"unicode/utf8"
@@ -37,6 +38,108 @@ type Settings struct {
 	Reservation            ReservationSettings            `json:"reservation"`
 	Stream                 StreamSettings                 `json:"stream"`
 	Capability             CapabilitySettings             `json:"capability"`
+	FCOCompat              FCOCompatSettings              `json:"fco_compat"`
+}
+
+// Modes of the standalone function_call_output compatibility rewrite.
+const (
+	// FCOCompatModeOff leaves outbound bodies untouched.
+	FCOCompatModeOff = "off"
+	// FCOCompatModeReactive rewrites and resends once after the upstream
+	// rejects a body for that reason.
+	FCOCompatModeReactive = "reactive"
+	// FCOCompatModeProactive rewrites before sending to a third-party relay.
+	FCOCompatModeProactive = "proactive"
+	// FCOCompatMaxAdminNames caps the administrator name list.
+	FCOCompatMaxAdminNames = 64
+)
+
+// fcoCompatAdminNameMaxLen matches the 128-character cap Codex applies when it
+// derives a name from an external key.
+const fcoCompatAdminNameMaxLen = 128
+
+// fcoCompatReservedPagePartPrefix reserves every page-part name: the built-in
+// rule owns the whole family, not just well-formed N_of_M suffixes.
+const fcoCompatReservedPagePartPrefix = "codex_apps_selected_page_part_"
+
+// fcoCompatReservedNames are the names the built-in rules own. Administrators
+// cannot add them, so an appended entry never changes a built-in rule.
+var fcoCompatReservedNames = map[string]struct{}{
+	"browser_info":         {},
+	"goal_objective":       {},
+	"untrusted_context":    {},
+	"ide_context":          {},
+	"untrusted_content":    {},
+	"proposed_plan":        {},
+	"terminal_info":        {},
+	"browser_tabs":         {},
+	"codex_apps_open_page": {},
+}
+
+// FCOCompatSettings controls the rewrite of standalone function_call_output
+// items (agent namespace, no call_id) that third-party relays reject.
+// AdminNames extends the built-in agent-namespace names; names are exact and
+// case-sensitive.
+type FCOCompatSettings struct {
+	Mode       string   `json:"mode"`
+	AdminNames []string `json:"admin_names"`
+}
+
+// ValidFCOCompatMode reports whether mode is off, reactive or proactive.
+func ValidFCOCompatMode(mode string) bool {
+	switch mode {
+	case FCOCompatModeOff, FCOCompatModeReactive, FCOCompatModeProactive:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsFCOCompatReservedName reports whether a built-in rule owns name.
+func IsFCOCompatReservedName(name string) bool {
+	if _, ok := fcoCompatReservedNames[name]; ok {
+		return true
+	}
+	return strings.HasPrefix(name, fcoCompatReservedPagePartPrefix)
+}
+
+// ValidFCOCompatAdminName reports whether name matches ^[A-Za-z0-9_]{1,128}$
+// and is not reserved. It does not trim: surrounding whitespace is invalid.
+func ValidFCOCompatAdminName(name string) bool {
+	if !fcoCompatAdminNameShape(name) {
+		return false
+	}
+	return !IsFCOCompatReservedName(name)
+}
+
+func fcoCompatAdminNameShape(name string) bool {
+	if name == "" || len(name) > fcoCompatAdminNameMaxLen {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+// fcoCompatNameForError keeps an echoed invalid name short.
+func fcoCompatNameForError(name string) string {
+	const limit = 48
+	if len(name) <= limit {
+		return name
+	}
+	return name[:limit] + "..."
+}
+
+// normalizeFCOCompatAdminNames returns a new sorted list without exact
+// duplicates. Entries are not trimmed, so invalid ones still fail Validate.
+func normalizeFCOCompatAdminNames(names []string) []string {
+	out := append(make([]string, 0, len(names)), names...)
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // StreamSettings controls stream protocol staging and terminal recognition.
@@ -241,6 +344,7 @@ func Defaults() Settings {
 		Reservation:   ReservationSettings{CacheAwareEstimate: true, OutputP99Cap: true},
 		Stream:        StreamSettings{PreludeStaging: true, NativePreludeWhitelist: true, StrictTerminal: true},
 		Capability:    CapabilitySettings{StreamOnlyLearning: true, LearnTTLSeconds: 21600},
+		FCOCompat:     FCOCompatSettings{Mode: FCOCompatModeReactive, AdminNames: []string{}},
 	}
 }
 
@@ -335,6 +439,16 @@ func (s Settings) Validate() error {
 		check(length >= 1 && length <= 128, "collaboration_plaintext.models entries must be 1-128 characters")
 	}
 
+	check(ValidFCOCompatMode(s.FCOCompat.Mode), "fco_compat.mode must be off, reactive or proactive")
+	check(len(s.FCOCompat.AdminNames) <= FCOCompatMaxAdminNames, "fco_compat.admin_names allows at most %d entries", FCOCompatMaxAdminNames)
+	for _, name := range s.FCOCompat.AdminNames {
+		if !fcoCompatAdminNameShape(name) {
+			check(false, "fco_compat.admin_names entries must be 1-%d ASCII letters, digits or underscores (got %q)", fcoCompatAdminNameMaxLen, fcoCompatNameForError(name))
+		} else if IsFCOCompatReservedName(name) {
+			check(false, "fco_compat.admin_names entry %q is reserved by a built-in rule", name)
+		}
+	}
+
 	if len(p) > 0 {
 		return &ValidationError{Problems: p}
 	}
@@ -399,6 +513,10 @@ func (s *Settings) normalize() {
 		}
 	}
 	s.CollaborationPlaintext.Models = models
+	if s.FCOCompat.Mode == "" {
+		s.FCOCompat.Mode = FCOCompatModeReactive
+	}
+	s.FCOCompat.AdminNames = normalizeFCOCompatAdminNames(s.FCOCompat.AdminNames)
 }
 
 // Normalized returns a copy with nil collections filled; handlers use it
@@ -519,6 +637,22 @@ func (s *Settings) CacheAwareEstimateOn() bool { return s.master() && s.Reservat
 // the model's recent P99.
 func (s *Settings) OutputP99CapOn() bool { return s.master() && s.Reservation.OutputP99Cap }
 
+// FCOCompatMode returns the global standalone function_call_output mode. It
+// is off while the master switch is off, so no account override can enable
+// it. An empty mode is the default; an unknown one fails closed.
+func (s *Settings) FCOCompatMode() string {
+	if !s.master() {
+		return FCOCompatModeOff
+	}
+	if s.FCOCompat.Mode == "" {
+		return FCOCompatModeReactive
+	}
+	if !ValidFCOCompatMode(s.FCOCompat.Mode) {
+		return FCOCompatModeOff
+	}
+	return s.FCOCompat.Mode
+}
+
 // FailureOn reports whether classification-driven penalties are active. It
 // follows the master switch only; individual penalties have their own gates.
 func (s *Settings) FailureOn() bool { return s.master() }
@@ -563,6 +697,7 @@ func (s Settings) Clone() Settings {
 	c.Failure.BalanceKeywordsExtra = append([]string(nil), s.Failure.BalanceKeywordsExtra...)
 	c.Keepalive.Edges = append([]string(nil), s.Keepalive.Edges...)
 	c.CollaborationPlaintext.Models = append([]string(nil), s.CollaborationPlaintext.Models...)
+	c.FCOCompat.AdminNames = append([]string(nil), s.FCOCompat.AdminNames...)
 	c.Budget.ModelOverrides = make(map[string]int, len(s.Budget.ModelOverrides))
 	for k, v := range s.Budget.ModelOverrides {
 		c.Budget.ModelOverrides[k] = v

@@ -347,6 +347,42 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.images_url_to_b64_json).toBe(true)
   })
 
+  it('omits the fco compat override by default so the account inherits the global mode', async () => {
+    await submitApiKeyAccount('openai')
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('openai_fco_compat_mode')
+  })
+
+  it('sends the chosen fco compat override in extra', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('openai account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    const select = wrapper.findComponent('[data-testid="openai-fco-compat-mode-select"]')
+    expect((select.props('options') as { value: string }[]).map((option) => option.value)).toEqual(['inherit', 'off', 'reactive', 'proactive'])
+    expect(select.props('modelValue')).toBe('inherit')
+    select.vm.$emit('update:modelValue', 'proactive')
+    await flushPromises()
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra?.openai_fco_compat_mode).toBe('proactive')
+  })
+
+  it('offers the fco compat override only for OpenAI API key accounts', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
+    expect(wrapper.find('[data-testid="openai-fco-compat-mode-select"]').exists()).toBe(false)
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'admin.accounts.types.chatgptOauth')
+    expect(wrapper.find('[data-testid="openai-fco-compat-mode-select"]').exists()).toBe(false)
+    await selectButtonByText(wrapper, 'API Key')
+    expect(wrapper.find('[data-testid="openai-fco-compat-mode-select"]').exists()).toBe(true)
+  })
+
   it('persists upstream model metadata after creating an account from preview', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

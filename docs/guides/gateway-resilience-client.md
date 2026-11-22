@@ -49,7 +49,10 @@
 | 响应归属不通过 | 400 / `previous_response_owner_mismatch` | `previous_response_id` / `previous_response_id is not available for this user` |
 | 可选账号都不支持 HTTP 续接（OAuth、SetupToken） | 400 / `http_continuation_unsupported` | `previous_response_id` / `The selected upstream does not support previous_response_id over HTTP; send complete input history` |
 | 既有工具输出校验发现缺 call_id | 400 / `tool_output_missing_call_id` | `input[i].call_id` / `input[i] (<type>) requires a non-empty string call_id; only a named function_call_output may omit call_id or use null` |
+| 上游中转不接受没有 call_id 的工具输出条目，且网关已无可做的改写 | 400 / `upstream_standalone_tool_output_unsupported` | 无 / `The selected upstream does not accept tool output items without call_id. Remove the item or provide its call_id.` |
 | 上游明确报告续接状态过期或不存在 | 410 / `upstream_continuation_expired` | `previous_response_id` / `The upstream continuation state is no longer available; send complete input history` |
+
+`upstream_standalone_tool_output_unsupported` 只在尚未向客户端输出时返回；已经输出（含首包前的保活帧）之后上游才以该原因拒绝时，流按上游原错误结束。兼容模式关闭或账号不在生效范围内时也返回上游原错误。
 
 响应归属按用户判断，同一用户换了 API 密钥仍可续接自己的响应。走原生 Responses 的 API Key 账号收到的 `previous_response_id` 与 `store`（缺省、`false`、`true`）都不改动；DeepSeek、Kimi 等无状态上游照旧去掉 `previous_response_id`、把 `store` 设为 `false` 后发送，上游走 Chat Completions 或 Anthropic 协议的 API Key 账号也照旧转换后发送，都不返回上面的错误。上游只返回普通的 404、409 或含义不明的 4xx 时，不当作续接过期，照原样返回。以上错误都不罚号、不计会话失败；尚未提交时不带 `Retry-After`，并写 `x-should-retry: false`；已提交的流保持原 HTTP 状态，以同样的错误码写一个错误终止帧。
 

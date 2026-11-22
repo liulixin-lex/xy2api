@@ -583,6 +583,64 @@ describe('BulkEditAccountModal', () => {
     })
   })
 
+  it('独立 function_call_output 兼容只在确认全部目标为 OpenAI API Key 时展示', () => {
+    const confirmed = { mode: 'selected', allOpenAIAPIKey: true }
+    for (const [platforms, types, target] of [
+      [['openai'], ['oauth'], confirmed],
+      [['openai', 'anthropic'], ['apikey'], confirmed],
+      [['anthropic'], ['apikey'], confirmed],
+      // The visible rows or the preview look right, but not every target is known.
+      [['openai'], ['apikey'], undefined],
+      [['openai'], ['apikey'], { mode: 'selected', allOpenAIAPIKey: false }],
+      [['openai'], ['apikey'], { mode: 'filtered', filters: {}, previewCount: 101, selectedPlatforms: ['openai'], selectedTypes: ['apikey'], allOpenAIAPIKey: false }]
+    ] as const) {
+      const hidden = mountModal({ selectedPlatforms: platforms, selectedTypes: types, target })
+      expect(hidden.find('#bulk-edit-openai-fco-compat-mode-enabled').exists()).toBe(false)
+      hidden.unmount()
+    }
+    const shown = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'], target: confirmed })
+    expect(shown.find('#bulk-edit-openai-fco-compat-mode-enabled').exists()).toBe(true)
+  })
+
+  it('独立 function_call_output 兼容继承提交 null，其余提交明确值', async () => {
+    const target = { mode: 'selected', allOpenAIAPIKey: true }
+    const inheritWrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'], target })
+    const select = inheritWrapper.get<HTMLSelectElement>('[data-testid="bulk-edit-openai-fco-compat-mode-select"]')
+    expect(select.element.value).toBe('inherit')
+    expect(Array.from(select.element.options).map((option) => option.value)).toEqual(['inherit', 'off', 'reactive', 'proactive'])
+    await inheritWrapper.get('#bulk-edit-openai-fco-compat-mode-enabled').setValue(true)
+    await inheritWrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+      extra: { openai_fco_compat_mode: null }
+    })
+    inheritWrapper.unmount()
+
+    for (const mode of ['off', 'reactive', 'proactive']) {
+      vi.mocked(adminAPI.accounts.bulkUpdate).mockClear()
+      const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'], target })
+      await wrapper.get('#bulk-edit-openai-fco-compat-mode-enabled').setValue(true)
+      await wrapper.get('[data-testid="bulk-edit-openai-fco-compat-mode-select"]').setValue(mode)
+      await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+      expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+        extra: { openai_fco_compat_mode: mode }
+      })
+      wrapper.unmount()
+    }
+  })
+
+  it('未勾选独立 function_call_output 兼容时不提交该键', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'], target: { mode: 'selected', allOpenAIAPIKey: true } })
+    await wrapper.get('[data-testid="bulk-edit-openai-fco-compat-mode-select"]').setValue('proactive')
+    await wrapper.get('#bulk-edit-openai-responses-mode-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+      extra: { openai_responses_mode: null }
+    })
+  })
+
   it('仅启用 Embeddings 时恢复 Responses 自动模式并精确提交联动字段', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],

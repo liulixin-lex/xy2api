@@ -173,6 +173,7 @@ func duplicateAccountExtra(value map[string]any) (map[string]any, error) {
 	for key := range duplicateAccountDiscardedExtraKeys {
 		delete(cloned, key)
 	}
+	SanitizeOpenAIFCOCompatExtra(cloned)
 	return cloned, nil
 }
 
@@ -586,6 +587,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := ValidateUpstreamRequestIDHeaderExtra(accountExtra); err != nil {
 		return nil, err
 	}
+	if err := ValidateOpenAIFCOCompatExtra(accountExtra); err != nil {
+		return nil, err
+	}
 
 	// 绑定分组
 	groupIDs := input.GroupIDs
@@ -707,6 +711,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			return nil, err
 		}
 		if err := ValidateUpstreamRequestIDHeaderExtra(normalizedExtra); err != nil {
+			return nil, err
+		}
+		if err := ValidateOpenAIFCOCompatExtra(normalizedExtra); err != nil {
 			return nil, err
 		}
 	}
@@ -1044,6 +1051,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if err := ValidateOpenAIFCOCompatExtra(updates); err != nil {
+		return err
+	}
 	updates = RedactAnthropicCompatExtra(updates)
 	_, hasCompat := updates[AnthropicCompatProfileExtraKey]
 	_, hasCompatAdmission := updates[AnthropicCompatNewSessionsExtraKey]
@@ -1102,6 +1112,11 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	// JSON null is how a bulk patch clears the override, since keys merge.
+	if err := ValidateOpenAIFCOCompatExtra(input.Extra); err != nil {
+		return nil, err
+	}
+	_, hasFCOCompatUpdate := input.Extra[OpenAIFCOCompatExtraKey]
 	input.Extra = RedactAnthropicCompatExtra(input.Extra)
 	_, hasCompatUpdate := input.Extra[AnthropicCompatProfileExtraKey]
 	_, hasCompatAdmissionUpdate := input.Extra[AnthropicCompatNewSessionsExtraKey]
@@ -1159,7 +1174,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if input.GroupIDs != nil || compatPreflight || len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.IQTargets != nil {
+	if input.GroupIDs != nil || compatPreflight || len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.IQTargets != nil || hasFCOCompatUpdate {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1184,6 +1199,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			if err := validateNewOAuthOnlyBindings(ctx, s.groupRepo, account.Type, account.GroupIDs, *input.GroupIDs); err != nil {
 				return nil, err
 			}
+		}
+	}
+	if hasFCOCompatUpdate {
+		if err := validateBulkOpenAIFCOCompatTargets(input.AccountIDs, targetsByID); err != nil {
+			return nil, err
 		}
 	}
 	if openAISettings.any() {

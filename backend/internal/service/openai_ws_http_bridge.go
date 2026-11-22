@@ -346,7 +346,7 @@ func (c *openAIWSToolCallReplayCollector) addItem(item gjson.Result) {
 	c.items = append(c.items, json.RawMessage(raw))
 }
 
-func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
+func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string, code ...string) []byte {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		message = http.StatusText(statusCode)
@@ -362,6 +362,9 @@ func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
 			"type":    "upstream_error",
 			"message": message,
 		},
+	}
+	if len(code) > 0 && code[0] != "" {
+		event["error"] = map[string]any{"type": "invalid_request_error", "message": message, "code": code[0]}
 	}
 	body, err := json.Marshal(event)
 	if err != nil {
@@ -419,6 +422,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	turn int,
 	writeClientMessage func([]byte) error,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	fcoCompat := armOpenAIFCOCompat(ctx, c, account, payload, true, turn)
+	defer func() { fcoCompat.completed(ctx, schedResult, schedErr) }()
 	var schedCapture *schedAttemptCapture
 	defer func() {
 		rethrowSchedAttemptPanic(schedCapture, recover())
@@ -501,7 +506,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if account.Platform == PlatformGrok {
 			upstreamReq, buildErr = buildGrokResponsesRequest(upstreamCtx, c, account, requestBody, token, grokCacheIdentity, s.cfg, s.settingService)
 		} else {
-			upstreamReq, buildErr = s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, requestBody, token)
+			upstreamReq, buildErr = s.buildUpstreamRequestOpenAIPassthrough(fcoCompat.buildContext(upstreamCtx), c, account, requestBody, token)
 		}
 		if buildErr != nil {
 			return nil, buildErr
@@ -556,7 +561,15 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if buildErr != nil {
 			return nil, buildErr
 		}
+		body, err = fcoCompat.prepare(upstreamReq, body)
+		if err != nil {
+			return nil, err
+		}
+		if fcoCompat != nil && fcoCompat.rewritten {
+			payloadBytes = len(body)
+		}
 		resp, err = s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, true, &schedCapture)
+		fcoCompat.dispatched(ctx, account, resp)
 		if err != nil {
 			if turn == 1 {
 				return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
@@ -570,15 +583,25 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		if resp.StatusCode < 400 {
 			if bytes.Contains(body, []byte("function_call_output")) {
-				observeOpenAIFCOSuccess(ctx, body, DefaultOpenAIFCORules(nil))
+				observeOpenAIFCOSuccess(ctx, body, fcoCompat.rules(ctx))
 			}
 			break
 		}
 
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, openAIWSHTTPBridgeErrorBodyLimitBytes))
-		observeOpenAIFCOHTTPError(ctx, c, body, respBody, resp.StatusCode, DefaultOpenAIFCORules(nil))
+		observeOpenAIFCOHTTPError(ctx, c, body, respBody, resp.StatusCode, fcoCompat.rules(ctx))
 		schedCapture.finishHTTP(resp, respBody)
 		_ = resp.Body.Close()
+		if next, unsupported := fcoCompat.afterHTTP(ctx, c, account, body, respBody, resp); unsupported {
+			clientError := buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadRequest, openAIFCOUnsupportedMessage, openAIFCOUnsupportedCode)
+			if writeErr := writeClientMessage(clientError); writeErr == nil {
+				markOpenAIWSClientVisibleFailure(c, "error", clientError)
+			}
+			return nil, &OpenAIRequestRejectionError{error: errors.New(openAIFCOUnsupportedCode)}
+		} else if next != nil {
+			body = next
+			continue
+		}
 		markOpenAICyberPolicyEvent(c, respBody, resp.StatusCode, nil)
 		if resp.StatusCode == http.StatusBadRequest &&
 			extractUpstreamErrorCode(respBody) == openAIWSFallbackReasonInvalidEncryptedContent {

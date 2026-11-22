@@ -80,7 +80,15 @@ export interface GatewayResilienceSettings {
    * outbound models after mapping (at most 16, 1 to 128 characters each, no duplicates).
    */
   collaboration_plaintext: { enabled: boolean; models: string[] }
+  /**
+   * Standalone function_call_output items (agent namespace, no call_id) that third-party relays
+   * reject. `admin_names` extends the built-in names (at most 64, ^[A-Za-z0-9_]{1,128}$, no
+   * built-in names). Accounts override the mode with extra.openai_fco_compat_mode.
+   */
+  fco_compat: { mode: FCOCompatMode; admin_names: string[] }
 }
+
+export type FCOCompatMode = 'off' | 'reactive' | 'proactive'
 
 export interface GatewayResilienceSettingsResponse {
   settings: GatewayResilienceSettings

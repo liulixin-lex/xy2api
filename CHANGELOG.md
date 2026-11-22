@@ -6,7 +6,11 @@
 
 ### 网关韧性
 
-- 上游中转以“function_call_output requires call_id on HTTP requests”拒绝 OpenAI Responses 请求时，日志 `resilience.fco_shape` 记录该请求里独立工具输出条目的结构摘要（数量、名称桶、call_id 与 output 形态，不含正文和 ID），用来判断是哪一类条目被拒；转发行为不变。[观测参考](docs/guides/gateway-resilience-observability.md)
+- Codex 请求里不带 `call_id` 的具名工具输出条目（`agent` 命名空间的浏览器、终端、IDE 上下文等）被第三方中转以“function_call_output requires call_id on HTTP requests”拒绝时，网关把名单内的条目改写为普通用户消息后在同一账号重试一次。只对 OpenAI API Key 类型、指向第三方中转的账号生效；不在名单内的条目仍会被拒。
+- 网关韧性设置新增“独立 function_call_output 兼容”：全局模式可选关闭、被动重放（默认，被拒后改写重试）、主动改写（发送前直接改写），可追加最多 64 个条目名；OpenAI API Key 账号可单独覆盖或继承全局。[设置参考](docs/guides/gateway-resilience-settings.md#独立-function_call_output-兼容-fco_compat)
+- 兼容模式未关闭且账号在生效范围内时，上游仍以该原因拒绝且已无可做的改写，客户端收到 400 / `upstream_standalone_tool_output_unsupported`，不再是上游那句“only supported on Responses WebSocket v2”。
+- 兼容模式未关闭时，请求末尾新到的名单内条目按改写后的文本参与关键词检查，命中时按站点现有的关键词规则处理（拦截或仅记录）；兼容层追加的这类条目的 output 文本只做关键词检查，不计入也不触发语义审计。需要站点配置了拦截关键词、内容审计处于前置拦截模式且审计策略不是“仅 API”；检查在选号之前进行，只看全局模式，与请求最终发往哪类账号无关。把模式设为关闭可撤回。
+- 上游以该原因拒绝时，日志 `resilience.fco_shape` 记录请求里这类条目的结构摘要（数量、名称桶、call_id 与 output 形态，不含正文和 ID）；改写与重试记入 `resilience.fco_compat`。[观测参考](docs/guides/gateway-resilience-observability.md)
 
 ## [0.6.13] - 2026-11-22
 

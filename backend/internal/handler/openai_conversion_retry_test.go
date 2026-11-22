@@ -51,8 +51,11 @@ func newConversionRetryHandler(t *testing.T, upstream service.HTTPUpstream, muta
 	if mutate != nil {
 		mutate(accounts)
 	}
-	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
-	cfg := &config.Config{RunMode: config.RunModeSimple}
+	return conversionHandlerForAccounts(t, upstream, openAIImagesFailoverAccountRepo{accounts: accounts}, &config.Config{RunMode: config.RunModeSimple}, nil, nil, stores...)
+}
+
+func conversionHandlerForAccounts(t *testing.T, upstream service.HTTPUpstream, accountRepo service.AccountRepository, cfg *config.Config, snapshot *service.SchedulerSnapshotService, concurrency *service.ConcurrencyService, stores ...*conversionRetryRequestStore) *OpenAIGatewayHandler {
+	t.Helper()
 	store := &conversionRetryRequestStore{}
 	if len(stores) > 0 {
 		store = stores[0]
@@ -66,8 +69,8 @@ func newConversionRetryHandler(t *testing.T, upstream service.HTTPUpstream, muta
 		nil,
 		nil,
 		cfg,
-		nil,
-		nil,
+		snapshot,
+		concurrency,
 		service.NewBillingService(cfg, nil),
 		nil,
 		nil,

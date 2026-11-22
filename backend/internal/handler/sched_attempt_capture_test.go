@@ -107,6 +107,7 @@ func captureTerminalSSE() string {
 
 type captureOptions struct {
 	noRecorder  bool
+	state       *resilience.RequestState
 	usage       service.UsageLogRepository
 	requestDone chan struct{}
 	ops         *service.OpsService
@@ -170,7 +171,11 @@ func captureFixture(t *testing.T, account service.Account, up service.HTTPUpstre
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), key)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1701, Concurrency: 2})
-		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
+		state := opt.state
+		if state == nil {
+			state = resilience.NewRequestState()
+		}
+		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
 		service.InstallDeliveryTracking(c, time.Now())
 		c.Next()
 		if opt.requestDone != nil {

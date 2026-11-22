@@ -474,6 +474,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		writeRequestBodyReadFailure(c, reqLog, err, service.PreOutputProtocolResponses)
 		return
 	}
+	// The fco_compat snapshot is taken from the bytes the handler read, before
+	// lenient normalization and every rewrite below; audit and Forward both read
+	// it. Before this point only the composite model mapping may have changed
+	// the body, and only its model field.
+	c.Request = c.Request.WithContext(service.WithOpenAIFCOCompatIngressSnapshot(c.Request.Context(), body))
 
 	if err := pkghttputil.ValidateJSONUTF8(body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "code": "invalid_utf8", "param": "body", "message": err.Error()}})
@@ -2777,6 +2782,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "unsupported websocket message type")
 		return
 	}
+	// The first turn's fco_compat snapshot comes from the frame as read; ctx
+	// picks it up below and carries it into the ingress forwarder, which takes
+	// a new snapshot from each later frame.
+	c.Request = c.Request.WithContext(service.WithOpenAIFCOCompatIngressSnapshot(c.Request.Context(), firstMessage))
 	if !gjson.ValidBytes(firstMessage) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "invalid JSON payload")
 		return
@@ -3624,6 +3633,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if policyTurnCtx != nil {
 					ctx, wsPricingAt = policyTurnCtx, policyTurnAt
 				}
+				ctx = withOpenAIWSRetriedTurnFCOCompatSnapshot(ctx, c)
 				wsAttemptMessage = qualityReroute.Payload
 				reqModel = qualityReroute.Model
 				channelMappingWS, _ = h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, reqModel)
@@ -3651,6 +3661,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					if policyTurnCtx != nil {
 						ctx, wsPricingAt = policyTurnCtx, policyTurnAt
 					}
+					ctx = withOpenAIWSRetriedTurnFCOCompatSnapshot(ctx, c)
 					previousResponseID = ""
 					reqLog.Warn("openai.websocket_current_turn_failover_retry",
 						zap.Int64("account_id", account.ID),

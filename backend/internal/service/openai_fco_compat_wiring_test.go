@@ -13,7 +13,7 @@ import (
 )
 
 func TestFCOObservationFourPathsPreservesErrors(t *testing.T) {
-	withResilienceSettings(t, nil)
+	withResilienceSettings(t, func(s *resilience.Settings) { s.FCOCompat.Mode = resilience.FCOCompatModeOff })
 	for _, path := range []string{"native", "passthrough", "chat", "bridge"} {
 		t.Run(path, func(t *testing.T) {
 			type result struct {

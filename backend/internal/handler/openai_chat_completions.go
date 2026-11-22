@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	pkghttputil "github.com/liulixin-lex/xy2api/internal/pkg/httputil"
 	"github.com/liulixin-lex/xy2api/internal/pkg/ip"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/liulixin-lex/xy2api/internal/pkg/openai_compat"
@@ -51,7 +52,17 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
+	rawBody, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	if err != nil {
+		writeRequestBodyReadFailure(c, reqLog, err, service.PreOutputProtocolChat)
+		return
+	}
+	// Chat can forward a native Responses input, so it takes the fco_compat
+	// snapshot from the bytes the handler read, before lenient normalization,
+	// too. Before this point only the composite model mapping may have changed
+	// the body, and only its model field.
+	c.Request = c.Request.WithContext(service.WithOpenAIFCOCompatIngressSnapshot(c.Request.Context(), rawBody))
+	body, err := pkghttputil.NormalizeLenientJSONRequestBody(rawBody, gatewayMaxBodySize(h.cfg))
 	if err != nil {
 		writeRequestBodyReadFailure(c, reqLog, err, service.PreOutputProtocolChat)
 		return

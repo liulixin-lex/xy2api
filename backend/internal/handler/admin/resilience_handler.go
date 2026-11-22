@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/pkg/response"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -72,6 +73,15 @@ func (h *ResilienceHandler) UpdateSettings(c *gin.Context) {
 	if gjson.GetBytes(body, "budget.model_overrides").Exists() {
 		next.Budget.ModelOverrides = nil
 	}
+	namesGiven, err := checkFCOCompatPatch(body)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if namesGiven {
+		// Decoding into the current list would reuse its elements.
+		next.FCOCompat.AdminNames = nil
+	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(body))
 	if !decodeStrictJSON(c, &next) {
 		return
@@ -81,6 +91,63 @@ func (h *ResilienceHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"settings": updated, "defaults": resilience.Defaults()})
+}
+
+// checkFCOCompatPatch rejects explicit fco_compat values that decoding over
+// the current settings would otherwise hide: a JSON null leaves the current
+// value in place and an empty mode would be filled with the default. Omitted
+// fields keep their current value like every other section. The probes use
+// encoding/json so key matching and repeated keys resolve as in the strict
+// decode that follows (repeated sections merge, the last value of a field
+// wins); documents that do not decode are left to that decode. It reports
+// whether admin_names was given.
+func checkFCOCompatPatch(body []byte) (bool, error) {
+	invalid := func(problem string) error {
+		return infraerrors.BadRequest("GATEWAY_RESILIENCE_SETTINGS_INVALID", "invalid gateway resilience settings: "+problem)
+	}
+	var whole struct {
+		FCOCompat json.RawMessage `json:"fco_compat"`
+	}
+	if json.Unmarshal(body, &whole) != nil || len(whole.FCOCompat) == 0 {
+		return false, nil
+	}
+	if isJSONNull(whole.FCOCompat) {
+		return false, invalid("fco_compat must be an object")
+	}
+	var fields struct {
+		FCOCompat struct {
+			Mode       json.RawMessage `json:"mode"`
+			AdminNames json.RawMessage `json:"admin_names"`
+		} `json:"fco_compat"`
+	}
+	if json.Unmarshal(body, &fields) != nil {
+		return false, nil
+	}
+	section := fields.FCOCompat
+	if len(section.Mode) > 0 {
+		var mode any
+		_ = json.Unmarshal(section.Mode, &mode)
+		if s, ok := mode.(string); !ok || !resilience.ValidFCOCompatMode(s) {
+			return false, invalid("fco_compat.mode must be off, reactive or proactive")
+		}
+	}
+	if len(section.AdminNames) == 0 {
+		return false, nil
+	}
+	var names []any
+	if isJSONNull(section.AdminNames) || json.Unmarshal(section.AdminNames, &names) != nil {
+		return true, invalid("fco_compat.admin_names must be an array of strings")
+	}
+	for _, name := range names {
+		if _, ok := name.(string); !ok {
+			return true, invalid("fco_compat.admin_names must be an array of strings")
+		}
+	}
+	return true, nil
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
 }
 
 // ListUndelivered lists requests whose client left before any output.

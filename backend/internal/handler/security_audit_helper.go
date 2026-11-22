@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"net/http"
 	"strings"
@@ -75,8 +76,9 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 			return nil
 		}
 	}
+	auditCtx := securityAuditContext(c, stage, body)
 	if coordinator == nil {
-		legacyDecision := runContentModeration(c, reqLog, legacy, apiKey, subject, protocol, model, body)
+		legacyDecision := runContentModeration(auditCtx, c, reqLog, legacy, apiKey, subject, protocol, model, body)
 		if legacyDecision == nil {
 			return nil
 		}
@@ -107,7 +109,7 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 				}
 			}
 			logSecurityAuditStart(reqLog, request, len(body), false)
-			decision := coordinator.Check(c.Request.Context(), request)
+			decision := coordinator.Check(auditCtx, request)
 			if decision.Kind == securityaudit.DecisionAllow {
 				c.Set(securityAuditWSDedupeContextKey, securityAuditWSDedupeEntry{
 					stage: request.Stage, turn: turnNo, bodyHash: bodyHash, decision: decision,
@@ -118,12 +120,39 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 		}
 	}
 	logSecurityAuditStart(reqLog, request, len(body), false)
-	decision := coordinator.Check(c.Request.Context(), request)
+	decision := coordinator.Check(auditCtx, request)
 	if decision.AllowNextStage && cacheCompletion {
 		c.Set(securityAuditCompletedContextKey, true)
 	}
 	logSecurityAuditDone(reqLog, request, decision, false)
 	return &decision
+}
+
+// securityAuditContext is the context the audit engines receive. The request
+// context of a Responses WebSocket holds the first turn's fco_compat snapshot;
+// a later turn is audited with the snapshot the ingress forwarder took from
+// that turn's frame, and the turn is sent with the same one.
+func securityAuditContext(c *gin.Context, stage string, body []byte) context.Context {
+	ctx := c.Request.Context()
+	if strings.TrimSpace(stage) != "subsequent_turn" {
+		return ctx
+	}
+	turnNo, hasTurn := securityAuditWSTurn(c)
+	if snapshot, turn, ok := service.OpenAIFCOCompatWSTurnSnapshot(c); ok && hasTurn && turn == turnNo {
+		return service.WithOpenAIFCOCompatSnapshot(ctx, snapshot)
+	}
+	// Never audit a later turn with the first turn's snapshot.
+	return service.WithOpenAIFCOCompatIngressSnapshot(ctx, body)
+}
+
+// withOpenAIWSRetriedTurnFCOCompatSnapshot carries the snapshot of the turn a
+// WebSocket failover or reroute resends into the next forwarder attempt, which
+// treats the resent payload as its first frame and does not audit it again.
+func withOpenAIWSRetriedTurnFCOCompatSnapshot(ctx context.Context, c *gin.Context) context.Context {
+	if snapshot, _, ok := service.OpenAIFCOCompatWSTurnSnapshot(c); ok {
+		return service.WithOpenAIFCOCompatSnapshot(ctx, snapshot)
+	}
+	return ctx
 }
 
 func logSecurityAuditStart(reqLog *zap.Logger, request securityaudit.Request, bodyBytes int, cached bool) {

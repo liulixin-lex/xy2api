@@ -1188,6 +1188,46 @@
         </div>
       </div>
 
+      <!-- OpenAI API Key standalone function_call_output compatibility -->
+      <div v-if="openAIFCOCompatApplicable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between gap-4">
+          <div class="flex-1">
+            <label
+              id="bulk-edit-openai-fco-compat-mode-label"
+              class="input-label mb-0"
+              for="bulk-edit-openai-fco-compat-mode-enabled"
+            >
+              {{ t('admin.accounts.openai.fcoCompatMode') }}
+            </label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.fcoCompatModeDesc') }}
+            </p>
+          </div>
+          <input
+            v-model="enableOpenAIFCOCompatMode"
+            id="bulk-edit-openai-fco-compat-mode-enabled"
+            type="checkbox"
+            aria-controls="bulk-edit-openai-fco-compat-mode-body"
+            class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            data-testid="bulk-edit-openai-fco-compat-mode-enabled"
+          />
+        </div>
+        <div
+          id="bulk-edit-openai-fco-compat-mode-body"
+          :class="!enableOpenAIFCOCompatMode && 'pointer-events-none opacity-50'"
+          role="group"
+          aria-labelledby="bulk-edit-openai-fco-compat-mode-label"
+        >
+          <Select
+            v-model="openAIFCOCompatMode"
+            :disabled="!enableOpenAIFCOCompatMode"
+            data-testid="bulk-edit-openai-fco-compat-mode-select"
+            :options="openAIFCOCompatModeOptions"
+            aria-labelledby="bulk-edit-openai-fco-compat-mode-label"
+          />
+        </div>
+      </div>
+
       <!-- OpenAI API Key WS mode -->
       <div v-if="allOpenAIAPIKey" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1585,6 +1625,11 @@ import {
   resolveOpenAIWSModeHintKey
 } from '@/utils/openaiWsMode'
 import type { OpenAIWSMode } from '@/utils/openaiWsMode'
+import {
+  FCO_COMPAT_EXTRA_KEY,
+  fcoCompatAccountModeOptions,
+  type FCOCompatAccountMode
+} from '@/utils/fcoCompat'
 interface Props {
   show: boolean
   accountIds: number[]
@@ -1596,6 +1641,8 @@ interface Props {
     previewCount?: number
     selectedPlatforms?: AccountPlatform[]
     selectedTypes?: AccountType[]
+    /** Every target, not only the visible or previewed ones, is an OpenAI API key account. */
+    allOpenAIAPIKey?: boolean
   }
   proxies: ProxyConfig[]
   groups: AdminGroup[]
@@ -1745,6 +1792,7 @@ const enableOpenAICollaborationPlaintext = ref(false)
 const enableOpenAILongContextBilling = ref(false)
 const enableOpenAIEndpointCapabilities = ref(false)
 const enableOpenAIResponsesMode = ref(false)
+const enableOpenAIFCOCompatMode = ref(false)
 const enableOpenAIWSMode = ref(false)
 const enableOpenAIAPIKeyWSMode = ref(false)
 const enableUpstreamBillingAutoProbe = ref(false)
@@ -1785,6 +1833,11 @@ const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>([
   'embeddings'
 ])
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
+const openAIFCOCompatMode = ref<FCOCompatAccountMode>('inherit')
+// The platforms and types above may describe only some targets; the override needs all of them confirmed
+// (the server checks again and rejects the batch otherwise).
+const openAIFCOCompatApplicable = computed(() => allOpenAIAPIKey.value && props.target?.allOpenAIAPIKey === true)
+const openAIFCOCompatModeOptions = computed(() => fcoCompatAccountModeOptions(t))
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const upstreamBillingAutoProbeMode = ref<'enabled' | 'disabled'>('enabled')
@@ -2014,6 +2067,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   const applyOpenAIEndpointCapabilities =
     enableOpenAIEndpointCapabilities.value && allOpenAIAPIKey.value
   const applyOpenAIResponsesMode = enableOpenAIResponsesMode.value && allOpenAIAPIKey.value
+  const applyOpenAIFCOCompatMode = enableOpenAIFCOCompatMode.value && openAIFCOCompatApplicable.value
   const ensureExtra = (): Record<string, unknown> => {
     if (!updates.extra) {
       updates.extra = {}
@@ -2106,6 +2160,12 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
       !openAIResponsesModeApplicable.value || openAIResponsesMode.value === 'auto'
         ? null
         : openAIResponsesMode.value
+  }
+
+  if (applyOpenAIFCOCompatMode) {
+    // Bulk extra merges by key, so inherit is sent as null to clear an override.
+    const extra = ensureExtra()
+    extra[FCO_COMPAT_EXTRA_KEY] = openAIFCOCompatMode.value === 'inherit' ? null : openAIFCOCompatMode.value
   }
 
   if (enableModelRestriction.value && !isOpenAIModelRestrictionDisabled.value) {
@@ -2306,6 +2366,7 @@ const handleSubmit = async () => {
     (enableOpenAILongContextBilling.value && allOpenAIPassthroughCapable.value) ||
     (enableOpenAIEndpointCapabilities.value && allOpenAIAPIKey.value) ||
     (enableOpenAIResponsesMode.value && allOpenAIAPIKey.value) ||
+    (enableOpenAIFCOCompatMode.value && openAIFCOCompatApplicable.value) ||
     enableModelRestriction.value ||
     enableCustomErrorCodes.value ||
     enableInterceptWarmup.value ||
@@ -2474,6 +2535,7 @@ watch(
       enableOpenAILongContextBilling.value = false
       enableOpenAIEndpointCapabilities.value = false
       enableOpenAIResponsesMode.value = false
+      enableOpenAIFCOCompatMode.value = false
       enableOpenAIWSMode.value = false
       enableOpenAIAPIKeyWSMode.value = false
       editIQCheck.value = false
@@ -2495,6 +2557,7 @@ watch(
       openAILongContextBillingEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
       openAIResponsesMode.value = 'auto'
+      openAIFCOCompatMode.value = 'inherit'
       modelRestrictionMode.value = 'whitelist'
       allowedModels.value = []
       modelMappings.value = []
