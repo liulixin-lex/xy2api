@@ -330,6 +330,7 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	change.mu.Lock()
 	defer change.mu.Unlock()
 	if change.target == selection.Account.ID && !change.done {
+		selection.rememberVetoPlan(change)
 		return
 	}
 	if change.expected.AccountID != 0 && !change.ownerReleased || openAIStickyBindingKept(ctx, change.session, selection.Account.ID) {
@@ -342,6 +343,7 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	next := change.replacement(kind, model, selection.Account.ID, resilience.StateFrom(ctx).StickyBypassReason())
 	next.toPriority = new(selection.Account.Priority)
 	next.toModel = OpenAIAttemptModel(selection.Account, model)
+	selection.rememberVetoPlan(next)
 	resilience.StateFrom(ctx).SetStickyChange(next)
 }
 
@@ -435,6 +437,7 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 		checkCtx = ContextWithSelectionProfitGate(CopyOpenAIQualityRoutingContext(checkCtx, ctx), selection)
 		return s.followTargetRejection(checkCtx, req, account)
 	}
+	selection.rememberVetoPlan(next)
 	state.SetStickyChange(next)
 }
 

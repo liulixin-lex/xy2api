@@ -2063,7 +2063,11 @@ func (s *OpenAIGatewayService) SelectionAdmissionForResult(ctx context.Context, 
 		return s.SelectionAdmissionVetoLatest(ctx, selection.Account)
 	}
 	if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok && req.candidateConstraint != nil {
-		return s.selectionAdmissionVeto(ctx, selection.Account, false)
+		latest, veto, reason := s.selectionAdmissionVeto(ctx, selection.Account, false)
+		if veto && selection.constrainedImmediate() {
+			selection.retireAdmissionVeto(ctx)
+		}
+		return latest, veto, reason
 	}
 	return s.SelectionAdmissionVeto(ctx, selection.Account)
 }

@@ -228,8 +228,12 @@ func (t *selectionTrial) finish(ctx context.Context, result *AccountSelectionRes
 	if reservation == nil {
 		return
 	}
+	if result.constrainedImmediate() {
+		result.vetoTrial = reservation
+	}
 	change := pendingOpenAIStickyChange(ctx)
 	if !reservation.request && t.request.SessionHash != "" && change != nil && change.groupID == derefGroupID(t.request.GroupID) && change.trialSessionKey() == t.request.SessionHash && change.target == result.Account.ID {
+		result.rememberVetoPlan(change)
 		change.trial = reservation
 		change.leases = t.leases
 	} else if !reservation.request && t.request.SessionHash != "" {
