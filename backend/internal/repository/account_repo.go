@@ -191,7 +191,7 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	var tx *dbent.Tx
 	if contextTx != nil {
 		client = contextTx.Client()
-	} else if account != nil && account.IQTargetsPatch != nil {
+	} else if account != nil && (account.IQTargetsPatch != nil || len(account.GroupIDs) > 0) {
 		var err error
 		tx, err = r.client.Tx(ctx)
 		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -211,6 +211,12 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 			return err
 		}
 	}
+	if len(account.GroupIDs) > 0 {
+		if err := r.BindGroups(ctx, account.ID, account.GroupIDs); err != nil {
+			return err
+		}
+	}
+
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -309,6 +315,10 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 // CreateWithAccountGroups atomically persists an account, its group memberships,
 // and the scheduler outbox event used to publish the new routing snapshot.
 func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup) error {
+	if scoped := r.accountTransactionScope(ctx); scoped != r {
+		return scoped.CreateWithAccountGroups(ctx, account, groups)
+	}
+
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
@@ -329,11 +339,13 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 	for i := range groups {
 		groupIDs = append(groupIDs, groups[i].GroupID)
 	}
+	if err := createAccountRecord(ctx, txClient, account); err != nil {
+		return err
+	}
 	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
 		return err
 	}
-
-	if err := createAccountRecord(ctx, txClient, account); err != nil {
+	if err := validateNewAccountGroupBindings(ctx, txClient, account.ID, groupIDs); err != nil {
 		return err
 	}
 	if len(groups) > 0 {
@@ -2167,10 +2179,6 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 	if adminaccess.RestrictedFromContext(ctx) != nil {
 		return r.scopedAdminBindGroups(ctx, accountID, groupIDs)
 	}
-	existingGroupIDs, err := r.loadAccountGroupIDs(ctx, accountID)
-	if err != nil {
-		return err
-	}
 	// 使用事务保证删除旧绑定与创建新绑定的原子性
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -2189,6 +2197,13 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		return err
 	}
 	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
+		return err
+	}
+	if err := validateNewAccountGroupBindings(ctx, txClient, accountID, groupIDs); err != nil {
+		return err
+	}
+	existingGroupIDs, err := newAccountRepositoryWithSQL(txClient, txClient, nil).loadAccountGroupIDs(ctx, accountID)
+	if err != nil {
 		return err
 	}
 

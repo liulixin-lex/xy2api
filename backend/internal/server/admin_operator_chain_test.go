@@ -122,6 +122,9 @@ func (r *chainAccounts) Create(ctx context.Context, a *service.Account) error {
 	r.w.record(ctx, "account.create")
 	a.ID = 10
 	r.row = a
+	if len(a.GroupIDs) > 0 {
+		return r.BindGroups(ctx, a.ID, a.GroupIDs)
+	}
 	return nil
 }
 func (r *chainAccounts) FindByExtraField(context.Context, string, any) ([]service.Account, error) {

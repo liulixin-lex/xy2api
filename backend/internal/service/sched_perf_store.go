@@ -22,6 +22,8 @@ type schedPerfStore struct {
 	boot, visibleThrough time.Time
 	finishedCursor       SchedAttemptCursor
 	loaded               bool
+	loadStarted          time.Time
+	readyLogged          bool
 }
 
 func (s *SchedQualityEngineService) PerformanceSnapshot() *SchedPerfSnapshot {
@@ -54,6 +56,9 @@ func (s *SchedQualityEngineService) runPerformance(ctx context.Context) {
 }
 
 func (s *SchedQualityEngineService) publishPerformance(ctx context.Context, w *schedPerfStore, at time.Time) error {
+	if w.loadStarted.IsZero() {
+		w.loadStarted = time.Now()
+	}
 	if err := w.load(ctx, s.attempts, at); err != nil {
 		return err
 	}
@@ -61,7 +66,14 @@ func (s *SchedQualityEngineService) publishPerformance(ctx context.Context, w *s
 	if err != nil {
 		return err
 	}
-	s.performance.Store(buildSchedPerf(w.facts, w.switches, policies, resets, at))
+	snapshot := buildSchedPerf(w.facts, w.switches, policies, resets, at)
+	s.performance.Store(snapshot)
+	if !w.readyLogged {
+		w.readyLogged = true
+		slog.InfoContext(ctx, "sched_quality.performance_ready",
+			"snapshot_at", snapshot.at, "from", snapshot.from,
+			"rows", len(w.facts), "load_ms", time.Since(w.loadStarted).Milliseconds())
+	}
 	return nil
 }
 

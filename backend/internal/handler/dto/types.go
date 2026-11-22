@@ -215,6 +215,7 @@ type AdminGroup struct {
 	AccountCount            int64          `json:"account_count,omitempty"`
 	ActiveAccountCount      int64          `json:"active_account_count,omitempty"`
 	RateLimitedAccountCount int64          `json:"rate_limited_account_count,omitempty"`
+	OAuthOnlyMismatchCount  int64          `json:"oauth_only_mismatch_count"`
 
 	// 分组排序
 	SortOrder int `json:"sort_order"`
