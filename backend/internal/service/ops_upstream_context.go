@@ -251,15 +251,33 @@ func PromoteOpsStreamFailure(c *gin.Context, errType, code, message string, inte
 	if c == nil {
 		return
 	}
-	if GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
-		if existing, ok := GetOpsStreamError(c); ok {
-			existing.CountTowardsSLA = true
-			if existing.IntendedStatus < http.StatusBadRequest {
-				existing.IntendedStatus = intendedStatus
-			}
-			c.Set(OpsStreamErrorKey, existing)
+	promote := func(existing *OpsStreamError) {
+		existing.CountTowardsSLA = true
+		if existing.IntendedStatus < http.StatusBadRequest {
+			existing.IntendedStatus = intendedStatus
+		}
+	}
+	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+		turn := 0
+		if value, ok := c.Get(OpsStreamTurnKey); ok {
+			turn, _ = value.(int)
+		}
+		var markers []OpsStreamError
+		if value, ok := c.Get(OpsStreamErrorsKey); ok {
+			markers, _ = value.([]OpsStreamError)
+		}
+		// Only the current turn's marker; a copy, since saved snapshots share it.
+		if n := len(markers); n > 0 && markers[n-1].Turn == turn {
+			markers = append([]OpsStreamError(nil), markers...)
+			promote(&markers[n-1])
+			c.Set(OpsStreamErrorsKey, markers)
+			c.Set(OpsStreamErrorKey, markers[n-1])
 			return
 		}
+	} else if existing, ok := GetOpsStreamError(c); ok {
+		promote(&existing)
+		c.Set(OpsStreamErrorKey, existing)
+		return
 	}
 	MarkOpsStreamFailure(c, errType, code, message, intendedStatus)
 }

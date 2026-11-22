@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -419,4 +420,48 @@ func TestM8RejectedFieldResentBoundary(t *testing.T) {
 	require.False(t, decoded.Resent)
 	require.Equal(t, "temperature", decoded.RejectedField)
 	require.Nil(t, appendOpsUpstreamError(nil, OpsUpstreamErrorEvent{}))
+}
+
+func TestPromoteOpsStreamFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Run("http keeps the existing marker", func(t *testing.T) {
+		c, _, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportHTTP)
+		MarkOpsStreamError(c, "server_error", "existing", 0)
+		PromoteOpsStreamFailure(c, "api_error", "", "lost", http.StatusBadGateway)
+		markers := GetOpsStreamErrors(c)
+		require.Len(t, markers, 1)
+		require.Equal(t, "existing", markers[0].Message)
+		require.True(t, markers[0].CountTowardsSLA)
+		require.Equal(t, http.StatusBadGateway, markers[0].IntendedStatus)
+	})
+	t.Run("websocket promotes only the current turn", func(t *testing.T) {
+		c, _, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportWS)
+		for turn := 1; turn <= 3; turn++ {
+			BeginOpsStreamTurn(c, turn)
+			MarkOpsStreamError(c, "server_error", fmt.Sprintf("turn %d", turn), 0)
+		}
+		before := GetOpsStreamErrors(c)
+		PromoteOpsStreamFailure(c, "api_error", "", "lost", http.StatusBadGateway)
+		markers := GetOpsStreamErrors(c)
+		require.Len(t, markers, 3)
+		require.False(t, markers[0].CountTowardsSLA)
+		require.False(t, markers[1].CountTowardsSLA)
+		require.True(t, markers[2].CountTowardsSLA)
+		require.Equal(t, "turn 3", markers[2].Message)
+		require.False(t, before[2].CountTowardsSLA, "an earlier snapshot must not change with it")
+		current, _ := GetOpsStreamError(c)
+		require.True(t, current.CountTowardsSLA)
+	})
+	t.Run("websocket turn without a marker records one", func(t *testing.T) {
+		c, _, _ := newPostOutputOpsTestContext(t, OpenAIClientTransportWS)
+		BeginOpsStreamTurn(c, 1)
+		MarkOpsStreamError(c, "server_error", "turn 1", 0)
+		BeginOpsStreamTurn(c, 2)
+		PromoteOpsStreamFailure(c, "api_error", "", "lost", http.StatusBadGateway)
+		markers := GetOpsStreamErrors(c)
+		require.Len(t, markers, 2)
+		require.False(t, markers[0].CountTowardsSLA)
+		require.Equal(t, "lost", markers[1].Message)
+		require.True(t, markers[1].CountTowardsSLA)
+	})
 }
