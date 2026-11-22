@@ -412,3 +412,45 @@ func TestCollabRegressionExhaustedNamedReasoning(t *testing.T) {
 		})
 	}
 }
+
+func TestCollabRegressionRenamedHandledEndpoints(t *testing.T) {
+	for _, name := range []string{"rs_a", "amsg_a"} {
+		progress := &CollabLadderProgress{handled: map[int64]map[string]bool{1: {name: true}}}
+		l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, Evidence: collabRegressionVerified(name), Progress: progress, Select: collabRegressionSelect}
+		sends := 0
+		l.Send = func(_ context.Context, id int64, _ []byte, action resilience.CollabAction) (resilience.CollabEvidence, bool) {
+			sends++
+			if name != "amsg_a" || id != 1 || action != resilience.CollabActionReplaceAll {
+				t.Fatalf("invalid endpoint: %s %d %s", name, id, action)
+			}
+			return collabRegressionVerified(name), false
+		}
+		l.Run(context.Background())
+		want := 0
+		if name == "amsg_a" {
+			want = 1
+		}
+		if sends != want {
+			t.Fatalf("%s sends=%d want=%d", name, sends, want)
+		}
+	}
+}
+
+func TestCollabRegressionObserverRemembersHandledLegacyItem(t *testing.T) {
+	original := ParseCollabBody([]byte(collabBodyFixture))
+	next, changed := original.Derive(original.Original, resilience.CollabActionNamedRepair, "amsg_a", false)
+	if !changed {
+		t.Fatal("fixture did not replace the task")
+	}
+	observer := NewCollabSendObserver(original)
+	body := &collabEvidenceBody{observer: observer, requestBody: next}
+	body.record(CollabRejection{AccountID: 1, Payload: []byte(`{"error":{"code":"invalid_encrypted_content","item_id":"amsg_a"}}`)})
+	rejection := observer.Rejections()[0]
+	if !rejection.Handled["amsg_a"] || rejection.Handled["rs_a"] {
+		t.Fatalf("incorrect handled facts: %v", rejection.Handled)
+	}
+	rejection.Handled["rs_a"] = true
+	if observer.Rejections()[0].Handled["rs_a"] {
+		t.Fatal("rejection snapshot changed observer")
+	}
+}

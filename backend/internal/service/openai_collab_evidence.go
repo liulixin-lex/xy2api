@@ -27,6 +27,7 @@ type CollabRejection struct {
 	Event       string
 	Source      resilience.CollabEvidenceSource
 	Truncated   bool
+	Handled     map[string]bool
 }
 
 func (r CollabRejection) Evidence(shape resilience.CollabRequestShape) resilience.CollabEvidence {
@@ -149,6 +150,7 @@ func (o *CollabSendObserver) Rejections() []CollabRejection {
 	out := append([]CollabRejection(nil), o.rejections...)
 	for i := range out {
 		out[i].Payload = bytes.Clone(out[i].Payload)
+		out[i].Handled = maps.Clone(out[i].Handled)
 	}
 	return out
 }
@@ -325,6 +327,26 @@ func (b *collabEvidenceBody) observe(data []byte) {
 func (b *collabEvidenceBody) record(rejection CollabRejection) {
 	if b.requestBody != nil {
 		rejection.BodyDigest = b.service.collabBodyDigest(b.requestBody)
+	}
+	candidate := rejection.Evidence(resilience.CollabRequestShape{AgentCiphertext: true, ToolOutputCiphertext: true})
+	if b.requestBody != nil && (candidate.Grade == resilience.CollabEvidenceGradeVerified || candidate.Grade == resilience.CollabEvidenceGradeClaimed) {
+		original := b.observer.Body()
+		current := ParseCollabBody(b.requestBody)
+		remainingItems := make(map[string]bool, len(current.Items))
+		for _, item := range current.Items {
+			remainingItems[item.Identity] = len(item.Paths) > 0
+		}
+		for _, item := range original.Items {
+			if item.WireID == "" || len(item.Paths) == 0 || current.Shape.Ambiguous {
+				continue
+			}
+			if !remainingItems[item.Identity] {
+				if rejection.Handled == nil {
+					rejection.Handled = map[string]bool{}
+				}
+				rejection.Handled[item.Identity] = true
+			}
+		}
 	}
 	b.observer.record(rejection, b.generation)
 }

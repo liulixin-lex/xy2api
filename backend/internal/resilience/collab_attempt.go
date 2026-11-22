@@ -40,6 +40,7 @@ type collabAttemptKey struct{}
 // the final accepted request settles once through the existing request owner.
 type CollabAttempt struct {
 	Seq       CollabSendSequence
+	Action    CollabAction
 	Optional  bool
 	Abandoned bool
 	Delivered bool

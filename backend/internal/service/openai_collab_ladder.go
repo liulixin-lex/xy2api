@@ -46,7 +46,9 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		progress.derived = map[int64][]byte{}
 		progress.probed = map[int64]bool{}
 		progress.replaced = map[int64]bool{}
-		progress.handled = map[int64]map[string]bool{}
+		if progress.handled == nil {
+			progress.handled = map[int64]map[string]bool{}
+		}
 		progress.namedFamilies = map[int64]map[resilience.CollabFamily]bool{}
 	}
 	derived, probed, replaced := progress.derived, maps.Clone(progress.probed), progress.replaced
@@ -71,6 +73,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		named := ""
 		prefer := current
 		var exclude map[int64]bool
+		endpoint := false
 		if final {
 			action = resilience.CollabActionReplaceAll
 		} else if evidence.Named != nil {
@@ -85,10 +88,17 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 					break
 				}
 			}
-			if item == nil || handled[current][named] {
+			if item == nil {
 				return false
 			}
-			if item.Family == resilience.CollabFamilyReasoning && l.NamedReasoningAllowed != nil && !l.NamedReasoningAllowed(current) {
+			if handled[current][named] {
+				if !collabProtectedTask(l.Body, named) || replaced[current] {
+					return false
+				}
+				action = resilience.CollabActionReplaceAll
+				endpoint = true
+				named = ""
+			} else if item.Family == resilience.CollabFamilyReasoning && l.NamedReasoningAllowed != nil && !l.NamedReasoningAllowed(current) {
 				// Exhausted in-place reasoning admission does not consume the
 				// separate final-disposal allowance.
 				action = resilience.CollabActionReplaceAll
@@ -150,6 +160,9 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				prefer = 0
 			}
 		}
+		if endpoint {
+			prefer = current
+		}
 		// Early entry returns to the existing first-account repair planner
 		// before a broad fallback could discard unrelated content. Terminal
 		// entry still gets every remaining repair under the shared quotas.
@@ -160,7 +173,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		if account == 0 && prefer > 0 && action == resilience.CollabActionNamedRepair && prefer != l.First {
 			account, release = l.Select(ctx, l.First, exclude)
 		}
-		if account == 0 && prefer > 0 && (action == resilience.CollabActionNamedRepair || action == resilience.CollabActionDropUnprotected || action == resilience.CollabActionReplaceAll) {
+		if account == 0 && !endpoint && prefer > 0 && (action == resilience.CollabActionNamedRepair || action == resilience.CollabActionDropUnprotected || action == resilience.CollabActionReplaceAll) {
 			account, release = l.Select(ctx, 0, exclude)
 		}
 		if account == 0 {
@@ -308,4 +321,22 @@ func collabProtectedTask(body CollabBody, named string) bool {
 		}
 	}
 	return false
+}
+
+// RememberHandled carries confirmed legacy repairs into terminal rescue.
+func (p *CollabLadderProgress) RememberHandled(account int64, items map[string]bool) {
+	if len(items) == 0 {
+		return
+	}
+	if p.handled == nil {
+		p.handled = map[int64]map[string]bool{}
+	}
+	if p.handled[account] == nil {
+		p.handled[account] = map[string]bool{}
+	}
+	for id, handled := range items {
+		if handled {
+			p.handled[account][id] = true
+		}
+	}
 }

@@ -103,6 +103,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	}
 	rejected := seam.rejected
 	for _, rejection := range rejections {
+		seam.progress.RememberHandled(rejection.AccountID, rejection.Handled)
 		rejected[service.CollabRejectedBody{AccountID: rejection.AccountID, Digest: rejection.BodyDigest}] = true
 	}
 	seamKeys := c.Copy().Keys
@@ -174,6 +175,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 			ctx, stop = watchCollabTakeover(ctx, remaining/2, observer.Accepted, waiters)
 			defer stop()
 		}
+		ctx = resilience.WithCollabAttempt(ctx, resilience.CollabAttempt{Optional: true, Action: action})
 		attemptCtx := service.WithCollabSendObserver(service.WithCollabRejectedBodies(ctx, rejected), observer)
 		c.Request = parentRequest.Clone(attemptCtx)
 		var result *service.OpenAIForwardResult
