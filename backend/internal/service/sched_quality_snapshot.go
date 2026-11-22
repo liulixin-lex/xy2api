@@ -347,7 +347,13 @@ func (s *SchedQualityEngineService) isMember(group, account int64) bool {
 // LogSchedQualityDecision emits a committed decision using the shared state-event format.
 func LogSchedQualityDecision(ctx context.Context, d q.Decision) {
 	slog.InfoContext(ctx, "sched_quality.state", "component", "sched_quality", "at", d.At, "rule_version", q.RuleVersion, "account_id", d.Key.AccountID, "model", d.Key.Model, "group_id", d.Key.GroupID, "action", d.Action, "line", d.Key.Line, "level", d.Level, "until", d.Until, "release_reason", d.Basis.ReleaseReason, "trial_duration_seconds", d.Basis.TrialDurationSeconds, "history_missing", d.Basis.HistoryMissing, "basis", d.Basis, "attempt_ids", d.Basis.AttemptIDs)
-	if d.Basis.MissingDeadline {
+	if !d.Basis.MissingDeadline {
+		return
+	}
+	// Only a rear review or trial assessment can repair a missing deadline.
+	// Administrative actions can carry the same persisted basis as evidence.
+	switch d.Action {
+	case q.ActionRenew, q.ActionTrial, q.ActionTrialFail, q.ActionTrialPass, q.ActionTrialTimeout:
 		slog.WarnContext(ctx, "sched_quality.missing_deadline", "component", "sched_quality", "at", d.At, "account_id", d.Key.AccountID, "model", d.Key.Model, "group_id", d.Key.GroupID, "line", d.Key.Line)
 	}
 }
