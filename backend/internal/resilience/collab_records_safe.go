@@ -68,8 +68,41 @@ func (s *SafeCollabRecordsStore) runWrites() {
 		case <-s.stop.Done():
 			return
 		case mutation := <-s.writes:
-			s.applyShared(mutation)
+			batch := []CollabRecordMutation{mutation}
+		drain:
+			for len(batch) < 64 {
+				select {
+				case next := <-s.writes:
+					batch = append(batch, next)
+				default:
+					break drain
+				}
+			}
+			s.applySharedBatch(batch)
 		}
+	}
+}
+
+// Batch support is optional so existing shared-store implementations keep working.
+type CollabSharedRecordsBatchWriter interface {
+	ApplyBatch(context.Context, []CollabRecordMutation) error
+}
+
+func (s *SafeCollabRecordsStore) applySharedBatch(batch []CollabRecordMutation) {
+	defer collabRecover(&collabSafety.recordPanics)
+	if writer, ok := s.shared.(CollabSharedRecordsBatchWriter); ok {
+		ctx, cancel := context.WithTimeout(s.stop, CollabRecordTimeout)
+		defer cancel()
+		if writer.ApplyBatch(ctx, batch) != nil {
+			collabSafety.recordErrors.Add(1)
+		}
+		return
+	}
+	for _, mutation := range batch {
+		if s.stop.Err() != nil {
+			return
+		}
+		s.applyShared(mutation)
 	}
 }
 func (s *SafeCollabRecordsStore) applyShared(mutation CollabRecordMutation) {
@@ -122,6 +155,7 @@ func (s *SafeCollabRecordsStore) LookupBatch(ctx context.Context, batch CollabRe
 		if ctx.Err() != nil {
 			return local
 		}
+		local = s.lookupLocal(ctx, batch)
 		// Local state wins over delayed shared writes, including pending voids.
 		remote.Records = maps.Clone(remote.Records)
 		remote.Dispositions = maps.Clone(remote.Dispositions)
@@ -131,8 +165,12 @@ func (s *SafeCollabRecordsStore) LookupBatch(ctx context.Context, batch CollabRe
 		if remote.Dispositions == nil && len(local.Dispositions) > 0 {
 			remote.Dispositions = make(map[CollabRecordQuery]CollabDispositionLookup)
 		}
-		maps.Copy(remote.Records, local.Records)
-		maps.Copy(remote.Dispositions, local.Dispositions)
+		for query, records := range local.Records {
+			remote.Records[query] = collabMergeRecords(remote.Records[query], records)
+		}
+		for query, dispositions := range local.Dispositions {
+			remote.Dispositions[query] = collabMergeDispositions(remote.Dispositions[query], dispositions)
+		}
 		remote.TreeLocalEndings = max(remote.TreeLocalEndings, local.TreeLocalEndings)
 		return remote
 	}
@@ -186,6 +224,7 @@ func (s *SafeCollabRecordsStore) Terminated(ctx context.Context, value CollabTer
 
 func (s *SafeCollabRecordsStore) PendingIssued(ctx context.Context, record CollabIssuedRecord) (token CollabIssuedToken, ok bool) {
 	defer collabRecover(&collabSafety.recordPanics)
+	record.Status = CollabIssuedStatusPending
 	token, ok = s.local.PendingIssued(ctx, record)
 	if ok {
 		s.enqueue(CollabRecordMutation{Kind: CollabRecordMutationPending, Issued: record, Token: token})
@@ -201,7 +240,7 @@ func (s *SafeCollabRecordsStore) IncrementTreeLocalEnding(ctx context.Context, s
 	defer collabRecover(&collabSafety.recordPanics)
 	count, ok = s.local.IncrementTreeLocalEnding(ctx, scope, event)
 	if ok {
-		s.enqueue(CollabRecordMutation{Kind: CollabRecordMutationLocalEnding, Scope: scope, Event: event})
+		s.enqueue(CollabRecordMutation{Kind: CollabRecordMutationLocalEnding, Scope: scope, Event: event, Issued: CollabIssuedRecord{ExpiresAt: time.Now().Add(CollabRecordTTL)}})
 	}
 	return count, ok
 }

@@ -485,6 +485,7 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
+	collabRecords         *resilience.SafeCollabRecordsStore
 	schedAttemptRecorder  SchedAttemptRecorder
 	selectionBoard        *OpenAISelectionBoard
 	selectionFullMarks    fullMarks
@@ -669,6 +670,7 @@ func NewOpenAIGatewayService(
 	if openAITokenProvider != nil {
 		openAITokenProvider.SetAccountRuntimeBlocker(svc)
 	}
+	svc.initCollabRecords()
 	svc.logOpenAIWSModeBootstrap()
 	svc.StartOpenAICodexTicketHarvester()
 	return svc

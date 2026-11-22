@@ -770,6 +770,7 @@ func provideCleanup(
 			}},
 			{"OpenAIWSPool", func() error {
 				if openAIGateway != nil {
+					openAIGateway.CloseCollabRecords()
 					openAIGateway.CloseOpenAIWSPool()
 				}
 				return nil
