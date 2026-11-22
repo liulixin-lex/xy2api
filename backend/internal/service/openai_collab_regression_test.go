@@ -391,12 +391,24 @@ func TestCollabRegressionEarlyFallbackKeepsLegacyRepair(t *testing.T) {
 }
 
 func TestCollabRegressionExhaustedNamedReasoning(t *testing.T) {
-	l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, Evidence: collabRegressionVerified("rs_a"), Select: collabRegressionSelect, NamedReasoningAllowed: func(int64) bool { return false }}
-	l.Send = func(context.Context, int64, []byte, resilience.CollabAction) (resilience.CollabEvidence, bool) {
-		t.Fatal("renewed exhausted legacy repair")
-		return resilience.CollabEvidence{}, false
-	}
-	if l.Run(context.Background()) {
-		t.Fatal("unexpected delivery")
+	for _, limit := range []int{1, 2, 4} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, MaxAttempts: limit, Evidence: collabRegressionVerified("rs_a"), Select: collabRegressionSelect, NamedReasoningAllowed: func(int64) bool { return false }}
+			sends := 0
+			l.Send = func(_ context.Context, id int64, body []byte, action resilience.CollabAction) (resilience.CollabEvidence, bool) {
+				sends++
+				if action != resilience.CollabActionReplaceAll || id != 1 {
+					t.Fatalf("renewed named repair instead of final disposal: %s account=%d", action, id)
+				}
+				want, changed := l.Body.Derive(l.Body.Original, resilience.CollabActionReplaceAll, "", false)
+				if !changed || !bytes.Equal(want, body) {
+					t.Fatal("final disposal did not merge all remaining edits")
+				}
+				return resilience.CollabEvidence{}, true
+			}
+			if !l.Run(context.Background()) || sends != 1 {
+				t.Fatalf("final disposal skipped: sends=%d", sends)
+			}
+		})
 	}
 }

@@ -85,10 +85,15 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 					break
 				}
 			}
-			if item == nil || handled[current][named] || item.Family == resilience.CollabFamilyReasoning && l.NamedReasoningAllowed != nil && !l.NamedReasoningAllowed(current) {
+			if item == nil || handled[current][named] {
 				return false
 			}
-			if item.Family != resilience.CollabFamilyReasoning && item.Class != resilience.CollabItemClassReplaceable && !switched && l.MaxAttempts != 1 {
+			if item.Family == resilience.CollabFamilyReasoning && l.NamedReasoningAllowed != nil && !l.NamedReasoningAllowed(current) {
+				// Exhausted in-place reasoning admission does not consume the
+				// separate final-disposal allowance.
+				action = resilience.CollabActionReplaceAll
+				named = ""
+			} else if item.Family != resilience.CollabFamilyReasoning && item.Class != resilience.CollabItemClassReplaceable && !switched && l.MaxAttempts != 1 {
 				action = resilience.CollabActionSwitchOriginal
 			} else {
 				action = resilience.CollabActionNamedRepair
