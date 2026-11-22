@@ -93,6 +93,9 @@ func collabAliasScope(c *gin.Context) CollabContinuationScope {
 			scope.User, scope.Key = owner.userID, owner.apiKeyID
 		}
 	}
+	if scope.User > 0 {
+		scope.Key = 0
+	} // Keys of the same owner remain interoperable.
 	return scope
 }
 func (s *OpenAIGatewayService) restoreCollabContinuation(ctx context.Context, c *gin.Context, account *Account, body []byte) ([]byte, error) {

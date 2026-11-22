@@ -106,3 +106,28 @@ func TestCollabRegressionContinuationOwnerIsolation(t *testing.T) {
 		t.Fatal("owner alias missing")
 	}
 }
+
+func TestCollabRegressionOptionalSuccessKeepsAccountState(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 7, Platform: PlatformOpenAI}
+	svc.openaiOAuth429RetryStartedAt.Store(account.ID, time.Now())
+	svc.getOpenAIAccountModelTransientState().recordFailure(account.ID, "synthetic-model", time.Now())
+	ctx := resilience.WithCollabAttempt(context.Background(), resilience.CollabAttempt{Optional: true})
+	svc.ReportOpenAIAccountScheduleResultWithContext(ctx, account, "synthetic-model", true, nil)
+	if _, ok := svc.openaiOAuth429RetryStartedAt.Load(account.ID); !ok {
+		t.Error("optional success changed retry state")
+	}
+	if _, ok := svc.getOpenAIAccountModelTransientState().readEntry(account.ID, "synthetic-model", time.Now()); !ok {
+		t.Error("optional success cleared shared failure streak")
+	}
+}
+
+func TestCollabRegressionContinuationKeysOfOneOwner(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Set(openAIHTTPResponseOwnerContextKey, openAIHTTPResponseOwner{userID: 5, apiKeyID: 7})
+	first := collabAliasScope(c)
+	c.Set(openAIHTTPResponseOwnerContextKey, openAIHTTPResponseOwner{userID: 5, apiKeyID: 8})
+	if collabAliasScope(c) != first {
+		t.Fatal("keys of the same response owner cannot share a continuation")
+	}
+}

@@ -738,7 +738,7 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 // scheduler and API-key health observer. Credential, quota and provider
 // Retry-After handlers remain independent.
 func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithContext(ctx context.Context, account *Account, model string, success bool, firstTokenMs *int, observedErr ...error) bool {
-	if account == nil {
+	if account == nil || !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		return false
 	}
 	accountID := account.ID

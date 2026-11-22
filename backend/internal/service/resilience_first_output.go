@@ -138,7 +138,7 @@ func coldFirstOutputTier(tier time.Duration, bodyBytes int) time.Duration {
 // attempt start and samples the delivered first-content delay of warm streams.
 // model is already the actual outbound canonical model.
 func (s *OpenAIGatewayService) ReportOpenAIAttemptSuccess(ctx context.Context, account *Account, model string) {
-	if s == nil || account == nil {
+	if s == nil || account == nil || !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		return
 	}
 	canonical := strings.TrimSpace(model)
