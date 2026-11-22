@@ -52,8 +52,10 @@ type OpenAIGatewayHandler struct {
 	imageLimiter               *imageConcurrencyLimiter
 	maxAccountSwitches         int
 	cfg                        *config.Config
-	// collabRescue is the collaboration ladder; nil leaves every saved error as it is.
-	collabRescue collabRescue
+	// collabRescue is the collaboration ladder and collabRescuable whether it
+	// could act on an error. Without both, no request gets a seam.
+	collabRescue    collabRescue
+	collabRescuable collabRescuable
 }
 
 type openAIWSTurnChannelMappingSnapshot struct {
@@ -946,6 +948,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 入账；failover 错误恒定 result=nil，不会重复计费。
 		submitResponsesUsage := func(res *service.OpenAIForwardResult) {
 			if res == nil {
+				return
+			}
+			// xy2api collaboration: a withheld error must not wait for the bill,
+			// and a rescued request was settled by its rescue.
+			if collabSeam.beforeSettlement(c, res) {
 				return
 			}
 			stampOpenAIRequestedReasoningEffort(res, c)

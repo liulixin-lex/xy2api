@@ -27,26 +27,38 @@ var (
 // it worked is decided by what reached the client, never by what it returns.
 type collabRescue func(c *gin.Context, seam *collabSeam, saved *collabWithheld)
 
+// collabRescuable reports whether the rescue could act on an error written
+// now, so nothing else is withheld or delayed. It is asked under the writer's
+// lock, possibly off the request goroutine: it has to be cheap and must
+// neither write nor use the gin context.
+type collabRescuable func(seam *collabSeam) bool
+
 // collabSeam is where the collaboration ladder takes over. The existing path
 // runs to its end with all of its side effects at their own time. Only then,
 // and only if it ended in an error before any output, may a takeover run.
 // When nothing takes over, the error goes out exactly as it was written.
 //
-// finish has to run before the request's other deferred cleanup, so that the
-// user slot, the balance reservation and the request record are still held.
+// A withheld error is decided by beforeSettlement or, if the request is not
+// settled, by finish. finish has to run before the request's other deferred
+// cleanup, so that the user slot, the balance reservation and the request
+// record are still held.
 type collabSeam struct {
-	writer   *collabSeamWriter
-	original gin.ResponseWriter
-	body     []byte
-	rescue   collabRescue
+	writer     *collabSeamWriter
+	original   gin.ResponseWriter
+	body       []byte
+	rescue     collabRescue
+	heartbeats service.DeliveryHeartbeatMark
 }
 
 // armCollabSeam installs the seam for requests the ladder covers: native
 // Responses requests of an official Codex client that carry ciphertext and
-// no continuation pointer. For every other request it returns nil, and every
-// method of a nil seam does nothing.
+// no continuation pointer, when a rescue is wired at all. For every other
+// request it returns nil, and every method of a nil seam does nothing.
 func (h *OpenAIGatewayHandler) armCollabSeam(c *gin.Context, body []byte, previousResponseID, platform string, legacyCompact bool) *collabSeam {
 	if c == nil || c.Request == nil || c.Writer == nil || platform != service.PlatformOpenAI || previousResponseID != "" || legacyCompact {
+		return nil
+	}
+	if h.collabRescue == nil || h.collabRescuable == nil {
 		return nil
 	}
 	if !resilience.StateFrom(c.Request.Context()).CollabSettingsSnapshot().CollabLadderOn() {
@@ -59,7 +71,8 @@ func (h *OpenAIGatewayHandler) armCollabSeam(c *gin.Context, body []byte, previo
 		return nil
 	}
 	seam := &collabSeam{original: c.Writer, body: body, rescue: h.collabRescue}
-	seam.writer = newCollabSeamWriter(c.Writer)
+	rescuable := h.collabRescuable
+	seam.writer = newCollabSeamWriter(c.Writer, func() bool { return rescuable(seam) })
 	c.Writer = seam.writer
 	return seam
 }
@@ -74,15 +87,47 @@ func (s *collabSeam) finish(c *gin.Context) {
 		panic(recovered)
 	}
 	if s.writer.withholding() {
-		collabSeamWithheld.Add(1)
-		if s.takeOver(c) {
-			s.writer.release()
-			return
-		}
-		// The existing path would have closed its heartbeat with this error.
-		stopPreOutputKeepalive(c)
+		s.decide(c, true)
+		return
 	}
 	s.writer.release()
+}
+
+// beforeSettlement decides a withheld error before the request's bill is
+// written. That write can take seconds, which the client must not wait for,
+// and once it claimed the request nothing can be taken over any more. A
+// response with metered usage is billed as it is. One without can be taken
+// over: then the rescue settles the request and it reports true.
+func (s *collabSeam) beforeSettlement(c *gin.Context, result *service.OpenAIForwardResult) (rescued bool) {
+	if s == nil || !s.writer.withholding() {
+		return false
+	}
+	return s.decide(c, !collabSeamMetered(result))
+}
+
+func (s *collabSeam) decide(c *gin.Context, mayTakeOver bool) bool {
+	collabSeamWithheld.Add(1)
+	if mayTakeOver && s.takeOver(c) {
+		s.writer.release()
+		return true
+	}
+	// The existing path would have closed its heartbeat with this error.
+	stopPreOutputKeepalive(c)
+	s.writer.release()
+	return false
+}
+
+func collabSeamMetered(result *service.OpenAIForwardResult) bool {
+	if result == nil {
+		return false
+	}
+	u := result.Usage
+	return result.ClientDisconnect ||
+		u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0 ||
+		u.ImageInputTokens > 0 || u.ImageCacheReadTokens > 0 || u.ImageOutputTokens > 0 ||
+		u.RawPromptTokens != nil && *u.RawPromptTokens > 0 ||
+		result.ImageCount > 0 || result.VideoCount > 0 || result.SearchCount > 0 || result.WebSearchCalls > 0 ||
+		result.AudioUsage != nil
 }
 
 // takeOver reports whether output of a takeover reached the client. In every
@@ -105,6 +150,7 @@ func (s *collabSeam) takeOver(c *gin.Context) (delivered bool) {
 	if saved == nil {
 		return false
 	}
+	s.heartbeats = service.MarkDeliveryHeartbeats(c)
 	// A takeover rewrites request-scoped keys and contexts. If it does not
 	// deliver, later readers have to see the existing path's values. Pointed-to
 	// state is shared, so a takeover uses its own request state.
@@ -118,6 +164,7 @@ func (s *collabSeam) takeOver(c *gin.Context) (delivered bool) {
 		s.quiesce(c)
 		delivered = !s.writer.resume(saved)
 		if !delivered {
+			s.heartbeats.Restore()
 			c.Request = request
 			collabSeamSetKeys(c, keys)
 		}
@@ -134,6 +181,7 @@ func (s *collabSeam) resetAttempt(c *gin.Context) {
 		return
 	}
 	s.quiesce(c)
+	s.heartbeats.Restore()
 	s.writer.discard()
 	collabSeamClearTerminal(c)
 }

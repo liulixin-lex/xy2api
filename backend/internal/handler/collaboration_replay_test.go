@@ -251,7 +251,7 @@ func runCollaborationReplay(t *testing.T, c replayCase, snapshot resilience.Sett
 		}
 		accounts = append(accounts, service.Account{ID: id + accountBase, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Priority: int(id), Concurrency: 2, Credentials: map[string]any{"api_key": "synthetic-key", "base_url": "https://fixture.invalid"}, Extra: extra})
 	}
-	repo := &openAIWSFailoverHandlerAccountRepoStub{accounts: accounts}
+	repo := &openAIWSFailoverHandlerAccountRepoStub{accounts: accounts, groupLookup: replayGroupLookup}
 	memory := &replayMemory{accountBase: accountBase, bindings: map[string]int64{}, avoids: map[string]map[int64]time.Time{}, avoidUntil: map[string]map[int64]time.Time{}, failures: map[string]map[int64]int64{}}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.JWT.Secret = "synthetic-replay-key"
@@ -270,6 +270,9 @@ func runCollaborationReplay(t *testing.T, c replayCase, snapshot resilience.Sett
 	defer func() { runtime.Stop(); service.SetResilienceInstance(previousRuntime) }()
 	concurrency := &replaySlots{base: accountBase, firstWaiters: c.FirstWaiters, secondFull: c.SecondUnavailable, userWaiters: c.UserWaiters, active: map[int64]int{}}
 	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(concurrency), billing, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
+	if configureReplayHandler != nil {
+		configureReplayHandler(h, usage)
+	}
 	synctest.Test(t, func(t *testing.T) {
 		records := &replayRecordStore{mode: c.RecordMode}
 		if configureReplayRecords != nil {

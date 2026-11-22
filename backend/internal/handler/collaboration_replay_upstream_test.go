@@ -196,6 +196,10 @@ func (u *replayUpstream) Do(req *http.Request, _ string, id int64, _ int) (*http
 			}
 		case "ordinary_error":
 			payload = replayError("invalid_request_error", "invalid synthetic request", "")
+		case "unmetered_error":
+			// Outside the recorded corpus: a failed response that reports no usage.
+			setRule(rule.Kind)
+			return replayResponse(200, "text/event-stream", replayFrame("response.failed", `{"type":"response.failed","response":{"id":"resp_fixture","object":"response","status":"failed","error":{"type":"invalid_request_error","code":"invalid_request_error","message":"invalid synthetic request"}}}`)), nil
 		case "conflict":
 			status = 409
 			payload = replayError("provenance_conflict", "conversation source conflict", "")

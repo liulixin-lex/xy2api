@@ -2229,6 +2229,17 @@ type openAIWSFailoverHandlerAccountRepoStub struct {
 	service.AccountRepository
 	accounts       []service.Account
 	rateLimitedIDs []int64
+	groupLookup    bool
+}
+
+// ListByGroup works only with groupLookup. The collaboration replay goldens
+// were recorded without it, so where the retry hint needs it they record the
+// recovered panic; a run with groupLookup covers those paths.
+func (s *openAIWSFailoverHandlerAccountRepoStub) ListByGroup(ctx context.Context, groupID int64) ([]service.Account, error) {
+	if !s.groupLookup {
+		return s.AccountRepository.ListByGroup(ctx, groupID)
+	}
+	return append([]service.Account(nil), s.accounts...), nil
 }
 
 type openAIHTTPPassthroughFailoverUpstream struct {
@@ -2363,9 +2374,13 @@ type openAIWSUsageHandlerUsageLogRepoStub struct {
 	service.UsageLogRepository
 	created  chan *service.UsageLog
 	unbilled chan *service.GatewayUnbilledRequest
+	delay    time.Duration
 }
 
 func (s *openAIWSUsageHandlerUsageLogRepoStub) Create(ctx context.Context, log *service.UsageLog) (bool, error) {
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
 	if s.created != nil {
 		s.created <- log
 	}

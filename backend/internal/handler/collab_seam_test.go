@@ -72,15 +72,22 @@ func (s *seamTestServer) do(t *testing.T, run func(*gin.Context)) seamTestWire {
 	return seamTestWire{status: resp.StatusCode, header: header, body: string(body)}
 }
 
-// withSeam installs the seam the way the Responses handler does.
+func seamTestAlways() bool { return true }
+
+// withSeam installs the seam the way the Responses handler does, for a
+// request of which the rescue could act on any error.
 func withSeam(c *gin.Context, rescue collabRescue, existingPath func()) {
+	withSeamWhen(c, rescue, seamTestAlways, func(*collabSeam) { existingPath() })
+}
+
+func withSeamWhen(c *gin.Context, rescue collabRescue, rescuable func() bool, existingPath func(*collabSeam)) {
 	seam := &collabSeam{original: c.Writer, rescue: rescue}
-	seam.writer = newCollabSeamWriter(c.Writer)
+	seam.writer = newCollabSeamWriter(c.Writer, rescuable)
 	c.Writer = seam.writer
 	defer seam.restore(c)
 	defer stopPreOutputKeepalive(c)
 	defer seam.finish(c)
-	existingPath()
+	existingPath(seam)
 }
 
 type seamTestOp struct {
@@ -168,17 +175,21 @@ func TestCollabSeamIsTransparentWithoutTakeover(t *testing.T) {
 	r := rand.New(rand.NewSource(1))
 	for i := range 6000 {
 		ops := seamTestSequence(r)
-		observe := func(seam bool) (seamTestWire, []string) {
+		// The answer may change while the response is being written.
+		from := r.Intn(len(ops) + 2)
+		observe := func(seam bool, rescuable func(done int) bool) (seamTestWire, []string) {
 			var seen []string
 			wire := server.do(t, func(c *gin.Context) {
+				done := 0
 				path := func() {
 					for _, op := range ops {
 						op.apply(c)
+						done++
 						seen = append(seen, fmt.Sprint(op.kind, c.Writer.Written(), c.Writer.Size(), c.Writer.Status()))
 					}
 				}
 				if seam {
-					withSeam(c, nil, path)
+					withSeamWhen(c, nil, func() bool { return rescuable(done) }, func(*collabSeam) { path() })
 				} else {
 					path()
 				}
@@ -191,10 +202,17 @@ func TestCollabSeamIsTransparentWithoutTakeover(t *testing.T) {
 			})
 			return wire, seen
 		}
-		wantWire, wantSeen := observe(false)
-		gotWire, gotSeen := observe(true)
-		require.Equal(t, wantSeen, gotSeen, "sequence %d: %+v", i, ops)
-		require.Equal(t, wantWire, gotWire, "sequence %d: %+v", i, ops)
+		wantWire, wantSeen := observe(false, nil)
+		for name, rescuable := range map[string]func(int) bool{
+			"always": func(int) bool { return true },
+			"never":  func(int) bool { return false },
+			"from":   func(done int) bool { return done >= from },
+			"until":  func(done int) bool { return done < from },
+		} {
+			gotWire, gotSeen := observe(true, rescuable)
+			require.Equal(t, wantSeen, gotSeen, "%s %d, sequence %d: %+v", name, from, i, ops)
+			require.Equal(t, wantWire, gotWire, "%s %d, sequence %d: %+v", name, from, i, ops)
+		}
 	}
 }
 
@@ -444,7 +462,7 @@ func BenchmarkCollabSeamStream(b *testing.B) {
 				c, _ := gin.CreateTestContext(&seamTestDiscard{header: http.Header{"Content-Type": {"text/event-stream"}}})
 				w := gin.ResponseWriter(c.Writer)
 				if seam {
-					w = newCollabSeamWriter(c.Writer)
+					w = newCollabSeamWriter(c.Writer, seamTestAlways)
 				}
 				for range 2000 {
 					_, _ = w.Write(delta)

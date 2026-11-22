@@ -61,11 +61,12 @@ type collabWithheld struct {
 	header       http.Header
 }
 
-// collabSeamWriter lets the existing path run unchanged and withholds only
-// the terminal error it ends with before any output: a status >= 400, a
-// response.failed or error frame, or a failed JSON response. Everything else
-// passes through, and what is withheld can be replayed call by call, so a
-// request that is not rescued ends byte for byte as it does today.
+// collabSeamWriter lets the existing path run unchanged and withholds only a
+// terminal error before any output, and only while rescuable says that a
+// takeover could act on it: a status >= 400, a response.failed or error frame,
+// or a failed JSON response. Everything else goes out when it is written, and
+// what is withheld can be replayed call by call, so a request that is not
+// rescued ends byte for byte as it does today.
 //
 // Writers installed later (the pre-output keepalive) wrap this one and may
 // write from their own goroutine, hence the lock. No method calls upwards.
@@ -75,10 +76,14 @@ type collabSeamWriter struct {
 	mode atomic.Int32
 	mu   sync.Mutex
 
-	// pending is an unfinished frame, or the prelude while quiet; checked is
-	// how much of it has been classified.
+	// pending is an unfinished frame, or while quiet everything written so
+	// far. checked is how much of it has been classified and sent how much
+	// went out already: what cannot be taken over is watched, never delayed.
 	pending []byte
 	checked int
+	sent    int
+	// rescuable may be called with mu held and must not write.
+	rescuable func() bool
 	// quiet is set during a takeover: until it has semantic output nothing of
 	// it reaches the client, neither headers, prelude, heartbeats nor errors,
 	// whether or not the existing path had committed the headers.
@@ -89,9 +94,29 @@ type collabSeamWriter struct {
 	commitHeader http.Header
 }
 
-func newCollabSeamWriter(inner gin.ResponseWriter) *collabSeamWriter {
-	return &collabSeamWriter{ResponseWriter: inner, armHeader: inner.Header().Clone()}
+func newCollabSeamWriter(inner gin.ResponseWriter, rescuable func() bool) *collabSeamWriter {
+	return &collabSeamWriter{ResponseWriter: inner, armHeader: inner.Header().Clone(), rescuable: rescuable}
 }
+
+// intercepts reports whether a terminal error written now is withheld.
+func (w *collabSeamWriter) intercepts() (yes bool) {
+	if w.quiet {
+		return true
+	}
+	if w.rescuable == nil {
+		return false
+	}
+	defer func() {
+		if recover() != nil {
+			yes = false
+		}
+	}()
+	return w.rescuable()
+}
+
+func (w *collabSeamWriter) unsent() int { return len(w.pending) - w.sent }
+
+func (w *collabSeamWriter) forget() { w.pending, w.checked, w.sent = nil, 0, 0 }
 
 func (w *collabSeamWriter) current() collabSeamMode { return collabSeamMode(w.mode.Load()) }
 func (w *collabSeamWriter) set(mode collabSeamMode) { w.mode.Store(int32(mode)) }
@@ -108,7 +133,7 @@ func (w *collabSeamWriter) WriteHeader(code int) {
 	defer w.mu.Unlock()
 	// Once bytes are withheld the response counts as written, and gin ignores
 	// a status change after that.
-	if w.current() == collabSeamHolding || len(w.pending) > 0 {
+	if w.current() == collabSeamHolding || w.unsent() > 0 {
 		return
 	}
 	w.ResponseWriter.WriteHeader(code)
@@ -143,8 +168,11 @@ func (w *collabSeamWriter) write(kind collabSeamOpKind, data []byte) (int, error
 	committed := w.ResponseWriter.Written()
 	if !committed && len(w.pending) == 0 {
 		if w.Status() >= http.StatusBadRequest {
-			w.hold(kind, data)
-			return len(data), nil
+			if w.intercepts() {
+				w.hold(kind, data)
+				return len(data), nil
+			}
+			return w.pass(kind, data)
 		}
 		if len(data) == 0 {
 			if w.quiet {
@@ -153,21 +181,66 @@ func (w *collabSeamWriter) write(kind collabSeamOpKind, data []byte) (int, error
 			return w.forward(kind, data)
 		}
 	}
-	if len(w.pending) > 0 || collabSeamEventStream(w.Header()) {
+	stream := collabSeamEventStream(w.Header())
+	if w.quiet && !stream {
+		return w.writeJSON(kind, data, committed)
+	}
+	if len(w.pending) > 0 || stream {
 		return w.writeFrames(kind, data, committed)
 	}
-	if !committed && collabSeamFailedJSON(data) || w.quiet && !collabSeamJSONOutput(data) {
+	if !committed && collabSeamFailedJSON(data) && w.intercepts() {
 		w.hold(kind, data)
 		return len(data), nil
 	}
-	// The mode changes only after the write: passing writers skip the lock.
+	return w.pass(kind, data)
+}
+
+// pass writes through and ends the watch. A takeover of which no byte went
+// out delivered nothing: the saved error is still owed.
+func (w *collabSeamWriter) pass(kind collabSeamOpKind, data []byte) (int, error) {
 	n, err := w.forward(kind, data)
+	if w.quiet && err != nil && n <= 0 {
+		w.hold(kind, nil)
+		return n, err
+	}
+	// The mode changes only after the write: passing writers skip the lock.
 	w.set(collabSeamPassing)
 	return n, err
 }
 
-func (w *collabSeamWriter) writeFrames(kind collabSeamOpKind, data []byte, committed bool) (int, error) {
+// writeJSON collects a takeover's JSON response. It may come in any number of
+// writes and replaces the saved error only when it is complete and has output.
+func (w *collabSeamWriter) writeJSON(kind collabSeamOpKind, data []byte, committed bool) (int, error) {
 	earlier := len(w.pending)
+	buf := data
+	if earlier > 0 {
+		buf = append(w.pending, data...)
+	} else if !committed {
+		w.commitHeader = w.Header().Clone()
+	}
+	body := bytes.TrimSpace(buf)
+	// Validity is only worth checking where an object can end.
+	complete := len(body) > 0 && body[len(body)-1] == '}' && gjson.ValidBytes(body)
+	switch {
+	case complete && collabSeamJSONOutput(body):
+		w.forget()
+		n, err := w.pass(kind, buf)
+		if err != nil {
+			return min(len(data), max(0, n-earlier)), err
+		}
+	case complete, len(body) > 0 && body[0] != '{', len(buf) > collabSeamQuietLimit:
+		w.forget()
+		w.hold(kind, buf)
+	case earlier > 0:
+		w.pending = buf
+	default:
+		w.pending = bytes.Clone(buf)
+	}
+	return len(data), nil
+}
+
+func (w *collabSeamWriter) writeFrames(kind collabSeamOpKind, data []byte, committed bool) (int, error) {
+	earlier, sent := len(w.pending), w.sent
 	buf := data
 	if earlier > 0 {
 		buf = append(w.pending, data...)
@@ -181,11 +254,16 @@ func (w *collabSeamWriter) writeFrames(kind collabSeamOpKind, data []byte, commi
 		}
 		frame, event, payload := collabSeamClassify(buf[pos : pos+end])
 		if frame == collabSeamFailedFrame {
-			// Withhold the whole write, so a prelude that came with the error
-			// does not commit the response on its own.
-			w.pending, w.checked = nil, 0
-			w.hold(kind, buf)
-			return len(data), nil
+			if sent == 0 && w.intercepts() {
+				// Withhold the whole write, so a prelude that came with the
+				// error does not commit the response on its own.
+				w.forget()
+				w.hold(kind, buf)
+				return len(data), nil
+			}
+			// What cannot be taken over ends the watch like output.
+			output = true
+			break
 		}
 		pos += end
 		if frame != collabSeamOutputFrame {
@@ -200,48 +278,54 @@ func (w *collabSeamWriter) writeFrames(kind collabSeamOpKind, data []byte, commi
 		}
 	}
 
-	out, pass := pos, false
+	// out is how far buf goes out now, keep where what stays pending starts.
+	out, keep, last := pos, pos, false
 	switch {
 	case output:
-		out, pass = len(buf), true
+		out, keep, last = len(buf), len(buf), true
 	case w.quiet:
 		if len(buf) > collabSeamQuietLimit {
-			w.pending, w.checked = nil, 0
+			w.forget()
 			w.hold(kind, nil)
 			return len(data), nil
 		}
-		out = 0
+		out, keep = 0, 0
 	case len(buf)-pos > collabSeamPendingLimit:
-		out, pass = len(buf), true
+		out, keep, last = len(buf), len(buf), true
+	case pos < len(buf) && (pos < sent || !w.intercepts()):
+		// An unfinished frame waits only if it could end in a takeover.
+		out = len(buf)
 	}
 
 	var err error
 	var written int
-	if out > 0 {
-		written, err = w.forward(kind, buf[:out])
-	}
-	if pass || err != nil {
-		// Again only after the write.
-		defer w.set(collabSeamPassing)
+	if out > sent {
+		if last {
+			written, err = w.pass(kind, buf[sent:out])
+		} else if written, err = w.forward(kind, buf[sent:out]); err != nil {
+			w.set(collabSeamPassing)
+		}
+	} else if last {
+		w.set(collabSeamPassing)
 	}
 	if err != nil {
-		w.pending, w.checked = nil, 0
-		return min(len(data), max(0, written-earlier)), err
+		w.forget()
+		return min(len(data), max(0, written-(earlier-sent))), err
 	}
-	if out == len(buf) {
-		w.pending, w.checked = nil, 0
+	if keep == len(buf) {
+		w.forget()
 		return len(data), nil
 	}
 	if !committed && out == 0 && earlier == 0 {
 		w.commitHeader = w.Header().Clone()
 	}
 	// The caller may reuse data, so the remainder is always copied.
-	if earlier > 0 && out == 0 {
+	if earlier > 0 && keep == 0 {
 		w.pending = buf
 	} else {
-		w.pending = bytes.Clone(buf[out:])
+		w.pending = bytes.Clone(buf[keep:])
 	}
-	w.checked = pos - out
+	w.checked, w.sent = pos-keep, max(0, out-keep)
 	return len(data), nil
 }
 
@@ -325,11 +409,11 @@ func (w *collabSeamWriter) commitOnly(kind collabSeamOpKind) {
 		return
 	}
 	if w.current() == collabSeamWatching && !w.ResponseWriter.Written() {
-		if len(w.pending) == 0 && w.Status() >= http.StatusBadRequest {
+		if len(w.pending) == 0 && w.Status() >= http.StatusBadRequest && w.intercepts() {
 			w.hold(kind, nil)
 			return
 		}
-		if len(w.pending) > 0 {
+		if w.unsent() > 0 {
 			return
 		}
 	}
@@ -351,7 +435,7 @@ func (w *collabSeamWriter) Written() bool {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.held != nil || len(w.pending) > 0 || w.ResponseWriter.Written()
+	return w.held != nil || w.unsent() > 0 || w.ResponseWriter.Written()
 }
 
 func (w *collabSeamWriter) Size() int {
@@ -361,10 +445,10 @@ func (w *collabSeamWriter) Size() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	size := w.ResponseWriter.Size()
-	if w.held == nil && len(w.pending) == 0 {
+	if w.held == nil && w.unsent() == 0 {
 		return size
 	}
-	size = max(0, size) + len(w.pending)
+	size = max(0, size) + w.unsent()
 	if w.held != nil {
 		size += w.held.size
 	}
@@ -385,7 +469,8 @@ func (w *collabSeamWriter) suspend() *collabWithheld {
 		return nil
 	}
 	held.header = w.Header().Clone()
-	w.held, w.pending, w.checked = nil, nil, 0
+	w.held = nil
+	w.forget()
 	w.set(collabSeamWatching)
 	w.quiet = true
 	if !held.committed {
@@ -401,7 +486,8 @@ func (w *collabSeamWriter) discard() {
 	if w.current() == collabSeamPassing {
 		return
 	}
-	w.held, w.pending, w.checked = nil, nil, 0
+	w.held = nil
+	w.forget()
 	w.set(collabSeamWatching)
 	if !w.ResponseWriter.Written() {
 		w.resetUncommitted()
@@ -423,7 +509,8 @@ func (w *collabSeamWriter) resume(saved *collabWithheld) bool {
 	if saved == nil || w.current() == collabSeamPassing {
 		return false
 	}
-	w.quiet, w.pending, w.checked, w.commitHeader = false, nil, 0, nil
+	w.quiet, w.commitHeader = false, nil
+	w.forget()
 	if !saved.committed && !w.ResponseWriter.Written() {
 		w.ResponseWriter.WriteHeader(saved.status)
 	}
@@ -440,10 +527,10 @@ func (w *collabSeamWriter) release() {
 	defer w.mu.Unlock()
 	defer w.set(collabSeamPassing)
 	w.quiet = false
-	if len(w.pending) > 0 {
-		_, _ = w.forward(collabSeamWrite, w.pending)
-		w.pending, w.checked = nil, 0
+	if w.unsent() > 0 {
+		_, _ = w.forward(collabSeamWrite, w.pending[w.sent:])
 	}
+	w.forget()
 	w.replay()
 }
 

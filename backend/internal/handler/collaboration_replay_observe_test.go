@@ -221,6 +221,10 @@ func (s *replaySlots) GetAccountsLoadBatch(ctx context.Context, accounts []servi
 // this adapter; slow/failing stores are deliberately not wired to sticky state.
 var configureReplayRecords func(*testing.T, *service.OpenAIGatewayService, *replayRecordStore)
 var configureReplayHistory func(*testing.T, *service.OpenAIGatewayService, replayCase)
+var configureReplayHandler func(*OpenAIGatewayHandler, *openAIWSUsageHandlerUsageLogRepoStub)
+
+// replayGroupLookup completes the repository stub. The goldens have it off.
+var replayGroupLookup bool
 
 type replayRecordStore struct {
 	mu    sync.Mutex
