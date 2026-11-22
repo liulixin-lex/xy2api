@@ -8,9 +8,10 @@ import (
 
 // The supervisor owns its timers and joins before request cleanup. Queue reads
 // have a short cancellation bound and occur at most once per second after the
-// initial gate. Acceptance ends optional supervision, not the normal stream.
+// initial gate. Acceptance suspends supervision until the next physical send.
 func watchCollabTakeover(parent context.Context, duration time.Duration, accepted func() bool, waiters func(context.Context) bool) (context.Context, func()) {
 	started := time.Now()
+	deadline := started.Add(duration)
 	ctx, cancel := context.WithCancel(parent)
 	queued := func() (blocked bool) {
 		defer func() {
@@ -47,12 +48,11 @@ func watchCollabTakeover(parent context.Context, duration time.Duration, accepte
 				if !accepted() {
 					cancel()
 				}
-				return
 			case <-ticker.C:
 				if accepted() {
-					return
+					continue
 				}
-				if queued() {
+				if !time.Now().Before(deadline) || queued() {
 					cancel()
 					return
 				}

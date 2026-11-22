@@ -2416,6 +2416,9 @@ func (s *RateLimitService) applyConfiguredModelCooldown(ctx context.Context, acc
 		return false, false
 	}
 	for _, match := range matchTempUnschedulableRules(account, statusCode, responseBody) {
+		if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+			return true, false
+		}
 		if match.rule.DurationMinutes <= 0 {
 			continue
 		}
@@ -2824,6 +2827,9 @@ func (s *RateLimitService) tryTempUnschedulable(ctx context.Context, account *Ac
 		}
 	}
 	for _, match := range matchTempUnschedulableRules(account, statusCode, responseBody) {
+		if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+			return true
+		}
 		if s.triggerTempUnschedulable(ctx, account, match.rule, match.ruleIndex, statusCode, match.matchedKeyword, responseBody, tempUnschedulableModel(ctx, requestedModel)) {
 			return true
 		}

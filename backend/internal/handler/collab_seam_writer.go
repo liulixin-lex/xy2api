@@ -2,10 +2,12 @@ package handler
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -55,6 +57,7 @@ type collabWithheld struct {
 	size int
 	// committed reports whether headers were on the wire before the error.
 	committed bool
+	retryable bool
 	status    int
 	// commitHeader is the header map when the error would have committed;
 	// header is the map afterwards, as later readers would have seen it.
@@ -92,14 +95,17 @@ type collabSeamWriter struct {
 	// whether or not the existing path had committed the headers.
 	quiet bool
 
-	held           *collabWithheld
-	armHeader      http.Header
-	commitHeader   http.Header
-	prelude        collabDeliveredPrelude
-	takeover       atomic.Bool
-	continuation   []byte
-	preludePending []byte
-	resumeSequence int64
+	held            *collabWithheld
+	armHeader       http.Header
+	commitHeader    http.Header
+	prelude         collabDeliveredPrelude
+	takeover        atomic.Bool
+	jsonDelivered   atomic.Bool
+	continuation    []byte
+	continuationErr error
+	preludePending  []byte
+	resumeSequence  int64
+	lastWrite       time.Time
 }
 
 // These facts describe only bytes delivered before a takeover. Local ending
@@ -162,6 +168,12 @@ func (w *collabSeamWriter) WriteHeader(code int) {
 }
 
 func (w *collabSeamWriter) Write(data []byte) (int, error) {
+	if w.jsonDelivered.Load() {
+		if len(bytes.TrimSpace(data)) == 0 {
+			return w.ResponseWriter.Write(data)
+		}
+		return 0, http.ErrBodyNotAllowed
+	}
 	if w.current() == collabSeamPassing && !w.takeover.Load() {
 		return w.ResponseWriter.Write(data)
 	}
@@ -171,6 +183,12 @@ func (w *collabSeamWriter) Write(data []byte) (int, error) {
 }
 
 func (w *collabSeamWriter) WriteString(s string) (int, error) {
+	if w.jsonDelivered.Load() {
+		if strings.TrimSpace(s) == "" {
+			return w.ResponseWriter.WriteString(s)
+		}
+		return 0, http.ErrBodyNotAllowed
+	}
 	if w.current() == collabSeamPassing && !w.takeover.Load() {
 		return w.ResponseWriter.WriteString(s)
 	}
@@ -256,7 +274,7 @@ func (w *collabSeamWriter) pass(kind collabSeamOpKind, data []byte) (int, error)
 
 // writeJSON collects a takeover's JSON response. It may come in any number of
 // writes and replaces the saved error only when the write that closes the
-// document leaves it valid and with output. Later writes pass through.
+// document leaves it valid and with output. Further documents are rejected.
 func (w *collabSeamWriter) writeJSON(kind collabSeamOpKind, data []byte, committed bool) (int, error) {
 	earlier := len(w.pending)
 	buf := data
@@ -274,6 +292,9 @@ func (w *collabSeamWriter) writeJSON(kind collabSeamOpKind, data []byte, committ
 			break
 		}
 		n, err := w.pass(kind, buf)
+		if err == nil {
+			w.jsonDelivered.Store(true)
+		}
 		if err != nil {
 			return min(len(data), max(0, n-earlier)), err
 		}
@@ -434,6 +455,9 @@ func (w *collabSeamWriter) forward(kind collabSeamOpKind, data []byte) (n int, e
 	originalSize := len(data)
 	if w.takeover.Load() && w.prelude.Created && collabSeamEventStream(w.Header()) {
 		data = w.continuePrelude(data)
+		if w.continuationErr != nil {
+			return 0, w.continuationErr
+		}
 		if len(data) == 0 {
 			return originalSize, nil
 		}
@@ -446,8 +470,15 @@ func (w *collabSeamWriter) forward(kind collabSeamOpKind, data []byte) (n int, e
 			n, err = w.ResponseWriter.Write(data)
 		}
 	})
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	if err != nil && w.takeover.Load() {
+		n = min(n, originalSize)
+	}
 	if err == nil && n == len(data) {
 		if !w.takeover.Load() && collabSeamEventStream(w.Header()) {
+			w.lastWrite = time.Now()
 			w.observePrelude(data)
 		}
 		n = originalSize
@@ -493,8 +524,9 @@ func (w *collabSeamWriter) continuePrelude(data []byte) []byte {
 	for len(data) > 0 {
 		end := collabSeamFrameEnd(data, 0)
 		if end == 0 {
-			if len(data) > collabSeamPendingLimit {
-				return append(out, data...)
+			if len(data) > collabSeamQuietLimit {
+				w.continuationErr = io.ErrShortBuffer
+				return nil
 			}
 			w.continuation = bytes.Clone(data)
 			return out
@@ -504,7 +536,10 @@ func (w *collabSeamWriter) continuePrelude(data []byte) []byte {
 		var payload []byte
 		for line := range bytes.Lines(frame) {
 			if value, ok := bytes.CutPrefix(line, []byte("data:")); ok {
-				payload = bytes.TrimSpace(value)
+				if payload != nil {
+					payload = append(payload, '\n')
+				}
+				payload = append(payload, bytes.TrimSpace(value)...)
 			}
 		}
 		if !gjson.ValidBytes(payload) {
@@ -528,7 +563,17 @@ func (w *collabSeamWriter) continuePrelude(data []byte) []byte {
 			next, _ = sjson.SetBytes(next, "sequence_number", w.prelude.NextSequence)
 			w.prelude.NextSequence++
 		}
-		out = append(out, bytes.Replace(frame, payload, next, 1)...)
+		for line := range bytes.Lines(frame) {
+			if bytes.HasPrefix(line, []byte("data:")) {
+				continue
+			}
+			if len(bytes.TrimSpace(line)) > 0 {
+				out = append(out, line...)
+			}
+		}
+		out = append(out, "data: "...)
+		out = append(out, next...)
+		out = append(out, '\n', '\n')
 	}
 	return out
 }
@@ -684,6 +729,7 @@ func (w *collabSeamWriter) discard() {
 	}
 	w.held = nil
 	w.continuation = nil
+	w.continuationErr = nil
 	w.prelude.NextSequence = w.resumeSequence
 	w.forget()
 	w.set(collabSeamWatching)
@@ -790,7 +836,7 @@ func collabSeamFailedJSON(data []byte) bool {
 		return false
 	}
 	status := gjson.GetBytes(data, "status")
-	return status.Type == gjson.String && status.String() == "failed"
+	return status.Type == gjson.String && status.String() == "failed" || gjson.GetBytes(data, "type").String() == "response.failed" && gjson.GetBytes(data, "response.status").String() == "failed"
 }
 
 // collabSeamJSONOutput reports whether a takeover's JSON response has output
@@ -885,4 +931,63 @@ func collabSeamClassify(frame []byte) (kind collabSeamFrame, event string, data 
 		return collabSeamPreludeFrame, event, data
 	}
 	return collabSeamOutputFrame, event, data
+}
+
+// collabPreemptionMark holds the exact unfinished legacy writer state while
+// early rescue runs. Its slices are detached from the optional writer.
+type collabPreemptionMark struct {
+	pending, preludePending []byte
+	checked, sent           int
+	document                collabJSONScan
+	prelude                 collabDeliveredPrelude
+	commitHeader            http.Header
+	status                  int
+}
+
+func (w *collabSeamWriter) beginPreemption() *collabPreemptionMark {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.current() != collabSeamWatching {
+		return nil
+	}
+	mark := &collabPreemptionMark{bytes.Clone(w.pending), bytes.Clone(w.preludePending), w.checked, w.sent, w.document, w.prelude, w.commitHeader.Clone(), w.Status()}
+	w.held = &collabWithheld{status: w.Status(), committed: w.ResponseWriter.Written(), header: w.Header().Clone(), commitHeader: w.Header().Clone()}
+	w.set(collabSeamHolding)
+	return mark
+}
+func (w *collabSeamWriter) restorePreemption(mark *collabPreemptionMark) {
+	w.discard()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.quiet = false
+	w.takeover.Store(false)
+	w.pending, w.preludePending = mark.pending, mark.preludePending
+	w.checked, w.sent, w.document = mark.checked, mark.sent, mark.document
+	w.prelude, w.commitHeader = mark.prelude, mark.commitHeader
+	if !w.ResponseWriter.Written() {
+		w.ResponseWriter.WriteHeader(mark.status)
+	}
+}
+
+// finishPending recognizes a complete final error frame without a blank-line
+// separator, after the response reader has reached EOF and recorded evidence.
+func (w *collabSeamWriter) finishPending() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.current() != collabSeamWatching || w.quiet || w.sent != 0 || len(w.pending) == 0 || !w.intercepts() {
+		return
+	}
+	kind, _, payload := collabSeamClassify(w.pending)
+	if kind != collabSeamFailedFrame || !gjson.ValidBytes(payload) {
+		return
+	}
+	body := w.pending
+	w.forget()
+	w.hold(collabSeamWrite, body)
+}
+
+func (w *collabSeamWriter) lastWriteAt() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastWrite
 }

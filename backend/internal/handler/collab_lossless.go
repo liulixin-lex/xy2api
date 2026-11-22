@@ -49,26 +49,31 @@ func (s *collabSeam) tryLossless(c *gin.Context) bool {
 		return false
 	}
 	started := time.Now()
+	writer, keys := c.Writer, c.Copy().Keys
+	header := c.Writer.Header().Clone()
+	s.idleDeadline = service.CollabClientIdleDeadline(c, s.started)
+	restoreHeartbeat := service.SuspendCollabKeepalive(c)
+	c.Delete(ginKeyPreOutputKeepaliveStop)
 	parent := resilience.StateFrom(c.Request.Context())
 	w := s.writer
-	w.mu.Lock()
-	if w.current() != collabSeamWatching {
-		w.mu.Unlock()
+	mark := w.beginPreemption()
+	if mark == nil {
+		collabSeamSetKeys(c, keys)
+		restoreHeartbeat()
 		return false
 	}
-	w.held = &collabWithheld{status: w.Status(), committed: w.ResponseWriter.Written(), header: w.Header().Clone(), commitHeader: w.Header().Clone()}
-	w.set(collabSeamHolding)
-	w.mu.Unlock()
 	delivered := s.takeOver(c)
 	if !delivered {
-		w.discard()
-		w.mu.Lock()
-		w.quiet = false
-		w.takeover.Store(false)
-		w.mu.Unlock()
-		parent.Budget().CompensateCollabPreempt(time.Since(started))
-		s.rescue = nil // optional quotas are request-wide, including legacy fallback
+		w.restorePreemption(mark)
+		collabSeamSetHeader(w.Header(), header)
+		collabSeamSetKeys(c, keys)
+		c.Writer = writer
+		restoreHeartbeat()
+		if budget := parent.Budget(); budget != nil {
+			budget.CompensateCollabPreempt(time.Since(started))
+		}
 	}
 	s.losslessDuration = 0
+	s.idleDeadline = time.Time{}
 	return delivered
 }

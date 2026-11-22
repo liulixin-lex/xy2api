@@ -159,6 +159,45 @@ func (u *replayUpstream) Do(req *http.Request, _ string, id int64, _ int) (*http
 		var payload string
 		status := http.StatusBadRequest
 		switch rule.Kind {
+		case "regression_owner", "regression_decrypt", "regression_locator":
+			if strings.Contains(string(body), `"encrypted_content"`) {
+				code, message, param := "encrypted_agent_recovery_wire_changed", "synthetic ownership rejection", ""
+				status = 409
+				if rule.Kind == "regression_decrypt" {
+					code, message, status = "invalid_request_error", "Encrypted content hydration failed", 400
+				}
+				if rule.Kind == "regression_locator" {
+					code, message, param, status = "invalid_encrypted_content", "Encrypted content could not be verified", "input[0].content[0]", 400
+				}
+				payload = replayError(code, message, param)
+				if strings.HasPrefix(u.c.Form, "regression_") {
+					setRule(rule.Kind)
+					failed := `{"type":"response.failed","response":{"id":"resp_fixture","object":"response","status":"failed","error":` + gjson.Get(payload, "error").Raw + `}}`
+					if u.c.Form == "regression_failed_json" {
+						return replayResponse(200, "application/json", gjson.Get(failed, "response").Raw), nil
+					}
+					if u.c.Form == "regression_json_envelope" {
+						return replayResponse(200, "application/json", failed), nil
+					}
+					frame := replayFrame("response.failed", failed)
+					if u.c.Form == "regression_sse_eof" {
+						frame = strings.TrimSuffix(frame, "\n")
+					}
+					return replayResponse(200, "text/event-stream", frame), nil
+				}
+			}
+		case "regression_long_hang":
+			setRule(rule.Kind)
+			select {
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			case <-time.After(90 * time.Second):
+				return nil, context.DeadlineExceeded
+			}
+		case "regression_transport":
+			setRule(rule.Kind)
+			return nil, fmt.Errorf("synthetic transport failure")
+
 		case "named_always":
 			payload = replayError("invalid_encrypted_content", "Encrypted content could not be verified for item "+rule.Item, "")
 		case "named":

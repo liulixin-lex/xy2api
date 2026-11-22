@@ -36,6 +36,8 @@ type openAICompactSSEKeepalive struct {
 	generation uint64
 	done       chan struct{}
 	lastWrite  time.Time
+	resumeAt   time.Time
+	interval   time.Duration
 	lastQueue  time.Time
 	// bytes 是心跳已写出的注释字节数。心跳不构成语义响应，handler 的
 	// "Forward 期间是否已写响应"判定（failover 放弃换号的依据）必须扣除
@@ -152,6 +154,8 @@ func (k *openAICompactSSEKeepalive) resume(firstDelay, interval time.Duration) {
 			firstDelay = 0
 		}
 	}
+	k.resumeAt = time.Now().Add(firstDelay)
+	k.interval = interval
 	k.stopped = false
 	k.generation++
 	generation := k.generation

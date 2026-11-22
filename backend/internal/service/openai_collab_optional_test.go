@@ -73,3 +73,77 @@ func TestCollabOptionalQuotaSnapshotDoesNotWriteAccount(t *testing.T) {
 		require.Zero(t, repo.updateExtraCalls)
 	})
 }
+
+func TestCollabOptionalDisconnectDrainsAfterDelivery(t *testing.T) {
+	original := resilience.Current().Clone()
+	defer resilience.Publish(original)
+	settings := original.Clone()
+	settings.Disconnect.Enabled = true
+	settings.Disconnect.PartialDrainMaxSeconds = 2
+	resilience.Publish(settings)
+	for _, delivered := range []bool{false, true} {
+		for _, stream := range []bool{false, true} {
+			synctest.Test(t, func(t *testing.T) {
+				client, cancel := context.WithCancel(context.Background())
+				owner := resilience.NewRequestState()
+				owner.InitDelivery(client, time.Now(), func() int64 {
+					if delivered {
+						return 10
+					}
+					return 0
+				})
+				ctx := resilience.WithCollabAttempt(resilience.WithRequestState(client, resilience.NewCollabChildState(owner)), resilience.CollabAttempt{Optional: true})
+				var upstream context.Context
+				var release context.CancelFunc
+				if stream {
+					upstream, release = detachStreamUpstreamContext(ctx, true)
+				} else {
+					upstream, release = detachUpstreamContext(ctx)
+				}
+				defer release()
+				cancel()
+				synctest.Wait()
+				if !delivered {
+					require.Error(t, upstream.Err())
+					return
+				}
+				require.NoError(t, upstream.Err())
+				time.Sleep(3 * time.Second)
+				synctest.Wait()
+				require.Error(t, upstream.Err())
+			})
+		}
+	}
+}
+
+func TestCollabOptionalContextSurvivesBuildRelease(t *testing.T) {
+	ctx, cancel := context.WithCancel(resilience.WithCollabAttempt(context.Background(), resilience.CollabAttempt{Optional: true}))
+	defer cancel()
+	upstream, release := detachUpstreamContext(ctx)
+	release()
+	require.NoError(t, upstream.Err(), "request construction releases its temporary context before dispatch")
+	cancel()
+	select {
+	case <-upstream.Done():
+	case <-time.After(time.Second):
+		t.Fatal("preparation cancellation lost")
+	}
+}
+
+func TestCollabOptionalSelectionReleasesTrial(t *testing.T) {
+	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+	leases := newSelectionTrialLeaseFake()
+	selectionSetTrial(f, 1, leases)
+	ctx := resilience.WithCollabAttempt(resilience.WithRequestState(context.Background(), resilience.NewCollabChildState(resilience.NewRequestState())), resilience.CollabAttempt{Optional: true})
+	result, err := f.svc.SelectCollabAccount(ctx, ptrInt64Selection(7), "m", OpenAIEndpointCapabilityResponses, 1, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Nil(t, result.WaitPlan)
+	require.NotEmpty(t, leases.held)
+	require.Empty(t, f.cache.sessionBindings)
+	release := CombineSelectionRelease(result, nil)
+	release()
+	release()
+	require.Empty(t, leases.held)
+	require.Empty(t, f.cache.sessionBindings)
+}

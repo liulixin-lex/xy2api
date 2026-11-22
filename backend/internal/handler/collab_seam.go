@@ -55,8 +55,13 @@ type collabSeam struct {
 	localEnding      func(*gin.Context, *collabSeam, *collabWithheld, resilience.CollabEvidence)
 	terminalRejected func(*gin.Context, resilience.CollabEvidence)
 	started          time.Time
+	idleDeadline     time.Time
 	losslessDuration time.Duration
 	lossless         bool
+	progress         service.CollabLadderProgress
+	optionalSpent    time.Duration
+	rejected         map[service.CollabRejectedBody]bool
+	deliveredAccount int64
 	terminalRecorded bool
 }
 
@@ -87,13 +92,9 @@ func (h *OpenAIGatewayHandler) armCollabSeam(c *gin.Context, body []byte, previo
 	if !bytes.Contains(body, collabCiphertextField) && !bytes.Contains(body, collabEncryptedArgs) {
 		return nil
 	}
-	parsed := service.ParseCollabBody(body)
-	if parsed.Shape.Ambiguous || parsed.Shape.ContinuationPointer || len(parsed.Items) == 0 && !parsed.Shape.CallArgumentsCiphertext {
-		return nil
-	}
 	seam := &collabSeam{original: c.Writer, body: body, rescue: h.collabRescue}
 	seam.lossless = resilience.StateFrom(c.Request.Context()).CollabSettingsSnapshot().CollabLosslessFirstOn()
-	seam.observer = service.NewCollabSendObserver(parsed)
+	seam.observer = service.NewLazyCollabSendObserver(body)
 	eligible := h.collabRescuable(seam)
 	if eligible == nil {
 		return nil
@@ -113,6 +114,7 @@ func (s *collabSeam) finish(c *gin.Context) {
 		s.writer.release()
 		panic(recovered)
 	}
+	s.writer.finishPending()
 	if s.writer.withholding() {
 		s.decide(c, true)
 		return
@@ -126,7 +128,11 @@ func (s *collabSeam) finish(c *gin.Context) {
 // response with metered usage is billed as it is. One without can be taken
 // over: then the rescue settles the request and it reports true.
 func (s *collabSeam) beforeSettlement(c *gin.Context, result *service.OpenAIForwardResult) (rescued bool) {
-	if s == nil || !s.writer.withholding() {
+	if s == nil {
+		return false
+	}
+	s.writer.finishPending()
+	if !s.writer.withholding() {
 		return false
 	}
 	return s.decide(c, !collabSeamMetered(result))
@@ -168,7 +174,7 @@ func (s *collabSeam) recordTerminal(c *gin.Context) {
 	defer func() { _ = recover() }()
 	rejections := s.observer.Rejections()
 	if len(rejections) != 0 {
-		s.terminalRejected(c, rejections[len(rejections)-1].Evidence(service.ParseCollabBody(s.body).Shape))
+		s.terminalRejected(c, rejections[len(rejections)-1].Evidence(s.observer.Body().Shape))
 	}
 }
 
@@ -187,6 +193,13 @@ func (s *collabSeam) takeOver(c *gin.Context) (delivered bool) {
 	// Snapshot first: stopping the heartbeat and clearing the claims below
 	// must not be what the saved error's later readers see.
 	original := c.Copy().Keys
+	if s.idleDeadline.IsZero() {
+		last := s.started
+		if written := s.writer.lastWriteAt(); written.After(last) {
+			last = written
+		}
+		s.idleDeadline = service.CollabClientIdleDeadline(c, last)
+	}
 	s.quiesce(c)
 	recorded := opsRecordedStatus(c)
 	saved := s.writer.suspend()
@@ -197,7 +210,14 @@ func (s *collabSeam) takeOver(c *gin.Context) (delivered bool) {
 	// A takeover rewrites request-scoped keys and contexts. If it does not
 	// deliver, later readers have to see the existing path's values. Pointed-to
 	// state is shared, so a takeover uses its own request state.
-	request, keys, ginErrors := c.Request, original, len(c.Errors)
+	request, keys, ginErrors := c.Request, original, c.Errors
+	c.Errors = append(c.Errors[:0:0], c.Errors...)
+	for i, entry := range c.Errors {
+		if entry != nil {
+			copied := *entry
+			c.Errors[i] = &copied
+		}
+	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			logger.FromContext(request.Context()).Error("collab.takeover_panic", zap.Stack("stack"))
@@ -206,19 +226,18 @@ func (s *collabSeam) takeOver(c *gin.Context) (delivered bool) {
 		// before the header map is put back.
 		s.quiesce(c)
 		delivered = !s.writer.resume(saved)
+		c.Request = request
 		if !delivered {
 			s.heartbeats.Restore()
-			c.Request = request
 			collabSeamSetKeys(c, keys)
-			if len(c.Errors) > ginErrors {
-				c.Errors = c.Errors[:ginErrors:ginErrors]
-			}
+			c.Errors = ginErrors
 			if !saved.committed && s.writer.ResponseWriter.Written() {
 				collabSeamRecordLost(c, saved, recorded)
 			}
 		}
 	}()
 	collabSeamClearTerminal(c)
+	c.Request = request.Clone(request.Context())
 	s.rescue(c, s, saved)
 	return false
 }

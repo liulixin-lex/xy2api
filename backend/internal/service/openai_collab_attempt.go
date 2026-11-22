@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/gin-gonic/gin"
 	"sync/atomic"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
@@ -12,10 +13,21 @@ import (
 // parent's settlement owner. Prelude continuation names the response the client
 // saw, so ownership and billing must use that same identity.
 func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, account *Account, result *OpenAIForwardResult, deliveredID string) {
+	// Alias storage cannot prevent the request owner's settlement after output.
+	defer func() { _ = recover() }()
 	if result == nil || c == nil || c.Request == nil || resilience.StateFrom(c.Request.Context()).DeliveredBytes() == 0 {
 		return
 	}
-	if deliveredID != "" {
+	if deliveredID != "" && deliveredID != result.ResponseID {
+		result.UpstreamResponseID = result.ResponseID
+		store := s.collabAliasStore()
+		if store == nil || !store.Ready() {
+			return
+		}
+		alias := CollabContinuationAlias{Account: account.ID, Upstream: result.ResponseID, Expires: time.Now().Add(s.openAIWSResponseStickyTTL())}
+		if store.Put(context.WithoutCancel(c.Request.Context()), collabAliasScope(c), deliveredID, alias) != nil {
+			return
+		}
 		result.ResponseID = deliveredID
 	}
 	if result.CompletedForDelivery() {

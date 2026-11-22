@@ -182,6 +182,10 @@ func replaySettings(c replayCase, snapshot resilience.Settings) resilience.Setti
 	s.Budget.FirstOutputTimeoutSeconds.Default = 2
 	s.Budget.ModelOverrides = nil
 	s.Budget.PreOutputBudgetSeconds = 30
+	if strings.HasPrefix(c.Name, "regression_long_") {
+		s.Budget.FirstOutputTimeoutSeconds.Default = 90
+		s.Budget.PreOutputBudgetSeconds = 90
+	}
 	s.FCOCompat.Mode = resilience.FCOCompatModeReactive
 	if c.MixedMarkers {
 		s.CollaborationPlaintext.Enabled = true

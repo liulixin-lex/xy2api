@@ -63,7 +63,9 @@ func (s *OpenAIGatewayService) failoverOpenAIModelAvailability(ctx context.Conte
 			c.Set(hostKey, host)
 		}
 		if reason == openAIModelUnavailableReason {
-			s.recordOpenAIModelAvailabilityFailure(account, model)
+			if resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+				s.recordOpenAIModelAvailabilityFailure(account, model)
+			}
 		}
 	}
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
@@ -239,7 +241,9 @@ func (s *OpenAIGatewayService) failoverOpenAIStreamModelAvailability(ctx context
 // still use the callers' existing terminal deferral to apply this once.
 func (s *OpenAIGatewayService) handleOpenAIStreamFailureAfterOutput(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, payload []byte, message, model string, wrappedStatus int) {
 	if _, matched := openAIStreamModelAvailabilityStatus(payload, message, wrappedStatus); matched && account.IsOpenAICompatible() {
-		s.recordOpenAIModelAvailabilityFailure(account, model)
+		if resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+			s.recordOpenAIModelAvailabilityFailure(account, model)
+		}
 		noteResiliencePostOutputFailureWithCategory(ctx, s.rateLimitService, account, resp, postOutputModelUnavailable, resilience.CategoryModelUnsupported)
 		return
 	}

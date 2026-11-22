@@ -261,10 +261,11 @@ type OpenAIForwardResult struct {
 	UpstreamRecoveryHint *resilience.UpstreamRecoveryHint
 	ImageCountObserved   bool
 
-	CacheDiagnostic  *OpenAICacheDiagnostic `json:"-"`
-	RoutingSessionID string                 `json:"-"`
-	RequestID        string
-	ResponseID       string
+	CacheDiagnostic    *OpenAICacheDiagnostic `json:"-"`
+	RoutingSessionID   string                 `json:"-"`
+	RequestID          string
+	ResponseID         string
+	UpstreamResponseID string
 	// UpstreamHeaders 是直接上游的响应头，用于按账户配置解析上游请求标识。
 	UpstreamHeaders http.Header
 	Usage           OpenAIUsage
@@ -529,6 +530,7 @@ type OpenAIGatewayService struct {
 	agentIdentityTaskMu            sync.Mutex
 	openaiWSPool                   *openAIWSConnPool
 	openaiWSStateStore             OpenAIWSStateStore
+	collabContinuations            CollabContinuationStore
 	openaiWSPassthroughDialer      openAIWSClientDialer
 	openaiWSSessionPreemptions     openAIWSSessionPreemptRegistry
 	openaiModelTransient           *openAIAccountModelTransientState

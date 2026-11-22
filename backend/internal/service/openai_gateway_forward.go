@@ -21,6 +21,13 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
+	if s.collabAliasStore() != nil {
+		var aliasErr error
+		body, aliasErr = s.restoreCollabContinuation(ctx, c, account, body)
+		if aliasErr != nil {
+			return nil, aliasErr
+		}
+	}
 	fcoCompat := armOpenAIFCOCompat(ctx, c, account, body, true, 0)
 	if fcoCompat != nil {
 		ctx = WithOpenAIFCOCompatSnapshot(ctx, fcoCompat.snapshot)

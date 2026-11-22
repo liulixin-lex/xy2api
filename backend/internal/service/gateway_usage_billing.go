@@ -612,6 +612,9 @@ func detachedBillingContext(ctx context.Context) (context.Context, context.Cance
 }
 
 func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Context, context.CancelFunc) {
+	if resilience.CollabAttemptFrom(ctx).Optional {
+		return collabUpstreamContext(ctx)
+	}
 	if ctx == nil {
 		return context.Background(), func() {}
 	}
@@ -626,8 +629,8 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 }
 
 func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
-		return ctx, func() {}
+	if resilience.CollabAttemptFrom(ctx).Optional {
+		return collabUpstreamContext(ctx)
 	}
 	if ctx == nil {
 		return context.Background(), func() {}
@@ -1375,4 +1378,23 @@ func optionalSubscriptionID(subscription *UserSubscription) *int64 {
 		return &subscription.ID
 	}
 	return nil
+}
+
+// Optional preparation is cancellable until delivery. After output, the normal
+// disconnect controller owns the bounded usage drain.
+func collabUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Done() == nil {
+		return ctx, func() {}
+	}
+	base := resilienceUpstreamContext(ctx, context.WithValue(context.WithoutCancel(ctx), codexTicketClientContextKey{}, ctx))
+	upstream, cancel := context.WithCancel(base)
+	context.AfterFunc(ctx, func() {
+		state := resilience.StateFrom(ctx)
+		if state == nil || state.DeliveredBytes() == 0 {
+			cancel()
+		}
+	})
+	// Callers release the construction scope before dispatch when no header
+	// guard owns it. The request/optional supervisor owns cancellation here.
+	return upstream, func() {}
 }
