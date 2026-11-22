@@ -187,7 +187,7 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 
 `summary` 的 `cycles` 是引擎每 5 秒的工作周期，正常每 5 分钟约 60 次；与每 5 分钟一次的普通质量判定不同。`cooled` 计进入后排、续期、试用失败；`released` 计试用放回；`trial` 计进入试用；`relax` 计门槛放宽写入的动作；`clear` 计再犯档位清零动作。只统计提交成功的动作，回滚的重评不发布也不计数；管理员手动恢复不计入这些计数。
 
-**`sched_quality.state`** 的 `at` 是逻辑判定时刻，`rule_version` 当前为 `3.1`；用 `account_id`、`model`、`group_id`、`line` 定位线，`line` 为 `ttfo`、`error` 或 `cache`。新 `action` 取 `enter`、`renew`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`relax`、`clear`，见 [判定记录](group-quality-gate.md#判定记录)；旧日志仍可见 `release`。`level` 为 0–4，对应 20、40、80、160、240 分钟。`until` 在进入后排、续期、试用失败时写后排期限，进入试用时写试用期限，其余为零值。
+**`sched_quality.state`** 的 `at` 是逻辑判定时刻，`rule_version` 当前为 `3.1`；用 `account_id`、`model`、`group_id`、`line` 定位线，`line` 为 `ttfo`、`error` 或 `cache`。`action` 取 `enter`、`renew`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`reset`、`relax`、`clear`，见 [判定记录](group-quality-gate.md#判定记录)；旧日志仍可见 `release`。管理员重置提交后，原先在后排或试用的线各记一条 `reset`。`level` 为 0–4，对应 20、40、80、160、240 分钟。`until` 在进入后排、续期、试用失败时写后排期限，进入试用时写试用期限，其余为零值。
 
 | 字段 | 含义 |
 |---|---|
@@ -264,7 +264,9 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 | 事件 | 级别 | 何时写 / 在哪查 |
 |---|---|---|
 | `upstream_conversion_failed` | Warn | 转换错误取得终态写入权时记一次。不带 `component=sched_quality`，在系统日志按事件名查 |
-| `openai_conversion_retry` | Info | Chat 请求走 Responses 上游，遇到可识别的输出条目身份冲突时，每请求记一次是否换号实发及结果。不带 `component=sched_quality`，只查应用日志 |
+| `openai_conversion_retry` | Info | Chat 请求走 Responses 上游且 `conversion_reason=conflicting_output_identity` 时，每请求记一次是否换号实发及结果。不带 `component=sched_quality`，只查应用日志 |
+
+流式工具调用身份冲突（`tool_identity_conflict`）、输出序号冲突（`conflicting_output_index`）以及两种输出歧义（`ambiguous_output_identity`、`ambiguous_unindexed_output`）沿用原来的错误处理；查 `upstream_conversion_failed`，不会有 `openai_conversion_retry`。
 
 两条日志共用下面的固定诊断字段。它们不记录错误原文、生成内容、实际条目 ID、调用 ID 或工具名称。
 
