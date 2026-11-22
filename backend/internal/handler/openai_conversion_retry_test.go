@@ -232,7 +232,7 @@ func TestChatConversionRetryEndToEnd(t *testing.T) {
 					upstream.responses[1] = conversionConflictStream(true)
 				}
 				mutate := func(accounts []service.Account) {
-					if scenario == "second_protocol_fallback" {
+					if scenario == "second_protocol_fallback" || scenario == "same_account_repair" {
 						for i := range accounts {
 							accounts[i].Type = service.AccountTypeAPIKey
 							accounts[i].Credentials = map[string]any{"api_key": "fixture"}
@@ -253,6 +253,9 @@ func TestChatConversionRetryEndToEnd(t *testing.T) {
 				h.gatewayService.SetSchedAttemptRecorder(attempts)
 				ctx, cancel := context.WithCancel(budgetCtx(t, resilience.KindText, 3131))
 				defer cancel()
+				if scenario == "same_account_repair" {
+					ctx = service.WithGroupSystemPrompt(ctx, service.GroupSystemPromptConfig{Prompt: "repair group fixture"}, "gpt-4.1")
+				}
 				c, rec := newOpenAIResponsesFailoverTestContext(t, ctx)
 				body := fmt.Sprintf(`{"model":"gpt-5.4","stream":%t,"messages":[{"role":"user","content":"hello"}]}`, stream)
 				if scenario == "functions" || scenario == "tool_prefix" {
@@ -262,9 +265,9 @@ func TestChatConversionRetryEndToEnd(t *testing.T) {
 					upstream.responses[0] = "data: " + `{"type":"response.output_item.added","output_index":1,"item":{"id":"fixture_stale_tool","type":"function_call","call_id":"fixture_stale_call","name":"fixture_stale_name","arguments":""}}` + "\n\n" + upstream.responses[0]
 				}
 				if scenario == "same_account_repair" {
-					body = strings.TrimSuffix(body, "}") + `,"top_p":0.8}`
-					upstream.responses = []string{`{"error":{"message":"Unsupported parameter: top_p","param":"top_p"}}`, conversionConflictStream(false), conversionSuccessStream}
-					upstream.statuses = []int{400, 200, 200}
+					body = fmt.Sprintf(`{"model":"gpt-4.1","stream":%t,"messages":[{"role":"user","content":"hello"}],"top_p":0.8,"temperature":0.4}`, stream)
+					upstream.responses = []string{`{"error":{"message":"Unsupported parameter: top_p","param":"top_p"}}`, conversionConflictStream(false), `{"error":{"message":"Unsupported parameter: temperature","param":"temperature"}}`, conversionSuccessStream}
+					upstream.statuses = []int{400, 200, 400, 200}
 				}
 				c.Request.URL.Path = "/v1/chat/completions"
 				c.Request.Body = io.NopCloser(strings.NewReader(body))
@@ -304,7 +307,7 @@ func TestChatConversionRetryEndToEnd(t *testing.T) {
 					wantCalls = 1
 				}
 				if scenario == "same_account_repair" {
-					wantCalls = 3
+					wantCalls = 4
 				}
 				require.Len(t, upstream.accounts, wantCalls, rec.Body.String())
 				require.Equal(t, 1, len(requestStore.recorded())+len(requestStore.unbilled), "one request terminal across billed and unbilled records")
@@ -313,10 +316,16 @@ func TestChatConversionRetryEndToEnd(t *testing.T) {
 					require.Equal(t, upstream.bodies[0], upstream.bodies[1], "replay must use exact final wire body")
 				}
 				if scenario == "same_account_repair" {
-					require.Equal(t, upstream.accounts[0], upstream.accounts[1])
-					require.NotEqual(t, upstream.accounts[1], upstream.accounts[2])
+					require.Equal(t, []int64{1, 1, 2, 2}, upstream.accounts)
+					for _, wire := range upstream.bodies {
+						require.Equal(t, "repair group fixture", gjson.GetBytes(wire, "instructions").String())
+					}
+					require.Equal(t, "0.8", gjson.GetBytes(upstream.bodies[0], "top_p").Raw)
+					require.False(t, gjson.GetBytes(upstream.bodies[1], "top_p").Exists())
+					require.Equal(t, "0.4", gjson.GetBytes(upstream.bodies[1], "temperature").Raw)
 					require.Equal(t, upstream.bodies[1], upstream.bodies[2])
-					require.NotContains(t, string(upstream.bodies[2]), "top_p")
+					require.False(t, gjson.GetBytes(upstream.bodies[3], "top_p").Exists())
+					require.False(t, gjson.GetBytes(upstream.bodies[3], "temperature").Exists())
 				}
 				if scenario == "success" || scenario == "functions" || scenario == "tool_prefix" && !stream || scenario == "heartbeat" || scenario == "same_account_repair" {
 					require.Contains(t, rec.Body.String(), "retry-success")
@@ -365,6 +374,47 @@ func TestChatConversionRetryEndToEnd(t *testing.T) {
 				t.Logf("calls=%v client=%d retry=%v", upstream.accounts, rec.Code, events[0])
 			})
 		}
+	}
+}
+
+type conversionRetryFailedTransport struct {
+	*conversionRetryUpstream
+	afterBoundary  bool
+	candidateCalls int
+}
+
+func (u *conversionRetryFailedTransport) Do(req *http.Request, proxy string, account int64, concurrency int) (*http.Response, error) {
+	if account != 2 {
+		return u.conversionRetryUpstream.Do(req, proxy, account, concurrency)
+	}
+	u.candidateCalls++
+	if u.afterBoundary {
+		// Real HTTP registers transport entry before dialing; no headers need to arrive.
+		_ = service.TraceUpstreamSends(req.Context(), account)
+	}
+	return nil, fmt.Errorf("fixture transport failure")
+}
+
+func TestConversionRetrySendBoundary(t *testing.T) {
+	withHandlerResilience(t, nil)
+	for _, crossed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("crossed=%t", crossed), func(t *testing.T) {
+			u := &conversionRetryFailedTransport{conversionRetryUpstream: &conversionRetryUpstream{responses: []string{conversionConflictStream(false)}}, afterBoundary: crossed}
+			h := newConversionRetryHandler(t, u, nil)
+			attempts := &conversionAttemptRecorder{}
+			h.gatewayService.SetSchedAttemptRecorder(attempts)
+			_, event := runConversionChat(t, h, `{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}`)
+			require.Equal(t, 1, u.candidateCalls)
+			require.Len(t, attempts.rows, 2)
+			require.Equal(t, "responses", event["source_protocol"])
+			require.Equal(t, "upstream_error", event["result"])
+			require.Equal(t, crossed, event["retried"])
+			if crossed {
+				require.Equal(t, "", event["skip_reason"])
+			} else {
+				require.Equal(t, "send_not_started", event["skip_reason"])
+			}
+		})
 	}
 }
 

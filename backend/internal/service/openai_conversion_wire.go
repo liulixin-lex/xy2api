@@ -4,20 +4,26 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"maps"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
 
+// wire and its output decoding table are immutable builder results. Repairs
+// start from the corresponding Responses body before builder/prompt injection.
+type conversionSendBody struct {
+	wire, responsesInput []byte
+	reverse              map[string]string
+}
+
 type openAIConversionWire struct {
-	wire, replay, first []byte // first is before same-account repairs; wire is the most recent send
-	accountID           int64
-	reverse             map[string]string
-	inbound, tier       string
-	scoped              bool
-	path                conversionWirePath
+	conversionSendBody
+	first                 []byte // before same-account repairs
+	pendingReplay, scoped bool
+	accountID             int64
+	inbound, tier         string
+	path                  conversionWirePath
 }
 
 // These are effective body rewrites, not transport properties such as proxy,
@@ -53,49 +59,45 @@ func (s *OpenAIGatewayService) matchesConversionWire(ctx context.Context, a *Acc
 	return err == nil && d.OutboundTier == state.tier
 }
 
+// Only inspect potentially large metadata on the rare path that starts selection.
+func (w *openAIConversionWire) startReplay() {
+	w.pendingReplay = true
+	w.scoped = w.path.codex && (gjson.GetBytes(w.wire, "prompt_cache_key").String() != "" || gjson.GetBytes(w.wire, "client_metadata").IsObject())
+	if !w.scoped {
+		w.path.namespace = ""
+	}
+}
+
 // Capture output decoding with the actual bytes. On a replay, the ordinary
 // builder must also reproduce the original pre-repair body before we substitute
 // the last (possibly repaired) send. This catches unanticipated builder drift.
-func (s *OpenAIGatewayService) prepareOpenAIConversionWire(ctx context.Context, c *gin.Context, req *http.Request, account *Account, inbound string) ([]byte, error) {
+func (s *OpenAIGatewayService) prepareOpenAIConversionWire(ctx context.Context, c *gin.Context, req *http.Request, account *Account, inbound string, send conversionSendBody) (conversionSendBody, error) {
 	state := openAIConversionRetryFrom(ctx)
 	if state == nil {
-		return nil, nil
+		return send, nil
 	}
-	var body []byte
-	if req.GetBody != nil {
-		if reader, err := req.GetBody(); err == nil {
-			defer func() { _ = reader.Close() }()
-			if b, readErr := io.ReadAll(reader); readErr == nil {
-				body = b
-			}
-		}
-	}
-	if state.replay != nil {
-		if len(body) == 0 || !bytes.Equal(body, state.first) {
+	if state.pendingReplay {
+		if len(send.wire) == 0 || !bytes.Equal(send.wire, state.first) {
 			WriteOpenAIConversionRetryFailure(c, state.failure, "candidate_wire")
-			return nil, state.failure.cause
+			return conversionSendBody{}, state.failure.cause
 		}
-		body = state.replay
-		state.replay = nil
+		send = state.conversionSendBody
+		body := send.wire
+		state.pendingReplay = false
 		req.Body = io.NopCloser(bytes.NewReader(body))
 		req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
 		req.ContentLength = int64(len(body))
 		req.Header.Del("Content-Length")
-		setCodexToolNameReverse(c, state.reverse)
-		return body, nil
+		setCodexToolNameReverse(c, send.reverse)
+		return send, nil
 	}
 	if state.first == nil || state.accountID != account.ID {
-		state.first, state.accountID = body, account.ID
+		state.first, state.accountID = send.wire, account.ID
 	}
-	state.wire, state.inbound = body, inbound
-	state.reverse = nil
-	if names := codexToolNameReverseFromContext(c); len(names) != 0 {
-		state.reverse = maps.Clone(names)
-	}
-	state.scoped = account.UsesOpenAICodexProtocol() && (gjson.GetBytes(body, "prompt_cache_key").String() != "" || gjson.GetBytes(body, "client_metadata").IsObject())
-	state.path = s.conversionWirePath(ctx, account, codexAccountIdentitySource(c, account), state.scoped)
+	state.conversionSendBody, state.inbound = send, inbound
+	state.path = s.conversionWirePath(ctx, account, codexAccountIdentitySource(c, account), account.UsesOpenAICodexProtocol())
 	if a, _ := ctx.Value(openAITierAttemptKey{}).(*openAITierAttempt); a != nil && a.decision != nil {
 		state.tier = a.decision.OutboundTier
 	}
-	return body, nil
+	return send, nil
 }

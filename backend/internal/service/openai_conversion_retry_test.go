@@ -7,11 +7,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
@@ -134,11 +137,37 @@ func TestConversionRetryQualification(t *testing.T) {
 
 func captureConversionTestWire(t *testing.T, c *gin.Context, account *Account, body string) *http.Request {
 	t.Helper()
+	return captureConversionTestSend(t, c, account, body, nil)
+}
+
+func captureConversionTestSend(t *testing.T, c *gin.Context, account *Account, body string, names map[string]string) *http.Request {
+	t.Helper()
 	r, err := http.NewRequest(http.MethodPost, "https://fixture.invalid/v1/responses", strings.NewReader(body))
 	require.NoError(t, err)
-	_, err = (&OpenAIGatewayService{}).prepareOpenAIConversionWire(c.Request.Context(), c, r, account, APIProtocolChatCompletions)
+	_, err = (&OpenAIGatewayService{}).prepareOpenAIConversionWire(c.Request.Context(), c, r, account, APIProtocolChatCompletions, conversionSendBody{wire: []byte(body), reverse: names})
 	require.NoError(t, err)
 	return r
+}
+
+func TestConversionRetryOrdinarySendBorrowsBuilderBody(t *testing.T) {
+	c, _ := conversionRetryTestContext(t, `{"model":"gpt-4.1"}`)
+	ctx := WithGroupSystemPrompt(c.Request.Context(), GroupSystemPromptConfig{Prompt: "group instruction"}, "gpt-4.1")
+	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	svc := &OpenAIGatewayService{}
+	input := []byte(`{"model":"gpt-4.1","input":"` + strings.Repeat("x", 1<<20) + `"}`)
+	req, wire, err := svc.buildUpstreamRequestWithBody(ctx, c, a, input, "fixture", true, "", false)
+	require.NoError(t, err)
+	require.Contains(t, gjson.GetBytes(wire, "instructions").String(), "group instruction")
+	actual, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, actual, wire)
+	req.GetBody = func() (io.ReadCloser, error) { t.Fatal("ordinary send reread the frozen request"); return nil, nil }
+	names := map[string]string{"alias": "original"}
+	_, err = svc.prepareOpenAIConversionWire(ctx, c, req, a, APIProtocolChatCompletions, conversionSendBody{wire: wire, reverse: names})
+	require.NoError(t, err)
+	state := openAIConversionRetryFrom(ctx)
+	require.Same(t, &wire[0], &state.wire[0])
+	require.Equal(t, reflect.ValueOf(names).Pointer(), reflect.ValueOf(state.reverse).Pointer())
 }
 
 func TestConversionRetryWireUsesFinalRequest(t *testing.T) {
@@ -149,10 +178,11 @@ func TestConversionRetryWireUsesFinalRequest(t *testing.T) {
 	a := &Account{ID: 1}
 	setCodexToolNameReverse(c, map[string]string{"alias": "before repair"})
 	captureConversionTestWire(t, c, a, original)
-	setCodexToolNameReverse(c, map[string]string{"alias": "name at send"})
-	captureConversionTestWire(t, c, a, repaired)
+	names := map[string]string{"alias": "name at send"}
+	setCodexToolNameReverse(c, names)
+	captureConversionTestSend(t, c, a, repaired, names)
 	codexToolNameReverseFromContext(c)["alias"] = "changed after send"
-	scope.replay = scope.wire
+	scope.startReplay()
 	setCodexToolNameReverse(c, map[string]string{"second": "new builder"})
 	second := captureConversionTestWire(t, c, &Account{ID: 2}, original)
 	actual, err := io.ReadAll(second.Body)
@@ -160,7 +190,7 @@ func TestConversionRetryWireUsesFinalRequest(t *testing.T) {
 	require.Equal(t, repaired, string(actual))
 	require.EqualValues(t, len(repaired), second.ContentLength)
 	require.Equal(t, map[string]string{"alias": "name at send"}, codexToolNameReverseFromContext(c))
-	require.Nil(t, scope.replay)
+	require.False(t, scope.pendingReplay)
 }
 
 func TestConversionRetryCandidateWireScope(t *testing.T) {
@@ -177,6 +207,8 @@ func TestConversionRetryCandidateWireScope(t *testing.T) {
 	} {
 		captureConversionTestWire(t, c, first, tc.wire)
 		state := openAIConversionRetryFrom(c.Request.Context())
+		state.startReplay()
+		state.pendingReplay = false // next iteration captures another source send
 		require.Equal(t, tc.compatible, svc.matchesConversionWire(c.Request.Context(), next, state))
 	}
 	// A later edit to the selected row must not change the captured namespace.
@@ -351,6 +383,111 @@ func TestConversionRetryStickyBoundary(t *testing.T) {
 				require.False(t, state.Avoided(target.ID))
 			}
 			require.Equal(t, f.owner.ID, f.binding.owner)
+		})
+	}
+}
+
+func TestChatAgentIdentityRefreshPreservesRepairedResponses(t *testing.T) {
+	const original = `{"model":"gpt-5.4","stream":false,"input":[{"type":"message","role":"user","status":"completed","content":[{"type":"input_text","text":"hello"}]}],"tools":[{"type":"function","name":"python","parameters":{"type":"object"}}]}`
+	for _, route := range []string{"same_account", "after_switch", "slow_refresh_stream"} {
+		t.Run(route, func(t *testing.T) {
+			body := original
+			slowStream := route == "slow_refresh_stream"
+			const tier = time.Second // Model overrides use whole seconds.
+			if slowStream {
+				body = strings.Replace(body, `"stream":false`, `"stream":true`, 1)
+				withResilienceSettings(t, func(s *resilience.Settings) {
+					s.Budget.ModelOverrides = map[string]int{"gpt-5.4": 1}
+				})
+			}
+			var registrations atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				registrations.Add(1)
+				if slowStream {
+					time.Sleep(tier + time.Millisecond)
+				}
+				_, _ = io.WriteString(w, `{"task_id":"task-new"}`)
+			}))
+			defer server.Close()
+			oldBase := openAIAgentIdentityAuthAPIBaseURL
+			openAIAgentIdentityAuthAPIBaseURL = server.URL
+			t.Cleanup(func() { openAIAgentIdentityAuthAPIBaseURL = oldBase })
+
+			key, private := newTestAgentIdentityKey(t)
+			agent := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{
+				"auth_mode": OpenAIAuthModeAgentIdentity, "agent_runtime_id": key.runtimeID, "agent_private_key": private, "task_id": "task-old", "chatgpt_account_id": "shared",
+			}}
+			first := agent
+			up := &httpUpstreamRecorder{responses: []*http.Response{newJSONResponse(400, `{"error":{"code":"unknown_parameter","message":"Unknown parameter: 'input[0].status'.","param":"input[0].status"}}`)}}
+			sse := func(events ...string) *http.Response {
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: " + strings.Join(events, "\n\ndata: ") + "\n\n"))}
+			}
+			if route == "after_switch" {
+				first = &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "fixture", "chatgpt_account_id": "shared"}}
+				up.responses = append(up.responses, sse(
+					`{"type":"response.output_item.added","output_index":0,"item":{"id":"a","type":"message","role":"assistant","content":[]}}`,
+					`{"type":"response.output_item.added","output_index":0,"item":{"id":"b","type":"message","role":"assistant","content":[]}}`,
+				))
+			}
+			up.responses = append(up.responses, newJSONResponse(401, `{"error":{"code":"invalid_task_id"}}`),
+				sse(`{"type":"response.completed","response":{"id":"result","status":"completed","output":[{"id":"item","type":"function_call","call_id":"call","name":"python__sub2api","arguments":"{}","status":"completed"}]}}`))
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: &agentIdentityForwardRepo{account: agent}, httpUpstream: up}
+			if slowStream {
+				svc.httpUpstream = &codexModelsHTTPUpstreamStub{do: func(req *http.Request, proxy string, accountID int64, concurrency int) (*http.Response, error) {
+					if agentIdentityTaskRecoveryWasTried(req.Context()) {
+						select {
+						case <-req.Context().Done():
+							return nil, req.Context().Err()
+						case <-time.After(5 * time.Millisecond):
+						}
+					}
+					resp, err := up.Do(req, proxy, accountID, concurrency)
+					if resp != nil {
+						resp.Request = req
+					}
+					return resp, err
+				}}
+			}
+			c, state := conversionRetryTestContext(t, body)
+			budgetDeadline := state.Budget().Deadline()
+			result, err := svc.ForwardAsChatCompletions(c.Request.Context(), c, first, []byte(body), "", "")
+			want := 3
+			if route == "after_switch" {
+				var f *UpstreamFailoverError
+				require.ErrorAs(t, err, &f)
+				require.Equal(t, OpenAIConversionIdentityReason, f.Reason)
+				require.True(t, svc.StartOpenAIConversionRetry(c, first, f))
+				request := OpenAIAccountScheduleRequest{RequestedModel: "gpt-5.4", candidateConstraint: openAIRequestCandidateConstraintFrom(c.Request.Context())}
+				require.Empty(t, requestCandidateConstraintFailure(request, agent))
+				_, err = svc.ForwardAsChatCompletions(c.Request.Context(), c, agent, []byte(body), "", "")
+				want = 4
+			}
+			require.NoError(t, err)
+			require.Len(t, up.bodies, want)
+			require.EqualValues(t, 1, registrations.Load())
+			require.Equal(t, "task-new", agent.GetCredential("task_id"))
+			require.Equal(t, "task-old", decodeAgentAssertionTask(t, up.requests[want-2].Header.Get("Authorization")))
+			require.Equal(t, "task-new", decodeAgentAssertionTask(t, up.requests[want-1].Header.Get("Authorization")))
+			require.True(t, gjson.GetBytes(up.bodies[0], "input.0.status").Exists())
+			require.False(t, gjson.GetBytes(up.bodies[1], "input.0.status").Exists())
+			require.Equal(t, "python__sub2api", gjson.GetBytes(up.bodies[1], "tools.0.name").String())
+			require.Equal(t, "python", codexToolNameReverseFromContext(c)["python__sub2api"])
+			if slowStream {
+				before, _ := up.requests[1].Context().Value(openAICompatFirstEventKey{}).(*openAICompatFirstEvent)
+				after, _ := up.requests[2].Context().Value(openAICompatFirstEventKey{}).(*openAICompatFirstEvent)
+				require.NotNil(t, before)
+				require.NotNil(t, after)
+				require.Equal(t, tier.Milliseconds(), after.plan.Diagnostics().TierMs)
+				require.GreaterOrEqual(t, after.started.Sub(before.started), tier)
+				require.Equal(t, budgetDeadline, state.Budget().Deadline())
+				elapsed := time.Since(after.started)
+				require.LessOrEqual(t, result.Duration, elapsed)
+				require.NotNil(t, result.FirstTokenMs)
+				require.LessOrEqual(t, int64(*result.FirstTokenMs), elapsed.Milliseconds())
+			}
+			for _, wire := range up.bodies[2:] {
+				require.Equal(t, up.bodies[1], wire, "credential refresh must preserve the repaired bytes")
+			}
 		})
 	}
 }
