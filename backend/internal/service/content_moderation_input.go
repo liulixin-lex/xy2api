@@ -42,10 +42,10 @@ func extractContentModerationInput(protocol string, body []byte, filterReminders
 			collector.collectLastRoleMessage(messages, "user", &parts, &images)
 		} else {
 			// Chat without messages forwards its input as a Responses request.
-			collector.collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
+			collector.collectLastResponsesInput(chatInputToModerate(gjson.GetBytes(body, "input")), &parts, &images)
 		}
 	case ContentModerationProtocolOpenAIResponses:
-		collector.collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
+		collector.collectLastResponsesInput(responsesInputToModerate(gjson.GetBytes(body, "input")), &parts, &images)
 	case ContentModerationProtocolGemini:
 		collector.collectLastGeminiContent(gjson.GetBytes(body, "contents"), &parts, &images)
 	case ContentModerationProtocolOpenAIImages:
@@ -221,13 +221,17 @@ func (collector moderationTextCollector) collectLastResponsesInput(input gjson.R
 	case input.Type == gjson.String:
 		collector.addModerationText(parts, input.String())
 	case input.IsArray():
-		item, ok := lastResponsesUserTextItem(input.Array())
-		if !ok {
+		array := input.Array()
+		if len(array) == 0 {
 			return
 		}
-		collector.collectContentValue(item.Get("content"), parts, images)
-		if item.Get("type").String() == "input_text" || item.Get("text").Exists() {
-			collector.collectContentValue(item, parts, images)
+		last := array[len(array)-1]
+		if !collector.isResponsesUserTextItem(last) {
+			return
+		}
+		collector.collectContentValue(last.Get("content"), parts, images)
+		if last.Get("type").String() == "input_text" || last.Get("text").Exists() {
+			collector.collectContentValue(last, parts, images)
 		}
 	case input.IsObject():
 		if collector.isResponsesUserTextItem(input) {
@@ -239,26 +243,60 @@ func (collector moderationTextCollector) collectLastResponsesInput(input gjson.R
 	}
 }
 
-// lastResponsesUserTextItem picks the item of a Responses input array to
-// moderate: the last item when it is user text, whatever its type, and
-// otherwise the last user text item in the trailing window. A tool output
-// inside the window is never the user's words. Reminder blocks count as text
-// here, so the keyword and semantic checks read the same item.
-func lastResponsesUserTextItem(items []gjson.Result) (gjson.Result, bool) {
-	if len(items) == 0 {
-		return gjson.Result{}, false
+// responsesInputToModerate narrows the input of a Responses request to what
+// collectLastResponsesInput should read. A last item that is user text stays
+// the one moderated, whatever its type or role field, as that rule always
+// had it; only an array without one falls back to the trailing window.
+// Reminder blocks count as text when choosing, so the keyword and semantic
+// checks read the same item.
+func responsesInputToModerate(input gjson.Result) gjson.Result {
+	if !input.IsArray() {
+		return input
 	}
+	return responsesItemToModerate(input.Array())
+}
+
+// chatInputToModerate does the same for a Chat request without messages. Chat
+// has no earlier rule to keep, so a tool output or transparent item is not
+// user text there, not even as the last item or as the whole input.
+func chatInputToModerate(input gjson.Result) gjson.Result {
+	if !input.IsArray() {
+		if isResponsesToolOutputItem(input) || isResponsesTransparentItem(input) {
+			return gjson.Result{}
+		}
+		return input
+	}
+	items := input.Array()
+	if n := len(items); n > 0 && (isResponsesToolOutputItem(items[n-1]) || isResponsesTransparentItem(items[n-1])) {
+		return lastUserMessageInTrailingWindow(items)
+	}
+	return responsesItemToModerate(items)
+}
+
+func responsesItemToModerate(items []gjson.Result) gjson.Result {
 	unfiltered := moderationTextCollector{}
-	if last := items[len(items)-1]; unfiltered.isResponsesUserTextItem(last) {
-		return last, true
+	if n := len(items); n > 0 && unfiltered.isResponsesUserTextItem(items[n-1]) {
+		return items[n-1]
 	}
+	return lastUserMessageInTrailingWindow(items)
+}
+
+// lastUserMessageInTrailingWindow requires an explicit user role: an item
+// without a role is only taken for user text when it is the last item. Tool
+// outputs and transparent items are never the user's words.
+func lastUserMessageInTrailingWindow(items []gjson.Result) gjson.Result {
+	unfiltered := moderationTextCollector{}
 	window := responsesTrailingWindow(items)
 	for i := len(window) - 1; i >= 0; i-- {
-		if !isResponsesToolOutputItem(window[i]) && unfiltered.isResponsesUserTextItem(window[i]) {
-			return window[i], true
+		item := window[i]
+		if isResponsesToolOutputItem(item) || isResponsesTransparentItem(item) {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(item.Get("role").String())) == "user" && unfiltered.responseItemHasModerationText(item) {
+			return item
 		}
 	}
-	return gjson.Result{}, false
+	return gjson.Result{}
 }
 
 // responsesTrailingWindow returns the run of consecutive non-model items at
@@ -310,6 +348,9 @@ func isResponsesNonModelItem(item gjson.Result) bool {
 }
 
 func isResponsesToolOutputItem(item gjson.Result) bool {
+	if !item.IsObject() {
+		return false
+	}
 	typ := item.Get("type")
 	return typ.Type == gjson.String && strings.HasSuffix(typ.String(), "_output")
 }
