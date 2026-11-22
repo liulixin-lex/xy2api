@@ -75,6 +75,23 @@ var (
 		Mode:                                "chat",
 		SupportsPromptCaching:               true,
 	}
+	openAIGPT62AstraFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:                   8e-6,
+		InputCostPerTokenPriority:           16e-6,
+		OutputCostPerToken:                  40e-6,
+		OutputCostPerTokenPriority:          80e-6,
+		CacheCreationInputTokenCost:         10e-6,
+		CacheCreationInputTokenCostPriority: 20e-6,
+		CacheReadInputTokenCost:             0.4e-6,
+		CacheReadInputTokenCostPriority:     0.8e-6,
+		LongContextInputTokenThreshold:      272_000,
+		LongContextInputCostMultiplier:      2,
+		LongContextOutputCostMultiplier:     1.5,
+		SupportsServiceTier:                 true,
+		LiteLLMProvider:                     "openai",
+		Mode:                                "chat",
+		SupportsPromptCaching:               true,
+	}
 	openAIGPT61SolFallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:                   2e-6,
 		InputCostPerTokenPriority:           4e-6,
@@ -1368,6 +1385,19 @@ func (s *PricingService) buildModelLookupCandidates(modelLower string) []string 
 		candidates = append([]string{normalized}, candidates...)
 	}
 
+	// A newly bundled GPT-6.2 base must not shadow a previously selected
+	// remote spelling. Keep canonical-first ordering when the canonical card
+	// is remote or patched by the operator, exactly as before the bundle grew.
+	if openai.GPT62ModelID(modelLower) != "" {
+		canonicalOrigin := s.pricingOrigins[normalized]
+		exactOrigin := s.pricingOrigins[modelLower]
+		if canonicalOrigin.Source == "fallback_file" && len(canonicalOrigin.Overrides) == 0 &&
+			s.pricingData[modelLower] != nil && exactOrigin.Source != "" &&
+			(exactOrigin.Source != "fallback_file" || len(exactOrigin.Overrides) > 0) {
+			candidates = append([]string{modelLower}, candidates...)
+		}
+	}
+
 	seen := make(map[string]struct{}, len(candidates))
 	out := make([]string, 0, len(candidates))
 	for _, c := range candidates {
@@ -1612,6 +1642,15 @@ func (s *PricingService) matchOpenAIModelWithSource(model string) (*LiteLLMModel
 		}
 	}
 
+	if base := openai.GPT62ModelID(model); base != "" {
+		if pricing, ok := s.pricingData[base]; ok {
+			return pricing, base, "openai_variant"
+		}
+		if base == "gpt-6.2-sol" {
+			return openAIGPT61SolFallbackPricing, base, "static"
+		}
+		return openAIGPT62AstraFallbackPricing, base, "static"
+	}
 	if openai.IsGPT61SolModelSpelling(model) {
 		if pricing, ok := s.pricingData["gpt-6.1-sol"]; ok {
 			return pricing, "gpt-6.1-sol", "openai_variant"

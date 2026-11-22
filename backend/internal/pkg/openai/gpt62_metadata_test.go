@@ -74,10 +74,7 @@ func TestCodexOfficialModelMetadata(t *testing.T) {
 	}
 }
 
-// CodexBaseInstructionsForModel feeds request-side default instructions, so
-// GPT-6.2 keeps the v0.6.9 fallback prompt while GPT-6.1 keeps its official
-// template. The 6.2 template is advertised only in the models manifest.
-func TestGPT62CodexBaseInstructionsUnchanged(t *testing.T) {
+func TestGPT62CodexBaseInstructions(t *testing.T) {
 	template := func(raw []byte) string {
 		var descriptor struct {
 			ModelMessages struct {
@@ -95,6 +92,10 @@ func TestGPT62CodexBaseInstructionsUnchanged(t *testing.T) {
 		{"gpt-6.1-sol", CodexGPT61SolMetadata},
 		{"gpt-6.1-sol-high", CodexGPT61SolMetadata},
 		{"gpt-6.1-terra", CodexGPT61TerraMetadata},
+		{"gpt-6.2-sol", CodexGPT62SolMetadata},
+		{"openai/GPT_6.2_SOL", CodexGPT62SolMetadata},
+		{"gpt-6.2-sol-high", CodexGPT62SolMetadata},
+		{"gpt-6.2-astra", CodexGPT62AstraMetadata},
 	} {
 		got := CodexBaseInstructionsForModel(tc.model)
 		require.Equal(t, template(tc.raw), got, tc.model)
@@ -103,7 +104,7 @@ func TestGPT62CodexBaseInstructionsUnchanged(t *testing.T) {
 	for _, raw := range [][]byte{CodexGPT62SolMetadata, CodexGPT62AstraMetadata} {
 		require.True(t, strings.HasPrefix(template(raw), "You are Codex, an agent based on GPT-6."))
 	}
-	for _, model := range []string{"gpt-6.2-sol", "openai/GPT_6.2_SOL", "gpt-6.2-astra", "gpt-6.2", "gpt-6.2-sol-high", "gpt-6.2-astra-pro"} {
+	for _, model := range []string{"gpt-6.2", "gpt-6.2-terra", "gpt-6.2-sol-2026-11-01", "gpt-6.2-astra-pro"} {
 		got := CodexBaseInstructionsForModel(model)
 		require.Equal(t, latestCodexInstructions(), got, model)
 		require.NotEqual(t, template(CodexGPT62SolMetadata), got, model)

@@ -61,6 +61,9 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	if projectionErr != nil {
 		return nil, projectionErr
 	}
+	if openai.GPT62ModelID(upstreamModel) != "" {
+		anthropicReq.Thinking = nil
+	}
 	if err := json.Unmarshal(body, &anthropicReq); err != nil {
 		return nil, err
 	}
@@ -83,6 +86,9 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 		return nil, err
 	}
 	chatReq.Model = upstreamModel
+	if openai.GPT62ModelID(upstreamModel) != "" {
+		chatReq.Temperature, chatReq.TopP = nil, nil
+	}
 	chatReq.ReasoningEffort = openAICompatAnthropicReasoningEffort(&anthropicReq, upstreamModel, chatReq.ReasoningEffort)
 	chatReq.Stream = clientStream
 	if clientStream {

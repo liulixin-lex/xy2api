@@ -57,4 +57,17 @@ describe('OpenAI Fast/Flex policy locale keys', () => {
     )
     expect(en.admin.settings.openaiFastPolicy.modelWhitelistHint).not.toContain('whitelist')
   })
+
+  it('distinguishes Ultrafast customer prices, procurement and separate waivers', () => {
+    const zhBilling = zh.admin.groups.openaiFast.billing
+    const enBilling = en.admin.groups.openaiFast.billing
+    for (const text of [zhBilling, enBilling]) {
+      expect(text).toContain('service_tier=ultrafast')
+      expect(text).toContain('6.2')
+    }
+    expect(zhBilling).toContain('不降低客户售价')
+    expect(zhBilling).toContain('分别设置')
+    expect(enBilling).toContain('does not discount customer prices')
+    expect(enBilling).toContain('waivers are separate')
+  })
 })

@@ -75,7 +75,7 @@ func supportedInferenceEffortsForAccount(account *Account, model string) ([]stri
 	var supported []string
 	reliable := false
 	switch {
-	case openai.IsGPT61SolModelSpelling(model):
+	case openai.IsGPT61SolModelSpelling(model), openai.GPT62ModelID(model) != "":
 		supported, reliable = []string{"low", "medium", "high", "xhigh", "max"}, true
 	case openai.IsGPT61TerraModelSpelling(model):
 		supported, reliable = []string{"none", "low", "medium", "high", "xhigh", "max"}, true
@@ -135,7 +135,8 @@ func applyFinalReasoningEffortForAccount(ctx context.Context, c *gin.Context, ac
 	if state.noneOmitted && state.omittedAccountID == account.ID && state.omittedModel == model {
 		return body, false, nil
 	}
-	if state.original == "" || (protocol == "anthropic" && state.field == "thinking.type" && !claude.IsClaudeModel(model)) {
+	isGPT62 := openai.GPT62ModelID(model) != ""
+	if state.original == "" || (protocol == "anthropic" && state.field == "thinking.type" && !claude.IsClaudeModel(model) && !isGPT62) {
 		return body, false, nil
 	}
 	if !state.policySet {
@@ -243,6 +244,13 @@ func projectFinalReasoningEffort(body []byte, model, protocol, effort string, pr
 		return out, nil
 	case "anthropic":
 		if preserveAnthropicMode || !claude.IsClaudeModel(model) {
+			if openai.GPT62ModelID(model) != "" && effort != "none" && gjson.GetBytes(body, "thinking.type").String() == "disabled" {
+				var err error
+				body, err = sjson.DeleteBytes(body, "thinking")
+				if err != nil {
+					return nil, err
+				}
+			}
 			return sjson.SetBytes(body, "output_config.effort", effort)
 		}
 		req := &apicompat.ResponsesRequest{Model: model, Input: json.RawMessage(`""`), Reasoning: &apicompat.ResponsesReasoning{Effort: effort}}

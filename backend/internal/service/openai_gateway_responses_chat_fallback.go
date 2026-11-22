@@ -94,6 +94,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 	var reasoningEffort *string
 	chatReq.Model = upstreamModel
+	if openai.GPT62ModelID(upstreamModel) != "" {
+		chatReq.Temperature, chatReq.TopP = nil, nil
+	}
 	if clientStream {
 		chatReq.StreamOptions = &apicompat.ChatStreamOptions{IncludeUsage: true}
 	}

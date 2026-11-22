@@ -1357,7 +1357,7 @@ export default {
         forceOn: "强制开启",
         forceOff: "强制关闭",
         waive: "免 {tier} 加速差价",
-        billing: "赠免只影响客户实扣。例如，Standard 为 $1、Fast 为 $2 时，免费 Fast 将计费上限设为 $1，再应用分组倍率。",
+        billing: "赠免只影响客户实扣。例如，Standard 为 $1、Fast 为 $2 时，免费 Fast 将计费上限设为 $1，再应用分组倍率。 Ultrafast 写入 service_tier=ultrafast，需要路由明确支持；售价按分组、渠道或模型价卡计算，6.2 官方采购价促销不降低客户售价。免费 Fast 与免费 Ultrafast 分别设置。",
         migrate: "保存时迁入新版档位策略",
         legacy: "此组使用旧计费契约。迁移后，强开档位需要支持该档的路由，上游确认降档可降低账单。保留旧契约时请保持未勾选。",
         fallback: "请求由兜底组承接时，使用承接组的价卡和赠免设置。",

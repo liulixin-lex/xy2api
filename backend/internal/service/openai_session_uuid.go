@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/tidwall/gjson"
 )
 
@@ -42,6 +43,9 @@ func (s *OpenAIGatewayService) fillOpenAIResponsesPromptCacheKey(
 	identity := c.GetString(openAICacheSessionGinKey)
 	if !strings.HasPrefix(identity, "v2:") || len(identity) <= len("v2:") {
 		return ""
+	}
+	if base := openai.GPT62ModelID(model); base != "" {
+		identity += ":" + base
 	}
 	return generateSessionUUID("xy2api:openai-filled-pck:v1:" + identity)
 }

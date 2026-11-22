@@ -1359,7 +1359,7 @@ export default {
         forceOn: "Force on",
         forceOff: "Force off",
         waive: "Waive {tier} premium",
-        billing: "A waiver affects the customer charge only. For example, if Standard costs $1 and Fast costs $2, Free Fast caps the charge at $1 before the group rate applies.",
+        billing: "A waiver affects the customer charge only. For example, if Standard costs $1 and Fast costs $2, Free Fast caps the charge at $1 before the group rate applies. Ultrafast sets service_tier=ultrafast and requires a route that advertises support. Customer prices follow the group, channel, or model price card; the 6.2 official procurement promotion does not discount customer prices. Fast and Ultrafast waivers are separate.",
         migrate: "Use the new tier policy when saving",
         legacy: "This group uses legacy billing. With the new policy, forced tiers require a supported route and a verified upstream downgrade can lower the bill. Leave unchecked to keep the existing policy.",
         fallback: "On a fallback route, the serving group supplies the price card and any premium waivers.",
