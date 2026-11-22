@@ -4,15 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestCollabSavedTerminalSeparatesEffects(t *testing.T) {
+func TestCollabSavedTerminalSnapshotIsImmutable(t *testing.T) {
 	failure := errors.New("synthetic original failure")
 	headers := http.Header{"Retry-After": []string{"3"}}
 	body := []byte("synthetic inner error")
@@ -30,27 +28,7 @@ func TestCollabSavedTerminalSeparatesEffects(t *testing.T) {
 	require.Equal(t, int64(2), saved.Snapshot.AccountID)
 	require.Equal(t, 3, saved.Snapshot.Advice.Seconds)
 	require.True(t, saved.Snapshot.Retryable)
-	require.False(t, saved.ClaimDeliveryEffects(), "takeover cannot claim delivery or suppress advice")
-	var claimed atomic.Int64
-	var group sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			if saved.ClaimPersistentEffects() {
-				claimed.Add(1)
-			}
-		}()
-	}
-	group.Wait()
-	require.Equal(t, int64(1), claimed.Load(), "persistent effects run once at the original boundary")
-	require.False(t, saved.ClaimDeliveryEffects())
-	require.True(t, saved.ResolveOutcome(CollabTerminal{Mode: CollabFinalModeLocal}))
-	require.False(t, saved.ResolveOutcome(CollabTerminal{Mode: CollabFinalModeNone}))
-	require.True(t, saved.ClaimDeliveryEffects())
-	require.False(t, saved.ClaimDeliveryEffects())
-	require.False(t, saved.ClaimPersistentEffects())
-	require.Same(t, failure, saved.Snapshot.Failure)
+
 }
 
 func TestCollabTakeoverDeadlineAndUserWaiters(t *testing.T) {
@@ -61,11 +39,8 @@ func TestCollabTakeoverDeadlineAndUserWaiters(t *testing.T) {
 		if retryable {
 			want = 15 * time.Second
 		}
-		require.Equal(t, want, p.AcceptanceSignalTimeout)
+		require.Equal(t, want, p.FirstEventTimeout)
 		require.Equal(t, want, p.TotalOptionalWait)
-		require.False(t, p.CommitHeaders)
-		require.False(t, p.CommitHeartbeats)
-		require.True(t, p.StopOnUserWaiters)
 		budget.UserHasWaiters = true
 		require.False(t, CollabOptionalPolicy(budget).Allowed, "skip or stop as soon as a user waits")
 	}

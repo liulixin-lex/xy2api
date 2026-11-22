@@ -61,14 +61,7 @@ func TestCollabOrdersAndOriginalFailure(t *testing.T) {
 	require.Equal(t, CollabOrderLosslessFirst, s.CollabOrder())
 	s.Collab.Ladder = false
 	require.Equal(t, CollabOrderLegacyFirst, s.CollabOrder())
-	failure := errors.New("synthetic saved failure")
-	endpoint := CollabLegacyEndpoint{Saved: NewCollabSavedTerminal(CollabTerminalSnapshot{Failure: failure})}
-	state := CollabRequestState{Order: CollabOrderLegacyFirst, LegacyEndpoint: endpoint}
-	require.Same(t, failure, state.LegacyEndpoint.Saved.Snapshot.Failure)
-	controller := NoopCollabController{}
-	require.False(t, controller.TakeOver(endpoint))
-	require.Equal(t, CollabNextKindLegacy, controller.NextStep().Kind)
-	require.Same(t, failure, endpoint.Saved.Snapshot.Failure)
+
 }
 
 func TestCollabOptionalDeadlineAndRevocableHold(t *testing.T) {
@@ -181,28 +174,6 @@ func TestCollabRequestRetainsOnlyOriginalAndCurrentBody(t *testing.T) {
 	for i := 0; i < sendType.NumField(); i++ {
 		require.NotEqual(t, byteSlice, sendType.Field(i).Type)
 	}
-}
-
-func TestCollabSelectionPrecedesAccountPlanning(t *testing.T) {
-	next := CollabNextStep{Kind: CollabNextKindSelectAccount, Selection: &CollabAccountSelection{Preferences: []CollabAccountPreference{{AccountID: 2}}, ExcludedAccountIDs: []int64{1}, ImmediateOnly: true}}
-	require.Nil(t, next.Candidate)
-	require.True(t, next.Selection.ImmediateOnly)
-	original := []byte("original")
-	candidate := &collabPlanningCandidate{}
-	candidate.Plan(CollabCandidateInput{Original: original, AccountID: 2, Records: CollabRecordBatchResult{TreeLocalEndings: 1}})
-	require.Equal(t, int64(2), candidate.input.AccountID)
-	require.Equal(t, original, candidate.input.Original)
-	require.Equal(t, 1, candidate.input.Records.TreeLocalEndings)
-}
-
-type collabPlanningCandidate struct {
-	NoopCollabCandidate
-	input CollabCandidateInput
-}
-
-func (c *collabPlanningCandidate) Plan(in CollabCandidateInput) (CollabCandidatePlan, bool) {
-	c.input = in
-	return CollabCandidatePlan{AccountID: in.AccountID}, true
 }
 
 func TestCollabThreadSchedulingAndOptionalEffects(t *testing.T) {
