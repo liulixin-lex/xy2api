@@ -70,11 +70,19 @@ func requireApplicationErrorReason(t *testing.T, err error, reason string) {
 }
 
 func (s *accountRepoStubForBulkUpdate) Create(_ context.Context, account *Account) error {
-	s.createAccount = account
+	if s.createErr != nil {
+		return s.createErr
+	}
 	if s.createID > 0 {
 		account.ID = s.createID
 	}
-	return s.createErr
+	if len(account.GroupIDs) > 0 {
+		if err := s.setGroups(account.ID, account.GroupIDs); err != nil {
+			return err
+		}
+	}
+	s.createAccount = account
+	return nil
 }
 
 func (s *accountRepoStubForBulkUpdate) Update(_ context.Context, account *Account) error {
@@ -84,13 +92,17 @@ func (s *accountRepoStubForBulkUpdate) Update(_ context.Context, account *Accoun
 
 func (s *accountRepoStubForBulkUpdate) BindGroups(_ context.Context, accountID int64, groupIDs []int64) error {
 	s.bindGroupsCalls = append(s.bindGroupsCalls, accountID)
+	return s.setGroups(accountID, groupIDs)
+}
+
+func (s *accountRepoStubForBulkUpdate) setGroups(accountID int64, groupIDs []int64) error {
+	if err := s.bindGroupErrByID[accountID]; err != nil {
+		return err
+	}
 	if s.bindGroupsByAccount == nil {
 		s.bindGroupsByAccount = make(map[int64][]int64)
 	}
 	s.bindGroupsByAccount[accountID] = append([]int64{}, groupIDs...)
-	if err, ok := s.bindGroupErrByID[accountID]; ok {
-		return err
-	}
 	return nil
 }
 

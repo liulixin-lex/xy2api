@@ -42,6 +42,9 @@ func (s *sparkShadowRepoStub) Create(_ context.Context, account *Account) error 
 	cp := *account
 	s.accounts[account.ID] = &cp
 	s.mockAccountRepoForGemini.accountsByID[account.ID] = &cp
+	if len(account.GroupIDs) > 0 {
+		s.groupsOf[account.ID] = append([]int64(nil), account.GroupIDs...)
+	}
 	return nil
 }
 

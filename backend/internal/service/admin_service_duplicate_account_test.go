@@ -59,9 +59,6 @@ func (s *duplicateAccountRepoStub) CreateWithAccountGroups(ctx context.Context, 
 	}
 	account.AccountGroups = clonedGroups
 	s.accountGroupsOf[account.ID] = clonedGroups
-	if len(groupIDs) > 0 {
-		s.groupsOf[account.ID] = append([]int64(nil), groupIDs...)
-	}
 	stored := *account
 	s.accounts[account.ID] = &stored
 	s.mockAccountRepoForGemini.accountsByID[account.ID] = &stored
