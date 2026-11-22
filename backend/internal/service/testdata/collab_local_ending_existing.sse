@@ -1,0 +1,21 @@
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":5,"output_index":0,"item":{"id":"msg_0a42b1cbdefb85e37b285071d9eda690","type":"message","role":"assistant","status":"in_progress","phase":"final_answer","content":[]}}
+
+event: response.content_part.added
+data: {"type":"response.content_part.added","sequence_number":6,"output_index":0,"content_index":0,"item_id":"msg_0a42b1cbdefb85e37b285071d9eda690","part":{"type":"output_text","text":"","annotations":[]}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":7,"output_index":0,"content_index":0,"item_id":"msg_0a42b1cbdefb85e37b285071d9eda690","delta":"Gateway notice [cle_example]. The task content could not be read. This turn ended before work began. A readable copy is needed to retry."}
+
+event: response.output_text.done
+data: {"type":"response.output_text.done","sequence_number":8,"output_index":0,"content_index":0,"item_id":"msg_0a42b1cbdefb85e37b285071d9eda690","text":"Gateway notice [cle_example]. The task content could not be read. This turn ended before work began. A readable copy is needed to retry."}
+
+event: response.content_part.done
+data: {"type":"response.content_part.done","sequence_number":9,"output_index":0,"content_index":0,"item_id":"msg_0a42b1cbdefb85e37b285071d9eda690","part":{"type":"output_text","text":"Gateway notice [cle_example]. The task content could not be read. This turn ended before work began. A readable copy is needed to retry.","annotations":[]}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":10,"output_index":0,"item":{"id":"msg_0a42b1cbdefb85e37b285071d9eda690","type":"message","role":"assistant","status":"completed","phase":"final_answer","content":[{"type":"output_text","text":"Gateway notice [cle_example]. The task content could not be read. This turn ended before work began. A readable copy is needed to retry.","annotations":[]}]}}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":11,"response":{"id":"resp_example","object":"response","created_at":42,"model":"example-model","status":"completed","error":null,"output":[{"id":"msg_0a42b1cbdefb85e37b285071d9eda690","type":"message","role":"assistant","status":"completed","phase":"final_answer","content":[{"type":"output_text","text":"Gateway notice [cle_example]. The task content could not be read. This turn ended before work began. A readable copy is needed to retry.","annotations":[]}]}]}}
+

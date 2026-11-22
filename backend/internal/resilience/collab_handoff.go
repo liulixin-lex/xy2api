@@ -69,7 +69,11 @@ func CollabLocalEndingPermitted(saved *CollabSavedTerminal, delivery CollabDeliv
 	if saved == nil {
 		return false
 	}
-	if !saved.Snapshot.Retryable {
+	return collabLocalEndingRetryPermitted(saved.Snapshot.Retryable, delivery, rejection, prior, now)
+}
+
+func collabLocalEndingRetryPermitted(retryable bool, delivery CollabDeliveryKey, rejection CollabDigest, prior []CollabTerminalRejectionCount, now time.Time) bool {
+	if !retryable {
 		return true
 	}
 	if delivery.Delivery == "" || rejection == "" {
