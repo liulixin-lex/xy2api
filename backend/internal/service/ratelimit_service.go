@@ -338,6 +338,9 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 }
 
 func (s *RateLimitService) handleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, inference bool, requestedModel ...string) (shouldDisable bool) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return false
+	}
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, "") {
 		return false
 	}

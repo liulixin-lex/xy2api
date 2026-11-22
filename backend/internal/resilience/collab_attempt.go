@@ -2,6 +2,18 @@ package resilience
 
 import "context"
 
+// NewCollabChildState shares only immutable ingress identity and settings.
+// Budgets, retry advice, selection eligibility and terminal ownership are fresh.
+func NewCollabChildState(parent *RequestState) *RequestState {
+	child := &RequestState{}
+	if parent != nil {
+		child.requestID = parent.GatewayRequestID()
+		child.collabSettings.Store(parent.CollabSettingsSnapshot())
+		child.groupID = parent.GroupID()
+	}
+	return child
+}
+
 type collabAttemptKey struct{}
 
 // Explicit attempt metadata follows an optional send through handler, health

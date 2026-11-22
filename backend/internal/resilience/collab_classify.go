@@ -9,6 +9,7 @@ import (
 )
 
 var collabNamedPattern = regexp.MustCompile("(?i)\\bfor\\s+item\\s+['\"`]?([a-z0-9]+_[a-z0-9_-]+)\\b")
+var collabIndexPattern = regexp.MustCompile(`\binput(?:\[([0-9]+)\]|\.([0-9]+))`)
 
 // ClassifyCollabEvidence does not authorize repairs or change legacy predicates.
 // Only structured error fields are evidence: request echoes, output and prose
@@ -174,6 +175,17 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 	for _, field := range []string{"message", "param"} {
 		for _, match := range collabNamedPattern.FindAllStringSubmatch(object.Get(field).String(), -1) {
 			add(match[1])
+		}
+		for _, match := range collabIndexPattern.FindAllStringSubmatch(object.Get(field).String(), -1) {
+			index, err := strconv.Atoi(match[1] + match[2])
+			if named == nil {
+				named = &CollabNamedItem{}
+			}
+			if err != nil || named.InputIndex != nil && *named.InputIndex != index {
+				named.Ambiguous = true
+			} else {
+				named.InputIndex = &index
+			}
 		}
 	}
 	return named

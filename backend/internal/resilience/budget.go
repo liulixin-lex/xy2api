@@ -95,6 +95,23 @@ func (b *Budget) Started() time.Time {
 	return b.started
 }
 
+// CompensateCollabPreempt restores the legacy budget after an abandoned
+// lossless phase. Its caller reserves idle headroom before preemption.
+func (b *Budget) CompensateCollabPreempt(elapsed time.Duration) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.attempts > 0 {
+		b.attempts--
+	}
+	if !b.deadline.IsZero() {
+		b.deadline = b.deadline.Add(max(time.Duration(0), elapsed))
+	}
+	b.exhausted = ""
+}
+
 // Kind returns the request kind.
 func (b *Budget) Kind() RequestKind {
 	if b == nil {

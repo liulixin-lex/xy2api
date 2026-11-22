@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"net/http"
 	"strings"
 	"time"
@@ -57,6 +58,9 @@ func classifyOpenAIAPIKeyHealthFailure(err error) (int, []byte, bool) {
 }
 
 func (s *RateLimitService) ObserveOpenAIAPIKeyHealthFailure(ctx context.Context, account *Account, upstreamErr error) bool {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return false
+	}
 	if s == nil || s.openAIAPIKeyHealth == nil || s.settingService == nil || s.accountRepo == nil || !isOpenAIAPIKeyHealthBreakerAccount(account) {
 		return false
 	}

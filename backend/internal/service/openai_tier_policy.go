@@ -588,6 +588,9 @@ func isOpenAITierRefusal(status int, payload []byte, tier string) bool {
 }
 
 func (s *OpenAIGatewayService) learnOpenAITierRefusal(ctx context.Context, account *Account, model, tier, protocol string, status int, refusal []byte) bool {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return false
+	}
 	if !openAITierTextRoute(account, model) || (tier != "default" && tier != OpenAIFastTierPriority && tier != OpenAIFastTierUltrafast) || !isOpenAITierRefusal(status, refusal, tier) {
 		return false
 	}
@@ -618,6 +621,9 @@ func openAITierHTTPProtocol(path string) string {
 // Bind the outbound tuple before any frames arrive. A bare error can be
 // superseded by a successful completion, so commit evidence at turn exit.
 func (s *OpenAIGatewayService) bindOpenAITierRefusal(ctx context.Context, o *upstreamResponseModelObserver, account *Account, model, tier, protocol string) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	if o == nil || s == nil || s.accountRepo == nil || !openAITierTextRoute(account, model) || protocol == "" {
 		return
 	}

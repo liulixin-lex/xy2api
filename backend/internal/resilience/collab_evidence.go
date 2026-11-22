@@ -29,6 +29,7 @@ type CollabRequestShape struct {
 // Identity is the original input item's identity, never a derived array index.
 // Raw named identifiers remain transient until converted to a keyed digest.
 type CollabNamedItem struct {
+	InputIndex *int
 	Identity   string
 	Family     CollabFamily
 	Located    bool
@@ -76,9 +77,11 @@ type CollabOriginalItem struct {
 
 func ResolveCollabNamedItem(named CollabNamedItem, original []CollabOriginalItem) CollabNamedItem {
 	named.Located = false
-	named.Ambiguous = false
 	named.MatchCount = 0
 	named.Item = ""
+	if named.Ambiguous {
+		return named
+	}
 	if named.Identity == "" {
 		return named
 	}

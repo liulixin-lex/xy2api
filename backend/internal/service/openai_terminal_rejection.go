@@ -119,6 +119,9 @@ func (s *OpenAIGatewayService) noteOpenAITerminalRejection(ctx context.Context, 
 }
 
 func (s *OpenAIGatewayService) noteOpenAITerminalRejectionForSession(ctx context.Context, account *Account, group int64, session string, status int, headers http.Header, body []byte, forwardErr error) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	cfg := resilience.Current()
 	if s == nil || s.resilience == nil || s.resilience.store == nil || account == nil ||
 		!account.IsOpenAICompatible() || !cfg.SessionOn() {

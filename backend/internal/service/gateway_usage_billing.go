@@ -626,6 +626,9 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 }
 
 func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return ctx, func() {}
+	}
 	if ctx == nil {
 		return context.Background(), func() {}
 	}

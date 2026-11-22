@@ -18,13 +18,14 @@ const collabRejectionLimit = 8
 // CollabRejection is transient, request-owned evidence. Never log or persist
 // Payload; BodyDigest covers exactly the bytes handed to the send boundary.
 type CollabRejection struct {
-	AccountID  int64
-	Status     int
-	BodyDigest resilience.CollabDigest
-	Payload    []byte
-	Event      string
-	Source     resilience.CollabEvidenceSource
-	Truncated  bool
+	AccountID   int64
+	Passthrough bool
+	Status      int
+	BodyDigest  resilience.CollabDigest
+	Payload     []byte
+	Event       string
+	Source      resilience.CollabEvidenceSource
+	Truncated   bool
 }
 
 func (r CollabRejection) Evidence(shape resilience.CollabRequestShape) resilience.CollabEvidence {
@@ -35,6 +36,33 @@ func (r CollabRejection) Evidence(shape resilience.CollabRequestShape) resilienc
 }
 
 type collabSendObserverKey struct{}
+type collabRejectedBodiesKey struct{}
+
+type CollabRejectedBody struct {
+	AccountID int64
+	Digest    resilience.CollabDigest
+}
+
+// WithCollabRejectedBodies supplies request-local exact-send exclusions.
+func WithCollabRejectedBodies(ctx context.Context, rejected map[CollabRejectedBody]bool) context.Context {
+	return context.WithValue(ctx, collabRejectedBodiesKey{}, rejected)
+}
+
+type CollabDuplicateSendError struct{}
+
+func (*CollabDuplicateSendError) Error() string { return "optional body already rejected" }
+
+func (s *OpenAIGatewayService) collabDuplicateSend(ctx context.Context, account *Account, body []byte) bool {
+	if !resilience.CollabAttemptFrom(ctx).Optional {
+		return false
+	}
+	rejected, ok := ctx.Value(collabRejectedBodiesKey{}).(map[CollabRejectedBody]bool)
+	if !ok {
+		return false
+	}
+	digest := s.CollabDigest(resilience.CollabDigestDomainBody, string(body))
+	return digest == "" || rejected[CollabRejectedBody{account.ID, digest}]
+}
 
 // CollabSendObserver retains at most eight bounded rejection payloads. It does
 // not read ahead, run callbacks, or alter transport errors and read boundaries.
@@ -89,7 +117,7 @@ func (s *OpenAIGatewayService) observeCollabHTTP(ctx context.Context, account *A
 		}
 	}
 	resp.Body = &collabEvidenceBody{ReadCloser: resp.Body, observer: observer,
-		rejection: CollabRejection{AccountID: account.ID, Status: resp.StatusCode, BodyDigest: s.CollabDigest(resilience.CollabDigestDomainBody, string(body)), Source: source},
+		rejection: CollabRejection{AccountID: account.ID, Passthrough: account.IsOpenAIPassthroughEnabled(), Status: resp.StatusCode, BodyDigest: s.CollabDigest(resilience.CollabDigestDomainBody, string(body)), Source: source},
 		stream:    resp.StatusCode < 400 && isEventStreamResponse(resp.Header)}
 }
 

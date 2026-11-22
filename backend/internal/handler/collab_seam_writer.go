@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -94,6 +95,24 @@ type collabSeamWriter struct {
 	held         *collabWithheld
 	armHeader    http.Header
 	commitHeader http.Header
+	prelude      collabDeliveredPrelude
+	takeover     atomic.Bool
+	continuation []byte
+}
+
+// These facts describe only bytes delivered before a takeover. Local ending
+// and a replacement upstream response must continue that same response.
+type collabDeliveredPrelude struct {
+	ID           string
+	CreatedAt    int64
+	Created      bool
+	NextSequence int64
+}
+
+func (w *collabSeamWriter) deliveredPrelude() collabDeliveredPrelude {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.prelude
 }
 
 func newCollabSeamWriter(inner gin.ResponseWriter, rescuable *atomic.Bool) *collabSeamWriter {
@@ -141,7 +160,7 @@ func (w *collabSeamWriter) WriteHeader(code int) {
 }
 
 func (w *collabSeamWriter) Write(data []byte) (int, error) {
-	if w.current() == collabSeamPassing {
+	if w.current() == collabSeamPassing && !w.takeover.Load() {
 		return w.ResponseWriter.Write(data)
 	}
 	w.mu.Lock()
@@ -150,7 +169,7 @@ func (w *collabSeamWriter) Write(data []byte) (int, error) {
 }
 
 func (w *collabSeamWriter) WriteString(s string) (int, error) {
-	if w.current() == collabSeamPassing {
+	if w.current() == collabSeamPassing && !w.takeover.Load() {
 		return w.ResponseWriter.WriteString(s)
 	}
 	w.mu.Lock()
@@ -410,6 +429,13 @@ func (w *collabSeamWriter) forward(kind collabSeamOpKind, data []byte) (n int, e
 		w.Header().Del("Content-Length")
 		w.commitHeader.Del("Content-Length")
 	}
+	originalSize := len(data)
+	if w.takeover.Load() && w.prelude.Created && collabSeamEventStream(w.Header()) {
+		data = w.continuePrelude(data)
+		if len(data) == 0 {
+			return originalSize, nil
+		}
+	}
 	w.committing(w.commitHeader, func() {
 		switch kind {
 		case collabSeamWriteString:
@@ -418,7 +444,83 @@ func (w *collabSeamWriter) forward(kind collabSeamOpKind, data []byte) (n int, e
 			n, err = w.ResponseWriter.Write(data)
 		}
 	})
+	if err == nil && n == len(data) {
+		if !w.takeover.Load() && collabSeamEventStream(w.Header()) {
+			w.observePrelude(data)
+		}
+		n = originalSize
+	}
 	return n, err
+}
+
+func (w *collabSeamWriter) observePrelude(data []byte) {
+	for line := range bytes.Lines(data) {
+		payload, ok := bytes.CutPrefix(line, []byte("data:"))
+		if !ok {
+			continue
+		}
+		payload = bytes.TrimSpace(payload)
+		if !gjson.ValidBytes(payload) {
+			continue
+		}
+		if gjson.GetBytes(payload, "type").String() == "response.created" {
+			w.prelude.ID = gjson.GetBytes(payload, "response.id").String()
+			w.prelude.CreatedAt = gjson.GetBytes(payload, "response.created_at").Int()
+			w.prelude.Created = true
+		}
+		if seq := gjson.GetBytes(payload, "sequence_number"); seq.Exists() {
+			w.prelude.NextSequence = max(w.prelude.NextSequence, seq.Int()+1)
+		}
+	}
+}
+
+func (w *collabSeamWriter) continuePrelude(data []byte) []byte {
+	if len(w.continuation) > 0 {
+		data = append(w.continuation, data...)
+		w.continuation = nil
+	}
+	var out []byte
+	for len(data) > 0 {
+		end := collabSeamFrameEnd(data, 0)
+		if end == 0 {
+			if len(data) > collabSeamPendingLimit {
+				return append(out, data...)
+			}
+			w.continuation = bytes.Clone(data)
+			return out
+		}
+		frame := data[:end]
+		data = data[end:]
+		var payload []byte
+		for line := range bytes.Lines(frame) {
+			if value, ok := bytes.CutPrefix(line, []byte("data:")); ok {
+				payload = bytes.TrimSpace(value)
+			}
+		}
+		if !gjson.ValidBytes(payload) {
+			out = append(out, frame...)
+			continue
+		}
+		if gjson.GetBytes(payload, "type").String() == "response.created" {
+			continue
+		}
+		next := payload
+		if gjson.GetBytes(next, "response.id").Exists() {
+			next, _ = sjson.SetBytes(next, "response.id", w.prelude.ID)
+		}
+		if gjson.GetBytes(next, "response.created_at").Exists() {
+			next, _ = sjson.SetBytes(next, "response.created_at", w.prelude.CreatedAt)
+		}
+		if gjson.GetBytes(next, "response_id").Exists() {
+			next, _ = sjson.SetBytes(next, "response_id", w.prelude.ID)
+		}
+		if gjson.GetBytes(next, "sequence_number").Exists() {
+			next, _ = sjson.SetBytes(next, "sequence_number", w.prelude.NextSequence)
+			w.prelude.NextSequence++
+		}
+		out = append(out, bytes.Replace(frame, payload, next, 1)...)
+	}
+	return out
 }
 
 // committing runs a call that may commit the response as if it happened when
@@ -482,6 +584,9 @@ func (w *collabSeamWriter) WriteHeaderNow() {
 }
 
 func (w *collabSeamWriter) commitOnly(kind collabSeamOpKind) {
+	if w.quiet && w.current() == collabSeamWatching {
+		return
+	}
 	if w.current() == collabSeamHolding && !w.yield() {
 		w.hold(kind, nil)
 		return
@@ -550,6 +655,7 @@ func (w *collabSeamWriter) suspend() *collabWithheld {
 	held.header = w.Header().Clone()
 	w.held = nil
 	w.forget()
+	w.takeover.Store(true)
 	w.set(collabSeamWatching)
 	w.quiet = true
 	if !held.committed {

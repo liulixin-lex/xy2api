@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
@@ -44,11 +45,17 @@ type collabRescuable func(seam *collabSeam) *atomic.Bool
 // cleanup, so that the user slot, the balance reservation and the request
 // record are still held.
 type collabSeam struct {
-	writer     *collabSeamWriter
-	original   gin.ResponseWriter
-	body       []byte
-	rescue     collabRescue
-	heartbeats service.DeliveryHeartbeatMark
+	writer           *collabSeamWriter
+	original         gin.ResponseWriter
+	body             []byte
+	rescue           collabRescue
+	heartbeats       service.DeliveryHeartbeatMark
+	observer         *service.CollabSendObserver
+	settle           func(*service.Account, *service.OpenAIForwardResult, error)
+	localEnding      func(*gin.Context, *collabSeam, *collabWithheld, resilience.CollabEvidence)
+	terminalRejected func(*gin.Context, resilience.CollabEvidence)
+	started          time.Time
+	losslessDuration time.Duration
 }
 
 // armCollabSeam installs the seam for requests the ladder covers: native
@@ -79,10 +86,12 @@ func (h *OpenAIGatewayHandler) armCollabSeam(c *gin.Context, body []byte, previo
 		return nil
 	}
 	seam := &collabSeam{original: c.Writer, body: body, rescue: h.collabRescue}
+	seam.observer = &service.CollabSendObserver{}
 	eligible := h.collabRescuable(seam)
 	if eligible == nil {
 		return nil
 	}
+	c.Request = c.Request.WithContext(service.WithCollabSendObserver(c.Request.Context(), seam.observer))
 	seam.writer = newCollabSeamWriter(c.Writer, eligible)
 	c.Writer = seam.writer
 	return seam
@@ -125,6 +134,7 @@ func (s *collabSeam) decide(c *gin.Context, mayTakeOver bool) bool {
 	}
 	// The existing path would have closed its heartbeat with this error.
 	stopPreOutputKeepalive(c)
+	s.recordTerminal(c)
 	s.writer.release()
 	return false
 }
@@ -141,6 +151,17 @@ func collabSeamMetered(result *service.OpenAIForwardResult) bool {
 		u.RawPromptTokens != nil && *u.RawPromptTokens > 0 ||
 		result.ImageCount > 0 || result.VideoCount > 0 || result.SearchCount > 0 || result.WebSearchCalls > 0 ||
 		result.AudioUsage != nil
+}
+
+func (s *collabSeam) recordTerminal(c *gin.Context) {
+	if s.terminalRejected == nil || s.observer == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	rejections := s.observer.Rejections()
+	if len(rejections) != 0 {
+		s.terminalRejected(c, rejections[len(rejections)-1].Evidence(service.ParseCollabBody(s.body).Shape))
+	}
 }
 
 // takeOver reports whether output of a takeover reached the client. In every

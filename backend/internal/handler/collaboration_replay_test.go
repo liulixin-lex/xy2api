@@ -273,6 +273,9 @@ func runCollaborationReplay(t *testing.T, c replayCase, snapshot resilience.Sett
 	if configureReplayHandler != nil {
 		configureReplayHandler(h, usage)
 	}
+	if configureReplayTakeover != nil {
+		configureReplayTakeover(h)
+	}
 	synctest.Test(t, func(t *testing.T) {
 		records := &replayRecordStore{mode: c.RecordMode}
 		if configureReplayRecords != nil {

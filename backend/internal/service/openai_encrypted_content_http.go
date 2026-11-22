@@ -11,6 +11,9 @@ import (
 )
 
 func (s *OpenAIGatewayService) stripHTTPEncryptedContentForAttempt(c *gin.Context, account *Account, body []byte, credentialVersion string) []byte {
+	if !resilience.CollabAttemptFrom(httpEncryptedRepairContext(c)).AccountEffectsAllowed() {
+		return body
+	}
 	if lineage := s.beginOpenAIM3(c, body); lineage != nil && account != nil {
 		body, _ = s.stripHTTPInvalidEncryptedContent(body, lineage.groupID, lineage.session, account.ID, credentialVersion)
 	}
@@ -37,6 +40,9 @@ type httpEncryptedRepairPlan struct {
 // further rejection that does not point at an item already cleared shows
 // more than one item failed, so the remaining ciphertext is cleared once.
 func planHTTPEncryptedContentRepair(ctx context.Context, c *gin.Context, account *Account, r *openAIRequestRepair, body, payload []byte) (httpEncryptedRepairPlan, bool) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return httpEncryptedRepairPlan{}, false
+	}
 	selected, err := openAIRequestEncryptedContentRepairBody(c, body, payload)
 	plan := httpEncryptedRepairPlan{Selected: selected}
 	if err != nil || r == nil || account == nil || r.accountID != account.ID || r.encryptedBulkTried || ctx.Err() != nil {

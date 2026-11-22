@@ -155,6 +155,9 @@ func groupBillsOpenAIFastAtStandard(apiKey *APIKey, account *Account, serviceTie
 
 // RecordUsage records usage and deducts balance
 func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) error {
+	if !resilience.CollabAttemptFrom(ctx).CustomerSettlementAllowed() {
+		return nil
+	}
 	if input == nil {
 		return errors.New("openai usage input is nil")
 	}
