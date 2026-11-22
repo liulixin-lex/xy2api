@@ -126,6 +126,13 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 		ctx = context.WithValue(ctx, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: 7, platform: PlatformOpenAI, threshold: .5, ceilingOn: true, pricingAt: time.Now()})
 	case 9:
 		require.NoError(t, f.svc.resilience.store.AddSessionAvoid(ctx, 7, firstOutputAvoidSession(session), 2, time.Minute))
+	case 10:
+		// A fresh owner slot can coexist with a stale full batch snapshot.
+		f.loads.loadMap = map[int64]*AccountLoadInfo{1: {LoadRate: 100}, 2: {LoadRate: 100}, 3: {LoadRate: 100}}
+	case 11:
+		if c.alias {
+			delete(f.cache.sessionBindings, "openai:"+session)
+		}
 	}
 	before := maps.Clone(f.cache.sessionBindings)
 	if on {
@@ -156,6 +163,11 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 		for key, value := range before {
 			require.Equal(t, value, f.cache.sessionBindings[key], "tree or alias changed: %s", key)
 		}
+		for key := range f.cache.sessionBindings {
+			if strings.HasPrefix(key, "openai:") {
+				require.Contains(t, before, key, "child must not adopt a tree alias")
+			}
+		}
 	}
 	return fmt.Sprintf("%s elapsed=%v attempts=%v", out, time.Since(start), f.attempts)
 }
@@ -167,7 +179,7 @@ func TestCollabThreadBindingGeneratedOracle(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(old) })
 	r := rand.New(rand.NewSource(17))
 	for i := 0; i < 3000; i++ {
-		c := collabOracleCase{bound: int64(r.Intn(4)), guardian: r.Intn(2) == 0, avoid: r.Intn(2) == 0, alias: r.Intn(2) == 0, plain: r.Intn(2) == 0, mode: i % 10, slots: map[int64]bool{}}
+		c := collabOracleCase{bound: int64(r.Intn(4)), guardian: r.Intn(2) == 0, avoid: r.Intn(2) == 0, alias: r.Intn(2) == 0, plain: r.Intn(2) == 0, mode: i % 12, slots: map[int64]bool{}}
 		for id := int64(1); id <= 3; id++ {
 			a := selectionFixtureAccount(id, r.Intn(3))
 			a.Schedulable = r.Intn(8) != 0
