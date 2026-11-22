@@ -856,11 +856,12 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 		}
 	}
 	capacityRequest := func(exclusions map[int64]struct{}) OpenAIAccountScheduleRequest {
-		req, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
-		req.GroupID, req.Platform, req.SessionHash, req.RequestedModel = group, platform, session, model
-		req.RequiredTransport, req.RequiredCapability, req.RequireCompact = transport, capability, compact
-		req.ExcludedIDs, req.UseUpstreamTokenCost = exclusions, useCost
-		return req
+		parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+		return OpenAIAccountScheduleRequest{
+			GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
+			RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
+			ExcludedIDs: exclusions, UseUpstreamTokenCost: useCost, candidateConstraint: parent.candidateConstraint,
+		}
 	}
 	for passIndex, pass := range tiers {
 		selection, decision, selectErr := selectPass(pass)

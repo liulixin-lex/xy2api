@@ -1383,8 +1383,14 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 								return selection, nil
 							}
 						} else {
-							capacityReq := req
-							capacityReq.SkipStickyCapacityRetry = err != nil
+							// Borrowing admits the snapshot using its original filters and
+							// checks group privacy on the fresh row after acquiring.
+							capacityReq := OpenAIAccountScheduleRequest{
+								GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel,
+								ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability,
+								UseUpstreamTokenCost: useUpstreamTokenCost, SkipStickyCapacityRetry: err != nil,
+								candidateConstraint: req.candidateConstraint,
+							}
 							selection, capacityErr := s.selectOpenAIStickyCapacity(ctx, account, openAILegacyStickyCapacityRequest(ctx, capacityReq))
 							if selection != nil && selection.StickyCapacitySpillover {
 								resilience.StateFrom(ctx).NoteStickyBypassReason("capacity_overflow")
