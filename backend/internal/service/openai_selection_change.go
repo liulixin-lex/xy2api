@@ -50,7 +50,7 @@ func firstOutputMigrationAllowed(ctx context.Context, session string) bool {
 	}
 	protected, _ := ctx.Value(openAITransferProtectedKey{}).(bool)
 	_, guardian := openAIGuardianParentAffinityFromContext(ctx)
-	return !protected && session != "" && !openAINoStickyMigration(ctx) && !guardian &&
+	return !protected && session != "" && !openAINoStickyMigration(ctx) && !openAICollabLeaseSuppressesMigration(ctx) && !guardian &&
 		!openAIRejectionScope(ctx).preserveBinding && !preserveOpenAIRejectionBinding(ctx, session)
 }
 

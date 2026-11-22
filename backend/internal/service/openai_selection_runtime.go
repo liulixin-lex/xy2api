@@ -239,7 +239,7 @@ func (s *OpenAIGatewayService) switchVetoOpportunity(ctx context.Context, req Op
 }
 
 func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenAIAccountScheduleRequest, owner *Account, members func() ([]Account, error)) *AccountSelectionResult {
-	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
+	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAINoStickyMigration(ctx) || openAICollabLeaseSuppressesMigration(ctx) || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
 		return nil
 	}
 	cache, ok := s.cache.(OpenAIStickyVersionedCache)

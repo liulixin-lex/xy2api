@@ -366,6 +366,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	}
 	ctx = s.withResilienceOpenAIEligibility(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform)
 	avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)
+	avoided = mergeExcluded(avoided, openAICollabThreadAvoidances(ctx))
 	if scope := openAIRejectionScope(ctx).session; scope != "" && scope != sessionHash {
 		threadAvoid := s.resilience.sessionAvoid(ctx, groupID, scope)
 		avoided = mergeExcluded(avoided, threadAvoid)
@@ -598,6 +599,19 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		decision.SelectedAccountID = selection.Account.ID
 		decision.SelectedAccountType = selection.Account.Type
 		return selection, decision, nil
+	}
+	if strings.TrimSpace(previousResponseID) == "" {
+		if hintID := openAICollabHint(ctx, guardianParentAccountID); hintID > 0 {
+			req, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+			req.RequirePrivacySet = s.openAIGroupRequiresPrivacySet(ctx, groupID)
+			if selection := s.selectOpenAICollabHint(ctx, req, hintID); selection != nil {
+				decision.Layer = "collab_tree"
+				decision.StickySessionHit = true
+				decision.SelectedAccountID = selection.Account.ID
+				decision.SelectedAccountType = selection.Account.Type
+				return selection, decision, nil
+			}
+		}
 	}
 	if guardianParentAccountID > 0 {
 		if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {

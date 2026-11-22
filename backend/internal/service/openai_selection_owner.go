@@ -163,6 +163,11 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		return selection, false, err
 	}
 
+	if probe, _ := ctx.Value(openAICollabHintProbeKey{}).(bool); probe {
+		// Tree hints never run capacity retries, borrow another account, or
+		// return a wait plan. A miss resumes the unchanged ordinary selector.
+		return nil, false, nil
+	}
 	if NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
 		if req.candidateConstraint != nil {
 			return nil, false, nil
