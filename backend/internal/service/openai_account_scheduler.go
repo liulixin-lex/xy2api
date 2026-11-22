@@ -286,7 +286,6 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	}
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, request)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
-	ctx = s.withOpenAICollabThreadRouting(ctx, sessionHash)
 	ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
 	ordinary := NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx)
 	defer func() {
@@ -367,9 +366,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	}
 	ctx = s.withResilienceOpenAIEligibility(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform)
 	avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)
-	avoided = mergeExcluded(avoided, openAICollabThreadAvoidances(ctx))
 	if scope := openAIRejectionScope(ctx).session; scope != "" && scope != sessionHash {
 		threadAvoid := s.resilience.sessionAvoid(ctx, groupID, scope)
+		threadAvoid = mergeExcluded(threadAvoid, s.collabThreadAvoidances(ctx))
 		avoided = mergeExcluded(avoided, threadAvoid)
 		if rejectionScope := openAIRejectionScope(ctx); len(threadAvoid) > 0 && rejectionScope.preserveBinding && rejectionScope.selectionPreservesBinding != nil {
 			owner, ownerErr := s.getStickySessionAccountID(ctx, groupID, sessionHash)
@@ -443,7 +442,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded, err)
 	}
 	if err == nil && selection != nil {
-		resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.openAISessionRecorder())
+		resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.collabSessionRecorder(ctx))
 	}
 	return selection, decision, capabilitySelectionError(ctx, err)
 }
@@ -537,7 +536,7 @@ func (s *OpenAIGatewayService) loadOpenAIGroupRequiresPrivacySet(ctx context.Con
 
 // applyLegacySelectionDecision 把非高级调度路径的选号结果回填到决策：记录选中账号，
 // 命中会话粘性时标记 session_hash 层，否则保持 load_balance。
-func applyLegacySelectionDecision(ctx context.Context, decision *OpenAIAccountScheduleDecision, selection *AccountSelectionResult) {
+func applyLegacySelectionDecision(decision *OpenAIAccountScheduleDecision, selection *AccountSelectionResult) {
 	if decision == nil || selection == nil || selection.Account == nil {
 		return
 	}
@@ -547,11 +546,6 @@ func applyLegacySelectionDecision(ctx context.Context, decision *OpenAIAccountSc
 		decision.Layer = openAIAccountScheduleLayerSessionSticky
 		decision.StickySessionHit = true
 	}
-	if selection.Acquired && selection.WaitPlan == nil && selection.Account.ID == openAICollabSelectionHint(ctx) {
-		decision.Layer = "collab_tree"
-		decision.StickySessionHit = true
-	}
-
 }
 
 func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
@@ -606,11 +600,8 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		decision.SelectedAccountType = selection.Account.Type
 		return selection, decision, nil
 	}
-	if strings.TrimSpace(previousResponseID) == "" {
-		ctx = context.WithValue(ctx, openAICollabHintKey{}, openAICollabHint(ctx, guardianParentAccountID))
-		if routing, ok := ctx.Value(openAICollabThreadRoutingKey{}).(openAICollabThreadRouting); ok && routing.route > 0 {
-			guardianParentAccountID = 0 // a recovered child owns its independent route
-		}
+	if id := openAICollabHint(ctx, guardianParentAccountID); id > 0 {
+		ctx = context.WithValue(ctx, openAICollabHintKey{}, id)
 	}
 	if guardianParentAccountID > 0 {
 		if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
@@ -659,7 +650,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 				return selection, decision, nil
 			}
 			if accountSupportsOpenAICapabilities(selection.Account, requiredCapability, requiredImageCapability) {
-				applyLegacySelectionDecision(ctx, &decision, selection)
+				applyLegacySelectionDecision(&decision, selection)
 				return selection, decision, nil
 			}
 			if selection.ReleaseFunc != nil {
@@ -686,7 +677,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		}
 		if s.isOpenAIAccountTransportCompatible(selection.Account, requiredTransport) &&
 			accountSupportsOpenAICapabilities(selection.Account, requiredCapability, requiredImageCapability) {
-			applyLegacySelectionDecision(ctx, &decision, selection)
+			applyLegacySelectionDecision(&decision, selection)
 			return selection, decision, nil
 		}
 		if selection.ReleaseFunc != nil {

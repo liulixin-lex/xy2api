@@ -41,6 +41,7 @@ type collabAffinityEntry struct {
 	route    CollabThreadRoute
 	lease    CollabDeliveryLease
 	released bool
+	written  time.Time
 }
 
 const (
@@ -49,6 +50,7 @@ const (
 	collabAffinityRoute
 	collabAffinityAvoid
 	collabAffinityLease
+	collabAffinityBinding
 )
 
 // ttl must be the gateway's existing sticky-session TTL. All keys are already
@@ -278,7 +280,11 @@ func (s *CollabTreeAffinity) AvoidThread(_ context.Context, avoidance CollabThre
 	if !now.Before(until) {
 		return false
 	}
-	s.put(collabAffinityEntry{key: collabAffinityKey{kind: collabAffinityAvoid, scope: avoidance.Scope, thread: avoidance.Thread, account: avoidance.AccountID}, until: until})
+	key := collabAffinityKey{kind: collabAffinityAvoid, scope: avoidance.Scope, thread: avoidance.Thread, account: avoidance.AccountID}
+	if old := s.get(key, now); old != nil && old.until.After(until) {
+		until = old.until
+	}
+	s.put(collabAffinityEntry{key: key, until: until, written: now})
 	return true
 }
 
@@ -294,6 +300,10 @@ func (s *CollabTreeAffinity) ThreadAvoided(_ context.Context, avoidance CollabTh
 // ThreadAvoidances is a snapshot for the ordinary selector's existing exclusion
 // path. It is never a tree-wide exclusion and does not consume a retry budget.
 func (s *CollabTreeAffinity) ThreadAvoidances(_ context.Context, scope CollabRecordScope, thread CollabDigest) map[int64]struct{} {
+	return s.ThreadAvoidancesAfterReset(context.Background(), scope, thread, nil)
+}
+
+func (s *CollabTreeAffinity) ThreadAvoidancesAfterReset(_ context.Context, scope CollabRecordScope, thread CollabDigest, resetAt func(int64) time.Time) map[int64]struct{} {
 	if s == nil {
 		return nil
 	}
@@ -303,7 +313,7 @@ func (s *CollabTreeAffinity) ThreadAvoidances(_ context.Context, scope CollabRec
 	now := time.Now()
 	for account, element := range s.avoidances[collabAffinityThread{scope, thread}] {
 		entry, _ := element.Value.(*collabAffinityEntry)
-		if !now.Before(entry.until) {
+		if !now.Before(entry.until) || resetAt != nil && entry.written.Before(resetAt(account)) {
 			s.remove(element)
 		} else {
 			if avoided == nil {
@@ -313,6 +323,28 @@ func (s *CollabTreeAffinity) ThreadAvoidances(_ context.Context, scope CollabRec
 		}
 	}
 	return avoided
+}
+
+// A present binding with account zero is a deletion tombstone, not absence.
+func (s *CollabTreeAffinity) ThreadBinding(key CollabDigest) (account int64, until time.Time, ok bool) {
+	if s == nil || key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.get(collabAffinityKey{kind: collabAffinityBinding, thread: key}, time.Now()); e != nil {
+		return e.route.AccountID, e.until, true
+	}
+	return
+}
+
+func (s *CollabTreeAffinity) PutThreadBinding(key CollabDigest, account int64, until time.Time) {
+	if s == nil || key == "" || account < 0 || !time.Now().Before(until) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.put(collabAffinityEntry{key: collabAffinityKey{kind: collabAffinityBinding, thread: key}, until: until, route: CollabThreadRoute{AccountID: account}})
 }
 
 func (s *CollabTreeAffinity) AcquireDeliveryLease(_ context.Context, lease CollabDeliveryLease) bool {

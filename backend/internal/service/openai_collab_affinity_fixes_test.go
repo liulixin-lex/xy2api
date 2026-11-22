@@ -68,9 +68,10 @@ func TestCollabAffinityRecoveredRouteRemainsSoft(t *testing.T) {
 				f.cache.sessionBindings["openai:shared-session"] = 2
 				settings := collabAffinitySettings()
 				local := resilience.NewCollabTreeAffinity(32, time.Hour)
-				ctx := collabAffinityContext(local, settings, "child", "root")
+				ctx := prepareAffinityTest(f, collabAffinityContext(local, settings, "child", "root"), "shared-session")
 				f.svc.AvoidOpenAICollabStateAccount(ctx, 7, "shared-session", 3, true)
-				NoteOpenAICollabSuccess(ctx, 1, false)
+				require.NoError(t, openAICollabBindingFrom(ctx).write(ctx, 1, time.Hour))
+				f.cache.sessionBindings["openai:shared-session"] = 1
 				switch mode {
 				case "busy", "all_busy":
 					f.loads.acquireResults = map[int64]bool{1: false, 2: mode != "all_busy"}
@@ -82,14 +83,14 @@ func TestCollabAffinityRecoveredRouteRemainsSoft(t *testing.T) {
 					selectionSetTrial(f, 1, leases)
 				}
 				start := time.Now()
-				baseline, _, baselineErr := collabAffinitySelect(f, selectionReviewContext(), "m", nil)
+				baseline, _, baselineErr := collabAffinitySelect(f, withOpenAINoStickyMigration(selectionReviewContext()), "m", nil)
 				baselineElapsed := time.Since(start)
 				require.NoError(t, baselineErr)
 				if baseline.ReleaseFunc != nil {
 					baseline.ReleaseFunc()
 				}
 				start = time.Now()
-				selected, _, err := collabAffinitySelect(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), settings, "child", "root"), "m", nil)
+				selected, _, err := collabAffinitySelect(f, prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), settings, "child", "root"), "shared-session"), "m", nil)
 				require.NoError(t, err)
 				require.Equal(t, baselineElapsed, time.Since(start))
 				require.Equal(t, baseline.Account.ID, selected.Account.ID)
@@ -130,14 +131,23 @@ func TestCollabAffinitySharedExpiryAndReset(t *testing.T) {
 		cache := &collabAffinityTTLCache{GatewayCache: f.svc.cache, routes: make(map[string]int64), expires: make(map[string]time.Time)}
 		f.svc.cache = cache
 		settings := collabAffinitySettings()
-		ctx := collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), settings, "child", "root")
+		ctx := prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), settings, "child", "root"), "tree")
 		f.svc.AvoidOpenAICollabStateAccount(ctx, 7, "tree", 1, true)
-		NoteOpenAICollabSuccess(ctx, 2, false)
+		require.NoError(t, openAICollabBindingFrom(ctx).write(ctx, 2, time.Minute))
 		require.Equal(t, time.Minute, cache.ttl)
-		read := func() openAICollabThreadRouting {
-			ctx = f.svc.withOpenAICollabThreadRouting(ctx, "tree")
-			routing, _ := ctx.Value(openAICollabThreadRoutingKey{}).(openAICollabThreadRouting)
-			return routing
+		read := func() struct {
+			avoided map[int64]struct{}
+			route   int64
+		} {
+			b := openAICollabBindingFrom(ctx)
+			account, ok := b.snapshot()
+			if !ok {
+				account = 0
+			}
+			return struct {
+				avoided map[int64]struct{}
+				route   int64
+			}{f.svc.collabThreadAvoidances(ctx), account}
 		}
 		require.Contains(t, read().avoided, int64(1))
 		require.EqualValues(t, 2, read().route)
@@ -162,7 +172,7 @@ func TestCollabAffinityRecoverySurvivesAnotherInstance(t *testing.T) {
 	first := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 3), selectionFixtureAccount(3, 2))
 	settings := collabAffinitySettings()
 	local := resilience.NewCollabTreeAffinity(32, time.Hour)
-	ctx := collabAffinityContext(local, settings, "child", "root")
+	ctx := prepareAffinityTest(first, collabAffinityContext(local, settings, "child", "root"), "shared-session")
 	first.svc.AvoidOpenAICollabStateAccount(ctx, 7, "shared-session", 1, true)
 	other := newSelectionRuntimeFixture(t, first.repo.accounts...)
 	other.svc.cache, other.svc.resilience = first.svc.cache, first.svc.resilience
@@ -170,14 +180,16 @@ func TestCollabAffinityRecoverySurvivesAnotherInstance(t *testing.T) {
 	identity := collabAffinityIdentity("child", "root")
 	identity.Scope.Tree = "" // a restarted instance has no membership registry
 	retry := WithOpenAICollabTreeAffinity(selectionReviewContext(), resilience.NewCollabTreeAffinity(32, time.Hour), settings, 7, identity, resilience.CollabRoleChild, true)
+	retry = prepareAffinityTest(other, retry, "shared-session")
 	selected, _, err := collabAffinitySelect(other, retry, "m", nil)
 	require.NoError(t, err)
 	require.NotEqualValues(t, 1, selected.Account.ID, "shared avoidance must be read immediately")
 	selected.ReleaseFunc()
-	NoteOpenAICollabSuccess(ctx, 2, false)
+	require.NoError(t, openAICollabBindingFrom(ctx).write(ctx, 2, time.Hour))
 	third := newSelectionRuntimeFixture(t, first.repo.accounts...)
 	third.svc.cache, third.svc.resilience = first.svc.cache, first.svc.resilience
 	retry = WithOpenAICollabTreeAffinity(selectionReviewContext(), resilience.NewCollabTreeAffinity(32, time.Hour), settings, 7, identity, resilience.CollabRoleChild, true)
+	retry = prepareAffinityTest(third, retry, "shared-session")
 	selected, _, err = collabAffinitySelect(third, retry, "m", nil)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, selected.Account.ID, "shared recovery route must outlive the local store")
@@ -191,6 +203,7 @@ func TestCollabAffinityAvoidancePreservesTreeAliases(t *testing.T) {
 	f.cache.sessionBindings["openai:legacy-tree"] = 1
 	ctx := collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root")
 	ctx = withOpenAILegacySessionHash(ctx, "legacy-tree")
+	ctx = prepareAffinityTest(f, ctx, "v2:tree")
 	f.svc.AvoidOpenAICollabStateAccount(ctx, 7, "v2:tree", 1, true)
 	require.EqualValues(t, 1, f.cache.sessionBindings["openai:v2:tree"])
 	require.EqualValues(t, 1, f.cache.sessionBindings["openai:legacy-tree"], "thread rejection must not call any binding deletion")

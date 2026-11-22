@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"maps"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -32,6 +34,16 @@ func collabAffinityContext(store *resilience.CollabTreeAffinity, settings *resil
 		role = resilience.CollabRoleChild
 	}
 	return WithOpenAICollabTreeAffinity(selectionReviewContext(), store, settings, 7, collabAffinityIdentity(thread, parent), role, true)
+}
+
+func prepareAffinityTest(f *selectionRuntimeFixture, ctx context.Context, session string) context.Context {
+	f.svc.cfg.JWT = config.JWTConfig{Secret: "synthetic-affinity-secret"}
+	if openAIRejectionScope(ctx).session == "" {
+		ctx = context.WithValue(ctx, openAITerminalRejectionScopeKey{}, openAITerminalRejectionScope{session: "child-execution", preserveBinding: true, selectionPreservesBinding: &atomic.Bool{}})
+	}
+	ctx = withOpenAINoStickyMigration(ctx)
+	f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true)
+	return ctx
 }
 
 func collabAffinitySelect(f *selectionRuntimeFixture, ctx context.Context, model string, excluded map[int64]struct{}) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
@@ -103,7 +115,7 @@ func TestCollabAffinityAloneNeverAddsSlotWait(t *testing.T) {
 					want := int64(2)
 					if on && mode == "free" {
 						want = 1
-						require.Equal(t, "collab_tree", decision.Layer)
+						require.False(t, decision.StickySessionHit)
 					}
 					require.Equal(t, want, selected.Account.ID)
 					if !on {
@@ -121,12 +133,12 @@ func TestCollabAffinityDoesNotCrossEffectiveGroups(t *testing.T) {
 	root := collabAffinityContext(s, settings, "root", "")
 	NoteOpenAICollabAdmission(root, 1, false)
 	ctx := collabAffinityContext(s, settings, "child", "root")
-	require.True(t, NoteOpenAICollabCiphertextFailure(ctx, 2, time.Now().Add(time.Minute)))
+	require.False(t, NoteOpenAICollabCiphertextFailure(ctx, 2, time.Now().Add(time.Minute)))
 	require.EqualValues(t, 1, openAICollabHint(ctx, 0))
 	changed := context.WithValue(ctx, openAISelectionRequestKey{}, OpenAIAccountScheduleRequest{GroupID: ptrInt64Selection(8)})
 	require.Zero(t, openAICollabHint(changed, 0))
-	require.Empty(t, openAICollabThreadAvoidances(changed))
-	require.False(t, openAICollabPreserveBinding(changed))
+	require.Nil(t, openAICollabBindingFrom(changed))
+	require.Nil(t, openAICollabAffinityFrom(changed))
 }
 
 func TestCollabAffinityCrossModelGrandchildAndParentPrecedence(t *testing.T) {
@@ -166,7 +178,7 @@ func TestCollabAffinityChildRetryMovesBeforeFinalOutcome(t *testing.T) {
 	settings := collabAffinitySettings()
 	root := collabAffinityContext(s, settings, "root", "")
 	NoteOpenAICollabAdmission(root, 1, false)
-	child := collabAffinityContext(s, settings, "child", "root")
+	child := prepareAffinityTest(f, collabAffinityContext(s, settings, "child", "root"), "shared-session")
 	initial, _, initialErr := collabAffinitySelect(f, child, "m", nil)
 	require.NoError(t, initialErr)
 	require.EqualValues(t, 1, initial.Account.ID)
@@ -174,13 +186,13 @@ func TestCollabAffinityChildRetryMovesBeforeFinalOutcome(t *testing.T) {
 	expires := time.Now().Add(time.Minute)
 	require.True(t, NoteOpenAICollabCiphertextFailure(child, 1, expires))
 	// A concurrent client retry sees avoidance before any success/final hook.
-	retry := collabAffinityContext(s, settings, "child", "root")
+	retry := prepareAffinityTest(f, collabAffinityContext(s, settings, "child", "root"), "shared-session")
 	selected, _, err := collabAffinitySelect(f, retry, "m", nil)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, selected.Account.ID)
 	selected.ReleaseFunc()
-	NoteOpenAICollabSuccess(child, 3, false)
-	retry = collabAffinityContext(s, settings, "child", "root")
+	require.NoError(t, f.svc.BindStickySessionAfterProfitAdmission(child, ptrInt64Selection(7), "shared-session", 3))
+	retry = prepareAffinityTest(f, collabAffinityContext(s, settings, "child", "root"), "shared-session")
 	selected, _, err = collabAffinitySelect(f, retry, "another-model", nil)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, selected.Account.ID, "recovered thread wins over a different tree account")
@@ -302,6 +314,7 @@ func TestCollabAffinityRejectionWrapperKeepsExistingTiming(t *testing.T) {
 			settings.Collab.TreeAffinity = on
 			ctx := collabAffinityContext(s, settings, "child", "root")
 			ctx = context.WithValue(ctx, openAITerminalRejectionScopeKey{}, openAITerminalRejectionScope{session: "child-execution", preserveBinding: true})
+			ctx = prepareAffinityTest(f, ctx, "shared-session")
 			f.svc.AvoidOpenAICollabStateAccount(ctx, 7, "shared-session", 1, true)
 			rootAvoid, err := f.svc.resilience.store.SessionAvoid(ctx, 7, "shared-session")
 			require.NoError(t, err)
@@ -330,12 +343,14 @@ func TestCollabAffinityAvoidanceFallbackRetainsTenant(t *testing.T) {
 	second.Scope.Tenant = "another-tenant"
 	for _, identity := range []resilience.CollabTreeHint{first, second} {
 		ctx := WithOpenAICollabTreeAffinity(selectionReviewContext(), s, settings, 7, identity, resilience.CollabRoleChild, true)
+		ctx = context.WithValue(ctx, openAITerminalRejectionScopeKey{}, openAITerminalRejectionScope{session: string(identity.Scope.Tenant) + ":execution", preserveBinding: true, selectionPreservesBinding: &atomic.Bool{}})
+		ctx = prepareAffinityTest(f, ctx, "shared-session")
 		f.svc.AvoidOpenAICollabStateAccount(ctx, 7, "shared-session", 1, true)
-		avoided, err := f.svc.resilience.store.SessionAvoid(ctx, 7, "collab-thread-v1:"+string(identity.Scope.Tenant)+":"+string(identity.Thread))
+		avoided, err := f.svc.resilience.store.SessionAvoid(ctx, 7, openAIRejectionScope(ctx).session)
 		require.NoError(t, err)
 		require.Contains(t, avoided, int64(1))
 		if identity == first {
-			other, err := f.svc.resilience.store.SessionAvoid(ctx, 7, "collab-thread-v1:"+string(second.Scope.Tenant)+":"+string(second.Thread))
+			other, err := f.svc.resilience.store.SessionAvoid(ctx, 7, "another-execution")
 			require.NoError(t, err)
 			require.Empty(t, other)
 		}

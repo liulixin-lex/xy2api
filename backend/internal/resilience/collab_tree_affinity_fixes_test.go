@@ -89,3 +89,23 @@ func TestCollabTreeAffinityIndexEvictionAndRelease(t *testing.T) {
 	require.False(t, s.AcquireDeliveryLease(ctx, other))
 	require.False(t, s.AcquireDeliveryLease(ctx, lease))
 }
+
+func TestCollabTreeAffinityLeaseInstanceConvergenceAndIssuanceTTL(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		issuer := NewCollabTreeAffinity(16, time.Minute)
+		receiver := NewCollabTreeAffinity(16, time.Minute)
+		lease := affinityTestLease("item")
+		lease.ExpiresAt = time.Now().Add(time.Minute)
+		require.True(t, issuer.AcquireDeliveryLease(ctx, lease))
+		receiver.ReleaseDeliveryLease(ctx, lease.Key, CollabLeaseReleaseConsumed)
+		require.True(t, issuer.HasDeliveryLeases(ctx, lease.Key.Scope), "process-local suppression converges on that instance's acceptance")
+		time.Sleep(30 * time.Second)
+		issuer.ReleaseDeliveryLease(ctx, lease.Key, CollabLeaseReleaseConsumed)
+		issuer.ReleaseDeliveryLease(ctx, lease.Key, CollabLeaseReleaseConsumed)
+		require.False(t, issuer.HasDeliveryLeases(ctx, lease.Key.Scope))
+		require.False(t, issuer.AcquireDeliveryLease(ctx, lease))
+		time.Sleep(30 * time.Second)
+		require.False(t, issuer.AcquireDeliveryLease(ctx, lease), "expired issuance cannot restart the TTL")
+	})
+}

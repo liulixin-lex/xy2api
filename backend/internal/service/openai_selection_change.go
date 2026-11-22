@@ -263,11 +263,14 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 	if !ok {
 		return
 	}
+	if b := collabBindingFor(ctx, groupID, session); b != nil {
+		cache = collabThreadVersionedCache{b: b}
+	}
 	key := s.openAISessionCacheKey(session)
 	expected, err := cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
 	legacy := s.openAILegacySessionCacheKey(ctx, session)
 	fallback := s.openAISessionHashReadOldFallbackEnabled()
-	if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok {
+	if aliases, ok := cache.(OpenAIStickyAliasCache); ok {
 		if legacy != "" && (fallback || s.openAISessionHashDualWriteOldEnabled()) {
 			expected, err = aliases.ResolveSessionBinding(ctx, derefGroupID(groupID), key, legacy, fallback)
 		}

@@ -129,15 +129,11 @@ func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, gr
 // The extra result preserves absence evidence for new-session placement. Legacy
 // callers keep their original ID and error even when a fallback read fails.
 func (s *OpenAIGatewayService) lookupStickySessionAccount(ctx context.Context, groupID *int64, sessionHash string) (int64, bool, error) {
+	if b := collabBindingFor(ctx, groupID, sessionHash); b != nil {
+		return b.effective(ctx)
+	}
 	if id, handled := s.qualitySticky(ctx, groupID, sessionHash); handled {
 		return id, false, nil
-	}
-	if a := openAICollabAffinityFrom(ctx); a != nil && a.groupID == derefGroupID(groupID) {
-		if routing, ok := ctx.Value(openAICollabThreadRoutingKey{}).(openAICollabThreadRouting); ok && routing.session == sessionHash && routing.route > 0 {
-			// A recovery route is a no-wait candidate preference, never a
-			// replacement sticky owner which could create a new capacity wait.
-			return 0, false, nil
-		}
 	}
 	if s == nil || s.cache == nil {
 		return 0, false, nil
@@ -186,6 +182,9 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 	if s == nil || s.cache == nil || accountID <= 0 {
 		return nil
 	}
+	if b := collabBindingFor(ctx, groupID, sessionHash); b != nil {
+		return b.set(ctx, accountID, ttl)
+	}
 	primaryKey := s.openAISessionCacheKey(sessionHash)
 	if primaryKey == "" {
 		return nil
@@ -233,6 +232,9 @@ func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, grou
 	if s == nil || s.cache == nil {
 		return nil
 	}
+	if b := collabBindingFor(ctx, groupID, sessionHash); b != nil {
+		return b.refresh(ctx, ttl, expectedOwner...)
+	}
 	primaryKey := s.openAISessionCacheKey(sessionHash)
 	if primaryKey == "" {
 		return nil
@@ -267,6 +269,9 @@ func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, grou
 }
 
 func (s *OpenAIGatewayService) deleteStickySessionAccountID(ctx context.Context, groupID *int64, sessionHash string) error {
+	if b := collabBindingFor(ctx, groupID, sessionHash); b != nil {
+		return b.deleteOwner(ctx, 0)
+	}
 	if preservePendingOpenAIStickyBinding(ctx, groupID, sessionHash) {
 		return nil
 	}
