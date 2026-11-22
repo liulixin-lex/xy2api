@@ -140,10 +140,13 @@ func ParseCollabBody(body []byte) CollabBody {
 					// A task survives intermediate assistant output until a final
 					// answer, compaction, or a newer task for the same recipient.
 					active := true
-					for _, later := range input[i+1:] {
-						if later.Get("type").String() == "compaction" || later.Get("role").String() == "assistant" && later.Get("phase").String() == "final_answer" || later.Get("recipient").String() == item.Get("recipient").String() && collabEnvelopeKind(later) == "NEW_TASK" {
-							active = false
-							break
+					// Unread tasks in one batch are all protected.
+					if i <= lastOutput {
+						for _, later := range input[i+1:] {
+							if later.Get("type").String() == "compaction" || later.Get("role").String() == "assistant" && later.Get("phase").String() == "final_answer" || later.Get("recipient").String() == item.Get("recipient").String() && collabEnvelopeKind(later) == "NEW_TASK" {
+								active = false
+								break
+							}
 						}
 					}
 					if active {
@@ -158,7 +161,7 @@ func ParseCollabBody(body []byte) CollabBody {
 				if collabEnvelopeKind(item) != "NEW_TASK" {
 					entry.Class = resilience.CollabItemClassReplaceable
 				}
-				if entry.Placeholder == collabUnreadTask {
+				if entry.Class == resilience.CollabItemClassReplaceable && entry.Placeholder == collabUnreadTask {
 					entry.Placeholder = collabProcessedTask
 				}
 			}

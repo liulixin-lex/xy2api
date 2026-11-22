@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -190,4 +191,31 @@ func TestCollabNamedCallArgumentsSwitchWithoutEditing(t *testing.T) {
 	}
 	require.False(t, l.Run(context.Background()))
 	require.Equal(t, 1, sends)
+}
+
+func TestCollabUnreadTaskBatchStaysProtected(t *testing.T) {
+	var input []any
+	for _, id := range []string{"amsg_first", "amsg_second"} {
+		input = append(input, map[string]any{"type": "agent_message", "id": id, "recipient": "child", "content": []map[string]string{
+			{"type": "input_text", "text": "Message Type: NEW_TASK\nTask name: child\nSender: parent\nPayload:\n"},
+			{"type": "encrypted_content", "encrypted_content": "synthetic-task"},
+		}})
+	}
+	body, err := json.Marshal(map[string]any{"input": input})
+	require.NoError(t, err)
+	parsed := ParseCollabBody(body)
+	require.Len(t, parsed.Items, 2)
+	for _, item := range parsed.Items {
+		require.Equal(t, resilience.CollabItemClassProtected, item.Class)
+	}
+	next, changed := parsed.Derive(body, resilience.CollabActionDropUnprotected, "", false)
+	require.False(t, changed)
+	require.Equal(t, body, next)
+	input = append(input[:1], map[string]any{"type": "message", "role": "assistant", "phase": "commentary", "content": "working"})
+	body, err = json.Marshal(map[string]any{"input": input})
+	require.NoError(t, err)
+	parsed = ParseCollabBody(body)
+	require.Len(t, parsed.Items, 1)
+	require.Equal(t, resilience.CollabItemClassProtected, parsed.Items[0].Class)
+	require.Equal(t, collabUnreadTask, parsed.Items[0].Placeholder)
 }
