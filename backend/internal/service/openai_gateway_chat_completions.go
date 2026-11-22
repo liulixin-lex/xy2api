@@ -553,6 +553,7 @@ retryChatResponsesWire:
 			// Re-sign the current Responses request; restarting at Chat ingress
 			// would discard the repairs and tool mapping of a replayed send.
 			ctx = markAgentIdentityTaskRecoveryTried(ctx)
+			startTime = time.Now()
 			goto retryChatResponsesWire
 		}
 		if retryBody, reason, changed, repairErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, repairBody, respBody); repairErr == nil &&

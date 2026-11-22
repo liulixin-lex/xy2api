@@ -388,12 +388,24 @@ func TestConversionRetryStickyBoundary(t *testing.T) {
 }
 
 func TestChatAgentIdentityRefreshPreservesRepairedResponses(t *testing.T) {
-	const body = `{"model":"gpt-5.4","stream":false,"input":[{"type":"message","role":"user","status":"completed","content":[{"type":"input_text","text":"hello"}]}],"tools":[{"type":"function","name":"python","parameters":{"type":"object"}}]}`
-	for _, route := range []string{"same_account", "after_switch"} {
+	const original = `{"model":"gpt-5.4","stream":false,"input":[{"type":"message","role":"user","status":"completed","content":[{"type":"input_text","text":"hello"}]}],"tools":[{"type":"function","name":"python","parameters":{"type":"object"}}]}`
+	for _, route := range []string{"same_account", "after_switch", "slow_refresh_stream"} {
 		t.Run(route, func(t *testing.T) {
+			body := original
+			slowStream := route == "slow_refresh_stream"
+			const tier = time.Second // Model overrides use whole seconds.
+			if slowStream {
+				body = strings.Replace(body, `"stream":false`, `"stream":true`, 1)
+				withResilienceSettings(t, func(s *resilience.Settings) {
+					s.Budget.ModelOverrides = map[string]int{"gpt-5.4": 1}
+				})
+			}
 			var registrations atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				registrations.Add(1)
+				if slowStream {
+					time.Sleep(tier + time.Millisecond)
+				}
 				_, _ = io.WriteString(w, `{"task_id":"task-new"}`)
 			}))
 			defer server.Close()
@@ -420,8 +432,25 @@ func TestChatAgentIdentityRefreshPreservesRepairedResponses(t *testing.T) {
 			up.responses = append(up.responses, newJSONResponse(401, `{"error":{"code":"invalid_task_id"}}`),
 				sse(`{"type":"response.completed","response":{"id":"result","status":"completed","output":[{"id":"item","type":"function_call","call_id":"call","name":"python__sub2api","arguments":"{}","status":"completed"}]}}`))
 			svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: &agentIdentityForwardRepo{account: agent}, httpUpstream: up}
-			c, _ := conversionRetryTestContext(t, body)
-			_, err := svc.ForwardAsChatCompletions(c.Request.Context(), c, first, []byte(body), "", "")
+			if slowStream {
+				svc.httpUpstream = &codexModelsHTTPUpstreamStub{do: func(req *http.Request, proxy string, accountID int64, concurrency int) (*http.Response, error) {
+					if agentIdentityTaskRecoveryWasTried(req.Context()) {
+						select {
+						case <-req.Context().Done():
+							return nil, req.Context().Err()
+						case <-time.After(5 * time.Millisecond):
+						}
+					}
+					resp, err := up.Do(req, proxy, accountID, concurrency)
+					if resp != nil {
+						resp.Request = req
+					}
+					return resp, err
+				}}
+			}
+			c, state := conversionRetryTestContext(t, body)
+			budgetDeadline := state.Budget().Deadline()
+			result, err := svc.ForwardAsChatCompletions(c.Request.Context(), c, first, []byte(body), "", "")
 			want := 3
 			if route == "after_switch" {
 				var f *UpstreamFailoverError
@@ -443,6 +472,19 @@ func TestChatAgentIdentityRefreshPreservesRepairedResponses(t *testing.T) {
 			require.False(t, gjson.GetBytes(up.bodies[1], "input.0.status").Exists())
 			require.Equal(t, "python__sub2api", gjson.GetBytes(up.bodies[1], "tools.0.name").String())
 			require.Equal(t, "python", codexToolNameReverseFromContext(c)["python__sub2api"])
+			if slowStream {
+				before, _ := up.requests[1].Context().Value(openAICompatFirstEventKey{}).(*openAICompatFirstEvent)
+				after, _ := up.requests[2].Context().Value(openAICompatFirstEventKey{}).(*openAICompatFirstEvent)
+				require.NotNil(t, before)
+				require.NotNil(t, after)
+				require.Equal(t, tier.Milliseconds(), after.plan.Diagnostics().TierMs)
+				require.GreaterOrEqual(t, after.started.Sub(before.started), tier)
+				require.Equal(t, budgetDeadline, state.Budget().Deadline())
+				elapsed := time.Since(after.started)
+				require.LessOrEqual(t, result.Duration, elapsed)
+				require.NotNil(t, result.FirstTokenMs)
+				require.LessOrEqual(t, int64(*result.FirstTokenMs), elapsed.Milliseconds())
+			}
 			for _, wire := range up.bodies[2:] {
 				require.Equal(t, up.bodies[1], wire, "credential refresh must preserve the repaired bytes")
 			}
