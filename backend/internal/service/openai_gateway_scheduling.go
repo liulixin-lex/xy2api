@@ -1208,6 +1208,13 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (selection *AccountSelectionResult, err error) {
 	ctx, handoff := beginSelectionHandoff(ctx)
 	defer handoff.finish(&selection)
+	// A result's admission context belongs to the old selection. Only an
+	// explicit caller constraint applies to a new public request.
+	parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+	if explicit := openAIRequestCandidateConstraintFrom(ctx); explicit != nil || parent.candidateConstraint != nil {
+		parent.candidateConstraint = explicit
+		ctx = context.WithValue(ctx, openAISelectionRequestKey{}, parent)
+	}
 	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
 	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
@@ -1246,9 +1253,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
 	parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
 	req := OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, ExcludedIDs: excludedIDs, RequireCompact: requireCompact, RequiredCapability: requiredCapability, UseUpstreamTokenCost: useUpstreamTokenCost, baseExclusions: parent.baseExclusions, candidateConstraint: parent.candidateConstraint, RequirePrivacySet: s.openAIGroupRequiresPrivacySet(ctx, groupID)}
-	if req.candidateConstraint == nil {
-		req.candidateConstraint = openAIRequestCandidateConstraintFrom(ctx)
-	}
 	req.NoWait = openAISelectionNoWait(ctx)
 	if state, _ := ctx.Value(openAILegacyStickyCapacityKey{}).(*openAILegacyStickyCapacity); state != nil {
 		req.RequiredTransport, req.RequiredImageCapability = state.transport, state.image
