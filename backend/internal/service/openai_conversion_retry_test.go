@@ -155,7 +155,7 @@ func TestConversionRetryOrdinarySendBorrowsBuilderBody(t *testing.T) {
 	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	svc := &OpenAIGatewayService{}
 	input := []byte(`{"model":"gpt-4.1","input":"` + strings.Repeat("x", 1<<20) + `"}`)
-	req, wire, err := svc.buildUpstreamRequestWithBody(ctx, c, a, input, "fixture", true, "", false)
+	req, wire, err := svc.buildUpstreamRequestWithBody(ctx, c, a, input, "fixture", true, "", false, GroupPromptResponses)
 	require.NoError(t, err)
 	require.Contains(t, gjson.GetBytes(wire, "instructions").String(), "group instruction")
 	actual, err := io.ReadAll(req.Body)

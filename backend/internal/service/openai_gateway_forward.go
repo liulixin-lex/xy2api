@@ -1675,11 +1675,11 @@ func (s *OpenAIGatewayService) learnOpenAIStreamOnlyHTTPFailure(ctx context.Cont
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
-	req, _, err := s.buildUpstreamRequestWithBody(ctx, c, account, body, token, isStream, promptCacheKey, isCodexCLI)
+	req, _, err := s.buildUpstreamRequestWithBody(ctx, c, account, body, token, isStream, promptCacheKey, isCodexCLI, GroupPromptResponses)
 	return req, err
 }
 
-func (s *OpenAIGatewayService) buildUpstreamRequestWithBody(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, []byte, error) {
+func (s *OpenAIGatewayService) buildUpstreamRequestWithBody(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool, groupPromptProtocol GroupPromptProtocol) (*http.Request, []byte, error) {
 	var cacheControlErr error
 	body, cacheControlErr = normalizeOpenAICacheControls(account, body)
 	if cacheControlErr != nil {
@@ -1721,7 +1721,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithBody(ctx context.Context,
 	// previous_response_id，避免携带状态字段被上游拒绝。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
 
-	wire, err := ApplyGroupSystemPrompt(ctx, body, GroupPromptResponses)
+	wire, err := ApplyGroupSystemPrompt(ctx, body, groupPromptProtocol)
 	if err != nil {
 		return nil, nil, err
 	}

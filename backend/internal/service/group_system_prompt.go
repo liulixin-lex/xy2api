@@ -16,10 +16,11 @@ import (
 type GroupPromptProtocol string
 
 const (
-	GroupPromptChat      GroupPromptProtocol = "chat"
-	GroupPromptResponses GroupPromptProtocol = "responses"
-	GroupPromptAnthropic GroupPromptProtocol = "anthropic"
-	GroupPromptGemini    GroupPromptProtocol = "gemini"
+	GroupPromptChat               GroupPromptProtocol = "chat"
+	GroupPromptResponses          GroupPromptProtocol = "responses"
+	groupPromptResponsesDeveloper GroupPromptProtocol = "responses-developer"
+	GroupPromptAnthropic          GroupPromptProtocol = "anthropic"
+	GroupPromptGemini             GroupPromptProtocol = "gemini"
 )
 
 type groupSystemPromptContextKey struct{}
@@ -167,6 +168,8 @@ func PrependGroupSystemPrompt(body []byte, protocol GroupPromptProtocol, prompt 
 	switch protocol {
 	case GroupPromptChat:
 		return prepend("messages", map[string]string{"role": "system", "content": prompt}, false, false)
+	case groupPromptResponsesDeveloper:
+		return prepend("input", map[string]string{"type": "message", "role": "developer", "content": prompt}, false, false)
 	case GroupPromptResponses:
 		instructions := gjson.GetBytes(body, "instructions")
 		if instructions.Exists() && instructions.Type != gjson.Null && instructions.Type != gjson.String {

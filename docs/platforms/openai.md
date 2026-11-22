@@ -216,6 +216,7 @@ goals = true
 - **请求**：`/v1/messages` 客户端直接携带已知 effort 后缀时拆为基名与 effort，并按基名计价，此时以带后缀名称配置的映射或渠道价不会命中；API Key 账号在其它情况下保留模型名和映射目标原样，`model_mapping` 的键仍区分大小写。`temperature`、`top_p` 在 Chat → Responses、Messages → Chat、Responses → Chat 转换及 Codex 协议路径中不发送，API Key 的原生 Responses 与 Chat 直转保留原值。
 - **工具调用**：只走 Responses。明确标记为不支持 Responses 的账号不再承接带工具的 6.2 请求；已标记支持或尚未标记的账号不受影响。
 - **缓存**：客户端未提供会话标识时自动补充 `prompt_cache_key`，按最终模型与下游 API Key 隔离。`/v1/messages` 的历史裁剪、续聊与 todo guard 不对 6.2 启用。
+- **可选兼容**：`gateway.gpt62_chat_system_as_developer` 默认 `false`。开启后，6.2 的 Chat → Responses 转换将 `system` 消息在原位改为 `developer`，用于兼容会把 system 提升到不可缓存 instructions 的中转；实际缓存收益未经真实上游验证。
 - **计费**：目录已有精确 6.2 价格时扣费不变。修复目录缺失或已知后缀误用其它模型家族价格的问题；缺失时也会启用 6.2 的长上下文与缓存写入价格，不完整渠道价卡的留空字段随之变化。供应商前缀模型也会匹配渠道价格（含显式零价与 Ultrafast 倍率）；分组和渠道显式配置仍优先。Ultrafast 售价沿用现有价卡；官方 API 采购价在太平洋时间 2027-03-01 零点前按 Standard 的 3 倍、之后 6 倍计算。免费 Fast 与免费 Ultrafast 分别设置，不按订阅套餐推断 Ultrafast 能力，也不新增官方 API 的 6.2 Ultrafast 目录广告。
 
 ## 相关功能
