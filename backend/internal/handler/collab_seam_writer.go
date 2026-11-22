@@ -8,12 +8,22 @@ import (
 	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 )
 
-// collabSeamPendingLimit bounds the bytes of an unfinished frame, or of the
-// prelude held back during a takeover. Beyond it the response passes through.
-const collabSeamPendingLimit = 256 << 10
+const (
+	// collabSeamPendingLimit bounds an unfinished frame of the existing path.
+	// Beyond it the response passes through and cannot be taken over.
+	collabSeamPendingLimit = 256 << 10
+	// collabSeamQuietLimit bounds what a takeover may write before output.
+	// Created and in-progress events echo instructions and tools, so it is
+	// generous. Beyond it the attempt is abandoned, never delivered.
+	collabSeamQuietLimit = 4 << 20
+	// Beyond these a withheld error goes out at once and is not taken over.
+	collabSeamHeldLimit = 1 << 20
+	collabSeamHeldOps   = 128
+)
 
 type collabSeamMode int32
 
@@ -69,8 +79,9 @@ type collabSeamWriter struct {
 	// how much of it has been classified.
 	pending []byte
 	checked int
-	// quiet is set during a takeover that began before headers were
-	// committed: nothing may commit them until there is output.
+	// quiet is set during a takeover: until it has semantic output nothing of
+	// it reaches the client, neither headers, prelude, heartbeats nor errors,
+	// whether or not the existing path had committed the headers.
 	quiet bool
 
 	held         *collabWithheld
@@ -145,7 +156,7 @@ func (w *collabSeamWriter) write(kind collabSeamOpKind, data []byte) (int, error
 	if len(w.pending) > 0 || collabSeamEventStream(w.Header()) {
 		return w.writeFrames(kind, data, committed)
 	}
-	if !committed && collabSeamFailedJSON(data) {
+	if !committed && collabSeamFailedJSON(data) || w.quiet && !collabSeamJSONOutput(data) {
 		w.hold(kind, data)
 		return len(data), nil
 	}
@@ -168,7 +179,7 @@ func (w *collabSeamWriter) writeFrames(kind collabSeamOpKind, data []byte, commi
 		if end == 0 {
 			break
 		}
-		frame := collabSeamClassify(buf[pos : pos+end])
+		frame, event, payload := collabSeamClassify(buf[pos : pos+end])
 		if frame == collabSeamFailedFrame {
 			// Withhold the whole write, so a prelude that came with the error
 			// does not commit the response on its own.
@@ -177,7 +188,13 @@ func (w *collabSeamWriter) writeFrames(kind collabSeamOpKind, data []byte, commi
 			return len(data), nil
 		}
 		pos += end
-		if frame == collabSeamOutputFrame {
+		if frame != collabSeamOutputFrame {
+			continue
+		}
+		// Anything ends the watch on the existing path. A takeover counts as
+		// delivered only with semantic output, by the gateway's own definition:
+		// an empty item or text part must not replace the saved error.
+		if !w.quiet || resilience.ResponsesEventOutputDisposition(event, payload).SemanticOutput {
 			output = true
 			break
 		}
@@ -185,10 +202,17 @@ func (w *collabSeamWriter) writeFrames(kind collabSeamOpKind, data []byte, commi
 
 	out, pass := pos, false
 	switch {
-	case output || len(buf)-pos > collabSeamPendingLimit || len(buf) > collabSeamPendingLimit && w.quiet && !committed:
+	case output:
 		out, pass = len(buf), true
-	case w.quiet && !committed:
+	case w.quiet:
+		if len(buf) > collabSeamQuietLimit {
+			w.pending, w.checked = nil, 0
+			w.hold(kind, nil)
+			return len(data), nil
+		}
 		out = 0
+	case len(buf)-pos > collabSeamPendingLimit:
+		out, pass = len(buf), true
 	}
 
 	var err error
@@ -263,8 +287,16 @@ func (w *collabSeamWriter) hold(kind collabSeamOpKind, data []byte) {
 		w.held, w.commitHeader = held, nil
 		w.set(collabSeamHolding)
 	}
-	w.held.ops = append(w.held.ops, collabSeamOp{kind: kind, data: bytes.Clone(data)})
 	w.held.size += len(data)
+	if w.quiet {
+		// A failed attempt's error is never replayed, only its size is kept.
+		return
+	}
+	w.held.ops = append(w.held.ops, collabSeamOp{kind: kind, data: bytes.Clone(data)})
+	if w.held.size > collabSeamHeldLimit || len(w.held.ops) > collabSeamHeldOps {
+		w.replay()
+		w.set(collabSeamPassing)
+	}
 }
 
 func (w *collabSeamWriter) Flush() {
@@ -297,9 +329,12 @@ func (w *collabSeamWriter) commitOnly(kind collabSeamOpKind) {
 			w.hold(kind, nil)
 			return
 		}
-		if w.quiet || len(w.pending) > 0 {
+		if len(w.pending) > 0 {
 			return
 		}
+	}
+	if w.quiet && w.current() == collabSeamWatching {
+		return
 	}
 	if kind == collabSeamFlush {
 		w.ResponseWriter.Flush()
@@ -340,8 +375,8 @@ func (w *collabSeamWriter) Size() int {
 func (w *collabSeamWriter) withholding() bool { return w.current() == collabSeamHolding }
 
 // suspend takes the withheld error out and prepares the writer for a
-// takeover. If headers were not committed, the response looks untouched and
-// stays uncommitted until the takeover produces output.
+// takeover: nothing of it goes out until it has semantic output, and if
+// headers were not committed the response looks untouched until then.
 func (w *collabSeamWriter) suspend() *collabWithheld {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -352,9 +387,9 @@ func (w *collabSeamWriter) suspend() *collabWithheld {
 	held.header = w.Header().Clone()
 	w.held, w.pending, w.checked = nil, nil, 0
 	w.set(collabSeamWatching)
+	w.quiet = true
 	if !held.committed {
 		w.resetUncommitted()
-		w.quiet = true
 	}
 	return held
 }
@@ -409,6 +444,10 @@ func (w *collabSeamWriter) release() {
 		_, _ = w.forward(collabSeamWrite, w.pending)
 		w.pending, w.checked = nil, 0
 	}
+	w.replay()
+}
+
+func (w *collabSeamWriter) replay() {
 	held := w.held
 	w.held = nil
 	if held == nil {
@@ -454,6 +493,21 @@ func collabSeamFailedJSON(data []byte) bool {
 	return status.Type == gjson.String && status.String() == "failed"
 }
 
+// collabSeamJSONOutput reports whether a takeover's JSON response has output
+// worth replacing the saved error with.
+func collabSeamJSONOutput(data []byte) bool {
+	if !gjson.ValidBytes(data) {
+		return false
+	}
+	response := gjson.ParseBytes(data)
+	status, output := response.Get("status"), response.Get("output")
+	if !output.IsArray() || status.Exists() && status.String() != "completed" && status.String() != "incomplete" {
+		return false
+	}
+	payload := append(append([]byte(`{"type":"response.completed","response":`), data...), '}')
+	return resilience.ResponsesEventOutputDisposition("response.completed", payload).SemanticOutput
+}
+
 // collabSeamFrameEnd returns the length of the first complete frame of buf,
 // 0 if there is none. scanned is how much of buf was already searched.
 func collabSeamFrameEnd(buf []byte, scanned int) int {
@@ -491,28 +545,36 @@ const (
 
 // collabSeamClassify is deliberately narrow: whatever is not a heartbeat,
 // prelude or terminal error counts as output and ends the watch.
-func collabSeamClassify(frame []byte) collabSeamFrame {
-	var event string
-	var data []byte
-	hasData := false
+func collabSeamClassify(frame []byte) (kind collabSeamFrame, event string, data []byte) {
+	var joined bytes.Buffer // only for an event with several data lines
+	lines := 0
 	for line := range bytes.Lines(frame) {
 		line = bytes.TrimRight(line, "\r\n")
 		if value, ok := bytes.CutPrefix(line, []byte("event:")); ok {
 			event = string(bytes.TrimSpace(value))
 		} else if value, ok := bytes.CutPrefix(line, []byte("data:")); ok {
-			if hasData {
-				data = append(append(bytes.Clone(data), '\n'), bytes.TrimSpace(value)...)
-			} else {
-				data, hasData = bytes.TrimSpace(value), true
+			value = bytes.TrimSpace(value)
+			lines++
+			if lines == 1 {
+				data = value
+				continue
 			}
+			if lines == 2 {
+				_, _ = joined.Write(data)
+			}
+			_ = joined.WriteByte('\n')
+			_, _ = joined.Write(value)
 		}
 	}
-	if event == "" && !hasData || string(data) == "[DONE]" {
-		return collabSeamPreludeFrame
+	if lines > 1 {
+		data = joined.Bytes()
+	}
+	if event == "" && lines == 0 || string(data) == "[DONE]" {
+		return collabSeamPreludeFrame, event, data
 	}
 	typ := gjson.GetBytes(data, "type").String()
 	if event == "response.failed" || event == "error" || typ == "response.failed" || typ == "error" {
-		return collabSeamFailedFrame
+		return collabSeamFailedFrame, event, data
 	}
 	if typ == "" {
 		typ = event
@@ -520,7 +582,7 @@ func collabSeamClassify(frame []byte) collabSeamFrame {
 	switch typ {
 	case "ping", "keepalive", "response.created", "response.in_progress", "response.queued",
 		"response.metadata", "codex.response.metadata", "codex.rate_limits":
-		return collabSeamPreludeFrame
+		return collabSeamPreludeFrame, event, data
 	}
-	return collabSeamOutputFrame
+	return collabSeamOutputFrame, event, data
 }

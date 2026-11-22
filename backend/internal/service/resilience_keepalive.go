@@ -180,6 +180,21 @@ func StopPreOutputKeepaliveIfUncommitted(c *gin.Context) {
 	k.mu.Unlock()
 }
 
+// ForgetStoppedSSEKeepalive detaches a permanently stopped heartbeat from the
+// request. A running one stays. Delivery accounting keeps its own reference.
+func ForgetStoppedSSEKeepalive(c *gin.Context) {
+	k := keepaliveFrom(c)
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	closed := k.closed
+	k.mu.Unlock()
+	if closed {
+		c.Delete(openAICompactSSEKeepaliveKey)
+	}
+}
+
 func keepaliveFrom(c *gin.Context) *openAICompactSSEKeepalive {
 	if c == nil {
 		return nil

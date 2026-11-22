@@ -248,6 +248,17 @@ func (s *RequestState) CompleteGatewayForward(complete, canceled bool) {
 
 // ClaimGatewayRequest picks the sole row owner. Billing writes keep ownership
 // even if persistence later fails; the deferred tail must not write a second row.
+// GatewayRequestFinalized reports whether billing or the unbilled record has
+// already claimed and frozen this request.
+func (s *RequestState) GatewayRequestFinalized() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gatewayRecord != nil && s.gatewayRecord.final != nil
+}
+
 func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadata, bool) {
 	if s == nil {
 		return nil, false

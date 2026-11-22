@@ -13,8 +13,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,7 +29,7 @@ const (
 	seamTestFailed   = "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}\n\n"
 	seamTestError    = "event: error\ndata: {\"error\":{\"message\":\"no\"}}\n\n"
 	seamTestDelta    = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"
-	seamTestJSON     = `{"status":"completed","output":[]}`
+	seamTestJSON     = `{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}`
 	seamTestJSONFail = `{"status":"failed","output":[]}`
 	seamTestHTTPFail = `{"error":{"message":"refused"}}`
 )
@@ -75,6 +78,7 @@ func withSeam(c *gin.Context, rescue collabRescue, existingPath func()) {
 	seam.writer = newCollabSeamWriter(c.Writer)
 	c.Writer = seam.writer
 	defer seam.restore(c)
+	defer stopPreOutputKeepalive(c)
 	defer seam.finish(c)
 	existingPath()
 }
@@ -234,7 +238,7 @@ func TestCollabSeamTakeoverReplacesAnUncommittedError(t *testing.T) {
 			withSeam(c, func(c *gin.Context, seam *collabSeam, _ *collabWithheld) {
 				c.Header("X-Attempt", "first")
 				c.Data(http.StatusConflict, "application/json", []byte(seamTestHTTPFail))
-				seam.writer.discard()
+				seam.resetAttempt(c)
 				c.Data(http.StatusOK, "application/json", []byte(seamTestJSON))
 			}, seamTestExistingError(c))
 		})
@@ -279,18 +283,12 @@ func TestCollabSeamFailedTakeoverKeepsTheExistingError(t *testing.T) {
 			c.Data(http.StatusTooManyRequests, "application/json", []byte(`{"error":{"message":"busy"}}`))
 		},
 		"prelude then error": func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
-			if seamTestCommitted(c) {
-				return // only an uncommitted response can hide a prelude
-			}
 			c.Header("Content-Type", "text/event-stream")
 			_, _ = c.Writer.WriteString(seamTestCreated)
 			c.Writer.Flush()
 			_, _ = c.Writer.WriteString(seamTestFailed)
 		},
 		"prelude then silence": func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
-			if seamTestCommitted(c) {
-				return
-			}
 			c.Header("Content-Type", "text/event-stream")
 			c.Writer.WriteHeaderNow()
 			_, _ = c.Writer.WriteString(seamTestCreated)
@@ -299,6 +297,27 @@ func TestCollabSeamFailedTakeoverKeepsTheExistingError(t *testing.T) {
 			c.Set("takeover", true)
 			c.Set("existing_error", false)
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), seamTestKey{}, true))
+		},
+		"empty item": func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
+			c.Header("Content-Type", "text/event-stream")
+			_, _ = c.Writer.WriteString("event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"msg_a\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"in_progress\",\"content\":[]}}\n\n")
+			c.Writer.Flush()
+		},
+		"empty json": func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
+			c.Data(http.StatusOK, "application/json", []byte(`{"status":"completed","output":[]}`))
+		},
+		"oversized prelude": func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
+			c.Header("Content-Type", "text/event-stream")
+			frame := `data: {"type":"response.in_progress","padding":"` + strings.Repeat("p", 1<<20) + "\"}\n\n"
+			for range 5 {
+				_, _ = c.Writer.WriteString(frame)
+				c.Writer.Flush()
+			}
+		},
+		"heartbeats of its own": func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
+			stop := service.StartPreOutputKeepalive(c, service.PreOutputProtocolResponses, 0, time.Millisecond)
+			c.Set(ginKeyPreOutputKeepaliveStop, stop)
+			time.Sleep(5 * time.Millisecond)
 		},
 		"panics": func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
 			c.Header("X-Attempt", "panic")
@@ -441,3 +460,138 @@ func (d *seamTestDiscard) Header() http.Header         { return d.header }
 func (d *seamTestDiscard) Write(p []byte) (int, error) { return len(p), nil }
 func (d *seamTestDiscard) WriteHeader(int)             {}
 func (d *seamTestDiscard) Flush()                      {}
+
+func TestCollabSeamTakeoverHeartbeatEndsWithIt(t *testing.T) {
+	server := newSeamTestServer(t)
+	server.do(t, func(c *gin.Context) {
+		original := c.Writer
+		withSeam(c, func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
+			stop := service.StartPreOutputKeepalive(c, service.PreOutputProtocolResponses, 0, time.Millisecond)
+			c.Set(ginKeyPreOutputKeepaliveStop, stop)
+			time.Sleep(3 * time.Millisecond)
+		}, func() {
+			// No Content-Length: the server would refuse a stray write past
+			// one and hide the leak behind the write error.
+			c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"message": "refused"}})
+		})
+		require.Equal(t, original, c.Writer, "nothing may stay on top of the original writer")
+		size := original.Size()
+		time.Sleep(5 * time.Millisecond)
+		require.Equal(t, size, original.Size(), "a heartbeat outlived the takeover")
+	})
+}
+
+// The keepalive that converted the saved error drops every later write.
+func TestCollabSeamConvertedErrorDoesNotSwallowTakeover(t *testing.T) {
+	server := newSeamTestServer(t)
+	wire := server.do(t, func(c *gin.Context) {
+		withSeam(c, func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
+			c.Header("Content-Type", "text/event-stream")
+			_, _ = c.Writer.WriteString(seamTestDelta)
+		}, func() {
+			stop := service.StartPreOutputKeepalive(c, service.PreOutputProtocolResponses, 0, time.Millisecond)
+			c.Set(ginKeyPreOutputKeepaliveStop, stop)
+			for range 1000 {
+				if service.PreOutputKeepaliveCommitted(c) {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"message": "refused"}})
+		})
+	})
+	require.Contains(t, wire.body, seamTestDelta)
+	require.NotContains(t, wire.body, "refused")
+}
+
+func TestCollabSeamTerminalClaimsAreProvisional(t *testing.T) {
+	server := newSeamTestServer(t)
+	existing := func(c *gin.Context) func() {
+		return func() {
+			require.True(t, service.ClaimProtocolTerminal(c))
+			service.MarkResponseCommitted(c)
+			c.Set(service.OpsStreamErrorKey, "existing")
+			c.Data(http.StatusBadRequest, "application/json", []byte(seamTestHTTPFail))
+		}
+	}
+	for _, delivers := range []bool{false, true} {
+		t.Run(fmt.Sprint("delivers=", delivers), func(t *testing.T) {
+			server.do(t, func(c *gin.Context) {
+				withSeam(c, func(c *gin.Context, seam *collabSeam, _ *collabWithheld) {
+					for range 2 {
+						require.False(t, service.IsResponseCommitted(c))
+						require.True(t, service.ClaimProtocolTerminal(c), "every attempt needs the terminal")
+						seam.resetAttempt(c)
+					}
+					if delivers {
+						c.Data(http.StatusOK, "application/json", []byte(seamTestJSON))
+					}
+				}, existing(c))
+				_, marked := c.Get(service.OpsStreamErrorKey)
+				require.Equal(t, !delivers, service.ProtocolTerminalClaimed(c))
+				require.Equal(t, !delivers, service.IsResponseCommitted(c))
+				require.Equal(t, !delivers, marked, "a rescued request is not a stream error")
+			})
+		})
+	}
+}
+
+func TestCollabSeamDoesNotTakeOverASettledRequest(t *testing.T) {
+	server := newSeamTestServer(t)
+	called := false
+	wire := server.do(t, func(c *gin.Context) {
+		state := resilience.NewRequestState()
+		state.EnableGatewayRequest(time.Now(), resilience.GatewayRequestScopeText)
+		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), state))
+		withSeam(c, func(*gin.Context, *collabSeam, *collabWithheld) { called = true }, func() {
+			state.ClaimGatewayRequest(true)
+			c.Data(http.StatusBadGateway, "application/json", []byte(seamTestHTTPFail))
+		})
+	})
+	require.False(t, called)
+	require.Equal(t, seamTestHTTPFail, wire.body)
+}
+
+func TestCollabSeamOversizedErrorPassesThrough(t *testing.T) {
+	server := newSeamTestServer(t)
+	existing := func(c *gin.Context) func() {
+		return func() {
+			c.Status(http.StatusBadGateway)
+			for range 3 {
+				_, _ = c.Writer.WriteString(strings.Repeat("e", collabSeamHeldLimit/2+1))
+			}
+		}
+	}
+	want := server.do(t, func(c *gin.Context) { existing(c)() })
+	called := false
+	got := server.do(t, func(c *gin.Context) {
+		withSeam(c, func(*gin.Context, *collabSeam, *collabWithheld) { called = true }, existing(c))
+	})
+	require.False(t, called)
+	require.Equal(t, want, got)
+}
+
+func TestCollabSeamTakeoverOutputKinds(t *testing.T) {
+	server := newSeamTestServer(t)
+	for name, frame := range map[string]string{
+		"function call": `{"type":"response.output_item.done","output_index":0,"item":{"id":"fc_a","type":"function_call","call_id":"call_a","name":"f","arguments":"{}"}}`,
+		"compaction":    `{"type":"response.output_item.done","output_index":0,"item":{"id":"cmp_a","type":"compaction","encrypted_content":"opaque"}}`,
+		"text":          `{"type":"response.output_text.delta","delta":"hi"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			wire := server.do(t, func(c *gin.Context) {
+				withSeam(c, func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
+					c.Header("Content-Type", "text/event-stream")
+					_, _ = c.Writer.WriteString("data: " + frame + "\n\n")
+				}, seamTestExistingError(c))
+			})
+			require.Equal(t, http.StatusOK, wire.status)
+			require.Contains(t, wire.body, frame)
+		})
+	}
+}
+
+func TestCollabSeamMultilineEventIsLinear(t *testing.T) {
+	frame := []byte("event: response.in_progress\n" + strings.Repeat("data: x\n", 20000) + "\n")
+	require.Less(t, testing.AllocsPerRun(3, func() { collabSeamClassify(frame) }), float64(64))
+}

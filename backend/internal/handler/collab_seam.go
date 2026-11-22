@@ -21,9 +21,10 @@ var (
 	collabSeamWithheld atomic.Int64
 )
 
-// collabRescue attempts a takeover. It writes through the seam's writer and
-// may call discard between attempts. Whether it worked is decided by what
-// reached the client, never by what it returns.
+// collabRescue attempts a takeover. It starts with no writer above the seam's,
+// no heartbeat and no terminal claim, and calls resetAttempt between attempts.
+// Deadlines, waiters and its own request state are its responsibility. Whether
+// it worked is decided by what reached the client, never by what it returns.
 type collabRescue func(c *gin.Context, seam *collabSeam, saved *collabWithheld)
 
 // collabSeam is where the collaboration ladder takes over. The existing path
@@ -86,10 +87,20 @@ func (s *collabSeam) finish(c *gin.Context) {
 
 // takeOver reports whether output of a takeover reached the client. In every
 // other case the saved error is back in place when it returns.
+//
+// It does not start once the existing path has settled: that bill and request
+// record are final, and a second upstream response could not be settled.
 func (s *collabSeam) takeOver(c *gin.Context) (delivered bool) {
 	if s.rescue == nil || c.Request == nil || c.Request.Context().Err() != nil {
 		return false
 	}
+	if resilience.StateFrom(c.Request.Context()).GatewayRequestFinalized() {
+		return false
+	}
+	// Snapshot first: stopping the heartbeat and clearing the claims below
+	// must not be what the saved error's later readers see.
+	original := c.Copy().Keys
+	s.quiesce(c)
 	saved := s.writer.suspend()
 	if saved == nil {
 		return false
@@ -97,19 +108,61 @@ func (s *collabSeam) takeOver(c *gin.Context) (delivered bool) {
 	// A takeover rewrites request-scoped keys and contexts. If it does not
 	// deliver, later readers have to see the existing path's values. Pointed-to
 	// state is shared, so a takeover uses its own request state.
-	request, keys := c.Request, c.Copy().Keys
+	request, keys := c.Request, original
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			logger.FromContext(request.Context()).Error("collab.takeover_panic", zap.Stack("stack"))
 		}
+		// Stop what the takeover started while its keys still name it, and
+		// before the header map is put back.
+		s.quiesce(c)
 		delivered = !s.writer.resume(saved)
 		if !delivered {
 			c.Request = request
 			collabSeamSetKeys(c, keys)
 		}
 	}()
+	collabSeamClearTerminal(c)
 	s.rescue(c, s, saved)
 	return false
+}
+
+// resetAttempt prepares for the next attempt of a takeover. It does nothing
+// once output of the takeover has reached the client.
+func (s *collabSeam) resetAttempt(c *gin.Context) {
+	if s.writer.current() == collabSeamPassing {
+		return
+	}
+	s.quiesce(c)
+	s.writer.discard()
+	collabSeamClearTerminal(c)
+}
+
+// quiesce stops every heartbeat that can write to the response and leaves the
+// seam's writer on top. A stop waits for a beat in progress. Forgetting the
+// stopped heartbeat also drops its converted-error state, which would swallow
+// whatever is written next.
+func (s *collabSeam) quiesce(c *gin.Context) {
+	stopPreOutputKeepalive(c)
+	service.StopOpenAICompactSSEKeepaliveCommitted(c)
+	service.ForgetStoppedSSEKeepalive(c)
+	c.Delete(ginKeyPreOutputKeepaliveStop)
+	c.Writer = s.writer
+}
+
+// collabSeamClearTerminal makes the saved error's terminal claims provisional.
+// They come back with the saved keys if the takeover does not deliver.
+func collabSeamClearTerminal(c *gin.Context) {
+	for _, key := range []string{
+		resilience.GinKeyTerminalFinalized,
+		service.ResponseCommittedKey,
+		service.OpsStreamErrorKey,
+		service.OpsStreamErrorsKey,
+		service.OpsGatewayTerminalStatusKey,
+		service.OpsUpstreamContentPolicyKey,
+	} {
+		c.Delete(key)
+	}
 }
 
 // restore runs after the keepalive wrapper above the seam was removed, so
