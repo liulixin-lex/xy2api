@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"net/http"
 	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
@@ -53,14 +54,21 @@ type collabSeam struct {
 // armCollabSeam installs the seam for requests the ladder covers: native
 // Responses requests of an official Codex client that carry ciphertext and
 // no continuation pointer, when a rescue is wired at all. For every other
-// request it returns nil, and every method of a nil seam does nothing.
-func (h *OpenAIGatewayHandler) armCollabSeam(c *gin.Context, body []byte, previousResponseID, platform string, legacyCompact bool) *collabSeam {
+// request it returns nil, and every method of a nil seam does nothing. It also
+// returns nil when arming panics: the ladder is optional, the request is not.
+func (h *OpenAIGatewayHandler) armCollabSeam(c *gin.Context, body []byte, previousResponseID, platform string, legacyCompact bool) (armed *collabSeam) {
 	if c == nil || c.Request == nil || c.Writer == nil || platform != service.PlatformOpenAI || previousResponseID != "" || legacyCompact {
 		return nil
 	}
 	if h.collabRescue == nil || h.collabRescuable == nil {
 		return nil
 	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logger.FromContext(c.Request.Context()).Error("collab.arm_panic", zap.Stack("stack"))
+			armed = nil
+		}
+	}()
 	if !resilience.StateFrom(c.Request.Context()).CollabSettingsSnapshot().CollabLadderOn() {
 		return nil
 	}
@@ -128,6 +136,7 @@ func collabSeamMetered(result *service.OpenAIForwardResult) bool {
 	u := result.Usage
 	return result.ClientDisconnect ||
 		u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0 ||
+		u.CacheCreation5mTokens > 0 || u.CacheCreation1hTokens > 0 ||
 		u.ImageInputTokens > 0 || u.ImageCacheReadTokens > 0 || u.ImageOutputTokens > 0 ||
 		u.RawPromptTokens != nil && *u.RawPromptTokens > 0 ||
 		result.ImageCount > 0 || result.VideoCount > 0 || result.SearchCount > 0 || result.WebSearchCalls > 0 ||
@@ -150,6 +159,7 @@ func (s *collabSeam) takeOver(c *gin.Context) (delivered bool) {
 	// must not be what the saved error's later readers see.
 	original := c.Copy().Keys
 	s.quiesce(c)
+	recorded := opsRecordedStatus(c)
 	saved := s.writer.suspend()
 	if saved == nil {
 		return false
@@ -174,11 +184,35 @@ func (s *collabSeam) takeOver(c *gin.Context) (delivered bool) {
 			if len(c.Errors) > ginErrors {
 				c.Errors = c.Errors[:ginErrors:ginErrors]
 			}
+			if !saved.committed && s.writer.ResponseWriter.Written() {
+				collabSeamRecordLost(c, saved, recorded)
+			}
 		}
 	}()
 	collabSeamClearTerminal(c)
 	s.rescue(c, s, saved)
 	return false
+}
+
+// collabSeamRecordLost keeps a saved error on record when an attempt committed
+// the response and then could not write: the error cannot reach the client any
+// more, and the request must not pass for a recovered one.
+func collabSeamRecordLost(c *gin.Context, saved *collabWithheld, status int) {
+	var body []byte
+	for _, op := range saved.ops {
+		body = append(body, op.data...)
+	}
+	parsed := parseOpsErrorResponse(body)
+	if status < http.StatusBadRequest {
+		if !parsed.StreamFailure {
+			return
+		}
+		if terminal, ok := service.OpsGatewayTerminalStatus(c); ok {
+			parsed.StatusCode = terminal
+		}
+		status = inferStreamFailureStatus(c, parsed)
+	}
+	service.MarkOpsStreamFailure(c, parsed.ErrorType, parsed.Code, parsed.Message, status)
 }
 
 // resetAttempt prepares for the next attempt of a takeover. It does nothing

@@ -156,6 +156,9 @@ func (w *collabSeamWriter) write(kind collabSeamOpKind, data []byte) (int, error
 	case collabSeamPassing:
 		return w.forward(kind, data)
 	case collabSeamHolding:
+		if w.yield() {
+			return w.forward(kind, data)
+		}
 		w.hold(kind, data)
 		return len(data), nil
 	}
@@ -187,6 +190,16 @@ func (w *collabSeamWriter) write(kind collabSeamOpKind, data []byte) (int, error
 		return len(data), nil
 	}
 	return w.pass(kind, data)
+}
+
+// yield lets a withheld error go once it is not rescuable any more.
+func (w *collabSeamWriter) yield() bool {
+	if w.intercepts() {
+		return false
+	}
+	w.replay()
+	w.set(collabSeamPassing)
+	return true
 }
 
 // pass writes through and ends the watch. A takeover of which no byte went
@@ -369,6 +382,11 @@ func (w *collabSeamWriter) writeFrames(kind collabSeamOpKind, data []byte, commi
 // forward writes through, committing with the headers of the moment the
 // response first counted as written.
 func (w *collabSeamWriter) forward(kind collabSeamOpKind, data []byte) (n int, err error) {
+	if w.quiet {
+		// A takeover's parts are joined here, so a length it copied may be wrong.
+		w.Header().Del("Content-Length")
+		w.commitHeader.Del("Content-Length")
+	}
 	w.committing(w.commitHeader, func() {
 		switch kind {
 		case collabSeamWriteString:
@@ -441,7 +459,7 @@ func (w *collabSeamWriter) WriteHeaderNow() {
 }
 
 func (w *collabSeamWriter) commitOnly(kind collabSeamOpKind) {
-	if w.current() == collabSeamHolding {
+	if w.current() == collabSeamHolding && !w.yield() {
 		w.hold(kind, nil)
 		return
 	}
