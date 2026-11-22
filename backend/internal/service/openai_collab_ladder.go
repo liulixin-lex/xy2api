@@ -27,7 +27,8 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		return false
 	}
 	claimed := l.Evidence.Grade == resilience.CollabEvidenceGradeClaimed
-	if l.Evidence.Grade != resilience.CollabEvidenceGradeVerified && !(claimed && (l.Body.Shape.AgentCiphertext || l.Body.Shape.ToolOutputCiphertext)) {
+	eligible := l.Evidence.Grade == resilience.CollabEvidenceGradeVerified || claimed && (l.Body.Shape.AgentCiphertext || l.Body.Shape.ToolOutputCiphertext)
+	if !eligible {
 		return false
 	}
 	derived := map[int64][]byte{}
@@ -41,12 +42,11 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 	evidence := l.Evidence
 	var switchedNamed *resilience.CollabNamedItem
 	for ctx.Err() == nil && (l.Continue == nil || l.Continue()) {
-		if evidence.Grade != resilience.CollabEvidenceGradeVerified && evidence.Grade != resilience.CollabEvidenceGradeClaimed {
+		if evidence.Ownership == resilience.CollabOwnershipClassCapacity || evidence.Ownership == resilience.CollabOwnershipClassContinuation {
 			return false
 		}
-		body := derived[current]
-		if body == nil {
-			body = l.Body.Original
+		if evidence.Grade != resilience.CollabEvidenceGradeVerified && evidence.Grade != resilience.CollabEvidenceGradeClaimed {
+			return false
 		}
 		var action resilience.CollabAction
 		named := ""
@@ -83,7 +83,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 					}
 				}
 			}
-		} else if evidence.Ownership == resilience.CollabOwnershipClassUnknownSuffix {
+		} else if evidence.Ownership == resilience.CollabOwnershipClassUnknownSuffix || evidence.Family == resilience.CollabFamilyOwnership && !l.Body.Shape.AgentCiphertext {
 			if switched || l.MaxAttempts == 1 {
 				return false
 			}
@@ -122,10 +122,16 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 			}
 			prefer = l.First
 			exclude = replaced
+			if replaced[prefer] {
+				prefer = 0
+			}
 		}
 		account, release := l.Select(ctx, prefer, exclude)
+		if account == 0 && prefer > 0 && (action == resilience.CollabActionDropUnprotected || action == resilience.CollabActionReplaceAll) {
+			account, release = l.Select(ctx, 0, exclude)
+		}
 		if account == 0 {
-			if action == resilience.CollabActionSwitchOriginal {
+			if action == resilience.CollabActionSwitchOriginal || action == resilience.CollabActionProbeReasoning || action == resilience.CollabActionDropUnprotected {
 				continue
 			}
 			return false
@@ -133,7 +139,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		if release == nil {
 			release = func() {}
 		}
-		body = derived[account]
+		body := derived[account]
 		if body == nil {
 			body = l.Body.Original
 		}

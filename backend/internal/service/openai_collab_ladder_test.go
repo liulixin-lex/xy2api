@@ -114,3 +114,80 @@ func TestCollabTakeoverDeadlines(t *testing.T) {
 		require.Equal(t, time.Second, CollabTakeoverDuration(now, now, retryable, true, now.Add(time.Second)))
 	}
 }
+
+func TestCollabOwnershipCapacityNeverDropsContent(t *testing.T) {
+	l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, Evidence: resilience.CollabEvidence{Grade: resilience.CollabEvidenceGradeVerified, Family: resilience.CollabFamilyOwnership, Ownership: resilience.CollabOwnershipClassCapacity}}
+	selected := false
+	l.Select = func(context.Context, int64, map[int64]bool) (int64, func()) { selected = true; return 0, nil }
+	l.Send = func(context.Context, int64, []byte, resilience.CollabAction) (resilience.CollabEvidence, bool) {
+		t.Fatal("capacity must return to legacy")
+		return resilience.CollabEvidence{}, false
+	}
+	require.False(t, l.Run(context.Background()))
+	require.False(t, selected)
+}
+
+func TestCollabLadderUnavailableProbeDoesNotHideReadableAccount(t *testing.T) {
+	verified := resilience.CollabEvidence{Grade: resilience.CollabEvidenceGradeVerified}
+	l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, Evidence: verified}
+	l.Select = func(_ context.Context, prefer int64, excluded map[int64]bool) (int64, func()) {
+		if prefer == 1 || excluded[2] {
+			return 0, nil
+		}
+		return 2, func() {}
+	}
+	l.Send = func(_ context.Context, id int64, body []byte, action resilience.CollabAction) (resilience.CollabEvidence, bool) {
+		require.Equal(t, int64(2), id)
+		require.Equal(t, resilience.CollabActionSwitchOriginal, action)
+		require.Equal(t, collabBodyFixture, string(body))
+		return verified, true
+	}
+	require.True(t, l.Run(context.Background()))
+}
+
+func TestCollabLadderReplaceAllCanTryTwoAccounts(t *testing.T) {
+	verified := resilience.CollabEvidence{Grade: resilience.CollabEvidenceGradeVerified}
+	l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, Evidence: verified, MaxAttempts: 1}
+	l.Select = func(_ context.Context, prefer int64, excluded map[int64]bool) (int64, func()) {
+		if prefer > 0 {
+			if excluded[prefer] {
+				return 0, nil
+			}
+			return prefer, func() {}
+		}
+		for _, id := range []int64{1, 2} {
+			if !excluded[id] {
+				return id, func() {}
+			}
+		}
+		return 0, nil
+	}
+	var sent []int64
+	l.Send = func(_ context.Context, id int64, _ []byte, action resilience.CollabAction) (resilience.CollabEvidence, bool) {
+		sent = append(sent, id)
+		require.Equal(t, resilience.CollabActionReplaceAll, action)
+		return verified, id == 2
+	}
+	require.True(t, l.Run(context.Background()))
+	require.Equal(t, []int64{1, 2}, sent)
+}
+
+func TestCollabNamedCallArgumentsSwitchWithoutEditing(t *testing.T) {
+	evidence := resilience.CollabEvidence{Grade: resilience.CollabEvidenceGradeVerified, Family: resilience.CollabFamilyCallArgs, Named: &resilience.CollabNamedItem{Identity: "fc_a"}}
+	l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, Evidence: evidence}
+	l.Select = func(_ context.Context, prefer int64, _ map[int64]bool) (int64, func()) {
+		if prefer == 0 {
+			return 2, func() {}
+		}
+		return prefer, func() {}
+	}
+	sends := 0
+	l.Send = func(_ context.Context, _ int64, body []byte, action resilience.CollabAction) (resilience.CollabEvidence, bool) {
+		sends++
+		require.Equal(t, resilience.CollabActionSwitchOriginal, action)
+		require.Equal(t, collabBodyFixture, string(body))
+		return evidence, false
+	}
+	require.False(t, l.Run(context.Background()))
+	require.Equal(t, 1, sends)
+}

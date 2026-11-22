@@ -101,6 +101,8 @@ func ParseCollabBody(body []byte) CollabBody {
 		case "function_call", "custom_tool_call":
 			if marker := item.Get("encrypted_function_args"); marker.Exists() && marker.Raw != "[]" {
 				out.Shape.CallArgumentsCiphertext = true
+				entry.Family = resilience.CollabFamilyCallArgs
+				out.Items = append(out.Items, entry)
 			}
 			// Validation established that these bytes are not decrypted here.
 			continue

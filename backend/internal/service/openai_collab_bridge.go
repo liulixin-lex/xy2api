@@ -31,9 +31,9 @@ func collabAnthropicBody(ctx context.Context, c *gin.Context, body []byte) []byt
 		for _, part := range item.Get("content").Array() {
 			switch part.Get("type").String() {
 			case "input_text", "text":
-				text.WriteString(part.Get("text").String())
+				_, _ = text.WriteString(part.Get("text").String())
 			case "encrypted_content":
-				text.WriteString(part.Get("encrypted_content").String())
+				_, _ = text.WriteString(part.Get("encrypted_content").String())
 			}
 		}
 		if text.Len() == 0 {
