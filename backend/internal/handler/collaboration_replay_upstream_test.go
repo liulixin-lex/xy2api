@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/tidwall/gjson"
 )
@@ -141,6 +142,10 @@ func (u *replayUpstream) Do(req *http.Request, _ string, id int64, _ int) (*http
 			key = "anonymous_" + replayDigest([]byte(item.Raw))
 		}
 		send.Items[key] = replayDigest([]byte(item.Raw))
+	}
+	attempt := resilience.CollabAttemptFrom(req.Context())
+	if attempt.Optional {
+		send.Optional, send.Action = true, attempt.Action
 	}
 	u.sends = append(u.sends, send)
 	setRule := func(kind string) { u.sends[len(u.sends)-1].Rule = kind }
@@ -309,6 +314,12 @@ func (u *replayUpstream) Do(req *http.Request, _ string, id int64, _ int) (*http
 		}
 		if payload != "" {
 			setRule(rule.Kind)
+			if attempt.Optional {
+				e := service.ParseCollabBody(body).ResolveEvidence(resilience.ClassifyCollabEvidence(resilience.CollabEvidenceInput{Payload: []byte(payload)}))
+				if e.Named != nil {
+					u.sends[len(u.sends)-1].RejectedItem = e.Named.Identity
+				}
+			}
 			return u.rejection(status, payload), nil
 		}
 	}

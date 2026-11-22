@@ -320,7 +320,7 @@ func runCollaborationReplay(t *testing.T, c replayCase, snapshot resilience.Sett
 				path += "/compact"
 			}
 			rec := httptest.NewRecorder()
-			writer := &replayWriter{ResponseRecorder: rec, last: time.Now(), start: time.Now(), headerAt: -1, terminalAt: -1, acceptedAt: -1}
+			writer := &replayWriter{upstream: upstream, deliveredSend: -1, ResponseRecorder: rec, last: time.Now(), start: time.Now(), headerAt: -1, terminalAt: -1, acceptedAt: -1}
 			timeout := 35 * time.Second
 			if c.LittleTime {
 				timeout = 50 * time.Millisecond
@@ -413,9 +413,7 @@ func runCollaborationReplay(t *testing.T, c replayCase, snapshot resilience.Sett
 				out.SendsPerAccount[send.Account]++
 			}
 			out.Survived = []string{}
-			if len(out.Sends) > 0 {
-				out.Survived = out.Sends[len(out.Sends)-1].Survived
-			}
+			out.Survived = replayDeliveredContent(out.Sends, writer.deliveredSend-before)
 			out.Bindings, out.Avoidance = memory.snapshot()
 			out.RateLimited = []string{}
 			for _, id := range repo.rateLimitedIDs {
@@ -534,4 +532,18 @@ func quietReplayLogs(t *testing.T) {
 	log.SetOutput(io.Discard)
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(func() { slog.SetDefault(previousSlog); log.SetOutput(previousLog) })
+}
+
+func replayDeliveredContent(sends []replaySend, delivered int) []string {
+	if delivered >= 0 && delivered < len(sends) {
+		return sends[delivered].Survived
+	}
+	// A restored error belongs to the existing path. Optional edits discarded
+	// before delivery never replace that saved response's content observation.
+	for i := len(sends) - 1; i >= 0; i-- {
+		if !sends[i].Optional {
+			return sends[i].Survived
+		}
+	}
+	return []string{}
 }

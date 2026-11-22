@@ -20,12 +20,15 @@ import (
 )
 
 type replaySend struct {
-	Account  string            `json:"account"`
-	Body     string            `json:"body_digest"`
-	Survived []string          `json:"survived"`
-	Learning []string          `json:"learning"`
-	Rule     string            `json:"rule"`
-	Items    map[string]string `json:"item_digests"`
+	Optional     bool                    `json:"optional,omitempty"`
+	Action       resilience.CollabAction `json:"action,omitempty"`
+	RejectedItem string                  `json:"rejected_item,omitempty"`
+	Account      string                  `json:"account"`
+	Body         string                  `json:"body_digest"`
+	Survived     []string                `json:"survived"`
+	Learning     []string                `json:"learning"`
+	Rule         string                  `json:"rule"`
+	Items        map[string]string       `json:"item_digests"`
 }
 
 type replayBinding struct {
@@ -225,15 +228,40 @@ func checkHandledReplay(got []replayGolden) error {
 		}
 		for _, turn := range c.Turns {
 			first := map[string]replaySend{}
+			renamed := ""
+			replaced := map[string]bool{}
+			protected := target == "amsg_task"
 			for _, send := range turn.Sends {
-				original, ok := first[send.Account]
-				if !ok {
+				if !send.Optional {
+					renamed = ""
+				} // Legacy failover retains its own sequence.
+				if send.Optional && renamed != "" && (!protected || renamed != send.Account || replaced[renamed] || send.Action != resilience.CollabActionReplaceAll) {
+					return fmt.Errorf("%s: send after re-named handled item", c.Case)
+				}
+				original, seen := first[send.Account]
+				if !seen {
 					first[send.Account] = send
 					continue
 				}
-				for id, digest := range original.Items {
-					if id != target && send.Items[id] != digest {
-						return fmt.Errorf("%s: repeated named item changed another item", c.Case)
+				if send.Optional {
+					if send.Action == resilience.CollabActionReplaceAll {
+						if replaced[send.Account] {
+							return fmt.Errorf("%s: second replace-all on account", c.Case)
+						}
+						replaced[send.Account] = true
+					}
+				}
+				// The immutable input digest changes when this send handles
+				// the named item. A refusal naming it again closes its path.
+				namesTarget := send.RejectedItem == target || !send.Optional && send.Rule == "named_always"
+				if namesTarget && original.Items[target] != send.Items[target] {
+					renamed = send.Account
+				}
+				if !send.Optional {
+					for id, digest := range original.Items {
+						if id != target && send.Items[id] != digest {
+							return fmt.Errorf("%s: repeated named item changed another item", c.Case)
+						}
 					}
 				}
 			}
@@ -474,4 +502,67 @@ func replayReasoningTradeoff(name string, old, next replayOutcome) bool {
 		}
 	}
 	return false
+}
+
+func replayDisclosedExecutableCase(name string) bool {
+	switch name {
+	case "target_executable_then_failure/pass_false/stream_true/attempts_2",
+		"target_executable_then_failure/pass_false/stream_true/attempts_4",
+		"target_executable_then_failure/pass_false/stream_true/attempts_0":
+		return true
+	}
+	return false
+}
+
+// Match the entire disclosed outcome, including actual output-frame digests.
+// A successful residual, missing executable output, or any other difference
+// requires an explicit revision of this three-case contract.
+func checkReplayExecutableResidual(old, next replayOutcome) error {
+	if !old.Success || len(old.Sends) != 2 || old.Sends[0].Account != "first" || old.Sends[0].Rule != "named" || old.Sends[1].Account != "first" || old.Sends[1].Rule != "success" || len(old.Bindings) == 0 || old.Bindings[0].Account != "first" {
+		return fmt.Errorf("disclosed residual baseline changed")
+	}
+	call := replayFrame("response.output_item.done", `{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_fixture","call_id":"call_fixture","name":"synthetic_action","arguments":"{}"}}`)
+	failure := replayFrame("response.failed", `{"type":"response.failed","response":{"id":"resp_fixture","status":"failed","error":{"type":"server_error","code":"server_error","message":"synthetic failure after call"}}}`)
+	expected := old
+	expected.Success = false
+	expected.Code = "server_error"
+	expected.ErrorType = "server_error"
+	expected.Retryable = true
+	original := old.Sends[0]
+	target := original
+	target.Account = "second"
+	target.Rule = "executable_failure"
+	target.Optional = true
+	target.Action = resilience.CollabActionSwitchOriginal
+	expected.Sends = []replaySend{original, target}
+	expected.SendsPerAccount = map[string]int{"first": 1, "second": 1}
+	expected.Events = []string{replayDigest([]byte(call)), replayDigest([]byte(failure))}
+	expected.Survived = original.Survived
+	// In this fixed corpus the sorted first binding is the ingress session;
+	// the successful legacy response's later response-ID bindings are absent.
+	expected.Bindings = old.Bindings[:1]
+	expected.UsageAccounts = []string{"second"}
+	expected.Learning = []string{}
+	if !reflect.DeepEqual(expected, next) {
+		return fmt.Errorf("disclosed failure after executable output changed")
+	}
+	return nil
+}
+
+func checkReplayDelivery(turn replayOutcome) error {
+	hasOptional := false
+	for _, send := range turn.Sends {
+		hasOptional = hasOptional || send.Optional
+	}
+	if !hasOptional {
+		return nil
+	}
+	delivered := -1
+	if turn.Success || turn.AcceptedMillis >= 0 {
+		delivered = len(turn.Sends) - 1
+	}
+	if !slices.Equal(turn.Survived, replayDeliveredContent(turn.Sends, delivered)) {
+		return fmt.Errorf("surviving content does not belong to the delivered response")
+	}
+	return nil
 }
