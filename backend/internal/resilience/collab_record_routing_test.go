@@ -52,7 +52,7 @@ func TestCollabBorrowGatesAndLosslessFallback(t *testing.T) {
 	settings.Collab.RecordRouting = true
 	settings.Collab.LosslessFirst = true
 	input := CollabBorrowInput{Settings: &settings, Scope: key.Scope, Thread: "parent", OriginalAccountID: 1,
-		Notices:     []CollabSeenNotice{{Event: "event", Sender: key.Thread, FinalAnswer: true, Current: true}},
+		Notices:     []CollabSeenNotice{{Event: "event", Sender: key.Thread, Recipient: "parent", FinalAnswer: true, Current: true}},
 		Terminated:  []CollabTerminatedRecord{{Key: key, Event: "event", Parent: "parent", ExpiresAt: now.Add(time.Hour)}},
 		Convertible: map[int64]bool{2: true, 3: true}, Immediate: map[int64]bool{2: true, 3: true}, Accounts: map[int64]CollabDigest{2: "account", 3: "other"},
 	}
@@ -69,7 +69,7 @@ func TestCollabBorrowGatesAndLosslessFallback(t *testing.T) {
 		func(i *CollabBorrowInput) { i.Carried = []CollabRoutingItem{{Key: key}} },
 		func(i *CollabBorrowInput) { i.Notices = nil },
 		func(i *CollabBorrowInput) {
-			i.Notices = []CollabSeenNotice{{Event: "event", Sender: key.Thread, FinalAnswer: true}}
+			i.Notices = []CollabSeenNotice{{Event: "event", Sender: key.Thread, Recipient: "parent", FinalAnswer: true}}
 		},
 		func(i *CollabBorrowInput) { i.Terminated = nil },
 		func(i *CollabBorrowInput) { i.Thread = "other" },

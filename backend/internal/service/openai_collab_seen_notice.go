@@ -22,7 +22,7 @@ func (s *OpenAIGatewayService) ParseCollabSeenNotices(body []byte, senders map[s
 	var out []resilience.CollabSeenNotice
 	items := root.Get("input").Array()
 	lastOutput := -1
-	ambiguous := false
+	ambiguous := !codexCollabUnambiguousJSON(root)
 	for i, item := range items {
 		kind := item.Get("type")
 		if !item.IsObject() || !codexCollabUniqueObject(item) || (kind.Exists() && kind.Type != gjson.String) || (!kind.Exists() && item.Get("role").Type != gjson.String) {
@@ -53,7 +53,13 @@ func (s *OpenAIGatewayService) ParseCollabSeenNotices(body []byte, senders map[s
 				text = part.Get("text").String()
 			}
 			sender, final := collabNoticeEnvelope(text)
-			final = final && item.Get("type").String() == "agent_message" && len(fragments) == 1
+			author, recipient := item.Get("author"), item.Get("recipient")
+			final = final && item.Get("type").String() == "agent_message" && len(fragments) == 1 && author.Type == gjson.String && author.String() == sender && recipient.Type == gjson.String && recipient.String() != "" && senders[recipient.String()] != ""
+			anchored := collabAnchoredEvent(text)
+			if _, body, ok := strings.Cut(text, "\nPayload:\n"); ok {
+				anchored = collabAnchoredEvent(body)
+			}
+			firstEvent := true
 			for remaining := text; len(out) < 32; {
 				_, after, ok := strings.Cut(remaining, "Gateway notice [")
 				if !ok {
@@ -67,7 +73,8 @@ func (s *OpenAIGatewayService) ParseCollabSeenNotices(body []byte, senders map[s
 				if len(event) < 1 || len(event) > 128 || strings.ContainsAny(event, " \t\r\n[]") {
 					continue
 				}
-				out = append(out, resilience.CollabSeenNotice{Event: s.CollabDigest(resilience.CollabDigestDomainEvent, event), Sender: senders[sender], FinalAnswer: final, Current: !ambiguous && i > lastOutput})
+				out = append(out, resilience.CollabSeenNotice{Event: s.CollabDigest(resilience.CollabDigestDomainEvent, event), Sender: senders[sender], Recipient: senders[recipient.String()], FinalAnswer: final && firstEvent && event == anchored, Current: !ambiguous && i > lastOutput})
+				firstEvent = false
 			}
 		}
 	}
@@ -93,7 +100,7 @@ func collabProvenInput(item gjson.Result) bool {
 	}
 	switch item.Get("type").String() {
 	case "agent_message":
-		return collabInputContent(item.Get("content"), false)
+		return collabAgentInputContent(item.Get("content"))
 	case "function_call_output", "custom_tool_call_output":
 		return item.Get("call_id").Type == gjson.String && item.Get("call_id").String() != "" && (item.Get("output").Type == gjson.String || collabInputContent(item.Get("output"), false))
 	case "message", "":
@@ -130,4 +137,95 @@ func collabInputContent(content gjson.Result, textAllowed bool) bool {
 		}
 	}
 	return true
+}
+
+func collabAgentInputContent(content gjson.Result) bool {
+	if !content.IsArray() {
+		return false
+	}
+	parts := content.Array()
+	if len(parts) == 1 {
+		return collabInputContent(content, false)
+	}
+	if len(parts) != 2 {
+		return false
+	}
+	for _, part := range parts {
+		if !part.IsObject() || !codexCollabUniqueObject(part) {
+			return false
+		}
+	}
+	return parts[0].Get("type").String() == "input_text" && parts[0].Get("text").Type == gjson.String && parts[1].Get("type").String() == "encrypted_content" && parts[1].Get("encrypted_content").Type == gjson.String
+}
+func collabAnchoredEvent(text string) string {
+	rest, ok := strings.CutPrefix(text, "Gateway notice [")
+	if !ok {
+		return ""
+	}
+	event, _, ok := strings.Cut(rest, "].")
+	if !ok || len(event) < 1 || len(event) > 128 || strings.ContainsAny(event, " \t\r\n[]") {
+		return ""
+	}
+	return event
+}
+
+// ParseCollabNoticeReceipts recognizes a notice in this request's history.
+// It does not authorize borrowing and is meaningful only with a matching live
+// gateway record. Later quoted events, user text and ambiguous objects do not count.
+func (s *OpenAIGatewayService) ParseCollabNoticeReceipts(body []byte) []resilience.CollabDigest {
+	if len(body) > 4<<20 || !gjson.ValidBytes(body) {
+		return nil
+	}
+	root := gjson.ParseBytes(body)
+	if !codexCollabUnambiguousJSON(root) {
+		return nil
+	}
+	var receipts []resilience.CollabDigest
+	seen := make(map[resilience.CollabDigest]bool)
+	for _, item := range root.Get("input").Array() {
+		kind := item.Get("type").String()
+		own := (kind == "message" || kind == "") && item.Get("role").String() == "assistant"
+		child := kind == "agent_message"
+		if !own && !child {
+			continue
+		}
+		content := item.Get("content")
+		parts := content.Array()
+		var texts []string
+		if own && content.Type == gjson.String {
+			texts = []string{content.String()}
+		}
+		if child && len(parts) != 1 {
+			continue
+		}
+		for _, part := range parts {
+			if (own && (part.Get("type").String() == "output_text" || part.Get("type").String() == "input_text")) || (child && part.Get("type").String() == "input_text") {
+				if part.Get("text").Type == gjson.String {
+					texts = append(texts, part.Get("text").String())
+				}
+			}
+		}
+		for _, text := range texts {
+			if child {
+				sender, valid := collabNoticeEnvelope(text)
+				if !valid || item.Get("author").Type != gjson.String || item.Get("author").String() != sender || item.Get("recipient").Type != gjson.String || item.Get("recipient").String() == "" {
+					continue
+				}
+				_, text, _ = strings.Cut(text, "\nPayload:\n")
+			}
+			event := collabAnchoredEvent(text)
+			if event == "" {
+				continue
+			}
+			digest := s.CollabDigest(resilience.CollabDigestDomainEvent, event)
+			if digest != "" && !seen[digest] {
+				seen[digest] = true
+				receipts = append(receipts, digest)
+			}
+			if len(receipts) == 32 {
+				return receipts
+			}
+		}
+	}
+	return receipts
 }

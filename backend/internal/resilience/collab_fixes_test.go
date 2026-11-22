@@ -324,13 +324,15 @@ func TestCollabRecordsBatchDeadlineAndNonblockingWrites(t *testing.T) {
 	close(unblock)
 
 	shared.lookup = func(ctx context.Context, b CollabRecordBatch) (CollabRecordBatchResult, error) {
-		require.Len(t, b.Queries, 64)
+		require.Len(t, b.Queries, 1, "duplicate queries share one slot")
 		return CollabRecordBatchResult{TreeLocalEndings: 2}, nil
 	}
 	readCtx, cancel := WithCollabRecordReadBudget(ctx)
 	defer cancel()
 	batch := CollabRecordBatch{Queries: make([]CollabRecordQuery, 64), Records: true, Dispositions: true}
-	require.Equal(t, 2, store.LookupBatch(readCtx, batch).TreeLocalEndings)
+	result := store.LookupBatch(readCtx, batch)
+	require.False(t, result.TreeLocalEndingsKnown)
+	require.Equal(t, CollabTreeLocalEndingLimit, result.LocalEndingCount())
 	again, againCancel := WithCollabRecordReadBudget(readCtx)
 	defer againCancel()
 	store.LookupBatch(again, batch)
@@ -345,9 +347,9 @@ func TestCollabRecordsBatchDeadlineAndNonblockingWrites(t *testing.T) {
 	readCtx, cancel = WithCollabRecordReadBudget(ctx)
 	defer cancel()
 	start := time.Now()
-	require.Empty(t, slow.LookupBatch(readCtx, batch))
+	require.Equal(t, CollabTreeLocalEndingLimit, slow.LookupBatch(readCtx, batch).LocalEndingCount())
 	require.Less(t, time.Since(start), time.Second)
-	require.Empty(t, slow.LookupBatch(readCtx, batch))
+	require.Equal(t, CollabTreeLocalEndingLimit, slow.LookupBatch(readCtx, batch).LocalEndingCount())
 	require.Equal(t, int64(1), blocked.reads.Load())
 }
 

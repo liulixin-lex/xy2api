@@ -113,7 +113,14 @@ func TestCollabFixNormalizationBeforeQueue(t *testing.T) {
 	}
 	before := CollabSafetySnapshot().RecordDropped
 	safe.enqueue(CollabRecordMutation{Kind: CollabRecordMutationTerminated, Terminated: CollabTerminatedRecord{Key: key, Event: "event", Copies: make([]CollabDigest, 4096), ExpiresAt: expiry}})
-	require.Equal(t, before+1, CollabSafetySnapshot().RecordDropped)
+	require.Equal(t, before, CollabSafetySnapshot().RecordDropped)
+	select {
+	case m := <-received:
+		require.Equal(t, key, m.Terminated.Key)
+		require.LessOrEqual(t, len(m.Terminated.Copies), CollabRecordMaxCopies)
+	case <-time.After(time.Second):
+		t.Fatal("primary termination must survive excess copies")
+	}
 	require.Empty(t, safe.writes)
 }
 
@@ -168,5 +175,10 @@ func TestCollabFixQueryBudgetIsSharedAcrossReads(t *testing.T) {
 	require.Len(t, s.LookupBatch(ctx, batch).Records, CollabRecordMaxQueries)
 	nested, stop := WithCollabRecordReadBudget(ctx)
 	defer stop()
-	require.Empty(t, s.LookupBatch(nested, batch).Records)
+	require.Len(t, s.LookupBatch(nested, batch).Records, CollabRecordMaxQueries, "duplicates do not spend budget again")
+	extra := batch
+	extra.Queries = []CollabRecordQuery{{Key: key, Call: "new-query"}}
+	result := s.LookupBatch(nested, extra)
+	require.False(t, result.RecordsComplete)
+	require.Empty(t, result.Records)
 }

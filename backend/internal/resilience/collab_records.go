@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"context"
+	"slices"
 	"time"
 )
 
@@ -117,8 +118,12 @@ type CollabRecordsStore interface {
 	PlaintextDelivered(context.Context, CollabPlaintextRecord) bool
 	Consumed(context.Context, CollabConsumedRecord) bool
 	Replaced(context.Context, CollabReplacedRecord) bool
+	// Register only after complete delivery; provisional until this request has a receipt.
 	Terminated(context.Context, CollabTerminatedRecord) bool
-	// Increment is idempotent per event and occurs only after full delivery.
+	// Reserve once before ANY output, atomically and idempotently per event.
+	// Keep the charge after attempted or ambiguous delivery; never increment on
+	// completion. With shared storage, the safe adapter reserves there synchronously.
+	// False or unknown means exhausted. Compatibility name; prefer the reserver API.
 	IncrementTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool)
 }
 
@@ -128,8 +133,8 @@ func (NoopCollabRecordsStore) TerminalRejected(context.Context, CollabTerminalRe
 	return 0, false
 }
 
-func (NoopCollabRecordsStore) LookupBatch(context.Context, CollabRecordBatch) CollabRecordBatchResult {
-	return CollabRecordBatchResult{}
+func (NoopCollabRecordsStore) LookupBatch(_ context.Context, b CollabRecordBatch) CollabRecordBatchResult {
+	return collabUnknownBatch(b)
 }
 func (NoopCollabRecordsStore) PendingIssued(context.Context, CollabIssuedRecord) (CollabIssuedToken, bool) {
 	return CollabIssuedToken{}, false
@@ -143,21 +148,28 @@ func (NoopCollabRecordsStore) Consumed(context.Context, CollabConsumedRecord) bo
 func (NoopCollabRecordsStore) Replaced(context.Context, CollabReplacedRecord) bool     { return false }
 func (NoopCollabRecordsStore) Terminated(context.Context, CollabTerminatedRecord) bool { return false }
 func (NoopCollabRecordsStore) IncrementTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool) {
-	return 0, false
+	return CollabTreeLocalEndingLimit, false
 }
 
 // A single batch includes all original items, disposition lookups and the tree
 // counter. Flags preserve independent records/disposition gates.
 type CollabRecordBatch struct {
-	Scope        CollabRecordScope
-	Queries      []CollabRecordQuery
-	Records      bool
-	Dispositions bool
+	Scope   CollabRecordScope
+	Queries []CollabRecordQuery
+	// DispositionQueries take priority and use their own query allowance.
+	// Nil reuses Queries for compatibility.
+	DispositionQueries                      []CollabRecordQuery
+	recordsTruncated, dispositionsTruncated bool
+	Records                                 bool
+	Dispositions                            bool
 }
 type CollabRecordBatchResult struct {
-	Records          map[CollabRecordQuery]CollabRecordLookup
-	Dispositions     map[CollabRecordQuery]CollabDispositionLookup
-	TreeLocalEndings int
+	RecordsComplete       bool
+	DispositionsComplete  bool
+	TreeLocalEndingsKnown bool
+	Records               map[CollabRecordQuery]CollabRecordLookup
+	Dispositions          map[CollabRecordQuery]CollabDispositionLookup
+	TreeLocalEndings      int
 }
 
 type CollabRecordMutationKind string
@@ -211,4 +223,36 @@ type CollabTerminalRejectionCount struct {
 	Rejection CollabDigest
 	Count     int
 	ExpiresAt time.Time
+}
+
+// Reserve before writing any local-ending notice. Implementations atomically
+// test the tree limit and count this event. Failed delivery may remain counted.
+type CollabLocalEndingReserver interface {
+	ReserveTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool)
+}
+
+func (r CollabRecordBatchResult) LocalEndingCount() int {
+	if !r.TreeLocalEndingsKnown {
+		return CollabTreeLocalEndingLimit
+	}
+	return min(r.TreeLocalEndings, CollabTreeLocalEndingLimit)
+}
+func collabUnknownBatch(b CollabRecordBatch) CollabRecordBatchResult {
+	r := CollabRecordBatchResult{}
+	if b.Dispositions {
+		r.TreeLocalEndings = CollabTreeLocalEndingLimit
+	}
+	return r
+}
+
+// Receipts prove only that this request carries the gateway notice. A live,
+// matching gateway record and the original delivery identity are still required.
+func CollabTerminationEffective(record CollabTerminatedRecord, key CollabDeliveryKey, receipts []CollabDigest, now time.Time) bool {
+	if !record.ExpiresAt.After(now) || record.Key.Scope != key.Scope || record.Key.Thread != key.Thread || record.Key.Delivery != key.Delivery {
+		return false
+	}
+	if record.Key != key && !slices.Contains(record.Copies, key.Item) {
+		return false
+	}
+	return record.Event != "" && slices.Contains(receipts, record.Event)
 }

@@ -2,20 +2,23 @@ package resilience
 
 import (
 	"encoding/json"
-	"slices"
 	"time"
 )
 
-// Encoded rows plus their two indexed field copies occupy at most 128 MiB
+// Encoded rows plus their three indexed field copies occupy at most 128 MiB
 // across 4096 trees. Redis allocator/object overhead is additional; at most
-// 262144 rows exist. These are shared-cache limits, not per tenant limits.
+// 536576 rows exist (64 evidence + 64 dispositions + 3 reservations/tree). These are shared-cache limits, not per tenant limits.
 const (
-	CollabRecordMaxTrees       = 4096
-	CollabRecordMaxTreeEntries = 64
-	CollabRecordMaxRowBytes    = 4096
-	CollabRecordMaxTreeBytes   = 32 << 10
-	CollabRecordMaxQueries     = 256
-	CollabRecordMaxCopies      = 16
+	CollabRecordMaxTrees         = 4096
+	CollabRecordMaxTreeEntries   = 64
+	CollabRecordMaxRowBytes      = 4096
+	CollabRecordMaxTreeBytes     = 32 << 10
+	CollabRecordMaxQueries       = 256
+	CollabRecordMaxCopies        = 16
+	CollabRecordMaxTenantTrees   = 64
+	CollabRecordEvidenceBytes    = 16 << 10
+	CollabRecordDispositionBytes = 14 << 10
+	CollabRecordCounterBytes     = 2 << 10
 )
 
 func collabDigestBound(d CollabDigest) bool { return len(d) <= 64 }
@@ -74,15 +77,16 @@ func NormalizeCollabRecordMutation(m CollabRecordMutation, now time.Time) (Colla
 		n.Replaced = r
 	case CollabRecordMutationTerminated:
 		r := m.Terminated
-		if !collabKeyBound(r.Key) || !collabDigestBound(r.Event) || !collabDigestBound(r.Parent) || len(r.Copies) > CollabRecordMaxCopies {
+		if !collabKeyBound(r.Key) || !collabDigestBound(r.Event) || !collabDigestBound(r.Parent) {
 			return n, nil, false
 		}
-		for _, copy := range r.Copies {
-			if !collabDigestBound(copy) {
-				return n, nil, false
+		copies := make([]CollabDigest, 0, min(len(r.Copies), CollabRecordMaxCopies))
+		for _, copy := range r.Copies[:min(len(r.Copies), CollabRecordMaxCopies)] {
+			if collabDigestBound(copy) && copy != "" {
+				copies = append(copies, copy)
 			}
 		}
-		r.Copies = slices.Clone(r.Copies)
+		r.Copies = copies
 		n.Terminated = r
 	case CollabRecordMutationTerminalRejected:
 		r := m.TerminalRejection
@@ -127,11 +131,49 @@ func NormalizeCollabRecordMutation(m CollabRecordMutation, now time.Time) (Colla
 	payload, err := json.Marshal(n)
 	return n, payload, err == nil && len(payload) <= CollabRecordMaxRowBytes
 }
+
+func collabUniqueQueries(queries []CollabRecordQuery) ([]CollabRecordQuery, bool) {
+	unique := make([]CollabRecordQuery, 0, min(len(queries), CollabRecordMaxQueries))
+	seen := make(map[CollabRecordQuery]bool)
+	for _, q := range queries {
+		if seen[q] {
+			continue
+		}
+		if len(unique) == CollabRecordMaxQueries {
+			return unique, true
+		}
+		seen[q] = true
+		unique = append(unique, q)
+	}
+	return unique, false
+}
 func collabBoundBatch(b CollabRecordBatch) CollabRecordBatch {
-	b.Queries = b.Queries[:min(len(b.Queries), CollabRecordMaxQueries)]
+	if b.DispositionQueries == nil {
+		b.DispositionQueries = b.Queries
+	}
+	var truncated bool
+	b.DispositionQueries, truncated = collabUniqueQueries(b.DispositionQueries)
+	b.dispositionsTruncated = b.dispositionsTruncated || truncated
+	b.Queries, truncated = collabUniqueQueries(b.Queries)
+	b.recordsTruncated = b.recordsTruncated || truncated
 	return b
 }
 
-// Charge the JSON and both hash/sorted-set field bytes, plus headroom for a
+// Evidence, dispositions, and the three reservation rows have separate quotas.
+func collabRecordPartition(kind CollabRecordMutationKind) int {
+	switch kind {
+	case CollabRecordMutationPending, CollabRecordMutationConfirm, CollabRecordMutationVoid, CollabRecordMutationPlaintext, CollabRecordMutationConsumed:
+		return 0
+	case CollabRecordMutationLocalEnding:
+		return 2
+	default:
+		return 1
+	}
+}
+func collabPartitionBytes(part int) int {
+	return [3]int{CollabRecordEvidenceBytes, CollabRecordDispositionBytes, CollabRecordCounterBytes}[part]
+}
+
+// Charge the JSON and hash, expiry and write-order field bytes, plus headroom for a
 // status transition. Redis's object metadata is bounded separately by row count.
-func collabRecordCharge(field string, payload []byte) int { return len(payload) + 2*len(field) + 32 }
+func collabRecordCharge(field string, payload []byte) int { return len(payload) + 3*len(field) + 32 }

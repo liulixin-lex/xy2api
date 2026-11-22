@@ -220,8 +220,8 @@ func TestCollabSeenNoticeNeedsRegisteredParentAndSender(t *testing.T) {
 	s := collabRecordTestService(t)
 	scope := collabRecordTestInput().Scope
 	text := "Message Type: FINAL_ANSWER\nTask name: synthetic-task\nSender: child\nPayload:\nGateway notice [synthetic-event]. The task content could not be read."
-	body, _ := json.Marshal(map[string]any{"input": []any{map[string]any{"type": "agent_message", "content": []any{map[string]string{"type": "input_text", "text": text}}}}})
-	notices := s.ParseCollabSeenNotices(body, map[string]resilience.CollabDigest{"child": "child-thread"})
+	body, _ := json.Marshal(map[string]any{"input": []any{map[string]any{"type": "agent_message", "author": "child", "recipient": "parent", "content": []any{map[string]string{"type": "input_text", "text": text}}}}})
+	notices := s.ParseCollabSeenNotices(body, map[string]resilience.CollabDigest{"child": "child-thread", "parent": "parent-thread"})
 	require.Len(t, notices, 1)
 	require.True(t, notices[0].FinalAnswer)
 	require.True(t, notices[0].Current)
@@ -236,7 +236,7 @@ func TestCollabSeenNoticeNeedsRegisteredParentAndSender(t *testing.T) {
 		bytes.Replace(body, []byte("FINAL_ANSWER"), []byte("MESSAGE"), 1),
 		bytes.Replace(body, []byte("Payload:"), []byte("Payload: ambiguous"), 1),
 	} {
-		parsed := s.ParseCollabSeenNotices(changed, map[string]resilience.CollabDigest{"child": "child-thread"})
+		parsed := s.ParseCollabSeenNotices(changed, map[string]resilience.CollabDigest{"child": "child-thread", "parent": "parent-thread"})
 		require.Len(t, parsed, 1)
 		require.False(t, parsed[0].FinalAnswer)
 	}
@@ -247,7 +247,7 @@ func TestCollabSeenNoticeNeedsRegisteredParentAndSender(t *testing.T) {
 	require.True(t, ok)
 	historical["input"] = append(inputs, map[string]string{"role": "assistant", "content": "acknowledged"})
 	history, _ := json.Marshal(historical)
-	old := s.ParseCollabSeenNotices(history, map[string]resilience.CollabDigest{"child": "child-thread"})
+	old := s.ParseCollabSeenNotices(history, map[string]resilience.CollabDigest{"child": "child-thread", "parent": "parent-thread"})
 	require.Len(t, old, 1)
 	require.True(t, old[0].FinalAnswer)
 	require.False(t, old[0].Current)

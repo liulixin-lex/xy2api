@@ -51,7 +51,10 @@ func TestCollabMemoryRecordsLifecycleAndIsolation(t *testing.T) {
 	require.Equal(t, 1, count)
 	other := b
 	other.Scope.Tenant = "other"
-	require.Empty(t, s.LookupBatch(ctx, other))
+	isolated := s.LookupBatch(ctx, other)
+	require.Empty(t, isolated.Records)
+	require.Empty(t, isolated.Dispositions)
+	require.Zero(t, isolated.LocalEndingCount())
 	newDelivery := q
 	newDelivery.Key.Delivery = "new"
 	newDelivery.Key.Item = "new"
@@ -80,7 +83,9 @@ func TestCollabMemoryExpiryCapacityAndConcurrency(t *testing.T) {
 		r := CollabPlaintextRecord{Scope: key.Scope, Call: CollabDigest(fmt.Sprint(i)), Arguments: "args", ExpiresAt: time.Now().Add(time.Hour)}
 		require.True(t, s.PlaintextDelivered(ctx, r))
 	}
-	require.False(t, s.PlaintextDelivered(ctx, CollabPlaintextRecord{Scope: key.Scope, Call: "overflow", Arguments: "args", ExpiresAt: time.Now().Add(time.Hour)}))
+	require.True(t, s.PlaintextDelivered(ctx, CollabPlaintextRecord{Scope: key.Scope, Call: "overflow", Arguments: "args", ExpiresAt: time.Now().Add(time.Hour)}))
+	oldQuery := CollabRecordQuery{Key: key, Call: "0"}
+	require.Empty(t, s.LookupBatch(ctx, CollabRecordBatch{Scope: key.Scope, Queries: []CollabRecordQuery{oldQuery}, Records: true}).Records[oldQuery].Plaintext, "oldest evidence is evicted")
 	fresh := NewMemoryCollabRecordsStore()
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {

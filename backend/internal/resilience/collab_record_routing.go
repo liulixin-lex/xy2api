@@ -67,9 +67,9 @@ func OrderCollabFailoverCandidates(settings *Settings, candidates []int64, accou
 
 // Parsed notice is untrusted until matched to a live gateway-issued termination.
 type CollabSeenNotice struct {
-	Event, Sender CollabDigest
-	FinalAnswer   bool
-	Current       bool
+	Event, Sender, Recipient CollabDigest
+	FinalAnswer              bool
+	Current                  bool
 }
 
 func CollabSeenEvent(notice CollabSeenNotice, scope CollabRecordScope, thread CollabDigest, records []CollabTerminatedRecord, now time.Time) CollabEventObservation {
@@ -80,7 +80,7 @@ func CollabSeenEvent(notice CollabSeenNotice, scope CollabRecordScope, thread Co
 	for _, r := range records {
 		if r.Event == notice.Event && r.Key.Scope == scope && r.ExpiresAt.After(now) {
 			result.Delivery = r.Key.Delivery
-			if notice.FinalAnswer && thread != "" && r.Parent == thread && notice.Sender != "" && r.Key.Thread == notice.Sender {
+			if notice.FinalAnswer && thread != "" && r.Parent == thread && notice.Recipient == thread && notice.Sender != "" && r.Key.Thread == notice.Sender {
 				result.Source = CollabEventSourceSeenParentNotice
 				return result
 			}

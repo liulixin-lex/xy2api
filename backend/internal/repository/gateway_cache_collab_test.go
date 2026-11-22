@@ -69,7 +69,9 @@ func TestCollabSharedCacheLifecycleAndBounds(t *testing.T) {
 	other.Scope.Group = "other"
 	result, err = shared.LookupBatch(ctx, other)
 	require.NoError(t, err)
-	require.Empty(t, result)
+	require.Empty(t, result.Records)
+	require.Empty(t, result.Dispositions)
+	require.Zero(t, result.LocalEndingCount())
 	// Event-based lookup works even when the parent has no child delivery key.
 	notice := resilience.CollabRecordQuery{Key: resilience.CollabDeliveryKey{Scope: scope}, Event: "event"}
 	b.Queries = []resilience.CollabRecordQuery{notice}
@@ -79,11 +81,14 @@ func TestCollabSharedCacheLifecycleAndBounds(t *testing.T) {
 	for i := 0; i < resilience.CollabRecordMaxTreeEntries+10; i++ {
 		require.NoError(t, shared.Apply(ctx, resilience.CollabRecordMutation{Kind: resilience.CollabRecordMutationPlaintext, Plaintext: resilience.CollabPlaintextRecord{Scope: scope, Call: resilience.CollabDigest(fmt.Sprint(i)), Arguments: "args", ExpiresAt: time.Now().Add(time.Hour)}}))
 	}
-	require.Equal(t, int64(resilience.CollabRecordMaxTreeEntries), client.HLen(ctx, collabCacheKeys(scope)[1]).Val())
+	require.LessOrEqual(t, client.HLen(ctx, collabCacheKeys(scope)[1]).Val(), int64(2*resilience.CollabRecordMaxTreeEntries+3))
+	require.True(t, client.HExists(ctx, collabCacheKeys(scope)[1], "e:event").Val(), "evidence never evicts the counter")
 	server.FastForward(resilience.CollabRecordTTL + time.Second)
 	result, err = shared.LookupBatch(ctx, b)
 	require.NoError(t, err)
-	require.Empty(t, result)
+	require.Empty(t, result.Records)
+	require.Empty(t, result.Dispositions)
+	require.Zero(t, result.LocalEndingCount())
 }
 
 func TestCollabSharedCachePendingConfirmVoidTokenIsolation(t *testing.T) {
