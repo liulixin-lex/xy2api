@@ -187,7 +187,7 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 
 `summary` 的 `cycles` 是引擎每 5 秒的工作周期，正常每 5 分钟约 60 次；与每 5 分钟一次的普通质量判定不同。`cooled` 计进入后排、续期、试用失败；`released` 计试用放回；`trial` 计进入试用；`relax` 计门槛放宽写入的动作；`clear` 计再犯档位清零动作。只统计提交成功的动作，回滚的重评不发布也不计数；管理员手动恢复不计入这些计数。
 
-**`sched_quality.state`** 的 `at` 是逻辑判定时刻，`rule_version` 当前为 `3.1`；用 `account_id`、`model`、`group_id`、`line` 定位线，`line` 为 `ttfo`、`error` 或 `cache`。新 `action` 取 `enter`、`renew`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`relax`、`clear`，见 [判定记录](group-quality-gate.md#判定记录)；旧日志仍可见 `release`。`level` 为 0–4，对应 20、40、80、160、240 分钟。`until` 在进入后排、续期、试用失败时写后排期限，进入试用时写试用期限，其余为零值。
+**`sched_quality.state`** 的 `at` 是逻辑判定时刻，`rule_version` 当前为 `3.1`；用 `account_id`、`model`、`group_id`、`line` 定位线，`line` 为 `ttfo`、`error` 或 `cache`。`action` 取 `enter`、`renew`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`reset`、`relax`、`clear`，见 [判定记录](group-quality-gate.md#判定记录)；旧日志仍可见 `release`。管理员重置提交后，原先在后排或试用的线各记一条 `reset`。`level` 为 0–4，对应 20、40、80、160、240 分钟。`until` 在进入后排、续期、试用失败时写后排期限，进入试用时写试用期限，其余为零值。
 
 | 字段 | 含义 |
 |---|---|
@@ -264,7 +264,9 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 | 事件 | 级别 | 何时写 / 在哪查 |
 |---|---|---|
 | `upstream_conversion_failed` | Warn | 转换错误取得终态写入权时记一次。不带 `component=sched_quality`，在系统日志按事件名查 |
-| `openai_conversion_retry` | Info | Chat 请求走 Responses 上游，遇到可识别的输出条目身份冲突时，每请求记一次是否换号实发及结果。不带 `component=sched_quality`，只查应用日志 |
+| `openai_conversion_retry` | Info | Chat 请求走 Responses 上游且 `conversion_reason=conflicting_output_identity` 时，每请求记一次是否换号实发及结果。不带 `component=sched_quality`，只查应用日志 |
+
+流式工具调用身份冲突（`tool_identity_conflict`）、输出序号冲突（`conflicting_output_index`）以及两种输出歧义（`ambiguous_output_identity`、`ambiguous_unindexed_output`）沿用原来的错误处理；查 `upstream_conversion_failed`，不会有 `openai_conversion_retry`。
 
 两条日志共用下面的固定诊断字段。它们不记录错误原文、生成内容、实际条目 ID、调用 ID 或工具名称。
 
@@ -278,7 +280,7 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 
 `upstream_conversion_failed` 另有 `client_status`（客户端实际 HTTP 状态）和 `client_error_status`（转换错误的逻辑状态 502）。流式响应已开场时，客户端实际状态可能仍是 200；也不能把逻辑 502 归给上游。
 
-`openai_conversion_retry` 的 `retried` 为布尔值，只在补发实际越过发送边界后为 `true`。`skip_reason` 在实发时为空串，未实发时取下表的固定值。
+`openai_conversion_retry` 的 `retried` 为布尔值，只在候选账号的补发越过发送边界后为 `true`，即使随后没收到上游响应也算。`skip_reason` 在实发时为空串，未实发时取下表的固定值。
 
 | 检查环节 | `skip_reason` |
 |---|---|
@@ -286,7 +288,7 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 | 重放资格 | `missing_replay_marker`（缺标记）、`replay_marker_false`（标记为否）、`state_continuation`（状态续接或受保护交接）、`missing_wire_body`（缺原出站体）、`duplicate_key`（JSON 有重复键）、`wire_model_mapped`（原号出站模型与调度模型不同） |
 | 请求结构 | `unrecognized_input`（请求体或输入结构不识别）、`unrecognized_tools`（工具定义或选择方式不识别）、`provider_tools`（上游代执行工具）、`custom_tools`（自定义工具） |
 | 预算 | `missing_budget`（没有请求预算）、`budget_exhausted`（时间或派发次数无余量）、`replay_limit`（已用过本次换号重发额度）、`switch_budget`（换号额度用完） |
-| 选号与准备 | `no_candidate`（无合规候选）、`candidate_protocol`（候选不走 Responses）、`candidate_wire`（候选模型不符、改写路径不同或发送前出站体校验不符）、`slot_unavailable`（未取得并发槽）、`prepare_failed`（未完成发送准备）。无号且两类候选检查都失败时，优先记 `candidate_wire` |
+| 选号与准备 | `no_candidate`（无合规候选）、`candidate_protocol`（候选不走 Responses）、`candidate_wire`（候选模型不符、改写路径不同或发送前出站体校验不符）、`slot_unavailable`（未取得并发槽）、`prepare_failed`（未完成重发请求构建）、`send_not_started`（已构建重发请求，但在本地发送准备阶段失败，未越过发送边界）。无号且两类候选检查都失败时，优先记 `candidate_wire` |
 
 `result` 为 `success`（重发成功）、`conversion_error`（首输出前再次遇到转换错误）、`interrupted`（补发已输出后中断）、`canceled`（取消或断开）、`upstream_error`（其他失败）或 `not_retried`（未重发，沿用原错误收口）。统计补发次数以 `retried` 为准，前置准备失败也会记录结果。重发条件见 [调度](scheduling.md#协议转换失败时换号重发)。
 

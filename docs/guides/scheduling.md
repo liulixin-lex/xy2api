@@ -36,7 +36,7 @@ OpenAI 分组按下表排定候选顺序，前一项分出先后就不再看后�
 
 ### 协议转换失败时换号重发
 
-Chat Completions 请求走 Responses 上游时，若转换器发现输出条目身份互相冲突，以下条件都满足才换一个账号重发一次。流式和非流式都适用。
+Chat Completions 请求走 Responses 上游时，只有转换原因是输出条目身份冲突（`conflicting_output_identity`），且满足以下条件，才换一个账号重发一次。流式和非流式都按这个原因判断。流式工具调用身份冲突（`tool_identity_conflict`）、输出序号冲突（`conflicting_output_index`）、输出身份歧义（`ambiguous_output_identity`）和无序号输出歧义（`ambiguous_unindexed_output`）沿用原来的错误处理，不记 `openai_conversion_retry`。
 
 | 检查项 | 条件 |
 |---|---|
