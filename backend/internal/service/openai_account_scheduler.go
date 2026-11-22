@@ -286,6 +286,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	}
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, request)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
+	ctx = s.withOpenAICollabThreadRouting(ctx, sessionHash)
 	ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
 	ordinary := NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx)
 	defer func() {
@@ -536,7 +537,7 @@ func (s *OpenAIGatewayService) loadOpenAIGroupRequiresPrivacySet(ctx context.Con
 
 // applyLegacySelectionDecision 把非高级调度路径的选号结果回填到决策：记录选中账号，
 // 命中会话粘性时标记 session_hash 层，否则保持 load_balance。
-func applyLegacySelectionDecision(decision *OpenAIAccountScheduleDecision, selection *AccountSelectionResult) {
+func applyLegacySelectionDecision(ctx context.Context, decision *OpenAIAccountScheduleDecision, selection *AccountSelectionResult) {
 	if decision == nil || selection == nil || selection.Account == nil {
 		return
 	}
@@ -546,6 +547,11 @@ func applyLegacySelectionDecision(decision *OpenAIAccountScheduleDecision, selec
 		decision.Layer = openAIAccountScheduleLayerSessionSticky
 		decision.StickySessionHit = true
 	}
+	if selection.Acquired && selection.WaitPlan == nil && selection.Account.ID == openAICollabSelectionHint(ctx) {
+		decision.Layer = "collab_tree"
+		decision.StickySessionHit = true
+	}
+
 }
 
 func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
@@ -601,16 +607,9 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		return selection, decision, nil
 	}
 	if strings.TrimSpace(previousResponseID) == "" {
-		if hintID := openAICollabHint(ctx, guardianParentAccountID); hintID > 0 {
-			req, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
-			req.RequirePrivacySet = s.openAIGroupRequiresPrivacySet(ctx, groupID)
-			if selection := s.selectOpenAICollabHint(ctx, req, hintID); selection != nil {
-				decision.Layer = "collab_tree"
-				decision.StickySessionHit = true
-				decision.SelectedAccountID = selection.Account.ID
-				decision.SelectedAccountType = selection.Account.Type
-				return selection, decision, nil
-			}
+		ctx = context.WithValue(ctx, openAICollabHintKey{}, openAICollabHint(ctx, guardianParentAccountID))
+		if routing, ok := ctx.Value(openAICollabThreadRoutingKey{}).(openAICollabThreadRouting); ok && routing.route > 0 {
+			guardianParentAccountID = 0 // a recovered child owns its independent route
 		}
 	}
 	if guardianParentAccountID > 0 {
@@ -660,7 +659,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 				return selection, decision, nil
 			}
 			if accountSupportsOpenAICapabilities(selection.Account, requiredCapability, requiredImageCapability) {
-				applyLegacySelectionDecision(&decision, selection)
+				applyLegacySelectionDecision(ctx, &decision, selection)
 				return selection, decision, nil
 			}
 			if selection.ReleaseFunc != nil {
@@ -687,7 +686,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		}
 		if s.isOpenAIAccountTransportCompatible(selection.Account, requiredTransport) &&
 			accountSupportsOpenAICapabilities(selection.Account, requiredCapability, requiredImageCapability) {
-			applyLegacySelectionDecision(&decision, selection)
+			applyLegacySelectionDecision(ctx, &decision, selection)
 			return selection, decision, nil
 		}
 		if selection.ReleaseFunc != nil {

@@ -213,6 +213,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		}
 		ordered = append(ordered, candidate{account, buildSelectionKey(view, groupID, model, account, req, now)})
 	}
+	hint := openAICollabSelectionHint(ctx)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		// Compact capability routing predates quality ranking and applies only
 		// to RequireCompact: confirmed support precedes unknown, then the quality key.
@@ -223,7 +224,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 			}
 		}
 
-		return selectionLess(ordered[i].key, ordered[j].key)
+		return openAICollabSelectionLess(ordered[i].key, ordered[j].key, hint)
 	})
 	if !migrate && len(ordered) > schedquality.TakeoverMaxCandidates {
 		ordered = ordered[:schedquality.TakeoverMaxCandidates]
@@ -294,6 +295,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 					}
 				}
 				resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
+				openAICollabHintAdmitted(ctx, latest.ID)
 				change.reason, change.target, change.trial = reason, latest.ID, reservation
 				change.fromPriority, change.toPriority = new(latestOwner.Priority), new(latest.Priority)
 				change.fromModel, change.toModel = OpenAIAttemptModel(latestOwner, model), OpenAIAttemptModel(latest, model)

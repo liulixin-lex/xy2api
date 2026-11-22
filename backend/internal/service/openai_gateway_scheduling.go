@@ -1481,6 +1481,15 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if err != nil || selected != nil {
 		return selected, err
 	}
+	if routing, ok := ctx.Value(openAICollabThreadRoutingKey{}).(openAICollabThreadRouting); ok && routing.route > 0 && !req.NoWait {
+		// A recovered thread's preference must not choose a new wait plan.
+		// Once its immediate round misses, restore the ordinary sticky owner
+		// and its original capacity retry, deadline and fallback behavior.
+		routing.route = 0
+		fallbackCtx := context.WithValue(ctx, openAICollabThreadRoutingKey{}, routing)
+		fallbackCtx = context.WithValue(fallbackCtx, openAICollabHintKey{}, int64(0))
+		return s.selectAccountWithLoadAwareness(fallbackCtx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
+	}
 	if withLoads && loadErr == nil && attempted {
 		if freshLoads, e := s.concurrencyService.GetAccountsLoadBatchFresh(ctx, loadRequests); e == nil {
 			loads = freshLoads
@@ -1495,7 +1504,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if selected, err = openAIMonitorProbeFreeSlot(ctx, tryAcquire); err != nil || selected != nil {
 		return selected, err
 	}
-	s.sortSelectionAccounts(ctx, candidates, req, loads)
+	waitCtx := context.WithValue(ctx, openAICollabHintKey{}, int64(0))
+	s.sortSelectionAccounts(waitCtx, candidates, req, loads)
 	for len(candidates) > 0 {
 		a := candidates[0]
 		candidates = candidates[1:]
@@ -1511,7 +1521,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		reservation, accepted := trial.reserve(ctx, fresh, full)
 		if !accepted {
 			candidates = append(candidates, fresh)
-			s.sortSelectionAccounts(ctx, candidates, req, loads)
+			s.sortSelectionAccounts(waitCtx, candidates, req, loads)
 			continue
 		}
 		trial.selected = reservation
@@ -1643,6 +1653,7 @@ func (s *OpenAIGatewayService) finishSelectionSlot(ctx context.Context, req Open
 			return nil, nil
 		}
 		trial.selected = reservation
+		openAICollabHintAdmitted(ctx, latest.ID)
 		selection, err := s.newAcquiredSelectionResult(ctx, latest, release)
 		if err != nil {
 			return nil, err
@@ -2288,7 +2299,11 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 		ptrs = append(ptrs, item.account)
 	}
 	s.selectionFullMarks.observe(ptrs, loadMap, s.selectionNow())
-	s.sortSelectionAccounts(ctx, ptrs, req, loadMap)
+	sortCtx := ctx
+	if fallbackWait {
+		sortCtx = context.WithValue(ctx, openAICollabHintKey{}, int64(0))
+	}
+	s.sortSelectionAccounts(sortCtx, ptrs, req, loadMap)
 	candidates = candidates[:0]
 	for _, a := range ptrs {
 		load := loadMap[a.ID]

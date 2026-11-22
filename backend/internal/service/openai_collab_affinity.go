@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -9,7 +10,14 @@ import (
 )
 
 type openAICollabAffinityKey struct{}
-type openAICollabHintProbeKey struct{}
+type openAICollabHintKey struct{}
+type openAICollabThreadRoutingKey struct{}
+
+type openAICollabThreadRouting struct {
+	session string
+	avoided map[int64]struct{}
+	route   int64
+}
 
 type openAICollabAffinity struct {
 	store           *resilience.CollabTreeAffinity
@@ -20,6 +28,7 @@ type openAICollabAffinity struct {
 	encrypted       bool
 	recovering      atomic.Bool
 	preserveBinding atomic.Bool
+	gateway         atomic.Pointer[OpenAIGatewayService]
 }
 
 // WithOpenAICollabTreeAffinity takes the frozen ingress settings and keyed
@@ -34,16 +43,19 @@ func WithOpenAICollabTreeAffinity(ctx context.Context, store *resilience.CollabT
 	lookup := identity.Scope
 	lookup.Tree = ""
 	if member, ok := store.LookupThread(ctx, lookup, identity.Thread); ok {
-		if member.Parent != identity.Parent {
+		if member.Parent != identity.Parent || identity.Scope.Tree != "" && identity.Scope.Tree != member.Scope.Tree {
 			return ctx
 		}
 		identity.Scope = member.Scope
 	} else if identity.Parent != "" {
 		if parent, ok := store.LookupThread(ctx, lookup, identity.Parent); ok {
+			if identity.Scope.Tree != "" && identity.Scope.Tree != parent.Scope.Tree {
+				return ctx
+			}
 			identity.Scope = parent.Scope
 		}
 	}
-	if identity.Scope.Tree == "" || (role == resilience.CollabRoleRoot && identity.Parent != "") {
+	if role == resilience.CollabRoleRoot && (identity.Scope.Tree == "" || identity.Parent != "") {
 		return ctx
 	}
 	a := &openAICollabAffinity{store: store, settings: settings, groupID: groupID, identity: identity, role: role, encrypted: encrypted}
@@ -85,7 +97,49 @@ func openAICollabThreadAvoidances(ctx context.Context) map[int64]struct{} {
 	if a == nil || a.role != resilience.CollabRoleChild {
 		return nil
 	}
+	if routing, ok := ctx.Value(openAICollabThreadRoutingKey{}).(openAICollabThreadRouting); ok {
+		return routing.avoided
+	}
 	return a.store.ThreadAvoidances(ctx, a.identity.Scope, a.identity.Thread)
+}
+
+func openAICollabThreadSession(ctx context.Context, a *openAICollabAffinity) string {
+	return openAITerminalRejectionSession(ctx, "collab-thread-v1:"+string(a.identity.Scope.Tenant)+":"+string(a.identity.Thread))
+}
+
+// Use the existing shared session stores and their normal expiration/reset
+// rules. Local hints are only a fallback when a shared dependency is absent.
+func (s *OpenAIGatewayService) withOpenAICollabThreadRouting(ctx context.Context, session string) context.Context {
+	a := openAICollabAffinityFrom(ctx)
+	if a == nil || s == nil {
+		return ctx
+	}
+	a.gateway.CompareAndSwap(nil, s)
+	if a.role != resilience.CollabRoleChild {
+		return ctx
+	}
+	routing := openAICollabThreadRouting{session: session, avoided: a.store.ThreadAvoidances(ctx, a.identity.Scope, a.identity.Thread)}
+	if s.resilience != nil && s.resilience.store != nil {
+		if avoided, err := sessionAvoidAfterReset(ctx, s.resilience.store, a.groupID, openAICollabThreadSession(ctx, a), s.resilience.sessionResetAt); err == nil {
+			routing.avoided = avoided
+		}
+	}
+	if route, ok := a.store.LookupThreadRoute(ctx, a.identity.Scope, a.identity.Thread); ok {
+		routing.route = route.AccountID
+	}
+	if s.cache != nil {
+		if route, err := s.cache.GetSessionAccountID(ctx, a.groupID, s.openAISessionCacheKey(openAICollabThreadSession(ctx, a))); err == nil || errors.Is(err, ErrStickySessionNotFound) {
+			routing.route = route
+		}
+	}
+	if _, avoided := routing.avoided[routing.route]; avoided {
+		routing.route = 0
+	}
+	if len(routing.avoided) > 0 || routing.route > 0 {
+		a.recovering.Store(true)
+		a.preserveBinding.Store(true)
+	}
+	return context.WithValue(ctx, openAICollabThreadRoutingKey{}, routing)
 }
 
 // NoteOpenAICollabAdmission runs after all admission rechecks, before Forward
@@ -115,7 +169,18 @@ func NoteOpenAICollabCiphertextFailure(ctx context.Context, accountID int64, avo
 	}
 	a.recovering.Store(true)
 	a.preserveBinding.Store(true)
-	a.store.AvoidThread(ctx, resilience.CollabThreadAvoidance{Scope: a.identity.Scope, Thread: a.identity.Thread, AccountID: accountID, ExpiresAt: avoidUntil})
+	shared := false
+	if s := a.gateway.Load(); s != nil && s.resilience != nil && s.resilience.store != nil {
+		if ttl := time.Until(avoidUntil); ttl > 0 {
+			// Avoidance only: sticky deletion also follows the request's legacy
+			// alias and can accidentally delete the parent's binding.
+			shared = s.resilience.store.AddSessionAvoid(ctx, a.groupID, openAICollabThreadSession(ctx, a), accountID, ttl, s.resilience.sessionAccountResetAt(accountID)) == nil
+		}
+	}
+	if !shared {
+		a.store.AvoidThread(ctx, resilience.CollabThreadAvoidance{Scope: a.identity.Scope, Thread: a.identity.Thread, AccountID: accountID, ExpiresAt: avoidUntil})
+	}
+	resilience.StateFrom(ctx).AddAvoided(accountID)
 	return true
 }
 
@@ -127,13 +192,15 @@ func (s *OpenAIGatewayService) AvoidOpenAICollabStateAccount(ctx context.Context
 		return
 	}
 	if ciphertextFailure {
+		if a := openAICollabAffinityFrom(ctx); a != nil && a.groupID == groupID {
+			a.gateway.CompareAndSwap(nil, s)
+		}
 		avoid := time.Duration(resilience.Current().Session.AvoidSeconds) * time.Second
 		if avoid <= 0 {
 			avoid = 10 * time.Minute
 		}
-		if NoteOpenAICollabCiphertextFailure(ctx, accountID, time.Now().Add(avoid)) {
-			a := openAICollabAffinityFrom(ctx)
-			session = openAITerminalRejectionSession(ctx, "collab-thread-v1:"+string(a.identity.Scope.Tenant)+":"+string(a.identity.Thread))
+		if a := openAICollabAffinityFrom(ctx); a != nil && a.groupID == groupID && NoteOpenAICollabCiphertextFailure(ctx, accountID, time.Now().Add(avoid)) {
+			return
 		}
 	}
 	s.AvoidOpenAIStateAccount(ctx, groupID, session, accountID)
@@ -150,6 +217,11 @@ func NoteOpenAICollabSuccess(ctx context.Context, accountID int64, borrowed bool
 		a.store.ConfirmTreeHint(ctx, hint)
 	} else if a.recovering.Load() {
 		a.store.BindRecoveredThread(ctx, resilience.CollabThreadRoute{Scope: hint.Scope, Thread: hint.Thread, AccountID: accountID, ExpiresAt: hint.ExpiresAt})
+		if s := a.gateway.Load(); s != nil && s.cache != nil {
+			// This independent thread binding has no tree aliases and uses
+			// exactly the existing sticky TTL.
+			_ = s.cache.SetSessionAccountID(ctx, a.groupID, s.openAISessionCacheKey(openAICollabThreadSession(ctx, a)), accountID, s.openAIStickyBindingTTL(&a.groupID))
+		}
 	}
 }
 
@@ -183,7 +255,11 @@ func openAICollabHint(ctx context.Context, parentAccountID int64) int64 {
 	if a == nil || a.role != resilience.CollabRoleChild || resilience.CollabAttemptFrom(ctx).Optional {
 		return 0
 	}
-	if route, ok := a.store.LookupThreadRoute(ctx, a.identity.Scope, a.identity.Thread); ok && !a.store.ThreadAvoided(ctx, resilience.CollabThreadAvoidance{Scope: a.identity.Scope, Thread: a.identity.Thread, AccountID: route.AccountID}) {
+	if routing, loaded := ctx.Value(openAICollabThreadRoutingKey{}).(openAICollabThreadRouting); loaded {
+		if routing.route > 0 {
+			return routing.route
+		}
+	} else if route, ok := a.store.LookupThreadRoute(ctx, a.identity.Scope, a.identity.Thread); ok && !a.store.ThreadAvoided(ctx, resilience.CollabThreadAvoidance{Scope: a.identity.Scope, Thread: a.identity.Thread, AccountID: route.AccountID}) {
 		return route.AccountID
 	}
 	if parentAccountID > 0 {
@@ -195,29 +271,25 @@ func openAICollabHint(ctx context.Context, parentAccountID int64) int64 {
 	return 0
 }
 
-func (s *OpenAIGatewayService) selectOpenAICollabHint(ctx context.Context, req OpenAIAccountScheduleRequest, accountID int64) *AccountSelectionResult {
-	if accountID <= 0 || s.checkChannelPricingRestriction(ctx, req.GroupID, req.RequestedModel) {
-		return nil
+// Preferences apply only within the same quality/trial and pinning round.
+// Normal slot acquisition, trial reservation, rechecks and retries still own
+// admission. Wait-plan ordering deliberately does not call this helper.
+func openAICollabSelectionLess(a, b selectionKey, hint int64) bool {
+	if hint > 0 && a.ID != b.ID && a.Tier == b.Tier && a.Pinned == b.Pinned && (a.ID == hint || b.ID == hint) {
+		return a.ID == hint
 	}
-	probe := context.WithValue(WithOpenAISelectionNoWait(ctx), openAICollabHintProbeKey{}, true)
-	req.StickyAccountID, req.PreserveStickyBinding = accountID, true
-	req.NoWait = true
-	probe = context.WithValue(probe, openAISelectionRequestKey{}, req)
-	selection, _, err := s.selectBySessionHash(probe, req)
-	if err != nil || selection == nil || selection.Account == nil || !selection.Acquired || selection.WaitPlan != nil {
-		if selection != nil && selection.ReleaseFunc != nil {
-			selection.ReleaseFunc()
+	return selectionLess(a, b)
+}
+
+func openAICollabSelectionHint(ctx context.Context) int64 {
+	id, _ := ctx.Value(openAICollabHintKey{}).(int64)
+	return id
+}
+
+func openAICollabHintAdmitted(ctx context.Context, accountID int64) {
+	if accountID == openAICollabSelectionHint(ctx) {
+		if a := openAICollabAffinityFrom(ctx); a != nil {
+			a.preserveBinding.Store(true)
 		}
-		return nil
 	}
-	latest, veto, _ := s.SelectionAdmissionForResult(ContextWithSelectionProfitGate(probe, selection), selection, false)
-	if veto {
-		CombineSelectionRelease(selection, nil)()
-		return nil
-	}
-	selection.Account = latest
-	if a := openAICollabAffinityFrom(ctx); a != nil {
-		a.preserveBinding.Store(true)
-	}
-	return selection
 }

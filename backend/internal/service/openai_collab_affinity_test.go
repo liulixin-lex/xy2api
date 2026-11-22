@@ -167,6 +167,10 @@ func TestCollabAffinityChildRetryMovesBeforeFinalOutcome(t *testing.T) {
 	root := collabAffinityContext(s, settings, "root", "")
 	NoteOpenAICollabAdmission(root, 1, false)
 	child := collabAffinityContext(s, settings, "child", "root")
+	initial, _, initialErr := collabAffinitySelect(f, child, "m", nil)
+	require.NoError(t, initialErr)
+	require.EqualValues(t, 1, initial.Account.ID)
+	initial.ReleaseFunc()
 	expires := time.Now().Add(time.Minute)
 	require.True(t, NoteOpenAICollabCiphertextFailure(child, 1, expires))
 	// A concurrent client retry sees avoidance before any success/final hook.

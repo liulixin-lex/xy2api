@@ -44,6 +44,7 @@ func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accoun
 	view, now := s.selectionView(), s.selectionNow()
 	request := s.selectionRequest(ctx, req, loads)
 	request.newSessionOutcome = req.newSessionOutcome
+	hint := openAICollabSelectionHint(ctx)
 	keys := make(map[int64]selectionKey, len(accounts))
 	for _, account := range accounts {
 		keys[account.ID] = buildSelectionKey(view, derefGroupID(req.GroupID), req.RequestedModel, account, request, now)
@@ -58,7 +59,7 @@ func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accoun
 			}
 		}
 
-		return selectionLess(keys[accounts[i].ID], keys[accounts[j].ID])
+		return openAICollabSelectionLess(keys[accounts[i].ID], keys[accounts[j].ID], hint)
 	})
 }
 

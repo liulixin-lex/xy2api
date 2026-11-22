@@ -132,6 +132,13 @@ func (s *OpenAIGatewayService) lookupStickySessionAccount(ctx context.Context, g
 	if id, handled := s.qualitySticky(ctx, groupID, sessionHash); handled {
 		return id, false, nil
 	}
+	if a := openAICollabAffinityFrom(ctx); a != nil && a.groupID == derefGroupID(groupID) {
+		if routing, ok := ctx.Value(openAICollabThreadRoutingKey{}).(openAICollabThreadRouting); ok && routing.session == sessionHash && routing.route > 0 {
+			// A recovery route is a no-wait candidate preference, never a
+			// replacement sticky owner which could create a new capacity wait.
+			return 0, false, nil
+		}
+	}
 	if s == nil || s.cache == nil {
 		return 0, false, nil
 	}

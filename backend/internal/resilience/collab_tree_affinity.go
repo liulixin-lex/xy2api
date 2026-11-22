@@ -12,11 +12,18 @@ import (
 // The embedded no-op methods leave record ordering and borrowing to their owner.
 type CollabTreeAffinity struct {
 	NoopCollabScheduler
-	mu       sync.Mutex
-	capacity int
-	ttl      time.Duration
-	entries  map[collabAffinityKey]*list.Element
-	lru      list.List
+	mu         sync.Mutex
+	capacity   int
+	ttl        time.Duration
+	entries    map[collabAffinityKey]*list.Element
+	lru        list.List
+	avoidances map[collabAffinityThread]map[int64]*list.Element
+	leases     map[CollabRecordScope]map[CollabDeliveryKey]*list.Element
+}
+
+type collabAffinityThread struct {
+	scope  CollabRecordScope
+	thread CollabDigest
 }
 
 type collabAffinityKey struct {
@@ -50,7 +57,8 @@ func NewCollabTreeAffinity(capacity int, ttl time.Duration) *CollabTreeAffinity 
 	if capacity <= 0 || capacity > CollabRecordMaxEntries {
 		capacity = CollabRecordMaxEntries
 	}
-	return &CollabTreeAffinity{capacity: capacity, ttl: ttl, entries: make(map[collabAffinityKey]*list.Element)}
+	return &CollabTreeAffinity{capacity: capacity, ttl: ttl, entries: make(map[collabAffinityKey]*list.Element),
+		avoidances: make(map[collabAffinityThread]map[int64]*list.Element), leases: make(map[CollabRecordScope]map[CollabDeliveryKey]*list.Element)}
 }
 
 func collabAffinityScopeValid(scope CollabRecordScope) bool {
@@ -79,8 +87,7 @@ func (s *CollabTreeAffinity) get(key collabAffinityKey, now time.Time) *collabAf
 	}
 	entry, _ := element.Value.(*collabAffinityEntry)
 	if !now.Before(entry.until) {
-		delete(s.entries, key)
-		s.lru.Remove(element)
+		s.remove(element)
 		return nil
 	}
 	s.lru.MoveToFront(element)
@@ -88,18 +95,53 @@ func (s *CollabTreeAffinity) get(key collabAffinityKey, now time.Time) *collabAf
 }
 
 func (s *CollabTreeAffinity) put(entry collabAffinityEntry) {
-	if element := s.entries[entry.key]; element != nil {
+	element := s.entries[entry.key]
+	if element != nil {
+		s.unindex(entry.key)
 		element.Value = &entry
 		s.lru.MoveToFront(element)
-		return
+	} else {
+		element = s.lru.PushFront(&entry)
+		s.entries[entry.key] = element
 	}
-	s.entries[entry.key] = s.lru.PushFront(&entry)
+	if entry.key.kind == collabAffinityAvoid {
+		thread := collabAffinityThread{entry.key.scope, entry.key.thread}
+		if s.avoidances[thread] == nil {
+			s.avoidances[thread] = make(map[int64]*list.Element)
+		}
+		s.avoidances[thread][entry.key.account] = element
+	} else if entry.key.kind == collabAffinityLease && !entry.released {
+		if s.leases[entry.key.scope] == nil {
+			s.leases[entry.key.scope] = make(map[CollabDeliveryKey]*list.Element)
+		}
+		s.leases[entry.key.scope][entry.key.delivery] = element
+	}
 	if s.lru.Len() > s.capacity {
-		oldest := s.lru.Back()
-		old, _ := oldest.Value.(*collabAffinityEntry)
-		delete(s.entries, old.key)
-		s.lru.Remove(oldest)
+		s.remove(s.lru.Back())
 	}
+}
+
+func (s *CollabTreeAffinity) unindex(key collabAffinityKey) {
+	switch key.kind {
+	case collabAffinityAvoid:
+		thread := collabAffinityThread{key.scope, key.thread}
+		delete(s.avoidances[thread], key.account)
+		if len(s.avoidances[thread]) == 0 {
+			delete(s.avoidances, thread)
+		}
+	case collabAffinityLease:
+		delete(s.leases[key.scope], key.delivery)
+		if len(s.leases[key.scope]) == 0 {
+			delete(s.leases, key.scope)
+		}
+	}
+}
+
+func (s *CollabTreeAffinity) remove(element *list.Element) {
+	entry, _ := element.Value.(*collabAffinityEntry)
+	s.unindex(entry.key)
+	delete(s.entries, entry.key)
+	s.lru.Remove(element)
 }
 
 // Active tree admissions renew the tree's membership as a whole without an
@@ -259,15 +301,15 @@ func (s *CollabTreeAffinity) ThreadAvoidances(_ context.Context, scope CollabRec
 	defer s.mu.Unlock()
 	var avoided map[int64]struct{}
 	now := time.Now()
-	for key, element := range s.entries {
-		if key.kind == collabAffinityAvoid && key.scope == scope && key.thread == thread {
-			entry, _ := element.Value.(*collabAffinityEntry)
-			if now.Before(entry.until) {
-				if avoided == nil {
-					avoided = make(map[int64]struct{})
-				}
-				avoided[key.account] = struct{}{}
+	for account, element := range s.avoidances[collabAffinityThread{scope, thread}] {
+		entry, _ := element.Value.(*collabAffinityEntry)
+		if !now.Before(entry.until) {
+			s.remove(element)
+		} else {
+			if avoided == nil {
+				avoided = make(map[int64]struct{})
 			}
+			avoided[account] = struct{}{}
 		}
 	}
 	return avoided
@@ -293,15 +335,22 @@ func (s *CollabTreeAffinity) AcquireDeliveryLease(_ context.Context, lease Colla
 }
 
 func (s *CollabTreeAffinity) ReleaseDeliveryLease(_ context.Context, key CollabDeliveryKey, reason CollabLeaseRelease) {
-	if s == nil || (reason != CollabLeaseReleaseConsumed && reason != CollabLeaseReleaseTerminated) {
+	if s == nil || !collabAffinityScopeValid(key.Scope) || key.Thread == "" || key.Item == "" || key.Delivery == "" || key.Digest == "" || (reason != CollabLeaseReleaseConsumed && reason != CollabLeaseReleaseTerminated) {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if entry := s.get(collabAffinityKey{kind: collabAffinityLease, scope: key.Scope, delivery: key}, time.Now()); entry != nil {
+	now := time.Now()
+	cacheKey := collabAffinityKey{kind: collabAffinityLease, scope: key.Scope, delivery: key}
+	if entry := s.get(cacheKey, now); entry != nil {
 		// Keep a tombstone until expiry so duplicate completion frames cannot
 		// recreate a delivery which has already been read or terminated.
 		entry.released = true
+		s.unindex(cacheKey)
+	} else if until := now.Add(s.ttl); now.Before(until) {
+		// Acceptance can race ahead of issuance's Written consumer. Retain
+		// absence as a tombstone so that late delivery cannot create a lease.
+		s.put(collabAffinityEntry{key: cacheKey, until: until, released: true})
 	}
 }
 
@@ -312,13 +361,12 @@ func (s *CollabTreeAffinity) HasDeliveryLeases(_ context.Context, scope CollabRe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
-	for key, element := range s.entries {
-		if key.kind == collabAffinityLease && key.scope == scope {
-			entry, _ := element.Value.(*collabAffinityEntry)
-			if !entry.released && now.Before(entry.until) {
-				return true
-			}
+	for _, element := range s.leases[scope] {
+		entry, _ := element.Value.(*collabAffinityEntry)
+		if now.Before(entry.until) {
+			return true
 		}
+		s.remove(element)
 	}
 	return false
 }
