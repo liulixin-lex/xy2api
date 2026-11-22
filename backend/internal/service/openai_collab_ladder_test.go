@@ -35,6 +35,11 @@ func TestCollabBodyDerivationsPreserveIndependentContent(t *testing.T) {
 		parsed := ParseCollabBody([]byte(bad))
 		require.True(t, parsed.Shape.Ambiguous)
 	}
+	for _, plain := range []string{`{"input":[{"type":"message","role":"user","content":"encrypted_content"}]}`, `{"input":[],"tools":[{"type":"function","parameters":{"properties":{"encrypted_content":{"type":"string"}}}}]}`, `{"input":[{"type":"function_call","encrypted_function_args":[]}]}`} {
+		parsed := ParseCollabBody([]byte(plain))
+		require.Empty(t, parsed.Items)
+		require.False(t, parsed.Shape.CallArgumentsCiphertext)
+	}
 }
 
 func TestCollabLadderGeneratedStateSpace(t *testing.T) {

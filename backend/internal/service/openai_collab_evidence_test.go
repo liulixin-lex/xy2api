@@ -121,3 +121,12 @@ func TestCollabEvidenceFailedJSON(t *testing.T) {
 	require.Len(t, observer.Rejections(), 1)
 	require.False(t, observer.Accepted())
 }
+
+func TestCollabEvidenceAcceptancePrecedesReasoningOutput(t *testing.T) {
+	observer := &CollabSendObserver{}
+	body := &collabEvidenceBody{observer: observer, stream: true}
+	body.observe([]byte("event: response.created\ndata: {\"type\":\"response.created\"}\n\n"))
+	require.False(t, observer.Accepted())
+	body.observe([]byte("event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"reasoning\",\"summary\":[]}}\n\n"))
+	require.True(t, observer.Accepted())
+}

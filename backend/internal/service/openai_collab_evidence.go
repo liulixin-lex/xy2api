@@ -196,7 +196,7 @@ func (b *collabEvidenceBody) frame() {
 			rejection := b.rejection
 			rejection.Payload, rejection.Event = payload, event
 			b.observer.record(rejection)
-		} else if resilience.ResponsesEventOutputDisposition(event, payload).SemanticOutput || typ == "response.completed" {
+		} else if typ == "response.output_item.added" || event == "response.output_item.added" || resilience.ResponsesEventOutputDisposition(event, payload).SemanticOutput {
 			b.observer.accepted.Store(true)
 		}
 	})

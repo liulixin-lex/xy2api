@@ -166,12 +166,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		return errors.New("openai usage result is nil")
 	}
 	s.observeCacheUsage(result, input.Account, time.Now())
-	if !result.PartialFailure {
+	if !result.PartialFailure && resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		s.resilience.NoteAccountSuccess(ctx, input.Account)
 	}
 	// OpenAI input_tokens already include cache reads and writes.
 	s.resilience.NoteSessionCacheUsage(ctx, result.Usage.CacheReadInputTokens, result.Usage.InputTokens)
-	if !result.PartialFailure && s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
+	if !result.PartialFailure && resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() && s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}
 

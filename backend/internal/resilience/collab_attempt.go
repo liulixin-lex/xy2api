@@ -7,11 +7,30 @@ import "context"
 func NewCollabChildState(parent *RequestState) *RequestState {
 	child := &RequestState{}
 	if parent != nil {
+		child.collabParent = parent
 		child.requestID = parent.GatewayRequestID()
 		child.collabSettings.Store(parent.CollabSettingsSnapshot())
 		child.groupID = parent.GroupID()
+		child.edge = parent.Edge()
 	}
 	return child
+}
+
+// AdoptCollabDelivery clears delivery-only failure decisions after actual
+// output. Account penalties and rejection counters remain owned by legacy.
+func (s *RequestState) AdoptCollabDelivery(accountID int64, child *RequestState) bool {
+	if s == nil || child == nil || child.collabParent != s || s.DeliveredBytes() == 0 {
+		return false
+	}
+	child.mu.Lock()
+	advice := child.retryAdvice
+	child.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retryAdvice, s.retryAdviceSet, s.retryAdviceProvider = advice, true, nil
+	s.turnFailed = false
+	delete(s.failedAccounts, accountID)
+	return true
 }
 
 type collabAttemptKey struct{}
@@ -23,6 +42,7 @@ type CollabAttempt struct {
 	Seq       CollabSendSequence
 	Optional  bool
 	Abandoned bool
+	Delivered bool
 }
 
 func WithCollabAttempt(ctx context.Context, attempt CollabAttempt) context.Context {
@@ -35,5 +55,7 @@ func CollabAttemptFrom(ctx context.Context) CollabAttempt {
 	attempt, _ := ctx.Value(collabAttemptKey{}).(CollabAttempt)
 	return attempt
 }
-func (a CollabAttempt) AccountEffectsAllowed() bool     { return !a.Optional }
-func (a CollabAttempt) CustomerSettlementAllowed() bool { return !a.Optional && !a.Abandoned }
+func (a CollabAttempt) AccountEffectsAllowed() bool { return !a.Optional }
+func (a CollabAttempt) CustomerSettlementAllowed() bool {
+	return (!a.Optional || a.Delivered) && !a.Abandoned
+}

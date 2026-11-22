@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -58,48 +59,21 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	if duration <= 0 {
 		return
 	}
-	ctx, cancel := context.WithCancel(parentRequest.Context())
-	defer cancel()
-	waitContext := ctx
-	waiters := func() bool {
-		loads, err := h.concurrencyHelper.concurrencyService.GetUsersLoadBatch(waitContext, []service.UserWithConcurrency{{ID: subject.UserID, MaxConcurrency: subject.Concurrency}})
+	var activeObserver atomic.Pointer[service.CollabSendObserver]
+	waiters := func(query context.Context) bool {
+		loads, err := h.concurrencyHelper.concurrencyService.GetUsersLoadBatch(query, []service.UserWithConcurrency{{ID: subject.UserID, MaxConcurrency: subject.Concurrency}})
 		return err != nil || loads[subject.UserID] != nil && loads[subject.UserID].WaitingCount > 0
 	}
-	if waiters() {
+	ctx, stopWatch := watchCollabTakeover(parentRequest.Context(), duration, func() bool { return activeObserver.Load().Accepted() }, waiters)
+	defer stopWatch()
+	if ctx.Err() != nil {
 		return
 	}
-	timer := time.AfterFunc(duration, func() {
-		if seam.writer.current() != collabSeamPassing {
-			cancel()
-		}
-	})
-	defer timer.Stop()
-	stop := make(chan struct{})
-	defer close(stop)
-	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-waitContext.Done():
-				return
-			case <-ticker.C:
-				if seam.writer.current() == collabSeamPassing {
-					return
-				}
-				if waiters() {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
 	child := resilience.NewCollabChildState(parent)
 	settings := parent.CollabSettingsSnapshot().Clone()
 	settings.Budget.MaxAttempts = 16
-	child.SetBudget(resilience.NewBudget(ctx, &settings, resilience.KindText, time.Now()))
+	optionalBudget := resilience.NewBudget(ctx, &settings, resilience.KindText, time.Now())
+	child.SetBudget(optionalBudget)
 	ctx = resilience.WithRequestState(ctx, child)
 	ctx = resilience.WithCollabAttempt(ctx, resilience.CollabAttempt{Optional: true})
 	model := gjson.GetBytes(seam.body, "model").String()
@@ -111,14 +85,13 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	seamKeys := c.Copy().Keys
 	latestEvidence := evidence
 	reset := func() {
-		seam.writer.discard()
+		seam.resetAttempt(c)
 		collabSeamSetKeys(c, seamKeys)
-		for _, key := range []string{resilience.GinKeyTerminalFinalized, service.ResponseCommittedKey, service.OpsStreamErrorKey, service.OpsStreamErrorsKey, service.OpsGatewayTerminalStatusKey} {
-			c.Delete(key)
-		}
-		c.Request = parentRequest.WithContext(ctx)
+		collabSeamClearTerminal(c)
+		service.IsolateCollabAttempt(c)
+		c.Request = parentRequest.Clone(ctx)
 	}
-	l := service.CollabLadder{Body: parsed, First: rejections[0].AccountID, Evidence: evidence, Continue: func() bool { return !waiters() }}
+	l := service.CollabLadder{Body: parsed, First: rejections[0].AccountID, Evidence: evidence, Continue: func() bool { return ctx.Err() == nil }}
 	if budget := parent.Budget(); budget != nil {
 		l.MaxAttempts = budget.MaxAttempts()
 	}
@@ -150,16 +123,21 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		return account.ID, release
 	}
 	l.Send = func(ctx context.Context, id int64, body []byte, action resilience.CollabAction) (resilience.CollabEvidence, bool) {
+		child = resilience.NewCollabChildState(parent)
+		child.SetBudget(optionalBudget)
+		ctx = resilience.WithRequestState(ctx, child)
 		reset()
 		observer := &service.CollabSendObserver{}
+		activeObserver.Store(observer)
 		attemptCtx := service.WithCollabSendObserver(service.WithCollabRejectedBodies(ctx, rejected), observer)
-		c.Request = parentRequest.WithContext(attemptCtx)
+		c.Request = parentRequest.Clone(attemptCtx)
 		result, err := h.gatewayService.Forward(attemptCtx, c, accounts[id], body)
 		if seam.writer.current() == collabSeamPassing {
-			c.Request = parentRequest
+			c.Request = parentRequest.WithContext(resilience.WithCollabAttempt(parentRequest.Context(), resilience.CollabAttempt{Optional: true, Delivered: true}))
 			parent.NoteGatewaySend(id)
-			resilience.SetRetryAdvice(parentRequest.Context(), resilience.RetryAdvice{})
+			parent.AdoptCollabDelivery(id, child)
 			seam.settle(accounts[id], result, err)
+			c.Request = parentRequest
 			return resilience.CollabEvidence{}, true
 		}
 		observed := observer.Rejections()
@@ -174,9 +152,10 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		if errors.As(err, &duplicate) {
 			return evidence, false
 		}
+		latestEvidence = resilience.CollabEvidence{}
 		return resilience.CollabEvidence{}, false
 	}
-	if !l.Run(ctx) && latestEvidence.Grade == resilience.CollabEvidenceGradeVerified && ctx.Err() == nil && !waiters() && seam.localEnding != nil {
+	if !l.Run(ctx) && latestEvidence.Grade == resilience.CollabEvidenceGradeVerified && ctx.Err() == nil && seam.localEnding != nil {
 		reset()
 		seam.localEnding(c, seam, saved, latestEvidence)
 	}
