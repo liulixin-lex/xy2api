@@ -9,14 +9,15 @@ import (
 )
 
 type selectionKey struct {
-	Tier      int
-	Pinned    bool
-	Priority  int
-	RateKnown bool
-	Rate      float64
-	LoadRate  int
-	LastUsed  int64
-	ID        int64
+	Tier       int
+	Pinned     bool
+	Priority   int
+	RateKnown  bool
+	RateSource string
+	Rate       float64
+	LoadRate   int
+	LastUsed   int64
+	ID         int64
 }
 
 type selectionRequest struct {
@@ -24,6 +25,8 @@ type selectionRequest struct {
 	Owner               int64
 	Borrow              bool
 	Room                func(int64, string) bool
+	trial               *selectionTrial
+	newSessionOutcome   *openAINewSessionOutcome
 	ManualOnly          bool
 	TokenBilled         bool
 	RequireCompact      bool
@@ -67,15 +70,19 @@ func selectionState(view schedquality.View, groupID int64, account *Account, mod
 }
 
 func buildSelectionKey(view schedquality.View, groupID int64, model string, acc *Account, req selectionRequest, now time.Time) selectionKey {
+	state := selectionState(view, groupID, acc, model)
+	placement := state.Placement(!req.ManualOnly && selectionAuto(view, groupID, now), now)
 	key := selectionKey{
-		Tier:     selectionTier(view, groupID, model, acc, req, now),
+		Tier:     selectionTier(placement, model, acc, req),
 		Pinned:   acc.PinnedIn(groupID),
 		Priority: acc.Priority, RateKnown: !req.TokenBilled, ID: acc.ID,
 	}
+	key.RateSource = "not_used"
 	if req.TokenBilled {
-		if rate, ok := openAISchedulingRate(acc, now, req.OAuthRateMultiplier); ok {
-			key.RateKnown = true
-			key.Rate = rate
+		rate, known, source := openAISchedulingRateDetails(acc, now, req.OAuthRateMultiplier)
+		key.RateSource = source
+		if known {
+			key.RateKnown, key.Rate = true, rate
 		}
 	}
 	if load := req.Loads[acc.ID]; load != nil {
@@ -84,11 +91,14 @@ func buildSelectionKey(view schedquality.View, groupID int64, model string, acc 
 	if acc.LastUsedAt != nil {
 		key.LastUsed = acc.LastUsedAt.UnixNano()
 	}
+	if req.newSessionOutcome != nil {
+		req.newSessionOutcome.recordCandidate(req, acc, model, key, placement, state)
+	}
 	return key
 }
 
-func selectionTier(view schedquality.View, groupID int64, model string, acc *Account, req selectionRequest, now time.Time) int {
-	switch selectionState(view, groupID, acc, model).Placement(!req.ManualOnly && selectionAuto(view, groupID, now), now) {
+func selectionTier(placement schedquality.Placement, model string, acc *Account, req selectionRequest) int {
+	switch placement {
 	case schedquality.PlaceRear:
 		return 2
 	case schedquality.PlaceTrial:

@@ -96,7 +96,7 @@ func (s RuleBSample) Eligible(now, cut time.Time) bool {
 	ownerTimeout := s.CaptureVersion >= FullTierTimeoutCaptureVersion && s.Warm && s.FullTierFirstOutputTimeout && s.Outcome == OutcomeTimeout
 	return s.Stream && (!s.SwitchedAccount || ownerTimeout) &&
 		(s.TTFOMs > 0 || s.Outcome == OutcomeTimeout) &&
-		!s.StartedAt.Before(cut) && !s.AvailableAt.Before(cut) &&
+		s.StartedAt.After(cut) && !s.AvailableAt.Before(cut) &&
 		!s.AvailableAt.Before(now.Add(-8*RuleBHalfLife)) && !s.AvailableAt.After(now)
 }
 

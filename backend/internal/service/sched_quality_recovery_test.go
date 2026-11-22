@@ -128,6 +128,9 @@ func TestEngineErrorRecoveryKeepsTrialAcrossRestart(t *testing.T) {
 			require.Len(t, f.store.Decisions, 1)
 
 			endAt := trial.TrialUntil
+			if tc.action == q.ActionTrialTimeout {
+				f.ledger.Rows = append(f.ledger.Rows, errorRecoverySamples(52, 5, endAt.Add(-30*time.Second))...)
+			}
 			if tc.action == q.ActionTrialFail {
 				endAt = trialAt.Add(time.Minute)
 				f.ledger.Rows = append(f.ledger.Rows, errorRecoverySamples(1, 1, endAt)...)

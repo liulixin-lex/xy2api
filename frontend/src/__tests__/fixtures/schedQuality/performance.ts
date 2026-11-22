@@ -23,7 +23,7 @@ type RowPatch = Omit<Partial<BackendPerfRow>, 'first' | 'cont' | 'attempts' | 's
 export function perfRow(id: number, patch: RowPatch = {}, rates: { n?: number; slowRate?: number; expectedRate?: number | null } = {}): BackendPerfRow {
   const n = rates.n ?? 463
   const expectedRate = rates.expectedRate === undefined ? 0.197 : rates.expectedRate
-  const line = { identity: 'unknown' as const, until: null, last_eval: null }
+  const line = { identity: 'unknown' as const, level: 0, until: null, trial_started_at: null, last_eval: null }
   return {
     group_id: 18,
     account_id: id,

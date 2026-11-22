@@ -1639,10 +1639,15 @@ func (s *OpenAIGatewayService) learnOpenAIStreamOnlyHTTPFailure(ctx context.Cont
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	req, _, err := s.buildUpstreamRequestWithBody(ctx, c, account, body, token, isStream, promptCacheKey, isCodexCLI)
+	return req, err
+}
+
+func (s *OpenAIGatewayService) buildUpstreamRequestWithBody(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, []byte, error) {
 	var cacheControlErr error
 	body, cacheControlErr = normalizeOpenAICacheControls(account, body)
 	if cacheControlErr != nil {
-		return nil, cacheControlErr
+		return nil, nil, cacheControlErr
 	}
 	// Determine target URL based on account type
 	var targetURL string
@@ -1667,7 +1672,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		} else {
 			validatedURL, err := s.validateUpstreamBaseURL(baseURL)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			targetURL = buildOpenAIResponsesURLForPlatform(account.Platform, validatedURL)
 		}
@@ -1680,9 +1685,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// previous_response_id，避免携带状态字段被上游拒绝。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
 
-	req, err := newGroupPromptUpstreamRequest(ctx, "POST", targetURL, body, GroupPromptResponses)
+	wire, err := ApplyGroupSystemPrompt(ctx, body, GroupPromptResponses)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(wire))
+	if err != nil {
+		return nil, nil, err
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 
@@ -1690,7 +1699,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// assertion here; OAuth/PAT/API-key keep their existing Bearer behavior.
 	authHeaders, err := s.buildOpenAIAuthenticationHeaders(ctx, account, token)
 	if err != nil {
-		return nil, fmt.Errorf("build openai authentication headers: %w", err)
+		return nil, nil, fmt.Errorf("build openai authentication headers: %w", err)
 	}
 	for key, values := range authHeaders {
 		for _, value := range values {
@@ -1703,7 +1712,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		// Required: set Host for ChatGPT API (must use req.Host, not Header.Set)
 		req.Host = "chatgpt.com"
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
-			return nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
+			return nil, nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
 		}
 	}
 
@@ -1720,7 +1729,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// 剥离后再出站——异账号 blob 与本账号的（指纹收敛后）出站身份自相矛盾。
 	s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
 	if err := s.applyOpenAICodexTicketToRequest(ctx, account, extractOpenAICodexTicketModel(body), req); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if account.UsesOpenAICodexProtocol() {
 		compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
@@ -1802,13 +1811,17 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
-	s.prepareQualityHTTP(ctx, c, account, req, body)
+	if updated := s.prepareQualityHTTP(ctx, c, account, req, body); updated != nil {
+		wire = updated
+	}
 	s.captureCacheRequestDiagnostic(c, req)
 
-	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {
-		return nil, err
+	if updated, err := applyMappedGPT55LiteBody(req, account, body); err != nil {
+		return nil, nil, err
+	} else if updated != nil {
+		wire = updated
 	}
-	return req, nil
+	return req, wire, nil
 }
 
 // codexIdentityOverrideUA 返回账号级显式配置的出站 User-Agent，供强制统一身份时作为覆写来源。

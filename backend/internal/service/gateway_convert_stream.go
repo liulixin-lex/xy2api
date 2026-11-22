@@ -756,7 +756,7 @@ func (st *gatewayConvertStream) conversionFailed(err error) gatewayConvertOutcom
 	st.released = true
 	st.held = nil
 	st.sawFailure = true
-	WriteTargetProtocolError(st.c, st.protocol, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+	writeUpstreamConversionError(st.c, st.resp, "anthropic", st.protocol, "server_error", "", err.Error(), err)
 	if beforeOutput {
 		_ = st.resp.Body.Close()
 	}

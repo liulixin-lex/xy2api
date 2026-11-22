@@ -116,13 +116,16 @@ func sortedCallsiteKeys(callsites map[string]int) []string {
 func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 	want := map[string]map[string]int{
 		"CanAttempt": {
-			"internal/handler/failover_loop.go:FailoverState.HandleSelectionExhausted":  2,
-			"internal/handler/failover_loop.go:FailoverState.HandleFailoverError":       1,
-			"internal/handler/resilience_budget.go:resilienceAttemptFailed":             2,
-			"internal/handler/resilience_recovery_outcome.go:recordSelectionExhausted":  1,
-			"internal/handler/openai_queue_reselection.go:canTryOpenAIQueueReselection": 1,
+			"internal/handler/failover_loop.go:FailoverState.HandleSelectionExhausted":                          2,
+			"internal/handler/failover_loop.go:FailoverState.HandleFailoverError":                               1,
+			"internal/handler/resilience_budget.go:resilienceAttemptFailed":                                     3,
+			"internal/handler/resilience_recovery_outcome.go:recordSelectionExhausted":                          1,
+			"internal/handler/openai_queue_reselection.go:canTryOpenAIQueueReselection":                         1,
+			"internal/service/openai_conversion_retry.go:openAIConversionRetryError":                            1,
+			"internal/service/openai_gateway_chat_completions.go:OpenAIGatewayService.forwardAsChatCompletions": 1,
 		},
 		"ConsumeInPlaceRetry": {
+			"internal/service/openai_conversion_retry.go:OpenAIGatewayService.StartOpenAIConversionRetry":       1,
 			"internal/service/antigravity_gateway_retry.go:AntigravityGatewayService.antigravityRetryLoop":      3,
 			"internal/service/openai_encrypted_content_http.go:planHTTPEncryptedContentRepair":                  1,
 			"internal/service/openai_m3.go:openAIM3Attempt.learn":                                               1,

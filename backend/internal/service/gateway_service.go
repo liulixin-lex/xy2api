@@ -574,6 +574,9 @@ type AccountSelectionResult struct {
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
 	profitGate       *openAIProfitControlGate
 	selectionContext *openAISelectionContext
+	// Owned by this constrained result until dispatch admission succeeds.
+	vetoPlan  *openAIStickyChange
+	vetoTrial *selectionTrialReservation
 }
 
 // ProfitGateActive 报告本次选号是否处于利润门之下。
@@ -701,6 +704,7 @@ const OpenAIAlphaSearchE5001Reason GatewayFailureReason = "openai_alpha_search_e
 // trigger account failover. Additive metadata keeps existing composite literals
 // source-compatible and preserves their legacy retry-next-account behavior.
 type UpstreamFailoverError struct {
+	conversionRetry                 *openAIConversionRetryState
 	UpstreamRecoveryHint            *resilience.UpstreamRecoveryHint
 	UpstreamTarget                  *resilience.UpstreamAttemptTarget
 	BudgetCutPlan                   *resilience.TimeoutPlan
@@ -789,7 +793,7 @@ func (e *UpstreamFailoverError) OpenAIWrappedRequestRejectionCode() string {
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
-	if e != nil && (e.PreDispatchSelectionInvalidated || e.Reason == openAITierUnavailable) {
+	if e != nil && (e.PreDispatchSelectionInvalidated || e.Reason == openAITierUnavailable || e.Reason == OpenAIConversionIdentityReason) {
 		return false
 	}
 	// Forbidden intentionally uses soft cooldown/session streaks without also reporting scheduler-health failure.

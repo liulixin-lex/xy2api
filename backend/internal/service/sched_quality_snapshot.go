@@ -15,15 +15,20 @@ type schedQualityKey struct {
 	group   int64
 }
 type schedQualityData struct {
-	replayStats   schedReplayStats
-	now           time.Time
-	samples       map[SchedAccountModel][]q.AttemptSample
-	globalEnabled bool
-	running       map[string]q.AttemptSample
-	ruleSamples   map[SchedAccountModel][]q.RuleBSample
-	ruleGroups    map[schedGroupModel][]q.RuleBSample
-	peers         *peerBucket
-	peerBuckets   map[time.Time]*peerBucket
+	missingHistory map[q.LineKey]schedMissingHistory
+	evidenceSince  time.Time
+	observedSince  time.Time
+	replayStats    schedReplayStats
+	now            time.Time
+	samples        map[SchedAccountModel][]q.AttemptSample
+	globalEnabled  bool
+	running        map[string]q.AttemptSample
+	previous       map[string]*q.AttemptSample
+	runningCache   schedPredecessorIndex
+	ruleSamples    map[SchedAccountModel][]q.RuleBSample
+	ruleGroups     map[schedGroupModel][]q.RuleBSample
+	peers          *peerBucket
+	peerBuckets    map[time.Time]*peerBucket
 }
 
 type schedQualityView struct {
@@ -116,6 +121,9 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 			grouped[groupKey] = row
 		}
 		lv := q.LineView{Identity: r.Identity, Trial: r.Trial, Level: r.Level, Until: r.Until, TrialUntil: r.TrialUntil}
+		if r.Trial {
+			lv.TrialStartedAt = r.Epoch
+		}
 		verdict, basis := s.assessLine(d, r, q.EventRegular, d.now, resets)
 		switch key.Line {
 		case q.DimensionTTFO:
@@ -338,7 +346,16 @@ func (s *SchedQualityEngineService) isMember(group, account int64) bool {
 
 // LogSchedQualityDecision emits a committed decision using the shared state-event format.
 func LogSchedQualityDecision(ctx context.Context, d q.Decision) {
-	slog.InfoContext(ctx, "sched_quality.state", "component", "sched_quality", "at", d.At, "rule_version", q.RuleVersion, "account_id", d.Key.AccountID, "model", d.Key.Model, "group_id", d.Key.GroupID, "action", d.Action, "line", d.Key.Line, "level", d.Level, "until", d.Until, "basis", d.Basis, "attempt_ids", d.Basis.AttemptIDs)
+	slog.InfoContext(ctx, "sched_quality.state", "component", "sched_quality", "at", d.At, "rule_version", q.RuleVersion, "account_id", d.Key.AccountID, "model", d.Key.Model, "group_id", d.Key.GroupID, "action", d.Action, "line", d.Key.Line, "level", d.Level, "until", d.Until, "release_reason", d.Basis.ReleaseReason, "trial_duration_seconds", d.Basis.TrialDurationSeconds, "history_missing", d.Basis.HistoryMissing, "basis", d.Basis, "attempt_ids", d.Basis.AttemptIDs)
+	if !d.Basis.MissingDeadline {
+		return
+	}
+	// Only a rear review or trial assessment can repair a missing deadline.
+	// Administrative actions can carry the same persisted basis as evidence.
+	switch d.Action {
+	case q.ActionRenew, q.ActionTrial, q.ActionTrialFail, q.ActionTrialPass, q.ActionTrialTimeout:
+		slog.WarnContext(ctx, "sched_quality.missing_deadline", "component", "sched_quality", "at", d.At, "account_id", d.Key.AccountID, "model", d.Key.Model, "group_id", d.Key.GroupID, "line", d.Key.Line)
+	}
 }
 
 // These projections support the existing board/admin response during integration.

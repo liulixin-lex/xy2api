@@ -47,8 +47,6 @@ export default {
         cache: '缓存',
       },
       placeUntil: {
-        rear: '后排至 {time}',
-        trial: '试用至 {time}',
         exempt: '豁免至 {time}',
       },
       ref: {
@@ -281,6 +279,12 @@ export default {
       error: '报错线',
       cache: '缓存线',
     },
+    // A stay wraps only at its dots: the words between them are held together by no-break spaces.
+    stay: {
+      rear: '第\u00a0{level}\u00a0档 · {time}\u00a0复核',
+      trial: '{start}\u00a0起 · 最晚\u00a0{end}',
+      line: '{line} · {stay}',
+    },
     ttftRule: {
       title: '首字线判定',
       hint: '对所有 OpenAI 分组生效。按首个有效输出判定，与同组同模型的前排号比较；样本越少，估计越靠近同组总体水平。',
@@ -432,8 +436,7 @@ export default {
         fast: '明显更快：慢占比的保守上界 {upper} 低于应有 {expected}',
         cacheLow: '偏差大：续接缓存 {rate} 低于本组下限 {min}',
       },
-      scoreUse: '新会话到来时，在同一优先级、价格不更高的号里，优先给分数比原本要给的号明显更低（低 3.0 以上）的号。',
-      scoreUseFull: '新会话到来时，在同一优先级、价格不更高的号里，优先给分数比原本要给的号明显更低（低 3.0 以上）的号；每个号在每个 15 分钟时段里这样多接的新会话，不超过它最近 15 分钟首派数的四分之一。已有归属的会话不受影响。',
+      scoreUse: '只供查看，不参与选号。',
       detail: {
         first: '首字',
         cache: '缓存',
@@ -466,6 +469,7 @@ export default {
         notMember: '已不在本组，没有判定。',
         gateOff: '这版统计没有计入本分组（统计时本分组没开质量门槛，或分组是之后才建的），不判定。',
         elsewhere: '{line}：本组没有样本，依据全部来自其他分组。',
+        stay: '{line}：{place}，{stay}。',
       },
       switchReason: {
         handoff: '首字超时交接',
@@ -474,8 +478,6 @@ export default {
         profit_floor: '利润下限释放',
         other: '其他',
       },
-      rearUntil: '{time} 到期复核',
-      trialUntil: '{time} 试用结束',
     },
     noAction: {
       short: {
@@ -498,7 +500,6 @@ export default {
       counts: '（{have} / {need}）',
       none: '还没有评估记录',
       since: '，已持续 {duration}',
-      trialEnds: '，{time} 试用结束',
     },
     duration: {
       minutes: '{m} 分钟',

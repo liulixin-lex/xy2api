@@ -59,9 +59,6 @@ func (s *duplicateAccountRepoStub) CreateWithAccountGroups(ctx context.Context, 
 	}
 	account.AccountGroups = clonedGroups
 	s.accountGroupsOf[account.ID] = clonedGroups
-	if len(groupIDs) > 0 {
-		s.groupsOf[account.ID] = append([]int64(nil), groupIDs...)
-	}
 	stored := *account
 	s.accounts[account.ID] = &stored
 	s.mockAccountRepoForGemini.accountsByID[account.ID] = &stored
@@ -85,7 +82,7 @@ func (s *duplicateAccountRepoStub) FindByExtraField(_ context.Context, key strin
 func TestDuplicateAccountCopiesConfigurationAndResetsRuntimeState(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
-	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: &Group{Platform: PlatformOpenAI}}}
 
 	notes := "keep this note"
 	proxyID := int64(17)
@@ -216,7 +213,7 @@ func TestDuplicateAccountCopiesConfigurationAndResetsRuntimeState(t *testing.T) 
 func TestDuplicateAccountRejectsCredentialShadow(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
-	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: &Group{Platform: PlatformOpenAI}}}
 	parentID := int64(99)
 	shadow := &Account{
 		Name:            "shadow",
@@ -240,7 +237,7 @@ func TestDuplicateAccountRejectsRotatingOrUnknownCredentialTypes(t *testing.T) {
 		t.Run(accountType, func(t *testing.T) {
 			ctx := context.Background()
 			repo := newDuplicateAccountRepoStub()
-			svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+			svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: &Group{Platform: PlatformOpenAI}}}
 			source := &Account{
 				Name:        "rotating-credential-account",
 				Platform:    PlatformOpenAI,
@@ -262,7 +259,7 @@ func TestDuplicateAccountRejectsRotatingOrUnknownCredentialTypes(t *testing.T) {
 func TestDuplicateAccountPreservesUngroupedState(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
-	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: &Group{Platform: PlatformOpenAI}}}
 	source := &Account{
 		Name:        "ungrouped",
 		Platform:    PlatformAnthropic,
@@ -304,7 +301,7 @@ func TestDuplicateAccountSimpleModeRejectsCompositeGroupBinding(t *testing.T) {
 func TestDuplicateAccountAtomicCreateFailureLeavesNoOrphan(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
-	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: &Group{Platform: PlatformOpenAI}}}
 	source := &Account{
 		Name:          "source",
 		Platform:      PlatformAnthropic,
@@ -332,7 +329,7 @@ func TestDuplicateAccountNamePreservesSuffixWithinSchemaLimit(t *testing.T) {
 func TestDuplicateAccountReturnsExistingCopyForSameOperationKey(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
-	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: &Group{Platform: PlatformOpenAI}}}
 	source := &Account{
 		Name:        "source",
 		Platform:    PlatformAnthropic,
@@ -363,7 +360,7 @@ func TestDuplicateAccountReturnsExistingCopyForSameOperationKey(t *testing.T) {
 func TestDuplicateAccountCopiesIQTargetSettingsDisabled(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
-	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo, groupRepo: &groupRepoStubForAdmin{getByID: &Group{Platform: PlatformOpenAI}}}
 	enabled := true
 	effort := "ultra"
 	interval, timeout := 45, 180

@@ -102,6 +102,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	c.Request = c.Request.WithContext(service.WithRequestReplaySafety(c.Request.Context(), body, false))
+	c.Request = c.Request.WithContext(service.WithOpenAIConversionRetry(c.Request.Context()))
 	c.Request = c.Request.WithContext(service.WithOpenAIEncryptedContentMigrationGuard(c.Request.Context(), body))
 	imageIntent := service.IsExplicitImageGenerationIntent("/v1/chat/completions", reqModel, body)
 	// Responses-shaped Chat requests can forward the original continuation ID.
@@ -186,6 +187,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var conversionFailure *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 
 	// 分组利润控制：chat completions 文本入口请求级装门并固定 pricingAt。
@@ -198,6 +200,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	for {
 		if failoverClientGone(c) {
+			if conversionFailure != nil {
+				service.WriteOpenAIConversionRetryFailure(c, conversionFailure, "client_canceled")
+			}
 			return
 		}
 		reqLog.Debug("openai_chat_completions.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
@@ -220,6 +225,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("account_selection_ms", time.Now())
 		selection, scheduleDecision, err := selectNext(c.Request.Context(), failedAccountIDs)
 		if err != nil {
+			if conversionFailure != nil {
+				service.WriteOpenAIConversionRetryFailure(c, conversionFailure, "no_candidate")
+				return
+			}
 			recordSelectionExhausted(c.Request.Context())
 			if failoverClientGone(c) {
 				reqLog.Info("openai_chat_completions.account_select_aborted_client_disconnected", zap.Error(err))
@@ -246,6 +255,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			}
 		}
 		if selection == nil || selection.Account == nil {
+			if conversionFailure != nil {
+				service.WriteOpenAIConversionRetryFailure(c, conversionFailure, "no_candidate")
+				return
+			}
 			cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, forwardModel, reqModel)
 			if !cls.ModelNotFound && !cls.CapabilityOnly {
 				markOpsRoutingCapacityLimited(c)
@@ -259,16 +272,36 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		resilience.StateFrom(c.Request.Context()).BeginDispatchPhase("account_admission_ms", time.Now())
-		accountReleaseFunc, slotResult := h.tryOneQueueReselection(c, apiKey.GroupID, sessionHash, &selection, &scheduleDecision, failedAccountIDs, false, selectNext, reqStream, &streamStarted, reqLog)
+		var accountReleaseFunc func()
+		var slotResult openAISlotAcquireResult
+		if conversionFailure != nil {
+			if !selection.Acquired {
+				if release := service.CombineSelectionRelease(selection, nil); release != nil {
+					release()
+				}
+				service.WriteOpenAIConversionRetryFailure(c, conversionFailure, "slot_unavailable")
+				return
+			}
+			accountReleaseFunc, slotResult = h.acquireOpenAIAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog, func(int, string, string, string) {})
+		} else {
+			accountReleaseFunc, slotResult = h.tryOneQueueReselection(c, apiKey.GroupID, sessionHash, &selection, &scheduleDecision, failedAccountIDs, false, selectNext, reqStream, &streamStarted, reqLog)
+		}
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// 利润终检否决：排除该账号重新选号；否决次数达上限则按无可用账号终止。
 			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
+				if conversionFailure != nil {
+					service.WriteOpenAIConversionRetryFailure(c, conversionFailure, "no_candidate")
+					return
+				}
 				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
 				return
 			}
 			continue
 		}
 		if slotResult != openAISlotAcquireOK {
+			if conversionFailure != nil {
+				service.WriteOpenAIConversionRetryFailure(c, conversionFailure, "slot_unavailable")
+			}
 			return
 		}
 		account = selection.Account
@@ -307,9 +340,27 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
+		service.CompleteOpenAIConversionRetry(c, result, err)
 		recordOpenAIForwardUsage(c, account, result)
 		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, gatewayOpenAICompleted(result))
+		var conversionErr *service.UpstreamFailoverError
+		if errors.As(err, &conversionErr) && conversionErr.Reason == service.OpenAIConversionIdentityReason {
+			if switchCount >= maxAccountSwitches {
+				finishOpenAIStickyForward(c, account.ID, result, err)
+				service.WriteOpenAIConversionRetryFailure(c, conversionErr, "switch_budget")
+				return
+			}
+			service.AbandonOpenAIStickyForwardForIdentityConflict(c.Request.Context(), account.ID)
+			if !h.gatewayService.StartOpenAIConversionRetry(c, account, conversionErr) {
+				return
+			}
+			conversionFailure = conversionErr
+			failedAccountIDs[account.ID] = struct{}{}
+			switchCount++
+			continue
+		}
 		finishOpenAIStickyForward(c, account.ID, result, err)
+
 		var cyberBlockBodyChat []byte
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockBodyChat = body
@@ -387,6 +438,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			} else {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
+					if conversionFailure != nil {
+						h.handleFailoverExhausted(c, failoverErr, streamStarted || c.Writer.Written())
+						return
+					}
 					if failoverClientGone(c) {
 						reqLog.Info("openai_chat_completions.failover_aborted_client_disconnected",
 							zap.Int64("account_id", account.ID),

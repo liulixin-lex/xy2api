@@ -5,3 +5,6 @@ R6-B parameter vector files (44 cases each). All identities use replay encoding:
 absolute timestamps are retained. The source prior states omit level/admissions;
 these fixtures test identity transitions only. Ladder/history are covered by the
 synthetic table tests. The input event is gated through Due before calling Step.
+
+Recovery 3.1 preserves all 132 inputs and verdicts; five prior direct-return
+identity labels now expect unknown, as both rear review and trial release require.

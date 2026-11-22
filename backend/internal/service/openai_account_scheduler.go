@@ -47,10 +47,63 @@ type OpenAIAccountScheduleRequest struct {
 	RequiredImageCapability OpenAIImagesCapability
 	// RequireCompact is only for legacy /responses/compact capability filtering
 	// and compact_model_mapping; native remote compaction v2 leaves it false.
-	RequireCompact     bool
-	ExcludedIDs        map[int64]struct{}
-	baseExclusions     map[int64]struct{} // Independent exclusions before first-output and quality routing.
-	firstOutputAvoided map[int64]struct{} // Source attribution for the last-resort event.
+	RequireCompact      bool
+	ExcludedIDs         map[int64]struct{}
+	baseExclusions      map[int64]struct{} // Independent exclusions for owner-guard opportunity checks.
+	candidateConstraint *openAIRequestCandidateConstraint
+	newSessionOutcome   *openAINewSessionOutcome
+	firstOutputAvoided  map[int64]struct{} // Source attribution for the last-resort event.
+}
+
+type openAIRequestCandidateConstraint struct {
+	originalPriority  int
+	actualModel       string
+	excludedAccountID int64
+	candidateFilter   func(*Account) bool
+	changedLimits     map[int64]struct{} // Only this public selection; skip stale slots in later internal passes.
+}
+
+type openAIRequestCandidateConstraintKey struct{}
+
+// WithOpenAISelectionCandidateConstraint limits one scheduler request to
+// another account at the original priority and actual model, excluding the
+// account that produced the original response. An optional candidate filter
+// can further restrict accounts before and after slot acquisition.
+func WithOpenAISelectionCandidateConstraint(ctx context.Context, originalPriority int, actualModel string, excludedAccountID int64, candidateFilter ...func(*Account) bool) context.Context {
+	constraint := openAIRequestCandidateConstraint{
+		originalPriority: originalPriority, actualModel: strings.TrimSpace(actualModel), excludedAccountID: excludedAccountID,
+	}
+	if len(candidateFilter) > 0 {
+		constraint.candidateFilter = candidateFilter[0]
+	}
+	return context.WithValue(WithOpenAISelectionNoWait(ctx), openAIRequestCandidateConstraintKey{}, constraint)
+}
+
+func openAIRequestCandidateConstraintFrom(ctx context.Context) *openAIRequestCandidateConstraint {
+	constraint, ok := ctx.Value(openAIRequestCandidateConstraintKey{}).(openAIRequestCandidateConstraint)
+	if !ok {
+		return nil
+	}
+	return &constraint
+}
+
+func requestCandidateConstraintFailure(req OpenAIAccountScheduleRequest, account *Account) string {
+	constraint := req.candidateConstraint
+	if constraint == nil {
+		return ""
+	}
+	if account == nil || constraint.actualModel == "" || constraint.excludedAccountID <= 0 ||
+		account.ID == constraint.excludedAccountID || account.Priority != constraint.originalPriority ||
+		OpenAIAttemptModel(account, req.RequestedModel) != constraint.actualModel {
+		return "request_candidate_constraint"
+	}
+	if _, rejected := constraint.changedLimits[account.ID]; rejected {
+		return "request_candidate_constraint"
+	}
+	if constraint.candidateFilter != nil && !constraint.candidateFilter(account) {
+		return "request_candidate_constraint"
+	}
+	return ""
 }
 
 type OpenAIAccountScheduleDecision struct {
@@ -216,49 +269,27 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
-	ctx = beginNewPickSelection(ctx)
-	pass := newPickPassFrom(ctx)
-	if pass != nil {
-		defer pass.release()
-	}
-	selection, decision, err = s.scheduleOpenAIAccount(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
-	if err == nil && pass != nil {
-		if err = pass.deliver(ctx, selection); err != nil {
-			return nil, OpenAIAccountScheduleDecision{}, err
-		}
-	}
-	return selection, decision, err
-}
-
-func (s *OpenAIGatewayService) scheduleOpenAIAccount(
-	ctx context.Context,
-	groupID *int64,
-	previousResponseID string,
-	sessionHash string,
-	requestedModel string,
-	excludedIDs map[int64]struct{},
-	requiredTransport OpenAIUpstreamTransport,
-	requiredCapability OpenAIEndpointCapability,
-	requiredImageCapability OpenAIImagesCapability,
-	requireCompact bool,
-	platform string,
-	previousResponseCanMove bool,
-	useUpstreamTokenCost bool,
-) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
+	ctx, handoff := beginSelectionHandoff(ctx)
+	defer handoff.finish(&selection)
 	// A new selection must not inherit the previous account's rescue pass.
 	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
 	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
 	ctx = withSelectionFailureEvidence(ctx)
+	newSessionLogState := &openAINewSessionLogState{}
+	firstSelection := resilience.StateFrom(ctx).BeginAccountSelection()
+	ctx = context.WithValue(ctx, openAINewSessionLogStateKey{}, newSessionLogState)
 	request := OpenAIAccountScheduleRequest{
 		GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), RequestedModel: requestedModel,
 		RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 		RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: excludedIDs,
+		candidateConstraint: openAIRequestCandidateConstraintFrom(ctx),
 	}
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, request)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
 	ordinary := NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx)
 	defer func() {
+		newSessionLogState.log(ctx, selection, err)
 		s.freezeOpenAITransferEligibility(ctx, groupID, sessionHash, selection, ordinary && err == nil)
 		s.planOpenAIFollow(ctx, groupID, sessionHash, requestedModel, selection, ordinary && err == nil)
 		s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection)
@@ -273,13 +304,14 @@ func (s *OpenAIGatewayService) scheduleOpenAIAccount(
 		guard.Store(false)
 	}
 	stickyOwner := state.StickyOwner()
+	missingBinding := sessionHash == ""
 	if stickyOwner <= 0 && sessionHash != "" && s != nil {
-		var missing bool
-		stickyOwner, missing, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
-		if isFirstNewPickSelection(ctx) && !missing {
-			stopNewPick(ctx)
-		}
+		stickyOwner, missingBinding, _ = s.lookupStickySessionAccount(ctx, groupID, sessionHash)
 		state.NoteStickyOwner(stickyOwner)
+	}
+	if firstSelection && ordinary && stickyOwner == 0 && missingBinding && s.newSessionAliasAbsent(ctx, groupID, sessionHash) && strings.TrimSpace(previousResponseID) == "" && request.candidateConstraint == nil && len(excludedIDs) == 0 &&
+		!preserveOpenAIGuardianParentBinding(ctx, sessionHash) && !preserveOpenAIRejectionBinding(ctx, sessionHash) {
+		newSessionLogState.outcome = newOpenAINewSessionOutcome(ctx, request)
 	}
 	_, ownerExcluded := excludedIDs[stickyOwner]
 	ownerFailedInRequest := ownerExcluded && (state.AccountFailed(stickyOwner) || state.StateRepairAvoided(stickyOwner))
@@ -348,10 +380,6 @@ func (s *OpenAIGatewayService) scheduleOpenAIAccount(
 	// A first-output cutoff leaves the owner bound. Only the existing avoidance
 	// scopes belong in request state, which trial selection uses to detect borrowing.
 	state.SetAvoided(avoided)
-	// This pass must be able to preserve a versioned owner while borrowing.
-	// Legacy callers without a pending binding would otherwise eagerly rebind.
-	// Retain the independent request restrictions before first-output and
-	// quality routing add their own. Veto attribution uses the full membership.
 	if ordinary && sessionHash != "" {
 		request.baseExclusions = mergeExcluded(origExcluded, avoided)
 		if request.baseExclusions == nil {
@@ -363,9 +391,6 @@ func (s *OpenAIGatewayService) scheduleOpenAIAccount(
 	binding := pendingOpenAIStickyChange(ctx)
 	if ordinary && resilience.Current().SessionOn() && binding.matchesSession(groupID, sessionHash) && !binding.skipCommit && s.resilience != nil && s.resilience.store != nil &&
 		firstOutputMigrationAllowed(ctx, sessionHash) && !s.firstOutputQualityOwnsSticky(ctx, groupID, sessionHash) {
-		if pass := newPickPassFrom(ctx); pass != nil {
-			pass.firstOutputAvoidRead = true
-		}
 		firstOutputAvoided, _ = sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), firstOutputAvoidSession(sessionHash), s.resilience.sessionResetAt)
 		if _, hit := firstOutputAvoided[stickyOwner]; hit {
 			_, hard := origExcluded[stickyOwner]
@@ -381,8 +406,8 @@ func (s *OpenAIGatewayService) scheduleOpenAIAccount(
 	markResilienceConfigError(ctx, err)
 	// xy2api resilience: last-resort soft selection instead of "no available
 	// account" (design §4.3). Continuations owned by an account keep failing
-	// as before.
-	if isNoAccountSelectionError(err) && strings.TrimSpace(previousResponseID) == "" {
+	// as before. A conversion retry cannot relax soft penalties.
+	if request.candidateConstraint == nil && isNoAccountSelectionError(err) && strings.TrimSpace(previousResponseID) == "" {
 		lrCtx := s.withOpenAIQuotaAutoPauseContext(ctx)
 		if requiredImageCapability == "" {
 			lrCtx = s.withOpenAIProfitControlGate(lrCtx, groupID)
@@ -392,6 +417,7 @@ func (s *OpenAIGatewayService) scheduleOpenAIAccount(
 			GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 			RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded, firstOutputAvoided: firstOutputAvoided,
+			newSessionOutcome: newSessionLogState.outcome,
 			RequirePrivacySet: s.openAIGroupRequiresPrivacySet(lrCtx, groupID), UseUpstreamTokenCost: useUpstreamTokenCost,
 		}, avoided); lr != nil {
 			selection, err = lr, nil
@@ -538,10 +564,10 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, OpenAIAccountScheduleRequest{
-		baseExclusions: parent.baseExclusions,
-		GroupID:        groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
+		GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 		RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 		RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: excludedIDs,
+		baseExclusions: parent.baseExclusions, candidateConstraint: parent.candidateConstraint,
 	})
 	resilience.StateFrom(ctx).ResetStickyBypassReason()
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
@@ -590,6 +616,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 			RequiredImageCapability: requiredImageCapability,
 			RequireCompact:          requireCompact,
 			ExcludedIDs:             excludedIDs,
+			candidateConstraint:     parent.candidateConstraint,
 			RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
 		})
 		if err != nil {

@@ -800,9 +800,42 @@ func NewBufferedResponseAccumulator() *BufferedResponseAccumulator {
 }
 func (a *BufferedResponseAccumulator) Err() error { return a.err }
 
-func (a *BufferedResponseAccumulator) fail(field, reason string) {
+func (a *BufferedResponseAccumulator) fail(field, reason string, identity ...string) {
 	if a.err == nil {
-		a.err = &UpstreamConversionError{Field: field, Reason: reason, SourceProtocol: "responses"}
+		conversion := &UpstreamConversionError{Field: field, Reason: reason, SourceProtocol: "responses"}
+		if len(identity) > 0 {
+			conversion.IdentityConflict = identity[0]
+		}
+		a.err = conversion
+	}
+}
+
+// Identity labels describe which lookup matched and which value disagreed;
+// they never include the actual item ID, call ID, type, or tool name.
+func outputIdentityConflict(left, right ResponsesOutput, matchedBy, reason string) *UpstreamConversionError {
+	if matchedBy == "" {
+		matchedBy = "output_index"
+		if left.ID != "" && left.ID == right.ID {
+			matchedBy = "item_id"
+		} else if left.CallID != "" && left.CallID == right.CallID {
+			matchedBy = "call_id"
+		}
+	}
+	mismatch := "name"
+	switch {
+	case left.ID != "" && right.ID != "" && left.ID != right.ID:
+		mismatch = "item_id"
+	case left.CallID != "" && right.CallID != "" && left.CallID != right.CallID:
+		mismatch = "call_id"
+	case left.Type != "" && right.Type != "" && left.Type != right.Type:
+		mismatch = "type"
+	}
+	return &UpstreamConversionError{Field: "output", Reason: reason, SourceProtocol: "responses", IdentityConflict: matchedBy + "_" + mismatch}
+}
+
+func (a *BufferedResponseAccumulator) failIdentity(previous, incoming ResponsesOutput, matchedBy string) {
+	if a.err == nil {
+		a.err = outputIdentityConflict(previous, incoming, matchedBy, "conflicting output identity")
 	}
 }
 
@@ -828,7 +861,7 @@ func (a *BufferedResponseAccumulator) slot(item ResponsesOutput, index int, expl
 	for _, candidate := range a.slots {
 		if (item.ID != "" && item.ID == candidate.item.ID) || (item.CallID != "" && item.CallID == candidate.item.CallID) {
 			if found != nil && found != candidate {
-				a.fail("output", "ambiguous output identity")
+				a.fail("output", "ambiguous output identity", "item_id_call_id_multiple_items")
 				return nil
 			}
 			found = candidate
@@ -836,11 +869,15 @@ func (a *BufferedResponseAccumulator) slot(item ResponsesOutput, index int, expl
 	}
 	if found != nil {
 		if bufferedIdentityConflict(found.item, item) {
-			a.fail("output", "conflicting output identity")
+			a.failIdentity(found.item, item, "")
 			return nil
 		}
 		if !terminal && explicit && found.explicit && found.index != index {
-			a.fail("output_index", "conflicting output index")
+			identity := "call_id_output_index"
+			if item.ID != "" && item.ID == found.item.ID {
+				identity = "item_id_output_index"
+			}
+			a.fail("output_index", "conflicting output index", identity)
 			return nil
 		}
 		return found
@@ -851,7 +888,7 @@ func (a *BufferedResponseAccumulator) slot(item ResponsesOutput, index int, expl
 				continue
 			}
 			if bufferedIdentityConflict(candidate.item, item) {
-				a.fail("output", "conflicting output identity")
+				a.failIdentity(candidate.item, item, "output_index")
 				return nil
 			}
 			return candidate
@@ -867,7 +904,7 @@ func (a *BufferedResponseAccumulator) slot(item ResponsesOutput, index int, expl
 			continue
 		}
 		if found != nil {
-			a.fail("output", "ambiguous unindexed output")
+			a.fail("output", "ambiguous unindexed output", "unindexed_multiple_items")
 			return nil
 		}
 		found = candidate

@@ -371,7 +371,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	}
 
 	if err := evidence.finish(readErr, finalResp != nil); err != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Upstream stream ended without a complete response")
+		writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolChat, "server_error", "", "Upstream stream ended without a complete response", nil)
 		return nil, err
 	}
 
@@ -389,14 +389,14 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 
 	responsesResp, conversionErr := apicompat.AnthropicToResponsesResponseWithBridgeOptions(finalResp, opts)
 	if conversionErr != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", conversionErr.Error())
+		writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolChat, "server_error", "", conversionErr.Error(), conversionErr)
 		return nil, conversionErr
 	}
 	if err := m7RestoreBridgeResponse(responsesResp, opts); err != nil {
 		return nil, err
 	}
 	if err := apicompat.ValidateResponsesForChat(responsesResp); opts.Bridge != nil && err != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolChat, "server_error", "", err.Error(), err)
 		return nil, err
 	}
 	ccResp := apicompat.ResponsesToChatCompletions(responsesResp, originalModel)
@@ -482,7 +482,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 			ccChunks = apicompat.ResponsesEventToChatChunks(resEvt, ccState)
 		}
 		if err := ccState.Err(); err != nil {
-			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+			writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolChat, "server_error", "", err.Error(), err)
 			return nil
 		}
 		var frames []string
@@ -525,7 +525,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	finalizeStream := func() []string {
 		if !stream.sawStop || stream.sawFailure {
 			apicompat.FinalizeResponsesChatStreamWithTerminal(ccState, false)
-			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Upstream stream ended without a terminal event")
+			writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolChat, "server_error", "", "Upstream stream ended without a terminal event", nil)
 			return nil
 		}
 		var frames []string
@@ -576,7 +576,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	result.ResponseFactsKnown, result.UsagePresent, result.UsageSource = outcome.ResponseFactsKnown, outcome.UsagePresent, outcome.UsageSource
 	result.TerminalSeen, result.TerminalValid, result.ResponseBodyKind = outcome.TerminalSeen, outcome.TerminalValid, outcome.ResponseBodyKind
 	if err := ccState.Err(); err != nil && outcome.err == nil {
-		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolChat, "server_error", "", err.Error(), err)
 		outcome.err = err
 	}
 	result.ClientDisconnect = stream.guarded && stream.gone

@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -329,6 +330,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
+	if err := validateNewOAuthOnlyBindings(ctx, s.groupRepo, source.Type, nil, groupIDs); err != nil {
+		return nil, err
+	}
 	proxyID := source.ProxyID
 	if source.ProxyFallbackOriginID != nil {
 		// Proxy fallback is transient runtime state; duplicate the configured origin.
@@ -626,15 +630,12 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
-	if err := s.accountRepo.Create(ctx, account); err != nil {
+	if err := validateNewOAuthOnlyBindings(ctx, s.groupRepo, account.Type, nil, groupIDs); err != nil {
 		return nil, err
 	}
-
-	// 绑定分组
-	if len(groupIDs) > 0 {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
-			return nil, err
-		}
+	account.GroupIDs = append([]int64(nil), groupIDs...)
+	if err := s.accountRepo.Create(ctx, account); err != nil {
+		return nil, err
 	}
 
 	AfterAccountCommit(ctx, func(_ context.Context) {
@@ -966,6 +967,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		if err := s.ValidateAccountGroupBindings(ctx, *input.GroupIDs); err != nil {
 			return nil, err
 		}
+		if err := validateNewOAuthOnlyBindings(ctx, s.groupRepo, account.Type, account.GroupIDs, *input.GroupIDs); err != nil {
+			return nil, err
+		}
 
 		// 检查混合渠道风险（除非用户已确认）
 		if !input.SkipMixedChannelCheck {
@@ -1155,7 +1159,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if compatPreflight || len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.IQTargets != nil {
+	if input.GroupIDs != nil || compatPreflight || len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.IQTargets != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1167,6 +1171,17 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		if account != nil {
 			targetsByID[account.ID] = account
 			if err := ValidateIQTargetsPatch(account.Platform, input.IQTargets); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if input.GroupIDs != nil {
+		for _, accountID := range input.AccountIDs {
+			account := targetsByID[accountID]
+			if account == nil {
+				continue // Missing accounts retain the per-account binding failure below.
+			}
+			if err := validateNewOAuthOnlyBindings(ctx, s.groupRepo, account.Type, account.GroupIDs, *input.GroupIDs); err != nil {
 				return nil, err
 			}
 		}
@@ -1831,6 +1846,33 @@ func (s *adminServiceImpl) ValidateAccountGroupBindings(ctx context.Context, gro
 		}
 		if !IsGroupBindableInSimpleMode(group) {
 			return infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite groups cannot be bound in simple mode")
+		}
+	}
+	return nil
+}
+
+// validateNewOAuthOnlyBindings preserves existing memberships, including legacy
+// API-key members. All account writes use this check before persisting anything.
+func validateNewOAuthOnlyBindings(ctx context.Context, groups GroupRepository, accountType string, current, requested []int64) error {
+	if accountType != AccountTypeAPIKey {
+		return nil
+	}
+	for _, groupID := range requested {
+		if slices.Contains(current, groupID) {
+			continue
+		}
+		if groups == nil {
+			return errors.New("group repository not configured")
+		}
+		group, err := groups.GetByIDLite(ctx, groupID)
+		if err != nil {
+			return err
+		}
+		if group == nil {
+			return ErrGroupNotFound
+		}
+		if group.RequireOAuthOnly && groupSupportsOAuthOnlyFilter(group.Platform) {
+			return infraerrors.BadRequest("GROUP_OAUTH_ONLY", "OAuth-only groups cannot accept new API-key account bindings")
 		}
 	}
 	return nil

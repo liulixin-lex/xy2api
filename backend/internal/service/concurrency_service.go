@@ -308,8 +308,9 @@ func (s *ConcurrencyService) SetAccountLoadBatchCacheTTL(ttl time.Duration) {
 
 // AcquireResult represents the result of acquiring a concurrency slot
 type AcquireResult struct {
-	Acquired    bool
-	ReleaseFunc func() // Must be called when done (typically via defer)
+	accountLimit int // Limit passed to OpenAI account slot acquisition, including zero (unlimited).
+	Acquired     bool
+	ReleaseFunc  func() // Must be called when done (typically via defer)
 }
 
 type AccountWithConcurrency struct {

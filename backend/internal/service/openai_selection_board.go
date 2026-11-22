@@ -2,24 +2,24 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // OpenAISelectionBoard uses the gateway's admission, view and ordering.
 // It never acquires slots or records full observations.
 type OpenAISelectionBoard struct {
-	service      *OpenAIGatewayService
-	leases       SchedTrialLeases
-	performance  func() (newPickSnapshot, time.Time)
-	newPickLimit newPickLimit
-	view         func() schedquality.View
-	now          func() time.Time
+	service *OpenAIGatewayService
+	leases  SchedTrialLeases
+	view    func() schedquality.View
+	now     func() time.Time
 }
 
 var _ SchedSelectionBoard = (*OpenAISelectionBoard)(nil)
@@ -44,10 +44,33 @@ func (b *OpenAISelectionBoard) Board(ctx context.Context, groupID int64, model s
 	if err != nil {
 		return nil, nil, err
 	}
+	// Preview a default Responses request against the selected group's policy,
+	// independent of an administrator's serving/origin group snapshots.
+	group := ServingPricingGroup(ctx)
+	if s.schedulerSnapshot != nil {
+		group, err = s.schedulerSnapshot.GetGroupByIDLite(ctx, groupID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if group == nil {
+			return nil, nil, ErrGroupNotFound
+		}
+	}
+	if group != nil {
+		if group.ID != groupID {
+			return nil, nil, ErrGroupNotFound
+		}
+		ctx = context.WithValue(ctx, ctxkey.Group, group)
+		key := &APIKey{GroupID: &groupID, Group: group}
+		ctx = WithBillingAPIKeySnapshot(ctx, key)
+		ctx = WithServingPricingKeySnapshot(ctx, key)
+	}
+	body, _ := json.Marshal(map[string]string{"model": model})
+	ctx = WithOpenAITierInput(ctx, body, APIProtocolResponses, "")
 	ctx = resilience.WithCapabilityRequest(ctx, "responses", true)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, &groupID)
-	ctx = s.withOpenAIProfitControlGate(ctx, &groupID)
+	ctx, _ = s.WithOpenAIRequestPricingContext(ctx, &groupID)
 	var view schedquality.View = emptySelectionView{}
 	if b.view != nil {
 		if current := b.view(); current != nil {

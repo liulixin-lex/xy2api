@@ -43,6 +43,14 @@ func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *
 	if failoverErr != nil && failoverErr.PreDispatchSelectionInvalidated {
 		return true
 	}
+	if failoverErr != nil && failoverErr.Reason == service.OpenAIConversionIdentityReason {
+		b := requestBudget(ctx)
+		if b == nil {
+			return true
+		}
+		b.RecordAttemptAt(time.Now())
+		return !b.CanAttempt(time.Now())
+	}
 	if failoverErr != nil {
 		st.SetLastUpstreamFailure(failoverErr)
 		hint := failoverErr.UpstreamRecoveryHint
@@ -220,6 +228,9 @@ func resilienceRetryDelay(ctx context.Context, d time.Duration) time.Duration {
 // upstream host; accounts on the failed host join the exclusions. It
 // reports whether the request must end instead.
 func resilienceBeforeSwitch(ctx context.Context, hosts any, accountID int64, failoverErr *service.UpstreamFailoverError, excluded map[int64]struct{}) bool {
+	if failoverErr != nil && failoverErr.Reason == service.OpenAIConversionIdentityReason {
+		return false
+	}
 	if failoverErr != nil && failoverErr.Reason == service.OpenAIStreamForbiddenReason {
 		if failoverErr.UpstreamPlatform != service.PlatformOpenAI || failoverErr.UpstreamAccountType != service.AccountTypeAPIKey {
 			return false

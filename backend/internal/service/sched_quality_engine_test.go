@@ -238,7 +238,7 @@ func TestEngineRuleChangesAtomicRejudgeAndConflict(t *testing.T) {
 				require.Equal(t, q.IdentityRear, r.Identity)
 				require.Zero(t, r.Level)
 				require.Equal(t, 1, r.Admissions)
-				require.True(t, r.Epoch.IsZero())
+				require.Equal(t, f.now, r.Epoch)
 				require.Equal(t, f.now, r.Entry)
 				require.NotNil(t, r.Basis.TTFT.PRel, "the cleared rear peer must supply usable evidence")
 				var actions []q.Action
@@ -306,6 +306,52 @@ func TestEngineRuleCommitFailureKeepsConfigAndSnapshot(t *testing.T) {
 	require.Zero(t, f.store.Rule.Version)
 	require.Equal(t, q.DefaultRuleBParams(), f.e.rule.Params)
 }
+
+func TestEngineReassessmentPublishesActionsOnlyAfterCommit(t *testing.T) {
+	output := captureSchedObsLogs(t)
+	for _, commit := range []bool{false, true} {
+		obs := NewSchedObservabilityService()
+		f := newQualityFixture(t)
+		f.e.obs = obs
+		f.badTTFT()
+		f.cycle()
+		output.Reset()
+		before := obs.window
+		start := len(f.store.Decisions)
+		if !commit {
+			f.store.CommitErr = fmt.Errorf("synthetic commit failure")
+		}
+
+		p := q.DefaultRuleBParams()
+		p.Confidence = .9
+		_, err := f.e.UpdateTTFTRule(context.Background(), 0, p)
+		actions := make(map[string]int)
+		for _, record := range schedObsLogRecords(t, output) {
+			if record["msg"] == "sched_quality.state" {
+				action, ok := record["action"].(string)
+				require.True(t, ok, "state log must carry a string action")
+				actions[action]++
+			}
+		}
+		if !commit {
+			require.ErrorIs(t, err, f.store.CommitErr)
+			require.Empty(t, actions)
+			require.Len(t, f.store.Decisions, start)
+			require.Equal(t, before, obs.window)
+			continue
+		}
+		require.NoError(t, err)
+		persisted := make(map[string]int)
+		for _, decision := range f.store.Decisions[start:] {
+			persisted[string(decision.Action)]++
+		}
+		require.Equal(t, 1, persisted[string(q.ActionRelax)])
+		require.Equal(t, persisted, actions)
+		require.EqualValues(t, len(f.store.Decisions)-start, (obs.window.cooled-before.cooled)+(obs.window.released-before.released)+(obs.window.trial-before.trial)+(obs.window.relax-before.relax)+(obs.window.cleared-before.cleared))
+		require.EqualValues(t, 1, obs.window.relax-before.relax)
+	}
+}
+
 func TestEngineSessionSlowTwice(t *testing.T) {
 	f := newQualityFixture(t)
 	rows := engineSamples(3, f.now.Add(-time.Minute), true)

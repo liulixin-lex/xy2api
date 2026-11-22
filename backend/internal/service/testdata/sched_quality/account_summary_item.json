@@ -37,7 +37,9 @@
       ],
       "until": "2026-11-01T12:20:00Z",
       "exempt": false,
-      "effective": true
+      "effective": true,
+      "level": 0,
+      "until_line": "ttfo"
     }
   ],
   "trial": []

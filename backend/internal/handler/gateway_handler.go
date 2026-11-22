@@ -358,6 +358,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		defer stopPreOutputKeepalive(c)
 		for {
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+			var accountReleaseFunc func()
+			if selection != nil {
+				accountReleaseFunc = selection.ReleaseFunc
+				if selection.Acquired {
+					accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
+					selection.ReleaseFunc = accountReleaseFunc
+					if accountReleaseFunc != nil {
+						defer accountReleaseFunc()
+					}
+				}
+			}
 			if err != nil {
 				if failoverClientGone(c) {
 					recordSelectionExhausted(c.Request.Context())
@@ -409,8 +420,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if account.IsInterceptWarmupEnabled() {
 				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
 				if interceptType != InterceptTypeNone {
-					if selection.Acquired && selection.ReleaseFunc != nil {
-						selection.ReleaseFunc()
+					if accountReleaseFunc != nil {
+						accountReleaseFunc()
 					}
 					if reqStream {
 						sendMockInterceptStream(c, reqModel, interceptType)
@@ -422,7 +433,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 
 			// 3. 获取账号并发槽位
-			accountReleaseFunc := selection.ReleaseFunc
 			if !selection.Acquired {
 				if selection.WaitPlan == nil {
 					markOpsRoutingCapacityLimited(c)
@@ -470,6 +480,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					h.handleConcurrencyError(c, err, "account", streamStarted)
 					return
 				}
+				// Install cancellation cleanup before leaving the wait queue or admitting the account.
+				accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
+				if accountReleaseFunc != nil {
+					defer accountReleaseFunc()
+				}
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
 			}
@@ -499,9 +514,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
-			// 账号槽位/等待计数需要在超时或断开时安全回收
-			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
-
 			// 转发请求 - 根据账号平台分流
 			var result *service.ForwardResult
 			requestCtx := c.Request.Context()

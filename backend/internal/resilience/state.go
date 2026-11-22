@@ -49,6 +49,7 @@ type RequestState struct {
 	requestID             string
 	gatewayRecord         *gatewayRequestTrace
 	gatewayAdmissionScope GatewayRequestScope
+	selectionRequestID    string // last logical request to enter public account selection
 	firstOutput           time.Time
 	// firstOutputNoted is set once firstOutput is; later writes skip mu.
 	firstOutputNoted atomic.Bool
@@ -144,8 +145,6 @@ type RequestState struct {
 	opsUpstreamEventSequence  uint64
 	opsUpstreamSendBoundaries map[int64]uint64
 	postOutputFailureFacts    []PostOutputFailureFact
-	// Only the first selection can consider performance-based placement.
-	newPickSelectionStarted bool
 }
 
 // AllowStateSwitch grants one request-scoped state-repair account switch,
@@ -643,6 +642,18 @@ func (s *RequestState) GatewayRequestID() string {
 	return s.requestID
 }
 
+// BeginAccountSelection claims the first selection of a logical gateway turn.
+func (s *RequestState) BeginAccountSelection() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	first := s.selectionRequestID != s.requestID && s.upstreamSendSeq == s.turnStartSendSeq && !s.turnFailed && len(s.failedAccounts) == 0
+	s.selectionRequestID = s.requestID
+	return first
+}
+
 // NoteFirstOutput records the first successful content write, once. Opening
 // metadata and heartbeats must not call it.
 func (s *RequestState) NoteFirstOutput(at time.Time) {
@@ -1036,16 +1047,4 @@ func (s *RequestState) LastResortSessionLimited() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lastResortSessionLimited
-}
-
-// BeginNewPickSelection identifies the first selection of this logical request.
-func (s *RequestState) BeginNewPickSelection() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	first := !s.newPickSelectionStarted && !s.turnFailed && len(s.failedAccounts) == 0 && s.upstreamSendSeq == s.turnStartSendSeq
-	s.newPickSelectionStarted = true
-	return first
 }

@@ -29,6 +29,7 @@ export function line<D extends BackendDim>(dim: D, identity: BackendIdentity = '
     identity,
     level: 0,
     until: null,
+    trial_started_at: null,
     trial_until: null,
     verdict: VERDICTS[identity],
     evidence: EVIDENCE[dim]() as BackendEvidenceOf[D],

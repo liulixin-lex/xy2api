@@ -148,15 +148,25 @@ func (r *scopedAdminWriteTestRepo) Update(ctx context.Context, a *Account) error
 	return err
 }
 func (r *scopedAdminWriteTestRepo) Create(ctx context.Context, a *Account) error {
+	if len(a.GroupIDs) > 0 && dbent.TxFromContext(ctx) == nil {
+		return errors.New("创建带分组的受限账号需要事务")
+	}
 	rows, err := r.login.sql(ctx).QueryContext(ctx, `INSERT INTO accounts(name,platform,type) VALUES($1,$2,$3) RETURNING id`, a.Name, a.Platform, a.Type)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	if !rows.Next() {
-		return errors.New("创建未返回 ID")
+	id, err := entsql.ScanInt64(rows)
+	if err != nil {
+		return err
 	}
-	return rows.Scan(&a.ID)
+	if len(a.GroupIDs) > 0 {
+		if err := r.BindGroups(ctx, id, a.GroupIDs); err != nil {
+			return err
+		}
+	}
+	a.ID = id
+	return nil
 }
 func (r *scopedAdminWriteTestRepo) BindGroups(ctx context.Context, id int64, groups []int64) error {
 	if r.failBind {

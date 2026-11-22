@@ -161,6 +161,7 @@ type Group struct {
 	AccountCount            int64
 	ActiveAccountCount      int64
 	RateLimitedAccountCount int64
+	OAuthOnlyMismatchCount  int64 // Non-deleted API-key members; meaningful only when RequireOAuthOnly is enabled.
 }
 
 // IsGroupBindableInSimpleMode is the shared policy for groups that may be

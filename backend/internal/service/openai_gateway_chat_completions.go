@@ -96,6 +96,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
+	conversionRetry := openAIConversionRetryFrom(ctx)
 	var schedCapture *schedAttemptCapture
 	defer func() {
 		rethrowSchedAttemptPanic(schedCapture, recover())
@@ -171,7 +172,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
 		return nil, writeOpenCodeUnsupportedModelError(c, false, routingModel)
 	}
-	switch s.resolveUpstreamProtocolFor(ctx, account, inbound, routingModel) {
+	upstreamProtocol := s.resolveUpstreamProtocolFor(ctx, account, inbound, routingModel)
+	if retry := openAIConversionRetryFrom(ctx); retry != nil && retry.used && !retry.resent && upstreamProtocol != APIProtocolResponses {
+		WriteOpenAIConversionRetryFailure(c, retry.failure, "candidate_protocol")
+		return nil, retry.failure.cause
+	}
+	switch upstreamProtocol {
 	case APIProtocolAnthropic:
 		if convertResponsesShape {
 			return s.forwardResponsesViaNativeAnthropic(ctx, c, account, body, "")
@@ -345,6 +351,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 	logger.L().Debug("openai chat_completions: model mapping applied", logFields...)
 
+	var toolNames map[string]string
 	if account.UsesOpenAICodexProtocol() {
 		var reqBody map[string]any
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
@@ -359,7 +366,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadRequest, "invalid_request_error", "", "", codexResult.Error.Error())
 			return nil, codexResult.Error
 		}
-		setCodexToolNameReverse(c, codexResult.ToolNameReverse)
+		toolNames = codexResult.ToolNameReverse
+		setCodexToolNameReverse(c, toolNames)
 		if !isResponsesShape {
 			ensureCodexOAuthInstructionsField(reqBody)
 		}
@@ -428,10 +436,6 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// 6. Build upstream request
 	s.prepareM7EncryptedRepair(c, account, requestRepair, responsesBody, token)
 retryChatResponsesWire:
-	requestRepair.setBody(body)
-	if requestRepair != nil && requestRepair.encryptedTried {
-		requestRepair.setBody(responsesBody)
-	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	cancelUpstream := func() {}
 	if clientStream {
@@ -447,14 +451,27 @@ retryChatResponsesWire:
 	if err != nil {
 		return nil, err
 	}
-	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
+	upstreamReq, wire, err := s.buildUpstreamRequestWithBody(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
+	send, err := s.prepareOpenAIConversionWire(ctx, c, upstreamReq, account, inbound, conversionSendBody{wire: wire, responsesInput: responsesBody, reverse: toolNames})
+	if err != nil {
+		return nil, err
+	}
+	// Keep local repairs before builder injection. A replay has already been
+	// converted (and may have been repaired); never restart it from ingress.
+	responsesBody, toolNames = send.responsesInput, send.reverse
+	repairResponses := conversionRetry != nil && conversionRetry.used || requestRepair != nil && requestRepair.encryptedTried
+	repairBody := body
+	if repairResponses {
+		repairBody = responsesBody
+	}
+	requestRepair.setBody(repairBody)
 	bindM7ResponsesWireBody(c, account, responsesBody)
-	actualReasoningEffort := extractOpenAIReasoningEffortFromRequest(upstreamReq)
+	actualReasoningEffort := extractOpenAIReasoningEffortFromBody(send.wire)
 
 	if promptCacheKey != "" {
 		upstreamReq.Header.Set("session_id", compatSessionUUID)
@@ -465,7 +482,23 @@ retryChatResponsesWire:
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, responsesBody, clientStream, &schedCapture)
+	var resendStart time.Time
+	if retry := conversionRetry; retry != nil && retry.used && !retry.resent {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if budget := resilience.StateFrom(ctx).Budget(); budget == nil || !budget.CanAttempt(time.Now()) {
+			WriteOpenAIConversionRetryFailure(c, retry.failure, "budget_exhausted")
+			return nil, retry.failure.cause
+		}
+		resendStart = time.Now()
+	}
+	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, send.wire, clientStream, &schedCapture)
+	if !resendStart.IsZero() {
+		// Only this candidate send counts, including a dial that returned no response.
+		sent := resilience.StateFrom(ctx).SessionDispatchStart(ctx, account.ID)
+		conversionRetry.resent = !sent.Before(resendStart)
+	}
 	noteOpenAIRequestRepairResent(ctx, c, account)
 	if firstEvent.expired() {
 		if resp != nil && resp.Body != nil {
@@ -517,11 +550,11 @@ retryChatResponsesWire:
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
 			closeAttempt()
-			return s.forwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
-		}
-		repairBody := body
-		if requestRepair != nil && requestRepair.encryptedTried {
-			repairBody = responsesBody
+			// Re-sign the current Responses request; restarting at Chat ingress
+			// would discard the repairs and tool mapping of a replayed send.
+			ctx = markAgentIdentityTaskRecoveryTried(ctx)
+			startTime = time.Now()
+			goto retryChatResponsesWire
 		}
 		if retryBody, reason, changed, repairErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, repairBody, respBody); repairErr == nil &&
 			changed && rejectedFieldRetryState.Allow(retryBody) {
@@ -533,13 +566,13 @@ retryChatResponsesWire:
 				zap.String("form", "http"),
 				zap.String("path", "chat"),
 			)
-			if requestRepair != nil && requestRepair.encryptedTried {
+			if repairResponses {
 				responsesBody = retryBody
 				goto retryChatResponsesWire
 			}
 			return s.forwardAsChatCompletions(ctx, c, account, retryBody, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
 		}
-		if account.Type == AccountTypeAPIKey &&
+		if (conversionRetry == nil || !conversionRetry.used) && account.Type == AccountTypeAPIKey &&
 			!account.routesByModel() &&
 			openai_compat.ResolveResponsesSupport(account.Extra) == openai_compat.ResponsesSupportUnknown &&
 			!isResponsesEndpointSupportedByStatus(resp.StatusCode) {
@@ -572,7 +605,7 @@ retryChatResponsesWire:
 		schedCapture.finish(result, handleErr)
 		closeAttempt()
 		ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
-		if kind == resilience.ReasonEncryptedContent || requestRepair != nil && requestRepair.encryptedTried {
+		if kind == resilience.ReasonEncryptedContent || repairResponses {
 			responsesBody = next
 			goto retryChatResponsesWire
 		}
@@ -594,7 +627,7 @@ retryChatResponsesWire:
 	// fast policy filter/force 之后）里的 tier，policy filter 删掉字段后不再
 	// 按原请求 Fast 计费。
 	if handleErr == nil && result != nil {
-		if tier := resolvedOpenAIUpstreamServiceTier(c, extractOpenAIServiceTierFromBody(responsesBody)); tier != nil {
+		if tier := resolvedOpenAIUpstreamServiceTier(c, extractOpenAIServiceTierFromBody(send.wire)); tier != nil {
 			result.ServiceTier = tier
 		}
 
@@ -708,7 +741,13 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	if err != nil {
 		var conversion *apicompat.UpstreamConversionError
 		if errors.As(err, &conversion) {
-			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, conversion.Field, "Invalid upstream response event")
+			if retry := openAIConversionRetryError(c, resp, account, upstreamModel, facts.UsagePresent, conversion.Field, "Invalid upstream response event", err); retry != nil {
+				return nil, retry
+			}
+			if openAIConversionRetryFrom(c.Request.Context()) != nil && c.Request.Context().Err() != nil {
+				return nil, c.Request.Context().Err()
+			}
+			writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolChat, "server_error", conversion.Field, "Invalid upstream response event", err)
 		}
 		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
 	}
@@ -776,11 +815,14 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	acc.SupplementResponseOutput(finalResponse)
 
 	if err := acc.Err(); err != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		if retry := openAIConversionRetryError(c, resp, account, upstreamModel, facts.UsagePresent, "", err.Error(), err); retry != nil {
+			return nil, retry
+		}
+		writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolChat, "server_error", "", err.Error(), err)
 		return nil, err
 	}
 	if err := apicompat.ValidateResponsesForChat(finalResponse); err != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolChat, "server_error", "", err.Error(), err)
 		return nil, err
 	}
 	chatResp := apicompat.ResponsesToChatCompletions(finalResponse, originalModel)
@@ -1008,7 +1050,18 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		pendingPrelude.take()
 		firstEvent.disarm()
 		stopPreludeCancel()
-		WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", message)
+		if retry := openAIConversionRetryError(c, resp, account, upstreamModel, facts.UsagePresent, "", message, err); retry != nil {
+			conversionErr, streamNonFailoverErr = retry, retry
+			conversionBeforeOutput = true
+			_ = resp.Body.Close()
+			return true
+		}
+		if openAIConversionRetryFrom(c.Request.Context()) != nil && c.Request.Context().Err() != nil {
+			conversionErr, streamNonFailoverErr = c.Request.Context().Err(), c.Request.Context().Err()
+			_ = resp.Body.Close()
+			return true
+		}
+		writeUpstreamConversionError(c, resp, "responses", PreOutputProtocolChat, "server_error", "", message, err)
 		if conversionBeforeOutput {
 			_ = resp.Body.Close()
 		}

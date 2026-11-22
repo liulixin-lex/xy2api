@@ -531,6 +531,17 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	for {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, modelName, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+		var accountReleaseFunc func()
+		if selection != nil {
+			accountReleaseFunc = selection.ReleaseFunc
+			if selection.Acquired {
+				accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
+				selection.ReleaseFunc = accountReleaseFunc
+				if accountReleaseFunc != nil {
+					defer accountReleaseFunc()
+				}
+			}
+		}
 		if err != nil {
 			if failoverClientGone(c) {
 				recordSelectionExhausted(c.Request.Context())
@@ -592,7 +603,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 
 		// 4) account concurrency slot
-		accountReleaseFunc := selection.ReleaseFunc
 		if !selection.Acquired {
 			if selection.WaitPlan == nil {
 				markOpsRoutingCapacityLimited(c)
@@ -634,6 +644,10 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				googleConcurrencyError(c, err, "account")
 				return
 			}
+			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
+			if accountReleaseFunc != nil {
+				defer accountReleaseFunc()
+			}
 			if accountWaitCounted {
 				geminiConcurrency.DecrementAccountWaitCount(c.Request.Context(), account.ID)
 				accountWaitCounted = false
@@ -665,9 +679,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				reqLog.Warn("gemini.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
-		// 账号槽位/等待计数需要在超时或断开时安全回收
-		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
-
 		// 5) forward (根据平台分流)
 		var result *service.ForwardResult
 		requestCtx := c.Request.Context()

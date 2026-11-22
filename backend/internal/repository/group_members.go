@@ -69,6 +69,9 @@ func (r *groupRepository) CopyAccountMembers(ctx context.Context, groupID int64,
 	if err := lockLiveGroups(ctx, exec, []int64{groupID}); err != nil {
 		return 0, err
 	}
+	if err := filterOAuthOnlyCopyMembers(ctx, exec, groupID, snapshot, oauthOnly); err != nil {
+		return 0, err
+	}
 	var count int64
 	err = scanSingleRow(ctx, exec, `/* ratefloor_copy_members */
  WITH desired AS MATERIALIZED (

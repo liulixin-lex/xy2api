@@ -33,6 +33,7 @@ func (s *OpenAIGatewayService) selectionRequest(ctx context.Context, req OpenAIA
 	if trial == nil {
 		trial = s.newSelectionTrial(ctx, req, req.StickyAccountID)
 	}
+	request.trial = trial
 	request.Owner = trial.owner
 	request.Borrow = trial.borrowing(ctx)
 	request.Room = func(id int64, model string) bool { return trial.room(ctx, id, model) }
@@ -42,6 +43,7 @@ func (s *OpenAIGatewayService) selectionRequest(ctx context.Context, req OpenAIA
 func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accounts []*Account, req OpenAIAccountScheduleRequest, loads map[int64]*AccountLoadInfo) {
 	view, now := s.selectionView(), s.selectionNow()
 	request := s.selectionRequest(ctx, req, loads)
+	request.newSessionOutcome = req.newSessionOutcome
 	keys := make(map[int64]selectionKey, len(accounts))
 	for _, account := range accounts {
 		keys[account.ID] = buildSelectionKey(view, derefGroupID(req.GroupID), req.RequestedModel, account, request, now)
@@ -172,12 +174,17 @@ func selectionLoadRequests(accounts []*Account) []AccountWithConcurrency {
 }
 
 func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts []*Account, loads map[int64]*AccountLoadInfo) []*Account {
+	var outcome *openAINewSessionOutcome
+	if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
+		outcome = req.newSessionOutcome
+	}
 	s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
 	available := make([]*Account, 0, len(accounts))
 	for _, a := range accounts {
 		if load := loads[a.ID]; load == nil || load.LoadRate < 100 {
 			available = append(available, a)
 		} else {
+			outcome.markLoadFull(a.ID)
 			observeSelectionFailure(ctx, a.ID, "concurrency_full", nil)
 		}
 	}
@@ -243,7 +250,10 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 	gid := derefGroupID(req.GroupID)
 	migrate := selectionMigrateOwner(view, gid, owner, req.RequestedModel, req.SessionHash, now)
 	bindings, _ := s.cache.(gatewaySessionBindingReader)
-	session := selectionSession{qualityOwnsSticky: s.firstOutputQualityOwnsSticky, view: s.selectionView, now: s.selectionNow, slots: s, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID), resetAt: s.resilience.sessionResetAt, leases: s.selectionTrialLeases()}
+	session := selectionSession{qualityOwnsSticky: s.firstOutputQualityOwnsSticky, view: s.selectionView, now: s.selectionNow, cache: cache, store: s.resilience.store, cacheKey: s.openAISessionCacheKey, bindings: bindings, marks: &s.selectionFullMarks, bindingTTL: s.openAIStickyBindingTTL(req.GroupID), resetAt: s.resilience.sessionResetAt, leases: s.selectionTrialLeases()}
+	session.acquireSlot = func(ctx context.Context, account *Account) (*AcquireResult, error) {
+		return s.acquireSelectionSlot(ctx, account, req.candidateConstraint)
+	}
 	bindingKey := s.openAISessionCacheKey(req.SessionHash)
 	if pending := pendingOpenAIStickyChange(ctx); pending != nil && pending.groupID == gid && pending.session == req.SessionHash {
 		bindingKey = pending.key
@@ -279,7 +289,10 @@ func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenA
 		loads, _ = s.concurrencyService.GetAccountsLoadBatchFresh(ctx, selectionLoadRequests(candidates))
 	}
 	candidates = s.selectionAvailable(ctx, candidates, loads)
-	session.recheck = func(ctx context.Context, a *Account) *Account {
+	session.recheck = func(ctx context.Context, a *Account, slot *AcquireResult) *Account {
+		if req.candidateConstraint != nil {
+			return s.constrainedSlotAccount(ctx, req, a, slot)
+		}
 		fresh := s.recheckSelectionAccount(ctx, req, a)
 		if fresh == nil {
 			return nil

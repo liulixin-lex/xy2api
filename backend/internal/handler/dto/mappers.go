@@ -178,6 +178,9 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		RateLimitedAccountCount:     g.RateLimitedAccountCount,
 		SortOrder:                   g.SortOrder,
 	}
+	if g.RequireOAuthOnly {
+		out.OAuthOnlyMismatchCount = g.OAuthOnlyMismatchCount
+	}
 	if len(g.AccountGroups) > 0 {
 		out.AccountGroups = make([]AccountGroup, 0, len(g.AccountGroups))
 		for i := range g.AccountGroups {

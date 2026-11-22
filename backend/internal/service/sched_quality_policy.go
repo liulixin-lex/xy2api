@@ -99,9 +99,11 @@ func (s *SchedQualityEngineService) UpdatePolicy(ctx context.Context, groupID, e
 			s.policies[group] = record
 		}
 		s.policies[groupID] = result.SchedPolicyRecord
-		states, result.Cleared, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool {
+		var rejudgeDecisions []schedquality.Decision
+		states, result.Cleared, rejudgeDecisions, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool {
 			return k.GroupID == groupID && slices.Contains(result.RelaxedLines, k.Line)
 		}, func(k schedquality.LineKey) bool { return k.GroupID == groupID && !p.Enabled })
+		batch.decisions = append(batch.decisions, rejudgeDecisions...)
 		return e
 	})
 	if err != nil {
@@ -159,7 +161,9 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 		}
 		s.rule = result.SchedTTFTRuleRecord
 		if result.Change == schedquality.RuleBRelaxed || result.Change == schedquality.RuleBMixed {
-			states, result.Cleared, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool { return k.Line == schedquality.DimensionTTFO }, func(schedquality.LineKey) bool { return false })
+			var rejudgeDecisions []schedquality.Decision
+			states, result.Cleared, rejudgeDecisions, e = s.rejudge(tx, d, states, batch.resets, func(k schedquality.LineKey) bool { return k.Line == schedquality.DimensionTTFO }, func(schedquality.LineKey) bool { return false })
+			batch.decisions = append(batch.decisions, rejudgeDecisions...)
 		}
 		return e
 	})
@@ -176,7 +180,7 @@ func (s *SchedQualityEngineService) UpdateTTFTRule(ctx context.Context, expected
 
 // rejudge first clears every affected row, then freezes that entire cleared
 // population, then evaluates. No intermediate configuration can be published.
-func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityData, states []schedquality.LineState, resets map[int64]time.Time, relax, remove func(schedquality.LineKey) bool) ([]schedquality.LineState, int, error) {
+func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityData, states []schedquality.LineState, resets map[int64]time.Time, relax, remove func(schedquality.LineKey) bool) ([]schedquality.LineState, int, []schedquality.Decision, error) {
 	keys, rows := s.rowKeys(d, states)
 	old := make(map[schedquality.LineKey]schedquality.LineState)
 	for _, r := range states {
@@ -198,6 +202,8 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 		}
 		if relax(k) {
 			relaxed := schedquality.Relaxed(k)
+			// Forget this line's recurrence level, not the group's latest failure.
+			relaxed.LastRear = rows[k].LastRear
 			relaxed.LastAssessment = rows[k].LastAssessment
 			rows[k] = relaxed
 		}
@@ -233,38 +239,73 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 	}
 	var changed []schedquality.LineState
 	var decisions []schedquality.Decision
+	inputs := make(map[schedquality.LineKey]schedquality.Evaluation)
+	var groups []schedQualityKey
+	seen := make(map[schedQualityKey]bool)
 	for _, k := range keys {
 		if remove(k) || !relax(k) || !s.policies[k.GroupID].Policy.Enabled {
 			continue
 		}
 		r := rows[k]
 		r.LineKey = k
+		rows[k] = r
 		verdict, basis := s.assessLine(d, r, schedquality.EventRegular, d.now, resets)
 		basis.Kind = "relax"
-		next, action := schedquality.Step(r, schedquality.EventRegular, verdict, basis, d.now)
-		rows[k] = next
-		changed = append(changed, next)
-		if old[k].Identity == schedquality.IdentityRear || old[k].Trial {
-			decisions = append(decisions, schedquality.Decision{At: d.now, Key: k, Action: schedquality.ActionRelax, Basis: basis})
+		inputs[k] = schedquality.Evaluation{Kind: schedquality.EventRegular, Verdict: verdict, Basis: basis}
+		g := schedQualityKey{k.AccountID, k.Model, k.GroupID}
+		if !seen[g] {
+			seen[g] = true
+			groups = append(groups, g)
 		}
-		if action != "" {
-			decisions = append(decisions, schedquality.Decision{At: d.now, Key: k, Action: action, Level: next.Level, Until: schedDecisionUntil(action, next), Basis: basis})
+	}
+	for _, g := range groups {
+		var before []schedquality.LineState
+		evaluations := make(map[schedquality.Dimension]schedquality.Evaluation)
+		for _, k := range keys {
+			if k.AccountID != g.account || k.Model != g.model || k.GroupID != g.group || remove(k) {
+				continue
+			}
+			r := rows[k]
+			r.LineKey = k
+			before = append(before, r)
+			if in, ok := inputs[k]; ok {
+				evaluations[k.Line] = in
+			}
+		}
+		after, actions := schedquality.StepGroup(before, evaluations, d.now)
+		for i, next := range after {
+			k, action := next.LineKey, actions[i]
+			if _, ok := inputs[k]; !ok && action == "" {
+				continue
+			}
+			rows[k] = next
+			changed = append(changed, next)
+			basis := inputs[k].Basis
+			if next.Basis != nil {
+				basis = *next.Basis
+			}
+			if relax(k) && (old[k].Identity == schedquality.IdentityRear || old[k].Trial) {
+				decisions = append(decisions, schedquality.Decision{At: d.now, Key: k, Action: schedquality.ActionRelax, Basis: basis})
+			}
+			if action != "" {
+				decisions = append(decisions, schedquality.Decision{At: d.now, Key: k, Action: action, Level: next.Level, Until: schedDecisionUntil(action, next), Basis: basis})
+			}
 		}
 	}
 	if err := tx.Delete(deleted); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	if err := tx.Upsert(changed); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	if err := tx.InsertDecisions(decisions); err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	out := make([]schedquality.LineState, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, r)
 	}
-	return out, cleared, nil
+	return out, cleared, decisions, nil
 }
 
 func (s *SchedQualityEngineService) refreshConfig(ctx context.Context, now time.Time) error {

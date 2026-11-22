@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -74,6 +75,85 @@ func TestQualityWindowStrictEarlierAndFinishedPredecessor(t *testing.T) {
 	require.NoError(t, w.prepareContinuations(context.Background(), store))
 	for _, r := range w.samples[SchedAccountModel{1, "synthetic-model"}] {
 		require.False(t, r.Continuation)
+	}
+}
+
+func TestQualityWindowMasksRunningCachePredecessorTemporarily(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		finishOffset time.Duration
+		verdict      q.Verdict
+		turns        int
+	}{
+		{"completed before dispatch", -time.Second, q.VerdictPass, q.CacheMinTurns},
+		{"overlapped dispatch", time.Second, q.VerdictUnknown, q.CacheMinTurns - 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newQualityFixture(t)
+			read, input, writes := 8, 2, 0
+			turns := engineSamples(q.CacheMinTurns, f.now.Add(-20*time.Second), true)
+			for i := range turns {
+				turn := &turns[i]
+				turn.SessionKey = fmt.Sprintf("session-%d", i)
+				turn.CacheReadTokens, turn.InputTokens, turn.CacheCreationTokens = &read, &input, &writes
+				old := *turn
+				old.AttemptID += "-old"
+				old.StartedAt = turn.StartedAt.Add(-2 * time.Minute)
+				old.FinishedAt = turn.StartedAt.Add(-time.Minute)
+				f.ledger.Rows = append(f.ledger.Rows, old, *turn)
+			}
+			current := turns[0]
+			pair := SchedAccountModel{current.AccountID, current.Model}
+			line := q.LineState{LineKey: q.LineKey{GroupID: current.GroupID, AccountID: current.AccountID, Model: current.Model, Line: q.DimensionCache}}
+			assess := func(e *SchedQualityEngineService, verdict q.Verdict, count int) {
+				t.Helper()
+				e.window.take(f.now)
+				require.NoError(t, e.loadEvidence(ctx, f.now))
+				d, err := e.inputs(ctx, f.now, e.window.samples)
+				require.NoError(t, err)
+				got, basis := e.assessLine(d, line, q.EventRegular, f.now, nil)
+				require.Equal(t, verdict, got)
+				require.Equal(t, count, basis.Cache.Turns)
+				require.Equal(t, .8, basis.Cache.Ratio, "exact cache ratio threshold")
+			}
+			assess(f.e, q.VerdictPass, q.CacheMinTurns)
+			prior := f.e.window.previous[current.AttemptID]
+			middle := current
+			middle.AttemptID += "-middle"
+			middle.StartedAt = current.StartedAt.Add(-30 * time.Second)
+			middle.FinishedAt = time.Time{}
+			middle.CacheReadTokens = nil // The predecessor itself is not a cache evidence turn.
+			for _, offset := range []time.Duration{0, time.Second} {
+				other := middle
+				other.AttemptID = fmt.Sprintf("non-predecessor-%d", offset)
+				other.StartedAt = current.StartedAt.Add(offset)
+				f.e.Observe(other)
+			}
+			assess(f.e, q.VerdictPass, q.CacheMinTurns)
+			f.e.Observe(middle)
+			assess(f.e, q.VerdictUnknown, q.CacheMinTurns-1)
+			require.Same(t, prior, f.e.window.previous[current.AttemptID])
+			for _, row := range f.e.window.samples[pair] {
+				if row.AttemptID == current.AttemptID {
+					require.True(t, row.Continuation, "mask must not change the window sample")
+				}
+			}
+			middle.FinishedAt = current.StartedAt.Add(tc.finishOffset)
+			f.e.Observe(middle)
+			f.now = f.now.Add(5 * time.Second)
+			assess(f.e, q.VerdictUnknown, q.CacheMinTurns-1)
+			require.Same(t, prior, f.e.window.previous[current.AttemptID])
+			require.Equal(t, middle.FinishedAt, f.e.window.running[middle.AttemptID].FinishedAt)
+
+			middle.InsertedAt = f.now
+			f.ledger.Rows = append(f.ledger.Rows, middle) // Arrived after its successor.
+			assess(f.e, tc.verdict, tc.turns)
+			require.Equal(t, middle.AttemptID, f.e.window.previous[current.AttemptID].AttemptID)
+			require.NotContains(t, f.e.window.running, middle.AttemptID)
+			fresh := NewSchedQualityEngineService(f.store, f.ledger, f.switches, func() time.Time { return f.now }, nil)
+			assess(fresh, tc.verdict, tc.turns)
+		})
 	}
 }
 

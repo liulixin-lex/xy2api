@@ -23,7 +23,8 @@ type selectionSlotsFake struct {
 	after    func(int64)
 }
 
-func (f *selectionSlotsFake) tryAcquireAccountSlot(_ context.Context, id int64, _ int) (*AcquireResult, error) {
+func (f *selectionSlotsFake) acquire(_ context.Context, account *Account) (*AcquireResult, error) {
+	id := account.ID
 	f.attempts = append(f.attempts, id)
 	*f.events = append(*f.events, fmt.Sprintf("slot:%d", id))
 	if f.after != nil {
@@ -119,7 +120,7 @@ func selectionNewSessionFixture() *selectionSessionFixture {
 	f.view = selectionTestView(f.now)
 	f.slots = &selectionSlotsFake{failed: map[int64]bool{}, events: &f.events}
 	f.binding = &selectionBindingFake{key: "openai:session", owner: 10, generation: "g1", remaining: 29 * time.Minute, events: &f.events}
-	f.session = &selectionSession{view: func() schedquality.View { return f.view }, now: func() time.Time { return f.now }, slots: f.slots, cache: f.binding, store: newMemResilienceStore(), cacheKey: (&OpenAIGatewayService{}).openAISessionCacheKey, bindings: f.binding, marks: &fullMarks{}, bindingTTL: 30 * time.Minute, recheck: func(_ context.Context, a *Account) *Account {
+	f.session = &selectionSession{view: func() schedquality.View { return f.view }, now: func() time.Time { return f.now }, acquireSlot: f.slots.acquire, cache: f.binding, store: newMemResilienceStore(), cacheKey: (&OpenAIGatewayService{}).openAISessionCacheKey, bindings: f.binding, marks: &fullMarks{}, bindingTTL: 30 * time.Minute, recheck: func(_ context.Context, a *Account, _ *AcquireResult) *Account {
 		f.events = append(f.events, fmt.Sprintf("check:%d", a.ID))
 		return a
 	}}
@@ -297,7 +298,7 @@ func TestOpenAISelectionSessionRechecksEveryTakeoverCondition(t *testing.T) {
 		{"new_full_mark", func(f *selectionSessionFixture) { f.session.marks.Mark(1, f.now) }},
 		{"group_off", func(f *selectionSessionFixture) { f.view.Takeovers[7] = fakeSchedTakeover{} }},
 		{"admission", func(f *selectionSessionFixture) {
-			f.session.recheck = func(context.Context, *Account) *Account { return nil }
+			f.session.recheck = func(context.Context, *Account, *AcquireResult) *Account { return nil }
 		}},
 	}
 	for _, tt := range cases {

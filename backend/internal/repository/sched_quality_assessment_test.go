@@ -89,8 +89,9 @@ func TestSchedAssessmentMigrationAndRestart(t *testing.T) {
 	stale := read()
 	require.Equal(t, after.LastAssessment, stale.LastAssessment)
 	require.Nil(t, service.SchedAdminLastEvalFromState(stale))
-	cleared, action := q.Step(stale, q.EventClock, q.VerdictUnknown, q.Basis{}, clockAt)
-	require.Equal(t, q.ActionClear, action)
+	group, actions := q.StepGroup([]q.LineState{stale}, nil, clockAt)
+	cleared := group[0]
+	require.Equal(t, q.ActionClear, actions[0])
 	save(cleared, true)
 	cleared = read()
 	require.True(t, clockAt.Equal(cleared.EvaluatedAt))

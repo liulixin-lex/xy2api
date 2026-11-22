@@ -190,6 +190,9 @@ func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID
 	if dbent.TxFromContext(ctx) == nil {
 		return fmt.Errorf("受限分组写入需要数据库事务")
 	}
+	if err := bumpAccountMembershipRevision(ctx, r.client, []int64{accountID}); err != nil {
+		return err
+	}
 	existing, err := r.loadAccountGroupIDs(ctx, accountID)
 	if err != nil {
 		return err
@@ -208,10 +211,10 @@ func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID
 	if len(added) == 0 && len(removed) == 0 {
 		return nil
 	}
-	if err := bumpAccountMembershipRevision(ctx, r.client, []int64{accountID}); err != nil {
+	if err := lockLiveGroups(ctx, r.client, added); err != nil {
 		return err
 	}
-	if err := lockLiveGroups(ctx, r.client, added); err != nil {
+	if err := validateNewAccountGroupBindings(ctx, r.client, accountID, added); err != nil {
 		return err
 	}
 	if len(removed) > 0 {

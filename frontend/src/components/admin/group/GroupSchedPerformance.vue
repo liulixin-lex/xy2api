@@ -214,6 +214,7 @@ import {
   fmtTenths,
   fmtScore,
   fmtSigned,
+  lineStayText,
   MIN_ATTEMPTS,
   MIN_FIRST,
   MIN_FIRST_SESSIONS,
@@ -382,9 +383,9 @@ function markTip(view: PerfView, dim: BackendDim): string {
   const line = view.row.lines[dim]
   const parts = [t(`admin.schedQuality.dim.${dim}`), schedWord('identity', line.identity, t, te)]
   const latest = line.last_eval
-  if (latest) parts.push(reasonLong(latest, t, te, { trialEnd: line.identity === 'trial' ? line.until : null, formatTime: formatShortTime }))
-  if (line.until && line.identity === 'rear') parts.push(t('admin.schedQuality.perf.rearUntil', { time: formatShortTime(line.until) }))
-  else if (line.until && line.identity === 'trial' && latest?.reason !== 'trial_open') parts.push(t('admin.schedQuality.perf.trialUntil', { time: formatShortTime(line.until) }))
+  if (latest) parts.push(reasonLong(latest, t, te))
+  const stay = lineStayText(line, t)
+  if (stay) parts.push(stay)
   return parts.join(' · ')
 }
 function whyOf(view: PerfView): string {

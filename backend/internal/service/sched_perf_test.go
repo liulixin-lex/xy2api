@@ -526,7 +526,7 @@ func TestSchedPerfAdminLineAssessments(t *testing.T) {
 	for _, line := range []schedPerfLine{unmatchedLines.TTFO, unmatchedLines.Error, unmatchedLines.Cache} {
 		raw, err := json.Marshal(line)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"identity":"unknown","until":null,"last_eval":null,"samples_local":null,"samples_total":null}`, string(raw))
+		require.JSONEq(t, `{"identity":"unknown","level":0,"trial_started_at":null,"until":null,"last_eval":null,"samples_local":null,"samples_total":null}`, string(raw))
 	}
 }
 

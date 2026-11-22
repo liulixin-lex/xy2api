@@ -52,6 +52,7 @@ func TestRatefloorMemberPersistence(t *testing.T) {
 	_, err = db.ExecContext(ctx, `CREATE TABLE scheduled_test_plans(account_id BIGINT)`)
 	require.NoError(t, err)
 	runRatefloorMemberPersistence(t, client, db)
+	t.Run("OAuthOnlyMembershipCounts", func(t *testing.T) { runOAuthOnlyMembershipCounts(t, client, db) })
 	runRatefloorCopyConcurrentSourceChange(t, client, db)
 	runRatefloorMembershipLockOrder(t, client, db)
 	runRatefloorSourceSnapshotBeforeAccountWait(t, client, db)

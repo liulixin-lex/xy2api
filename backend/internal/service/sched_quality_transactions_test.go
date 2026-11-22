@@ -243,7 +243,7 @@ func TestEngineRestartReplaysOverdueDeadlinesWithoutExtendingTrial(t *testing.T)
 	f.cycle()
 	require.False(t, f.view().TTFO.Trial)
 	require.Equal(t, q.IdentityUnknown, f.view().TTFO.Identity)
-	require.Equal(t, until, f.line(q.DimensionTTFO).Epoch)
+	require.Equal(t, until.Add(q.TrialDuration), f.line(q.DimensionTTFO).Epoch)
 	require.Len(t, f.store.Decisions, 2)
 	require.Equal(t, q.ActionTrial, f.store.Decisions[0].Action)
 	require.Equal(t, until, f.store.Decisions[0].At)
@@ -307,6 +307,7 @@ func TestEngineDecisionDeadlinesAndCounters(t *testing.T) {
 	require.Equal(t, float64(3), record["cooled"])
 	require.Equal(t, float64(3), record["released"])
 	require.Equal(t, float64(1), record["trial"])
+	require.Equal(t, float64(1), record["relax"])
 	require.Equal(t, float64(1), record["clear"])
 }
 

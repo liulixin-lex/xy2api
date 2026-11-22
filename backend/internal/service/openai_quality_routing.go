@@ -650,12 +650,12 @@ func qualityRotateHeaders(headers http.Header, rotation string) {
 	headers.Del("x-codex-turn-state")
 }
 
-func (s *OpenAIGatewayService) prepareQualityHTTP(ctx context.Context, c *gin.Context, account *Account, req *http.Request, body []byte) {
+func (s *OpenAIGatewayService) prepareQualityHTTP(ctx context.Context, c *gin.Context, account *Account, req *http.Request, body []byte) []byte {
 	model := gjson.GetBytes(body, "model").String()
 	tier := gjson.GetBytes(body, "service_tier").String()
 	if qualityRequest(ctx) == nil || req.GetBody == nil {
 		s.bindOpenAITierRefusal(ctx, upstreamResponseModelObserverFromContext(c), account, model, tier, openAITierHTTPProtocol(req.URL.Path))
-		return
+		return nil
 	}
 	o := s.qualityObserver(ctx, account, model)
 	s.bindOpenAITierRefusal(ctx, o, account, model, tier, openAITierHTTPProtocol(req.URL.Path))
@@ -664,16 +664,16 @@ func (s *OpenAIGatewayService) prepareQualityHTTP(ctx context.Context, c *gin.Co
 	}
 	rotation := s.qualityRotation(ctx, account)
 	if rotation == "" {
-		return
+		return nil
 	}
 	reader, err := req.GetBody()
 	if err != nil {
-		return
+		return nil
 	}
 	body, err = io.ReadAll(reader)
 	_ = reader.Close()
 	if err != nil {
-		return
+		return nil
 	}
 	body = qualityRotateBody(body, rotation, strings.Contains(req.URL.Path, "/responses"))
 	qualityRotateHeaders(req.Header, rotation)
@@ -685,6 +685,7 @@ func (s *OpenAIGatewayService) prepareQualityHTTP(ctx context.Context, c *gin.Co
 	scope, generation := q.scope, q.state.Generation
 	q.mu.Unlock()
 	qualityEvent("identity_rotated", scope, account.ID, generation)
+	return body
 }
 
 // qualityExclusionTiers reuses the ordinary scheduler for every pass, including
@@ -855,6 +856,14 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 			}
 		}
 	}
+	capacityRequest := func(exclusions map[int64]struct{}) OpenAIAccountScheduleRequest {
+		parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+		return OpenAIAccountScheduleRequest{
+			GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
+			RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
+			ExcludedIDs: exclusions, UseUpstreamTokenCost: useCost, candidateConstraint: parent.candidateConstraint,
+		}
+	}
 	for passIndex, pass := range tiers {
 		selection, decision, selectErr := selectPass(pass)
 		if selectErr == nil && selection != nil && selection.Account != nil {
@@ -868,11 +877,7 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 						borrowExcluded = make(map[int64]struct{})
 					}
 					borrowExcluded[state.Binding] = struct{}{}
-					borrowed, borrowErr := s.selectOpenAIStickyCapacityBorrow(ctx, selection.Account, OpenAIAccountScheduleRequest{
-						GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
-						RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
-						ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost,
-					})
+					borrowed, borrowErr := s.selectOpenAIStickyCapacityBorrow(ctx, selection.Account, capacityRequest(borrowExcluded))
 					if borrowErr != nil {
 						return nil, OpenAIAccountScheduleDecision{}, borrowErr
 					}
@@ -899,11 +904,7 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 						if borrowExcluded == nil {
 							borrowExcluded = make(map[int64]struct{})
 						}
-						fallback, fallbackErr := s.selectOpenAIStickyCapacityFallbackWait(ctx, selection.Account, OpenAIAccountScheduleRequest{
-							GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
-							RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
-							ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost,
-						})
+						fallback, fallbackErr := s.selectOpenAIStickyCapacityFallbackWait(ctx, selection.Account, capacityRequest(borrowExcluded))
 						if fallbackErr != nil {
 							return nil, OpenAIAccountScheduleDecision{}, fallbackErr
 						}

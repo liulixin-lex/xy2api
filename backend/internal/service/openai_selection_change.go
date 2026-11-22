@@ -119,6 +119,7 @@ func (c *openAIStickyChange) writeFirstOutputAvoid(ctx context.Context, fact res
 
 // A selection only plans a change. Admission and billing must never commit it.
 type openAIStickyChange struct {
+	aliasPairMissing bool // Immutable evidence from the existing pre-selection alias resolution.
 	mu               sync.Mutex
 	done             bool
 	followDelivered  bool
@@ -150,7 +151,6 @@ type openAIStickyChange struct {
 	ttl                      time.Duration
 	cache                    OpenAIStickyVersionedCache
 	dualWriteLegacy          bool
-	newPickMissing           bool // Explicit miss on every binding key, captured before selection.
 	skipCommit               bool // The snapshot read failed; keep all selection writes suppressed.
 	// ownerReleased: selection hit a branch that deletes the owner's binding
 	// (hard unavailable, failure streak). Only then may an ordinary placement
@@ -189,6 +189,28 @@ func FinishOpenAIStickyForward(ctx context.Context, accountID int64, result *Ope
 	canceled := change.attemptCanceled || resilience.StateFrom(ctx).ClientCanceled() || (result != nil && result.ClientDisconnect)
 	success := change.attemptSucceeded && err == nil && ctx.Err() == nil && !canceled && result.CompletedForDelivery()
 	change.completeLocked(ctx, success, canceled, beforeSend)
+}
+
+const stickyAbandonIdentityConflict = "identity_conflict"
+
+// AbandonOpenAIStickyForwardForIdentityConflict retires only this candidate's
+// sticky plan after a Responses conversion identity conflict. The caller must
+// invoke it only for that fixed conversion reason; the old binding is preserved
+// and the request can prepare a fresh plan for its next candidate.
+func AbandonOpenAIStickyForwardForIdentityConflict(ctx context.Context, accountID int64) {
+	state := resilience.StateFrom(ctx)
+	change := pendingOpenAIStickyChange(ctx)
+	if state == nil || change == nil {
+		return
+	}
+	change.mu.Lock()
+	if change.done || change.target != accountID {
+		change.mu.Unlock()
+		return
+	}
+	change.reason = stickyAbandonIdentityConflict
+	change.completeLocked(ctx, false, false, false)
+	state.ClearStickyChangeIf(change)
 }
 
 func pendingOpenAIStickyChange(ctx context.Context) *openAIStickyChange {
@@ -245,26 +267,15 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 	expected, err := cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
 	legacy := s.openAILegacySessionCacheKey(ctx, session)
 	fallback := s.openAISessionHashReadOldFallbackEnabled()
-	missing := stickyLookupMissing(expected.AccountID, err)
 	if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok {
 		if legacy != "" && (fallback || s.openAISessionHashDualWriteOldEnabled()) {
 			expected, err = aliases.ResolveSessionBinding(ctx, derefGroupID(groupID), key, legacy, fallback)
-			missing = missing && stickyLookupMissing(expected.AccountID, err)
 		}
 	} else if (err == nil && expected.AccountID <= 0 || errors.Is(err, ErrStickySessionNotFound)) && fallback && legacy != "" {
 		key = legacy
 		expected, err = cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
-		missing = missing && stickyLookupMissing(expected.AccountID, err)
 	}
-	if missing && legacy != "" && !fallback {
-		missing = false
-		if s.newPickNeedsAliasRead(ctx, derefGroupID(groupID), session) {
-			// The normal resolver ignores the alias when legacy adoption is off.
-			// This read must neither adopt it nor change the existing CAS plan.
-			old, oldErr := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), legacy)
-			missing = stickyLookupMissing(old, oldErr)
-		}
-	}
+	pairMissing := expected.BothKeysMissing && errors.Is(err, ErrStickySessionNotFound)
 	unreadable := err != nil && !errors.Is(err, ErrStickySessionNotFound)
 	kind := "migrate"
 	if expected.AccountID <= 0 {
@@ -278,10 +289,9 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 		groupID: derefGroupID(groupID), session: strings.TrimSpace(session), key: key,
 		kind: kind, expected: expected, ttl: s.openAIStickyBindingTTL(groupID), cache: cache,
 		dualWriteLegacy: s.openAISessionHashDualWriteOldEnabled(),
-		skipCommit:      unreadable,
-		newPickMissing:  isFirstNewPickSelection(ctx) && missing,
-		resetAt:         s.resilience.sessionAccountResetAt,
-		leases:          s.selectionTrialLeases(), trialSession: session, ownerLookup: s.selectionTrialOwner,
+		skipCommit:      unreadable, aliasPairMissing: pairMissing,
+		resetAt: s.resilience.sessionAccountResetAt,
+		leases:  s.selectionTrialLeases(), trialSession: session, ownerLookup: s.selectionTrialOwner,
 	})
 }
 
@@ -320,6 +330,7 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	change.mu.Lock()
 	defer change.mu.Unlock()
 	if change.target == selection.Account.ID && !change.done {
+		selection.rememberVetoPlan(change)
 		return
 	}
 	if change.expected.AccountID != 0 && !change.ownerReleased || openAIStickyBindingKept(ctx, change.session, selection.Account.ID) {
@@ -332,6 +343,7 @@ func planOpenAIStickyReplacement(ctx context.Context, groupID *int64, session, m
 	next := change.replacement(kind, model, selection.Account.ID, resilience.StateFrom(ctx).StickyBypassReason())
 	next.toPriority = new(selection.Account.Priority)
 	next.toModel = OpenAIAttemptModel(selection.Account, model)
+	selection.rememberVetoPlan(next)
 	resilience.StateFrom(ctx).SetStickyChange(next)
 }
 
@@ -425,6 +437,7 @@ func (s *OpenAIGatewayService) planOpenAIFollow(ctx context.Context, group *int6
 		checkCtx = ContextWithSelectionProfitGate(CopyOpenAIQualityRoutingContext(checkCtx, ctx), selection)
 		return s.followTargetRejection(checkCtx, req, account)
 	}
+	selection.rememberVetoPlan(next)
 	state.SetStickyChange(next)
 }
 
@@ -556,6 +569,9 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 	}()
 	if canceled && change.kind == stickyFollow {
 		change.reason = "canceled"
+	}
+	if change.reason == stickyAbandonIdentityConflict {
+		return
 	}
 	if canceled || change.skipCommit {
 		return
