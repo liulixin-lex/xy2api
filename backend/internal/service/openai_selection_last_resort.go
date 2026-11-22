@@ -20,6 +20,7 @@ func (s *OpenAIGatewayService) pickOpenAILastResort(ctx context.Context, req Ope
 	}
 	s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
 	request := s.selectionRequest(ctx, req, loads)
+	request.newSessionOutcome = req.newSessionOutcome
 	view, now := s.selectionView(), s.selectionNow()
 	keys := make(map[int64]selectionKey, len(accounts))
 	for _, a := range accounts {
@@ -147,16 +148,29 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 		verified = append(verified, c)
 		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, s.codexEffectiveConcurrency(ctx, acc.ID, acc.Concurrency))
 		if err == nil && result != nil && result.Acquired {
-			latest, vetoed, _ := s.SelectionAdmissionVeto(gateCtx, acc)
-			if vetoed || latest == nil {
-				result.ReleaseFunc()
+			rejected := false
+			selection, err := withOpenAISelectionSlotGuard(result.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
+				latest := s.admitSelectionSlot(gateCtx, req, acc, result)
+				if latest == nil {
+					rejected = true
+					return nil, nil
+				}
+				acc = latest
+				s.noteOpenAILastResort(ctx, req, acc, c.recoverAt, avoided, meta)
+				return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{Account: acc, Acquired: true, ReleaseFunc: release}), nil
+			})
+			if err != nil {
+				return nil
+			}
+			if rejected {
 				verified = verified[:len(verified)-1]
 				continue
 			}
-			acc = latest
-			s.noteOpenAILastResort(ctx, req, acc, c.recoverAt, avoided, meta)
-			return attachSelectionProfitGate(gateCtx, &AccountSelectionResult{Account: acc, Acquired: true, ReleaseFunc: result.ReleaseFunc})
+			if selection != nil {
+				return selection
+			}
 		}
+		req.newSessionOutcome.markSlotUnavailable(acc.ID)
 		meta.addReason("capacity")
 	}
 	if len(verified) == 0 || req.NoWait || openAISelectionNoWait(ctx) {

@@ -443,12 +443,14 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 	requestedModel string,
 	excludedIDs map[int64]struct{},
 	requireCompact bool,
-) (*AccountSelectionResult, error) {
+) (selection *AccountSelectionResult, err error) {
+	ctx, handoff := beginSelectionHandoff(ctx)
+	defer handoff.finish(&selection)
 	// 分组利润控制：公共入口装门，保证不经 selectAccountWithScheduler
 	// 的调用方也无法绕过利润准入（scheduler 内部路径已在唯一调度入口装门）。
 	ctx = context.WithValue(ctx, openAISelectionRequestKey{}, OpenAIAccountScheduleRequest{
 		GroupID: groupID, Platform: PlatformOpenAI, RequestedModel: requestedModel,
-		RequireCompact: requireCompact, ExcludedIDs: excludedIDs,
+		RequireCompact: requireCompact, ExcludedIDs: excludedIDs, candidateConstraint: openAIRequestCandidateConstraintFrom(ctx),
 	})
 	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	return s.selectAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, "", requireCompact)
@@ -472,21 +474,36 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 		return nil, nil
 	}
 
+	req, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+	if requestCandidateConstraintFailure(req, account) != "" {
+		return nil, nil
+	}
 	result, acquireErr := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
-	if acquireErr == nil && result.Acquired {
-		logOpenAIWSBindResponseAccountWarn(
-			derefGroupID(groupID),
-			accountID,
-			responseID,
-			store.BindResponseAccount(ctx, derefGroupID(groupID), responseID, accountID, s.openAIWSResponseStickyTTL()),
-		)
-		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
-			Account:     account,
-			Acquired:    true,
-			ReleaseFunc: result.ReleaseFunc,
-		}), nil
+	if acquireErr == nil && result != nil && result.Acquired {
+		return withOpenAISelectionSlotGuard(result.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
+			if req.candidateConstraint != nil {
+				account = s.constrainedSlotAccount(ctx, req, account, result)
+				if account == nil {
+					return nil, nil
+				}
+			}
+			logOpenAIWSBindResponseAccountWarn(
+				derefGroupID(groupID),
+				accountID,
+				responseID,
+				store.BindResponseAccount(ctx, derefGroupID(groupID), responseID, accountID, s.openAIWSResponseStickyTTL()),
+			)
+			return attachSelectionProfitGate(ctx, &AccountSelectionResult{
+				Account:     account,
+				Acquired:    true,
+				ReleaseFunc: release,
+			}), nil
+		})
 	}
 
+	if req.candidateConstraint != nil {
+		return nil, nil
+	}
 	cfg := s.schedulingConfig()
 	if s.concurrencyService != nil {
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{

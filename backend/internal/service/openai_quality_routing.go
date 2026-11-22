@@ -855,6 +855,14 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 			}
 		}
 	}
+	capacityRequest := func(exclusions map[int64]struct{}) OpenAIAccountScheduleRequest {
+		parent, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
+		return OpenAIAccountScheduleRequest{
+			GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
+			RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
+			ExcludedIDs: exclusions, UseUpstreamTokenCost: useCost, candidateConstraint: parent.candidateConstraint,
+		}
+	}
 	for passIndex, pass := range tiers {
 		selection, decision, selectErr := selectPass(pass)
 		if selectErr == nil && selection != nil && selection.Account != nil {
@@ -868,11 +876,7 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 						borrowExcluded = make(map[int64]struct{})
 					}
 					borrowExcluded[state.Binding] = struct{}{}
-					borrowed, borrowErr := s.selectOpenAIStickyCapacityBorrow(ctx, selection.Account, OpenAIAccountScheduleRequest{
-						GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
-						RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
-						ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost,
-					})
+					borrowed, borrowErr := s.selectOpenAIStickyCapacityBorrow(ctx, selection.Account, capacityRequest(borrowExcluded))
 					if borrowErr != nil {
 						return nil, OpenAIAccountScheduleDecision{}, borrowErr
 					}
@@ -899,11 +903,7 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 						if borrowExcluded == nil {
 							borrowExcluded = make(map[int64]struct{})
 						}
-						fallback, fallbackErr := s.selectOpenAIStickyCapacityFallbackWait(ctx, selection.Account, OpenAIAccountScheduleRequest{
-							GroupID: group, Platform: platform, SessionHash: session, RequestedModel: model,
-							RequiredTransport: transport, RequiredCapability: capability, RequireCompact: compact,
-							ExcludedIDs: borrowExcluded, UseUpstreamTokenCost: useCost,
-						})
+						fallback, fallbackErr := s.selectOpenAIStickyCapacityFallbackWait(ctx, selection.Account, capacityRequest(borrowExcluded))
 						if fallbackErr != nil {
 							return nil, OpenAIAccountScheduleDecision{}, fallbackErr
 						}

@@ -143,18 +143,30 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		return nil, false, acquireErr
 	}
 	if acquireErr == nil && result != nil && result.Acquired {
-		s.newSelectionTrial(ctx, req, account.ID).touch(ctx, account)
-		if !req.PreserveStickyBinding {
-			_ = s.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.openAIWSSessionStickyTTL(), accountID)
-		}
-		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
-			Account:     account,
-			Acquired:    true,
-			ReleaseFunc: result.ReleaseFunc,
-		}), false, nil
+		selection, err := withOpenAISelectionSlotGuard(result.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
+			if req.candidateConstraint != nil {
+				account = s.constrainedSlotAccount(ctx, req, account, result)
+				if account == nil {
+					return nil, nil
+				}
+			}
+			s.newSelectionTrial(ctx, req, account.ID).touch(ctx, account)
+			if !req.PreserveStickyBinding {
+				_ = s.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.openAIWSSessionStickyTTL(), accountID)
+			}
+			return attachSelectionProfitGate(ctx, &AccountSelectionResult{
+				Account:     account,
+				Acquired:    true,
+				ReleaseFunc: release,
+			}), nil
+		})
+		return selection, false, err
 	}
 
 	if NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
+		if req.candidateConstraint != nil {
+			return nil, false, nil
+		}
 		if s.concurrencyService != nil {
 			cfg := s.schedulingConfig()
 			return attachSelectionProfitGate(ctx, &AccountSelectionResult{
@@ -218,6 +230,7 @@ func (s *OpenAIGatewayService) selectLegacyAccountByPreviousResponse(
 		RequiredImageCapability: requiredImageCapability,
 		RequireCompact:          requireCompact,
 		ExcludedIDs:             excludedIDs,
+		candidateConstraint:     openAIRequestCandidateConstraintFrom(ctx),
 		RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
 	})
 	if !s.openAIAccountMatchesSchedulingGroup(account, groupID) || !compatible || !scheduler.isAccountTransportCompatible(account, requiredTransport) {
@@ -227,7 +240,7 @@ func (s *OpenAIGatewayService) selectLegacyAccountByPreviousResponse(
 		return nil, false, nil
 	}
 	if sessionHash != "" {
-		s.newSelectionTrial(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel}, account.ID).touch(ctx, account)
+		s.newSelectionTrial(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, SessionHash: sessionHash, RequestedModel: requestedModel, candidateConstraint: openAIRequestCandidateConstraintFrom(ctx)}, account.ID).touch(ctx, account)
 		_ = s.bindOpenAIStickySessionDuringSelection(ctx, groupID, sessionHash, account.ID)
 	} else {
 		trial := s.newSelectionTrial(ctx, OpenAIAccountScheduleRequest{GroupID: groupID, Platform: platform, RequestedModel: requestedModel}, 0)

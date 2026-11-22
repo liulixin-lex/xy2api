@@ -1,6 +1,9 @@
 package service
 
-import "context"
+import (
+	"context"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
+)
 
 // openAISelectionContext carries the effective scheduling group, independently
 // of whether its profit gate is enabled, plus continuation/migration guards.
@@ -76,6 +79,7 @@ func attachSelectionContext(ctx context.Context, selection *AccountSelectionResu
 			}
 			req.ExcludedIDs = excluded
 		}
+		req.newSessionOutcome = nil // the handler replays admission, not the selection log
 		copied.request = &req
 	}
 	copied.exempt = openAISelectionExempt(ctx)
@@ -83,6 +87,33 @@ func attachSelectionContext(ctx context.Context, selection *AccountSelectionResu
 	copied.proxyBypass = openAIProxyStreamQuarantineBypassed(ctx)
 	selection.selectionContext = &copied
 }
+func (r *AccountSelectionResult) constrainedImmediate() bool {
+	return r != nil && r.Acquired && r.WaitPlan == nil && r.selectionContext != nil &&
+		r.selectionContext.request != nil && r.selectionContext.request.candidateConstraint != nil
+}
+
+func (r *AccountSelectionResult) rememberVetoPlan(plan *openAIStickyChange) {
+	if r.constrainedImmediate() {
+		r.vetoPlan = plan
+	}
+}
+
+// A veto occurs before dispatch. Retire the exact plan installed for this
+// result, even if another plan for the same account now occupies the request.
+func (r *AccountSelectionResult) retireAdmissionVeto(ctx context.Context) {
+	if plan := r.vetoPlan; plan != nil {
+		plan.mu.Lock()
+		retire := !plan.done
+		plan.done = true // prevent a late forward completion from promoting this plan
+		plan.mu.Unlock()
+		if retire {
+			resilience.StateFrom(ctx).ClearStickyChangeIf(plan)
+			plan.releaseTrial(ctx)
+		}
+	}
+	r.vetoTrial.release(ctx)
+}
+
 func contextWithSelectionContext(ctx context.Context, selection *AccountSelectionResult) context.Context {
 	if selection == nil || selection.selectionContext == nil {
 		return ctx

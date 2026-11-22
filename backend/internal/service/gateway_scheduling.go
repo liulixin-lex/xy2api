@@ -107,6 +107,8 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // xy2apiUserID: 系统用户 ID，用于二维亲和调度
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, xy2apiUserID int64) (result *AccountSelectionResult, err error) {
+	ctx, handoff := beginSelectionHandoff(ctx)
+	defer handoff.finish(&result)
 	ctx = withSelectionFailureEvidence(ctx)
 	latencyModel := anthropicLatencyModel(ctx, requestedModel)
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
@@ -921,7 +923,9 @@ func gatewayAccountsAsPointers(accounts []Account) []*Account {
 	return result
 }
 
-func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash, requestedModel string, preferOAuth bool) (*AccountSelectionResult, bool, error) {
+func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash, requestedModel string, preferOAuth bool) (selection *AccountSelectionResult, found bool, err error) {
+	ctx, handoff := beginSelectionHandoff(ctx)
+	defer handoff.finish(&selection)
 	ordered := append([]*Account(nil), candidates...)
 	sortAccountsByPriorityAndLastUsed(ordered, preferOAuth)
 	ordered = s.partitionAnthropicLatencyHeldAccounts(ordered, anthropicLatencyModel(ctx, requestedModel))
@@ -1313,6 +1317,7 @@ func (s *GatewayService) tryAcquireAccountSlot(ctx context.Context, accountID in
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
 	}
 	result, err := s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
+	guardAcquiredSelectionSlot(ctx, result)
 	if err != nil {
 		observeSelectionFailure(ctx, accountID, "dependency_error", err)
 	} else if result == nil || !result.Acquired {

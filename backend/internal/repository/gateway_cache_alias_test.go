@@ -37,8 +37,17 @@ func testStickyBindingAliases(t *testing.T, addr string) {
 		_ = first.Close()
 		_ = second.Close()
 	})
+	missing, err := one.ResolveSessionBinding(ctx, group, primary, legacy, false)
+	require.ErrorIs(t, err, service.ErrStickySessionNotFound)
+	require.True(t, missing.BothKeysMissing)
 	// Start with the scalar-only legacy format from before generation fencing.
 	require.NoError(t, first.Set(ctx, buildSessionKey(group, legacy), 10, 5*time.Minute).Err())
+	ignored, err := one.ResolveSessionBinding(ctx, group, primary, legacy, false)
+	require.ErrorIs(t, err, service.ErrStickySessionNotFound)
+	require.False(t, ignored.BothKeysMissing)
+	require.Zero(t, ignored.AccountID)
+	require.EqualValues(t, 0, first.Exists(ctx, buildSessionKey(group, primary)).Val())
+
 	var snapshots [2]service.StickySessionBinding
 	var errs [2]error
 	start := make(chan struct{})

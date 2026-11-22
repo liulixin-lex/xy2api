@@ -75,6 +75,9 @@ func (s *OpenAIGatewayService) accountRequestCompatibleWithParent(ctx context.Co
 	if account == nil {
 		return false, "account_nil"
 	}
+	if reason := requestCandidateConstraintFailure(req, account); reason != "" {
+		return false, reason
+	}
 	if reason := s.chatRequestCapabilityFailureReason(ctx, account); reason != "" {
 		return false, reason
 	}

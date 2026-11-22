@@ -574,6 +574,9 @@ type AccountSelectionResult struct {
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
 	profitGate       *openAIProfitControlGate
 	selectionContext *openAISelectionContext
+	// Owned by this constrained result until dispatch admission succeeds.
+	vetoPlan  *openAIStickyChange
+	vetoTrial *selectionTrialReservation
 }
 
 // ProfitGateActive 报告本次选号是否处于利润门之下。

@@ -17,7 +17,8 @@ var resolveSessionBindingScript = redis.NewScript(`
 local owner = redis.call('GET', KEYS[1])
 local legacy = redis.call('GET', KEYS[3])
 if not owner then
-  if ARGV[2] ~= '1' or not legacy then return nil end
+  if not legacy then return nil end
+  if ARGV[2] ~= '1' then return {} end
   owner = legacy
   local ttl = redis.call('PTTL', KEYS[3])
   redis.call('SET', KEYS[1], owner)
@@ -55,10 +56,14 @@ func (c *gatewayCache) ResolveSessionBinding(ctx context.Context, group int64, p
 	keys := append(sessionBindingKeys(group, primary), sessionBindingKeys(group, legacy)...)
 	values, err := resolveSessionBindingScript.Run(ctx, c.rdb, keys, uuid.NewString(), flag).StringSlice()
 	if errors.Is(err, redis.Nil) {
-		return service.StickySessionBinding{}, service.ErrStickySessionNotFound
+		return service.StickySessionBinding{BothKeysMissing: true}, service.ErrStickySessionNotFound
 	}
 	if err != nil {
 		return service.StickySessionBinding{}, err
+	}
+	if len(values) == 0 {
+		// A legacy-only owner was observed but fallback is disabled.
+		return service.StickySessionBinding{}, service.ErrStickySessionNotFound
 	}
 	owner, err := strconv.ParseInt(values[0], 10, 64)
 	binding := service.StickySessionBinding{AccountID: owner, Generation: values[1], LegacyKey: legacy}

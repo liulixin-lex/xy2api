@@ -27,7 +27,7 @@ type selectionSession struct {
 	bindings          gatewaySessionBindingReader
 	marks             *fullMarks
 	bindingTTL        time.Duration
-	recheck           func(context.Context, *Account) *Account
+	recheck           func(context.Context, *Account, *AcquireResult) *Account
 	resetAt           func(int64) time.Time
 	leases            SchedTrialLeases
 	vetoOpportunity   func(string, map[int64]struct{}, map[int64]struct{}, func(*Account) bool) *Account
@@ -236,7 +236,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		if ctx.Err() != nil {
 			return nil
 		}
-		target := s.recheck(ctx, item.account)
+		target := s.recheck(ctx, item.account, nil)
 		if target == nil || !s.candidateAllowed(s.view(), groupID, model, owner, target, migrate, req, s.now()) {
 			continue
 		}
@@ -250,52 +250,66 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 			}
 			continue
 		}
-		latest := s.recheck(ctx, target)
-		latestOwner := owner
-		if !migrate {
-			latestOwner = s.recheck(ctx, owner)
-		}
-		now, view = s.now(), s.view()
-		allowed := latest != nil && latestOwner != nil && s.candidateAllowed(view, groupID, model, latestOwner, latest, migrate, req, now)
-		if !migrate {
-			allowed = allowed && s.takeoverReady(ctx, view, groupID, key, owner.ID, now, facts)
-		}
-		if !allowed || ctx.Err() != nil {
-			slot.ReleaseFunc()
-			continue
-		}
 		var reservation *selectionTrialReservation
-		if selectionState(view, groupID, latest, model).Placement(selectionAuto(view, groupID, now), now) == schedquality.PlaceTrial {
-			acquired := false
-			var generation string
-			if s.leases != nil {
-				var err error
-				acquired, generation, err = s.leases.Acquire(ctx, latest.ID, OpenAIAttemptModel(latest, model), groupID, TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID()), now)
-				if err != nil {
-					slog.WarnContext(ctx, "sched_quality.trial_acquire_failed", "component", "sched_quality", "account_id", latest.ID, "error", err)
-					acquired = false
+		transferred := false
+		selection := func() *AccountSelectionResult {
+			defer func() {
+				if reservation != nil && !transferred {
+					reservation.release(ctx)
 				}
-			}
-			if !acquired {
-				slot.ReleaseFunc()
-				continue
-			}
-			reservation = &selectionTrialReservation{leases: s.leases, account: latest.ID, group: groupID, model: OpenAIAttemptModel(latest, model), member: TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID()), session: TrialLeaseSessionMember(sessionHash), now: s.now}
-			reservation.rememberRound(view, generation)
+			}()
+			selected, _ := withOpenAISelectionSlotGuard(slot.ReleaseFunc, func(slotRelease func()) (*AccountSelectionResult, error) {
+				latest := s.recheck(ctx, target, slot)
+				latestOwner := owner
+				if !migrate {
+					latestOwner = s.recheck(ctx, owner, nil)
+				}
+				now, view = s.now(), s.view()
+				allowed := latest != nil && latestOwner != nil && s.candidateAllowed(view, groupID, model, latestOwner, latest, migrate, req, now)
+				if !migrate {
+					allowed = allowed && s.takeoverReady(ctx, view, groupID, key, owner.ID, now, facts)
+				}
+				if !allowed || ctx.Err() != nil {
+					return nil, nil
+				}
+				if selectionState(view, groupID, latest, model).Placement(selectionAuto(view, groupID, now), now) == schedquality.PlaceTrial {
+					acquired := false
+					var generation string
+					if s.leases != nil {
+						var err error
+						acquired, generation, err = s.leases.Acquire(ctx, latest.ID, OpenAIAttemptModel(latest, model), groupID, TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID()), now)
+						if err != nil {
+							slog.WarnContext(ctx, "sched_quality.trial_acquire_failed", "component", "sched_quality", "account_id", latest.ID, "error", err)
+							acquired = false
+						}
+					}
+					if !acquired {
+						return nil, nil
+					}
+					reservation = &selectionTrialReservation{leases: s.leases, account: latest.ID, group: groupID, model: OpenAIAttemptModel(latest, model), member: TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID()), session: TrialLeaseSessionMember(sessionHash), now: s.now}
+					guardSelectionReservation(ctx, reservation)
+					reservation.rememberRound(view, generation)
+				}
+				reason := "priority_takeover"
+				if migrate {
+					reason = "quality_migration_ttfo"
+					if selectionState(view, groupID, owner, model).Error.Identity == schedquality.IdentityRear {
+						reason = "quality_migration_error"
+					}
+				}
+				resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
+				change.reason, change.target, change.trial = reason, latest.ID, reservation
+				change.fromPriority, change.toPriority = new(latestOwner.Priority), new(latest.Priority)
+				change.fromModel, change.toModel = OpenAIAttemptModel(latestOwner, model), OpenAIAttemptModel(latest, model)
+				resilience.StateFrom(ctx).SetStickyChange(change)
+				return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: releaseSelectionTrialWithSlot(ctx, change, reservation, slotRelease)}), nil
+			})
+			transferred = selected != nil
+			return selected
+		}()
+		if selection != nil {
+			return selection
 		}
-		reason := "priority_takeover"
-		if migrate {
-			reason = "quality_migration_ttfo"
-			if selectionState(view, groupID, owner, model).Error.Identity == schedquality.IdentityRear {
-				reason = "quality_migration_error"
-			}
-		}
-		resilience.StateFrom(ctx).NoteStickyBypassReason(reason)
-		change.reason, change.target, change.trial = reason, latest.ID, reservation
-		change.fromPriority, change.toPriority = new(latestOwner.Priority), new(latest.Priority)
-		change.fromModel, change.toModel = OpenAIAttemptModel(latestOwner, model), OpenAIAttemptModel(latest, model)
-		resilience.StateFrom(ctx).SetStickyChange(change)
-		return attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: latest, Acquired: true, ReleaseFunc: releaseSelectionTrialWithSlot(ctx, change, reservation, slot.ReleaseFunc)})
 	}
 	if len(soft) != 0 {
 		logOpportunity("target_avoided")
