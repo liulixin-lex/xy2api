@@ -267,6 +267,7 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 		base = resilience.WithGatewayRequestMetadata(base, meta)
 	}
 	base = service.WithInflightReservation(base, service.InflightReservationFromContext(parent))
+	base = resilience.WithCollabAttempt(base, resilience.CollabAttemptFrom(parent))
 	// xy2api resilience: billing needs the request's delivery state; a client
 	// already gone is resolved now (design §8.2).
 	if st := resilience.StateFrom(parent); st != nil {
