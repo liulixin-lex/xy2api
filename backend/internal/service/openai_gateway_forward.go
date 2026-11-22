@@ -1579,7 +1579,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 				s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 			}
-		} else if partialErr == nil && account.IsShadow() && account.ParentAccountID != nil {
+		} else if partialErr == nil && resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() && account.IsShadow() && account.ParentAccountID != nil {
 			notifyOpenAIAutoReset(*account.ParentAccountID)
 		}
 
