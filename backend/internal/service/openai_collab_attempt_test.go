@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,4 +43,22 @@ func TestCollabAttemptIsolatesMutableLegacyState(t *testing.T) {
 	openAIRejectionScope(child).selectionPreservesBinding.Store(true)
 	require.False(t, flag.Load())
 	require.Equal(t, openAIRejectionScope(parent).session, openAIRejectionScope(child).session)
+}
+
+func TestCollabCommittedResponseIdentityMatchesBinding(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	state := resilience.NewRequestState()
+	state.InitDelivery(context.Background(), time.Now(), func() int64 { return 10 })
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(resilience.WithRequestState(context.Background(), state))
+	store := NewOpenAIWSStateStore(nil)
+	svc := &OpenAIGatewayService{openaiWSStateStore: store}
+	result := &OpenAIForwardResult{ResponseID: "resp_upstream"}
+	svc.CommitCollabResponseIdentity(c, &Account{ID: 7}, result, "resp_delivered")
+	require.Equal(t, "resp_delivered", result.ResponseID)
+	id, err := store.GetResponseAccount(context.Background(), 0, "resp_delivered")
+	require.NoError(t, err)
+	require.Equal(t, int64(7), id)
+	id, err = store.GetResponseAccount(context.Background(), 0, "resp_upstream")
+	require.NoError(t, err)
+	require.Zero(t, id)
 }

@@ -92,12 +92,14 @@ type collabSeamWriter struct {
 	// whether or not the existing path had committed the headers.
 	quiet bool
 
-	held         *collabWithheld
-	armHeader    http.Header
-	commitHeader http.Header
-	prelude      collabDeliveredPrelude
-	takeover     atomic.Bool
-	continuation []byte
+	held           *collabWithheld
+	armHeader      http.Header
+	commitHeader   http.Header
+	prelude        collabDeliveredPrelude
+	takeover       atomic.Bool
+	continuation   []byte
+	preludePending []byte
+	resumeSequence int64
 }
 
 // These facts describe only bytes delivered before a takeover. Local ending
@@ -454,12 +456,20 @@ func (w *collabSeamWriter) forward(kind collabSeamOpKind, data []byte) (n int, e
 }
 
 func (w *collabSeamWriter) observePrelude(data []byte) {
-	for line := range bytes.Lines(data) {
-		payload, ok := bytes.CutPrefix(line, []byte("data:"))
-		if !ok {
-			continue
+	if len(w.preludePending) > 0 {
+		data = append(w.preludePending, data...)
+		w.preludePending = nil
+	}
+	for len(data) > 0 {
+		end := collabSeamFrameEnd(data, 0)
+		if end == 0 {
+			if len(data) <= collabSeamPendingLimit {
+				w.preludePending = bytes.Clone(data)
+			}
+			return
 		}
-		payload = bytes.TrimSpace(payload)
+		_, _, payload := collabSeamClassify(data[:end])
+		data = data[end:]
 		if !gjson.ValidBytes(payload) {
 			continue
 		}
@@ -655,7 +665,8 @@ func (w *collabSeamWriter) suspend() *collabWithheld {
 	held.header = w.Header().Clone()
 	w.held = nil
 	w.forget()
-	w.takeover.Store(true)
+	w.takeover.Store(w.prelude.Created)
+	w.resumeSequence = w.prelude.NextSequence
 	w.set(collabSeamWatching)
 	w.quiet = true
 	if !held.committed {
@@ -672,6 +683,8 @@ func (w *collabSeamWriter) discard() {
 		return
 	}
 	w.held = nil
+	w.continuation = nil
+	w.prelude.NextSequence = w.resumeSequence
 	w.forget()
 	w.set(collabSeamWatching)
 	if !w.ResponseWriter.Written() {
@@ -724,6 +737,10 @@ func (w *collabSeamWriter) release() {
 	}
 	w.forget()
 	w.replay()
+	if len(w.continuation) > 0 {
+		_, _ = w.ResponseWriter.Write(w.continuation)
+		w.continuation = nil
+	}
 }
 
 func (w *collabSeamWriter) replay() {

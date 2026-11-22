@@ -4,7 +4,24 @@ import (
 	"context"
 	"github.com/gin-gonic/gin"
 	"sync/atomic"
+
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
+
+// CommitCollabResponseIdentity runs only after semantic delivery, through the
+// parent's settlement owner. Prelude continuation names the response the client
+// saw, so ownership and billing must use that same identity.
+func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, account *Account, result *OpenAIForwardResult, deliveredID string) {
+	if result == nil || c == nil || c.Request == nil || resilience.StateFrom(c.Request.Context()).DeliveredBytes() == 0 {
+		return
+	}
+	if deliveredID != "" {
+		result.ResponseID = deliveredID
+	}
+	if result.CompletedForDelivery() {
+		s.bindHTTPResponseAccount(resilience.WithCollabAttempt(c.Request.Context(), resilience.CollabAttempt{}), c, account, result.ResponseID)
+	}
+}
 
 // Selection may update the rejection scope's binding flag. Keep that mutable
 // cell out of the legacy context even though the thread identity is shared.

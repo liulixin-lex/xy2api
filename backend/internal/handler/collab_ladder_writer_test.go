@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -34,4 +35,43 @@ func TestCollabTakeoverContinuesDeliveredPrelude(t *testing.T) {
 		require.Contains(t, wire.body, `"sequence_number":1`)
 		require.NotContains(t, wire.body, "response.failed")
 	}
+}
+
+func TestCollabPreludeTracksFragmentsAndPreservesTrailingBytes(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	w := newCollabSeamWriter(c.Writer, func() bool { return false })
+	w.Header().Set("Content-Type", "text/event-stream")
+	created := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_seen\"}}\n\n"
+	for _, b := range []byte(created) {
+		_, err := w.Write([]byte{b})
+		require.NoError(t, err)
+	}
+	require.True(t, w.deliveredPrelude().Created)
+	w.rescuable = seamTestAlways
+	_, err := w.WriteString(seamTestFailed)
+	require.NoError(t, err)
+	require.NotNil(t, w.suspend())
+	_, err = w.WriteString(seamTestDelta)
+	require.NoError(t, err)
+	_, err = w.WriteString(": tail")
+	require.NoError(t, err)
+	w.release()
+	require.Equal(t, 0, len(w.continuation))
+	require.True(t, strings.HasSuffix(recorder.Body.String(), ": tail"))
+}
+
+func TestCollabNoDeliveredPreludeKeepsFastOutputPath(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	w := newCollabSeamWriter(c.Writer, seamTestAlways)
+	w.WriteHeader(502)
+	_, err := w.WriteString(seamTestHTTPFail)
+	require.NoError(t, err)
+	require.NotNil(t, w.suspend())
+	require.False(t, w.takeover.Load())
+	w.Header().Set("Content-Type", "text/event-stream")
+	_, err = w.WriteString(seamTestDelta)
+	require.NoError(t, err)
+	require.Equal(t, collabSeamPassing, w.current())
+	require.False(t, w.takeover.Load())
 }
