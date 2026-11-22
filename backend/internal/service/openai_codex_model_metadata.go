@@ -53,12 +53,26 @@ func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite b
 	return changed
 }
 
+// Prefer the literal snapshot. Only Codex credentials normalize a recognized
+// GPT-6.2 suffix before sending it upstream; API keys keep the target verbatim.
+func accountCodexUpstreamModelMetadata(account *Account, modelID string) (UpstreamModelMetadata, bool) {
+	if metadata, ok := account.GetUpstreamModelMetadata(modelID); ok {
+		return metadata, true
+	}
+	if account.UsesOpenAICodexProtocol() {
+		if base := openai.GPT62ModelID(modelID); base != "" {
+			return account.GetUpstreamModelMetadata(base)
+		}
+	}
+	return UpstreamModelMetadata{}, false
+}
+
 func accountCodexToolCapabilities(account *Account, modelID string) map[string]json.RawMessage {
 	capabilities := make(map[string]json.RawMessage)
 	if account == nil {
 		return capabilities
 	}
-	if metadata, ok := account.GetUpstreamModelMetadata(modelID); ok {
+	if metadata, ok := accountCodexUpstreamModelMetadata(account, modelID); ok {
 		applyCodexToolCapabilities(capabilities, metadata.CodexToolCapabilities, true)
 	}
 	if account.IsOpenAI() && shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
@@ -75,7 +89,7 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	official := err == nil && (strings.EqualFold(parsed.Hostname(), "api.openai.com") ||
 		(account.IsOpenAIOAuth() && strings.EqualFold(parsed.Hostname(), "chatgpt.com")))
 	if account.IsOpenAI() && (isOpenAIGPT6AstraModel(modelID) || openai.RequiresResponsesForToolCalls(modelID) ||
-		openai.IsGPT62SolModelSpelling(modelID) || openai.IsGPT62AstraModelSpelling(modelID)) && official {
+		openai.GPT62ModelID(modelID) != "") && official {
 		defaults := map[string]json.RawMessage{
 			"supports_search_tool":  json.RawMessage("true"),
 			"apply_patch_tool_type": json.RawMessage(`"freeform"`),
@@ -202,7 +216,7 @@ func groupCodexModelMetadata(
 		if strings.TrimSpace(lookupModel) != modelID {
 			publicAlias = true
 		}
-		metadata, ok := account.GetUpstreamModelMetadata(lookupModel)
+		metadata, ok := accountCodexUpstreamModelMetadata(account, lookupModel)
 		if !ok {
 			if explicitTargetsConflict {
 				return codexModelMetadataOverride{

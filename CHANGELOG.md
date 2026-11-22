@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+- 客户端未带会话标识时，GPT-6.2 请求也会获得稳定的 `prompt_cache_key`，`/v1/messages` 仍发送完整历史，见 [OpenAI 模型支持](docs/platforms/openai.md#模型支持gpt-62-sol-与-gpt-62-astra)。
+- GPT-6.2 的 `none`、`minimal` 推理强度在 API Key 账号的 HTTP 请求中改按 `low` 发送，在 OAuth 账号与 WebSocket 中改为本地拒绝；带工具的请求不再分给明确不支持 Responses 的账号，部分协议转换路径不再发送 `temperature`、`top_p`。
+- GPT-6.2 在价格目录缺失或名称带推理后缀时不再按其它模型家族计价，带供应商前缀时会匹配渠道价格；目录已有精确 6.2 价格时扣费不变。
+- GPT-6.2 Sol / Astra 出现在默认模型列表、白名单预设与客户端配置中，OAuth 账号的默认提示词改用官方 6.2 模板。
+
 ## [0.6.14] - 2026-11-22
 
 本版解决 Codex 请求被第三方中转以“function_call_output requires call_id on HTTP requests”拒绝的问题：网关把客户端自动附带的上下文条目改写为普通用户消息后重试，并新增对应的设置与错误码。同时补上内容审计此前漏掉的两类用户输入。无数据库迁移。

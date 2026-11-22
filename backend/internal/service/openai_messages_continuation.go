@@ -26,7 +26,7 @@ func openAICompatContinuationEnabled(account *Account, model string) bool {
 	if account == nil || account.Type != AccountTypeAPIKey {
 		return false
 	}
-	return shouldAutoInjectPromptCacheKeyForCompat(model)
+	return shouldApplyCompatMessagesReplayPolicy(model)
 }
 
 func trimAnthropicCompatResponsesInputToLatestTurn(req *apicompat.ResponsesRequest) {

@@ -22,7 +22,7 @@ func AnthropicToResponsesWithOptions(req *AnthropicRequest, opts ConversionOptio
 	if req == nil {
 		return nil, unsupportedConversion("request", "request is nil")
 	}
-	if err := openai.ValidateGPT61SolReasoningEffort(req.Model, gpt61SolAnthropicReasoningEffort(req)); err != nil {
+	if err := openai.ValidateRequiredReasoningEffort(req.Model, gpt61SolAnthropicReasoningEffort(req)); err != nil {
 		return nil, err
 	}
 	if err := openai.ValidateGPT61TerraReasoningEffort(req.Model, anthropicReasoningEffort(req)); err != nil {
@@ -89,7 +89,7 @@ func AnthropicToResponsesWithOptions(req *AnthropicRequest, opts ConversionOptio
 	if effort != "none" {
 		out.Reasoning.Summary = "auto"
 	}
-	if openai.IsGPT61SolModelSpelling(req.Model) {
+	if openai.IsGPT61SolModelSpelling(req.Model) || openai.GPT62ModelID(req.Model) != "" {
 		out.Reasoning.Effort = gpt61SolAnthropicReasoningEffort(req)
 	}
 
@@ -629,7 +629,7 @@ func boolPtr(v bool) *bool {
 // request until someone edited this line.
 func isReasoningModel(model string) bool {
 	major, ok := openAIModelGeneration(model)
-	return (ok && major >= 5) || openai.IsGPT6SolOrLunaModelSpelling(model) || openai.IsGPT61SolModelSpelling(model)
+	return (ok && major >= 5) || openai.IsGPT6SolOrLunaModelSpelling(model) || openai.IsGPT61SolModelSpelling(model) || openai.GPT62ModelID(model) != ""
 }
 
 // openAIModelGeneration extracts N from a "gpt-N[.M][-suffix]" model id.

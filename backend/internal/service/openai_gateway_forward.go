@@ -81,13 +81,21 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			validationModel = mapped
 		}
 	}
-	if account.Type != AccountTypeAPIKey || account.IsOpenAIPassthroughEnabled() || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+	isGPT62 := openai.GPT62ModelID(validationModel) != ""
+	if account.Type != AccountTypeAPIKey || (account.IsOpenAIPassthroughEnabled() && !isGPT62) || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
 		if err := validateGPT61SolCompatRequest(body, validationModel); err != nil {
 			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadRequest, "invalid_request_error", "", "", err.Error())
 			return nil, err
 		}
 	} else {
 		ctx = WithFinalReasoningEffortRequest(ctx, body)
+		if isGPT62 && account.IsOpenAIPassthroughEnabled() {
+			projected, _, err := applyFinalReasoningEffortForAccount(ctx, c, account, body, validationModel, "responses")
+			if err != nil {
+				return nil, writeFinalReasoningPolicyError(c, "responses", err)
+			}
+			body = projected
+		}
 	}
 	var cacheControlErr error
 	body, cacheControlErr = normalizeOpenAICacheControls(account, body)

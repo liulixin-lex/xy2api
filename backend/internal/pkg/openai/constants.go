@@ -25,6 +25,8 @@ var DefaultModels = []Model{
 	{ID: "gpt-5.6", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 (Sol)"},
 	{ID: "gpt-5.6-terra", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Terra"},
 	{ID: "gpt-5.6-luna", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Luna"},
+	{ID: "gpt-6.2-sol", Object: "model", Created: 1794873600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.2 Sol"},
+	{ID: "gpt-6.2-astra", Object: "model", Created: 1794873600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.2 Astra"},
 	{ID: "gpt-6.1-sol", Object: "model", Created: 1790640000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.1 Sol"},
 	{ID: "gpt-6.1-terra", Object: "model", Created: 1792972800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.1 Terra"},
 	{ID: "gpt-6-sol", Object: "model", Created: 1790035200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Sol"},
@@ -122,6 +124,26 @@ func IsGPT62AstraModelSpelling(model string) bool {
 	return CanonicalizeOpenAIModelAliasSpelling(model) == "gpt-6.2-astra"
 }
 
+// GPT62ModelID returns the published GPT-6.2 ID for the model's local effort and
+// compact spellings, or "" for any other model. Disabled effort suffixes stay
+// identifiable so request validation can handle them. Use it on request and
+// billing paths; the exact-ID predicates above remain catalog-only.
+func GPT62ModelID(model string) string {
+	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
+	for _, base := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
+		if canonical == base {
+			return base
+		}
+		if suffix, ok := strings.CutPrefix(canonical, base+"-"); ok {
+			switch suffix {
+			case "none", "minimal", "low", "medium", "high", "xhigh", "max", "openai-compact":
+				return base
+			}
+		}
+	}
+	return ""
+}
+
 // CodexOfficialModelMetadata returns the embedded official Codex descriptor
 // for models whose catalog entry is taken verbatim from openai/codex, or nil.
 func CodexOfficialModelMetadata(model string) []byte {
@@ -201,14 +223,11 @@ func CanonicalizeOpenAIModelAliasSpelling(model string) string {
 func CodexBaseInstructionsForModel(model string) string {
 	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
 	switch {
-	// GPT-6.2 is intentionally absent: this function feeds request-side default
-	// instructions, and its official template is advertised only through the
-	// Codex models manifest descriptor.
-	case IsGPT61SolModelSpelling(canonical), IsGPT61TerraModelSpelling(canonical):
-		raw := CodexGPT61SolMetadata
-		if IsGPT61TerraModelSpelling(canonical) {
-			raw = CodexGPT61TerraMetadata
+	case GPT62ModelID(canonical) != "", IsGPT61SolModelSpelling(canonical), IsGPT61TerraModelSpelling(canonical):
+		if base := GPT62ModelID(canonical); base != "" {
+			canonical = base
 		}
+		raw := CodexOfficialModelMetadata(canonical)
 		var metadata struct {
 			ModelMessages struct {
 				InstructionsTemplate string `json:"instructions_template"`
@@ -293,6 +312,22 @@ func ValidateGPT61SolReasoningEffort(model, effort string) error {
 	return nil
 }
 
+// ValidateRequiredReasoningEffort runs after HTTP effort projection, or on the
+// original intent for clients using Codex credentials or WebSocket transport.
+func ValidateRequiredReasoningEffort(model, effort string) error {
+	if base := GPT62ModelID(model); base != "" {
+		value := strings.ToLower(strings.TrimSpace(effort))
+		if value == "" {
+			value = strings.TrimPrefix(CanonicalizeOpenAIModelAliasSpelling(model), base+"-")
+		}
+		if value == "none" || value == "minimal" {
+			return fmt.Errorf("%s does not support reasoning effort %q; use low, medium, high, xhigh or max", base, value)
+		}
+		return nil
+	}
+	return ValidateGPT61SolReasoningEffort(model, effort)
+}
+
 // IsGPT61TerraModelSpelling recognizes the published model and local effort/compact
 // spellings. Invalid effort suffixes remain identifiable for request validation.
 func IsGPT61TerraModelSpelling(model string) bool {
@@ -315,7 +350,7 @@ func IsGPT61TerraModelSpelling(model string) bool {
 // RequiresResponsesForToolCalls reports models whose tool calls are only
 // available through the Responses API.
 func RequiresResponsesForToolCalls(model string) bool {
-	return IsGPT61SolModelSpelling(model) || IsGPT61TerraModelSpelling(model)
+	return GPT62ModelID(model) != "" || IsGPT61SolModelSpelling(model) || IsGPT61TerraModelSpelling(model)
 }
 
 // ValidateGPT61TerraReasoningEffort rejects the unpublished minimal level;

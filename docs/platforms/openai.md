@@ -210,10 +210,13 @@ goals = true
 
 ## 模型支持：GPT-6.2 Sol 与 GPT-6.2 Astra
 
-- **名称**：`gpt-6.2-sol`、`gpt-6.2-astra`，供应商前缀、大小写与下划线精确归一；带推理或 compact 后缀的写法（如 `gpt-6.2-sol-high`）不会匹配。
-- **Codex**：模型目录采用 openai/codex 官方描述符，推理档位 `low`–`ultra`，默认 `low`；context window 分别为 500000（Sol）与 272000（Astra），max context window 均为 872000；支持图片输入与 Fast（`priority`）档。已获取的实时上游元数据优先，API Key 账号及其映射别名不启用 Responses Lite。目录中的 `ultra` 是 Codex 工作流能力，不代表 HTTP 推理档位。
-- **请求**：网关不对这两个模型做本地推理档位校验或映射，请求中的推理档位（包括 `none`）原样发往上游，由上游决定是否接受；工具调用不强制走 Responses 接口。
-- **路由**：仍遵守分组映射与受限目录；新增型号不会自动使未配置的账号可服务。
+- **名称与目录**：`gpt-6.2-sol`、`gpt-6.2-astra` 加入默认模型列表、白名单与映射预设；支持供应商前缀、大小写、下划线与已知推理/compact 后缀（如 `gpt-6.2-sol-high`），未知日期或近似名称不自动归一。仍遵守分组映射与受限目录；使用默认模型列表的分组（含无可调度账号时）的 `/v1/models` 会新增列出这两个模型，不改变调度；显式 mapping 或白名单仍按配置过滤。新增型号不会自动使未配置的账号可服务。
+- **Codex**：内嵌描述符与默认提示词来自 openai/codex 官方快照，推理档位 `low`–`ultra`，默认 `low`；context window 分别为 500000（Sol）与 272000（Astra），max context window 均为 872000；支持图片输入与 Fast（`priority`）档。实时上游或账号元数据优先，已知后缀沿用相同描述符；API Key 账号及其映射别名关闭 Responses Lite。目录中的 `ultra` 是 Codex 工作流能力，不代表 HTTP 推理档位。
+- **推理强度**：API Key 账号的 HTTP 请求把 `none`、`minimal` 映射为 `low` 发送；与 `gpt-6.1-sol` 不同，`/v1/messages` 的 `thinking.type=disabled` 和 Responses 透传也按 `low` 发送而不是拒绝。OAuth 账号与 WebSocket 在本地拒绝这两档及关闭 thinking。显式 `max` 原样保留。
+- **请求**：`/v1/messages` 客户端直接携带已知 effort 后缀时拆为基名与 effort，并按基名计价，此时以带后缀名称配置的映射或渠道价不会命中；API Key 账号在其它情况下保留模型名和映射目标原样，`model_mapping` 的键仍区分大小写。`temperature`、`top_p` 在 Chat → Responses、Messages → Chat、Responses → Chat 转换及 Codex 协议路径中不发送，API Key 的原生 Responses 与 Chat 直转保留原值。
+- **工具调用**：只走 Responses。明确标记为不支持 Responses 的账号不再承接带工具的 6.2 请求；已标记支持或尚未标记的账号不受影响。
+- **缓存**：客户端未提供会话标识时自动补充 `prompt_cache_key`，按最终模型与下游 API Key 隔离。`/v1/messages` 的历史裁剪、续聊与 todo guard 不对 6.2 启用。
+- **计费**：目录已有精确 6.2 价格时扣费不变。修复目录缺失或已知后缀误用其它模型家族价格的问题；缺失时也会启用 6.2 的长上下文与缓存写入价格，不完整渠道价卡的留空字段随之变化。供应商前缀模型也会匹配渠道价格（含显式零价与 Ultrafast 倍率）；分组和渠道显式配置仍优先。Ultrafast 售价沿用现有价卡；官方 API 采购价在太平洋时间 2027-03-01 零点前按 Standard 的 3 倍、之后 6 倍计算。免费 Fast 与免费 Ultrafast 分别设置，不按订阅套餐推断 Ultrafast 能力，也不新增官方 API 的 6.2 Ultrafast 目录广告。
 
 ## 相关功能
 

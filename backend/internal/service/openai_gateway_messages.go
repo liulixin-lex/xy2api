@@ -16,6 +16,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
 	"github.com/liulixin-lex/xy2api/internal/pkg/claude"
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/pkg/openai"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/util/responseheaders"
 	"github.com/tidwall/gjson"
@@ -126,6 +127,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if projectionErr != nil {
 		return nil, projectionErr
 	}
+	if openai.GPT62ModelID(upstreamModel) != "" {
+		anthropicReq.Thinking = nil
+	}
 	if err := json.Unmarshal(body, &anthropicReq); err != nil {
 		return nil, err
 	}
@@ -151,7 +155,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			compatPromptCacheInjected = true
 		}
 	}
-	if promptCacheKey == "" && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
+	if model := openai.GPT62ModelID(upstreamModel); model != "" && promptCacheKey == "" && !openAIClientHasSessionIdentity(c, body) {
+		promptCacheKey = gpt62MessagesCacheKey(anthropicReq, model, apiKeyID)
+		compatPromptCacheInjected = true
+	} else if promptCacheKey == "" && shouldApplyCompatMessagesReplayPolicy(upstreamModel) {
 		promptCacheKey = promptCacheKeyFromAnthropicMetadataSession(&anthropicReq)
 		if promptCacheKey == "" {
 			promptCacheKey = deriveAnthropicCacheControlPromptCacheKey(&anthropicReq)
@@ -168,7 +175,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		compatPromptCacheInjected = promptCacheKey != ""
 	}
 	compatReplayTrimmed := false
-	compatReplayGuardEnabled := shouldAutoInjectPromptCacheKeyForCompat(upstreamModel)
+	compatReplayGuardEnabled := shouldApplyCompatMessagesReplayPolicy(upstreamModel)
 	compatContinuationEnabled := openAICompatContinuationEnabled(account, upstreamModel)
 	previousResponseID := ""
 	if compatContinuationEnabled {
@@ -291,7 +298,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			return nil, err
 		}
 		ensureCodexOAuthInstructionsField(reqBody)
-		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
+		if compatReplayGuardEnabled {
 			appendOpenAICompatClaudeCodeTodoGuardToRequestBody(reqBody)
 		}
 		if codexResult.NormalizedModel != "" {

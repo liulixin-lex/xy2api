@@ -13,10 +13,16 @@ import (
 const compatPromptCacheKeyPrefix = "compat_cc_"
 
 func shouldAutoInjectPromptCacheKeyForCompat(model string) bool {
+	return openai.GPT62ModelID(model) != "" || shouldApplyCompatMessagesReplayPolicy(model)
+}
+
+// History trimming, previous_response_id and the todo guard share the legacy
+// Messages replay contract. A cache identity alone needs none of these.
+func shouldApplyCompatMessagesReplayPolicy(model string) bool {
 	trimmed := strings.TrimSpace(strings.ToLower(model))
 	canonical := canonicalizeOpenAIModelAliasSpelling(trimmed)
 	// GPT-6 Sol/Luna share the supported Responses cache identity contract.
-	if canonical == "gpt-6" || canonical == "gpt-6-astra" || openai.IsGPT6SolOrLunaModelSpelling(canonical) || openai.RequiresResponsesForToolCalls(canonical) {
+	if canonical == "gpt-6" || canonical == "gpt-6-astra" || openai.IsGPT6SolOrLunaModelSpelling(canonical) || openai.IsGPT61SolModelSpelling(canonical) || openai.IsGPT61TerraModelSpelling(canonical) {
 		return true
 	}
 	// 仅对 Responses 兼容路径支持的 GPT-5 族开启自动注入，避免 normalizeCodexModel
@@ -26,6 +32,67 @@ func shouldAutoInjectPromptCacheKeyForCompat(model string) bool {
 	}
 	normalized := strings.TrimSpace(strings.ToLower(normalizeCodexModel(trimmed)))
 	return strings.HasPrefix(normalized, "gpt-5") || strings.Contains(normalized, "codex")
+}
+
+func gpt62MessagesCacheKey(req apicompat.AnthropicRequest, model string, apiKeyID int64) string {
+	seed := promptCacheKeyFromAnthropicMetadataSession(&req)
+	if seed == "" {
+		var user any
+		for _, msg := range req.Messages {
+			if msg.Role == "user" {
+				user = gpt62CacheContent(msg.Content, false)
+				break
+			}
+		}
+		tools := make([]apicompat.AnthropicTool, len(req.Tools))
+		copy(tools, req.Tools)
+		for i := range tools {
+			tools[i].CacheControl = nil
+		}
+		parts, _ := json.Marshal([]any{gpt62CacheContent(req.System, true), tools, user})
+		seed = string(parts)
+	}
+	return isolateOpenAISessionID(apiKeyID, model+"|"+seed)
+}
+
+// Canonicalize only Anthropic content blocks. A cache_control property in a
+// tool's schema or a tool_use input is application data.
+func gpt62CacheContent(raw json.RawMessage, system bool) any {
+	var value any
+	if len(raw) == 0 || decodeOpenAIJSONUseNumber(raw, &value) != nil {
+		return nil
+	}
+	return gpt62CacheBlocks(value, system)
+}
+
+func gpt62CacheBlocks(value any, system bool) any {
+	if text, ok := value.(string); ok {
+		value = []any{map[string]any{"type": "text", "text": text}}
+	}
+	blocks, ok := value.([]any)
+	if !ok {
+		return value
+	}
+	stable := blocks[:0]
+	for _, item := range blocks {
+		if block, ok := item.(map[string]any); ok {
+			delete(block, "cache_control")
+			if system && block["type"] == "text" {
+				if text, ok := block["text"].(string); ok {
+					clean := stripSessionBillingHeader(text)
+					if clean != text && clean == "" {
+						continue
+					}
+					block["text"] = clean
+				}
+			}
+			if block["type"] == "tool_result" {
+				block["content"] = gpt62CacheBlocks(block["content"], false)
+			}
+		}
+		stable = append(stable, item)
+	}
+	return stable
 }
 func deriveCompatPromptCacheKey(req *apicompat.ChatCompletionsRequest, mappedModel string) string {
 	if req == nil {

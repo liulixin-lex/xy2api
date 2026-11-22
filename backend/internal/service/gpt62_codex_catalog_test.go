@@ -107,8 +107,15 @@ func TestGPT62DescriptorUsesOfficialMetadata(t *testing.T) {
 	descriptor := newConfiguredCodexModelDescriptor("openai/GPT_6.2_SOL")
 	require.Equal(t, "openai/GPT_6.2_SOL", descriptor.Slug)
 	require.Equal(t, string(openai.CodexGPT62SolMetadata), string(descriptor.officialMetadata))
-	// Suffix spellings have no local alias and keep the generic descriptor.
-	for _, model := range []string{"gpt-6.2-sol-high", "gpt-6.2-astra-max", "gpt-6.2"} {
+	// Recognized suffixes use the same official metadata while retaining their slug.
+	for _, model := range []string{"gpt-6.2-sol-high", "gpt-6.2-astra-max", "gpt-6.2-sol-openai-compact"} {
+		descriptor := newConfiguredCodexModelDescriptor(model)
+		require.Equal(t, model, descriptor.Slug)
+		require.Equal(t, string(openai.CodexOfficialModelMetadata(openai.GPT62ModelID(model))), string(descriptor.officialMetadata), model)
+		require.Equal(t, "low", *descriptor.DefaultReasoningLevel, model)
+	}
+	// Unknown families, dates and suffixes keep the generic descriptor.
+	for _, model := range []string{"gpt-6.2", "gpt-6.2-terra", "gpt-6.2-sol-2026-11-17", "gpt-6.2-astra-pro"} {
 		descriptor := newConfiguredCodexModelDescriptor(model)
 		require.Empty(t, descriptor.officialMetadata, model)
 		require.Equal(t, "none", *descriptor.DefaultReasoningLevel, model)
@@ -160,7 +167,7 @@ func TestGPT62APIKeyCatalogUsesFullResponses(t *testing.T) {
 }
 
 func TestGPT62APIKeyAliasesDisableLiteAndKeepMetadata(t *testing.T) {
-	for _, target := range []string{"openai/GPT_6.2_SOL", "gpt-6.2-astra"} {
+	for _, target := range []string{"openai/GPT_6.2_SOL", "gpt-6.2-astra", "gpt-6.2-sol-high", "gpt-6.2-astra-openai-compact"} {
 		account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"public": target}}}
 		for _, slug := range []string{"gpt-6.2-sol", "gpt-6.2-astra", target, "public"} {
 			body, err := json.Marshal(map[string]any{"models": []any{map[string]any{"slug": slug, "use_responses_lite": true, "supports_search_tool": false, "apply_patch_tool_type": nil, "supported_reasoning_levels": []any{}, "future_capability": map[string]any{"enabled": false}}}})
@@ -175,8 +182,8 @@ func TestGPT62APIKeyAliasesDisableLiteAndKeepMetadata(t *testing.T) {
 			require.Equal(t, map[string]any{"enabled": false}, models[0]["future_capability"])
 		}
 	}
-	// Suffix spellings are not 6.2 aliases and are left untouched.
-	account := gpt62RelayAPIKeyAccount(map[string]any{"public": "gpt-6.2-sol-high"})
+	// Unrecognized suffixes are left untouched.
+	account := gpt62RelayAPIKeyAccount(map[string]any{"public": "gpt-6.2-sol-unknown"})
 	body := []byte(`{"models":[{"slug":"public","use_responses_lite":true}]}`)
 	out, err := adjustAPIKeyCodexModelsManifest(body, account)
 	require.NoError(t, err)
@@ -331,48 +338,37 @@ func TestGPT62AliasCatalogMatchesGPT61SolAlias(t *testing.T) {
 	requireGPT62ParityWith(t, "alias complete astra", models["team-61"], models["team-62-astra"])
 }
 
-// The request path is unchanged: GPT-6.2 IDs stay outside every request-side
-// GPT-6 family predicate, alias normalizer, and reasoning-effort clamp.
-func TestGPT62RequestPathPredicatesUnchanged(t *testing.T) {
+func TestGPT62RequestPathPredicates(t *testing.T) {
 	account := gpt62RelayAPIKeyAccount(nil)
 	for _, model := range []string{"gpt-6.2-sol", "gpt-6.2-astra", "GPT_6.2_SOL", "openai/gpt-6.2-astra", "gpt-6.2-sol-high", "gpt-6.2-astra-max"} {
-		require.False(t, isOpenAIGPT6Model(model), model)
+		require.True(t, isOpenAIGPT6Model(model), model)
 		require.False(t, isOpenAIGPT6AstraModel(model), model)
 		require.False(t, openai.IsGPT61SolModelSpelling(model), model)
 		require.False(t, openai.IsGPT61TerraModelSpelling(model), model)
 		require.False(t, openai.IsGPT6SolOrLunaModelSpelling(model), model)
-		require.False(t, openai.RequiresResponsesForToolCalls(model), model)
-		require.Empty(t, normalizeKnownOpenAICodexModel(model), model)
+		require.True(t, openai.RequiresResponsesForToolCalls(model), model)
+		require.Equal(t, openai.GPT62ModelID(model), normalizeKnownOpenAICodexModel(model), model)
 		supported, reliable := supportedInferenceEffortsForAccount(account, model)
-		require.False(t, reliable, model)
-		require.Empty(t, supported, model)
+		require.True(t, reliable, model)
+		require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, supported, model)
 		for _, effort := range []string{"none", "minimal", "low", "xhigh", "max"} {
 			require.NoError(t, openai.ValidateGPT61SolReasoningEffort(model, effort), model)
 			require.NoError(t, openai.ValidateGPT61TerraReasoningEffort(model, effort), model)
 		}
 	}
 	for _, id := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
-		require.NotContains(t, openai.DefaultModelIDs(), id)
+		require.Contains(t, openai.DefaultModelIDs(), id)
 	}
 }
 
-// Request-side default instructions (OAuth/SetupToken forward, passthrough, and
-// the OAuth transform) keep the v0.6.9 GPT-5.5 fallback for GPT-6.2; the
-// official 6.2 template is advertised only in the models manifest.
-func TestGPT62RequestInstructionsUnchanged(t *testing.T) {
-	fallback := defaultCodexSynthInstructions("gpt-5.5")
-	require.NotEmpty(t, fallback)
-	officialTemplates := []string{
-		strings.TrimSpace(gpt62OfficialInstructionsTemplate(t, openai.CodexGPT62SolMetadata)),
-		strings.TrimSpace(gpt62OfficialInstructionsTemplate(t, openai.CodexGPT62AstraMetadata)),
-	}
+func TestGPT62CodexRequestInstructions(t *testing.T) {
 	for _, model := range []string{"gpt-6.2-sol", "gpt-6.2-astra", "GPT_6.2_SOL", "openai/gpt-6.2-astra", "gpt-6.2-sol-high"} {
-		require.Equal(t, openai.CodexBaseInstructionsForModel("gpt-5.5"), openai.CodexBaseInstructionsForModel(model), model)
-		require.Equal(t, fallback, defaultCodexSynthInstructions(model), model)
+		raw := openai.CodexOfficialModelMetadata(openai.GPT62ModelID(model))
+		want := strings.TrimSpace(gpt62OfficialInstructionsTemplate(t, raw))
+		require.Equal(t, want, defaultCodexSynthInstructions(model), model)
 		reqBody := map[string]any{"model": model, "input": "hi"}
 		applyCodexOAuthTransform(reqBody, false, false)
-		require.Equal(t, fallback, reqBody["instructions"], model)
-		require.NotContains(t, officialTemplates, reqBody["instructions"], model)
+		require.Equal(t, want, reqBody["instructions"], model)
 	}
 	// GPT-6.1 keeps its official template on the request path.
 	require.Equal(t, strings.TrimSpace(gpt62OfficialInstructionsTemplate(t, openai.CodexGPT61SolMetadata)), defaultCodexSynthInstructions("gpt-6.1-sol"))
@@ -393,7 +389,7 @@ func TestGPT62OfficialMetadataScope(t *testing.T) {
 		{"openai/GPT_6.1_SOL_MAX", "gpt-6.1-sol"},
 		{"gpt-6.2-sol", "gpt-6.2-sol"},
 		{"openai/GPT_6.2_ASTRA", "gpt-6.2-astra"},
-		{"gpt-6.2-sol-high", "gpt-6.2-sol-high"},
+		{"gpt-6.2-sol-high", "gpt-6.2-sol"},
 		{"gpt-5.6-sol", "gpt-5.6-sol"},
 	} {
 		require.Equal(t, tc.want, apiKeyCodexResponsesLiteTarget(tc.model), tc.model)

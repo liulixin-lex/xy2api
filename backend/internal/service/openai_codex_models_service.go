@@ -555,7 +555,11 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		}
 	}
 
-	if raw := openai.CodexOfficialModelMetadata(modelID); raw != nil {
+	metadataModelID := modelID
+	if base := openai.GPT62ModelID(modelID); base != "" {
+		metadataModelID = base
+	}
+	if raw := openai.CodexOfficialModelMetadata(metadataModelID); raw != nil {
 		if err := json.Unmarshal(raw, &descriptor); err != nil {
 			panic(err)
 		}
@@ -1293,7 +1297,7 @@ func accountCodexModelSupportsImageInput(account *Account, upstreamModel string)
 	}
 	switch account.Platform {
 	case PlatformOpenAI, PlatformDeepseek, PlatformOpenCodeGo:
-		if metadata, ok := account.GetUpstreamModelMetadata(upstreamModel); ok {
+		if metadata, ok := accountCodexUpstreamModelMetadata(account, upstreamModel); ok {
 			if modalities := normalizeCodexInputModalities(metadata.InputModalities); len(modalities) > 0 {
 				// Official GPT-6 Astra metadata briefly shipped with a stale
 				// text-only modality list. Keep explicit provider metadata
@@ -2133,6 +2137,9 @@ var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
 // apiKeyCodexResponsesLiteTarget canonicalizes model spellings to the keys of
 // apiKeyCodexModelsWithoutResponsesLite. Other models are returned unchanged.
 func apiKeyCodexResponsesLiteTarget(model string) string {
+	if base := openai.GPT62ModelID(model); base != "" {
+		return base
+	}
 	switch {
 	case isOpenAIGPT6AstraModel(model):
 		return "gpt-6-astra"
@@ -2140,10 +2147,6 @@ func apiKeyCodexResponsesLiteTarget(model string) string {
 		return "gpt-6.1-terra"
 	case openai.IsGPT61SolModelSpelling(model):
 		return "gpt-6.1-sol"
-	case openai.IsGPT62SolModelSpelling(model):
-		return "gpt-6.2-sol"
-	case openai.IsGPT62AstraModelSpelling(model):
-		return "gpt-6.2-astra"
 	default:
 		return model
 	}
