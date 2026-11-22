@@ -17,8 +17,10 @@ func CollabRecordStorageIdentity(m CollabRecordMutation) (scope CollabRecordScop
 	switch m.Kind {
 	case CollabRecordMutationPending:
 		return m.Issued.Scope, "i:" + string(m.Token.Token), m.Issued.ExpiresAt
-	case CollabRecordMutationConfirm, CollabRecordMutationVoid:
+	case CollabRecordMutationConfirm:
 		return m.Token.Scope, "i:" + string(m.Token.Token), time.Time{}
+	case CollabRecordMutationVoid:
+		return m.Token.Scope, "v:" + string(m.Token.Token), m.Issued.ExpiresAt
 	case CollabRecordMutationPlaintext:
 		return m.Plaintext.Scope, "p:" + string(m.Plaintext.Call) + ":" + string(m.Plaintext.Arguments), m.Plaintext.ExpiresAt
 	case CollabRecordMutationConsumed:
@@ -152,6 +154,8 @@ func (s *MemoryCollabRecordsStore) mutationTree(scope CollabRecordScope, create 
 }
 func collabMutationIndexes(m CollabRecordMutation) []collabMemoryIndex {
 	switch m.Kind {
+	case CollabRecordMutationVoid:
+		return []collabMemoryIndex{{kind: "void"}}
 	case CollabRecordMutationPending:
 		return []collabMemoryIndex{{kind: "call", digest: m.Issued.Call}, {kind: "cipher", digest: m.Issued.Digest}}
 	case CollabRecordMutationPlaintext:
@@ -204,7 +208,7 @@ func (s *MemoryCollabRecordsStore) applyMutation(m CollabRecordMutation) (count 
 	if !validCollabScope(scope) || field == "" {
 		return 0, false
 	}
-	transition := m.Kind == CollabRecordMutationConfirm || m.Kind == CollabRecordMutationVoid
+	transition := m.Kind == CollabRecordMutationConfirm
 	if !transition && !expires.After(now) {
 		return 0, false
 	}
@@ -261,37 +265,46 @@ func (s *MemoryCollabRecordsStore) applyMutation(m CollabRecordMutation) (count 
 		tree.mu.Unlock()
 		tree.active.Add(-1)
 	}()
+	if m.Kind == CollabRecordMutationPending || transition {
+		revoked := false
+		for _, f := range []string{"v:", "v:" + string(m.Token.Token)} {
+			if e, exists := tree.entries[f]; exists && collabRecordExpiry(e.mutation).After(now) {
+				revoked = true
+			}
+		}
+		if revoked {
+			if transition {
+				return 0, false
+			}
+			m.Issued.Status = CollabIssuedStatusVoid
+		}
+	}
 	if transition {
 		old, exists := tree.entries[field]
 		if !exists || old.mutation.Token != m.Token || !old.mutation.Issued.ExpiresAt.After(now) {
 			return 0, false
 		}
-		if m.Kind == CollabRecordMutationVoid {
-			old.mutation.Issued.Status = CollabIssuedStatusVoid
-			if old.mutation.Issued.ExpiresAt.UnixNano() > tree.protectedUntil.Load() {
-				tree.protectedUntil.Store(old.mutation.Issued.ExpiresAt.UnixNano())
-			}
-		} else if old.mutation.Issued.Status != CollabIssuedStatusVoid {
-			old.mutation.Issued.Status = CollabIssuedStatusConfirmed
-		} else {
+
+		if old.mutation.Issued.Status == CollabIssuedStatusVoid {
 			return 0, false
 		}
+		old.mutation.Issued.Status = CollabIssuedStatusConfirmed
 		tree.entries[field] = old
 		return count, true
 	}
 	if old, exists := tree.entries[field]; exists {
 		if collabRecordExpiry(old.mutation).After(now) {
-			if old.mutation.Reserved && m.Kind == CollabRecordMutationTerminated && !m.Reserved {
+			if m.Kind == CollabRecordMutationTerminated {
 				// Only publish the exact admitted disposition; a changed notice needs admission.
 				m.Terminated.ExpiresAt = old.mutation.Terminated.ExpiresAt
 				pending := m
-				pending.Reserved = true
+				pending.Reserved = old.mutation.Reserved
 				before, _ := json.Marshal(old.mutation)
 				after, _ := json.Marshal(pending)
 				if string(before) != string(after) {
 					return 0, false
 				}
-				old.mutation.Reserved = false
+				old.mutation.Reserved = old.mutation.Reserved && m.Reserved
 				tree.entries[field] = old
 			}
 			return count, true
@@ -316,7 +329,7 @@ func (s *MemoryCollabRecordsStore) applyMutation(m CollabRecordMutation) (count 
 			oldest := ""
 			var stamp int64
 			for f, old := range tree.entries {
-				if collabRecordPartition(old.mutation.Kind) == 0 && old.mutation.Issued.Status != CollabIssuedStatusVoid && (oldest == "" || old.written < stamp) {
+				if collabRecordPartition(old.mutation.Kind) == 0 && old.mutation.Kind != CollabRecordMutationVoid && old.mutation.Issued.Status != CollabIssuedStatusVoid && (oldest == "" || old.written < stamp) {
 					oldest = f
 					stamp = old.written
 				}
@@ -328,12 +341,35 @@ func (s *MemoryCollabRecordsStore) applyMutation(m CollabRecordMutation) (count 
 			count, used = tree.partitionSize(part)
 		}
 	}
+	if m.Kind == CollabRecordMutationVoid && (count >= limit || used+charge > collabPartitionBytes(part)) {
+		// Saturated invalidations conservatively suppress all issuance in this tree.
+		for f, e := range tree.entries {
+			if collabRecordPartition(e.mutation.Kind) == 0 {
+				tree.remove(f)
+			}
+		}
+		m.Token.Token = ""
+		m.Token.Call = ""
+		m.Token.Generation = 0
+		field = "v:"
+		payload, _ = json.Marshal(m)
+		charge = collabRecordCharge(field, payload)
+		count, used = 0, 0
+	}
 	if count >= limit || used+charge > collabPartitionBytes(part) {
 		return 0, false
 	}
 	if m.Kind == CollabRecordMutationTerminalRejected {
 		if _, ok := tree.counter.Record(m.TerminalRejection, now); !ok {
 			return 0, false
+		}
+	}
+	if m.Kind == CollabRecordMutationVoid {
+		for f, e := range tree.entries {
+			if e.mutation.Kind == CollabRecordMutationPending && (m.Token.Token == "" || e.mutation.Token == m.Token) {
+				e.mutation.Issued.Status = CollabIssuedStatusVoid
+				tree.entries[f] = e
+			}
 		}
 	}
 	tree.entries[field] = collabMemoryEntry{mutation: m, charge: charge, written: now.UnixNano()}
@@ -345,7 +381,7 @@ func (s *MemoryCollabRecordsStore) applyMutation(m CollabRecordMutation) (count 
 		tree.index[key][field] = struct{}{}
 	}
 	tree.lastWritten.Store(now.UnixNano())
-	if part != 0 && expires.UnixNano() > tree.protectedUntil.Load() {
+	if (part != 0 || m.Kind == CollabRecordMutationVoid) && expires.UnixNano() > tree.protectedUntil.Load() {
 		tree.protectedUntil.Store(expires.UnixNano())
 	}
 	if expires.UnixNano() > tree.expires.Load() {
@@ -508,9 +544,6 @@ func (s *MemoryCollabRecordsStore) LookupBatch(ctx context.Context, b CollabReco
 					d.Replaced = append(d.Replaced, m.Replaced)
 				}
 			case CollabRecordMutationTerminated:
-				if m.Reserved {
-					continue
-				}
 				v := m.Terminated
 				v.Copies = slices.Clone(v.Copies)
 				d.Terminated = append(d.Terminated, v)
@@ -546,6 +579,8 @@ func (s *MemoryCollabRecordsStore) LookupBatch(ctx context.Context, b CollabReco
 		var r CollabRecordLookup
 		for _, m := range rows {
 			switch m.Kind {
+			case CollabRecordMutationVoid:
+				r.VoidedTokens = append(r.VoidedTokens, m.Token)
 			case CollabRecordMutationPending:
 				v := m.Issued
 				if q.Account == "" || q.Account == v.Account {
@@ -561,7 +596,7 @@ func (s *MemoryCollabRecordsStore) LookupBatch(ctx context.Context, b CollabReco
 				}
 			}
 		}
-		r.Issued = collabAggregateIssues(r.IssuedTokens)
+		collabApplyVoids(&r)
 		if result.Records == nil {
 			result.Records = make(map[CollabRecordQuery]CollabRecordLookup)
 		}
@@ -582,6 +617,7 @@ func (t *collabMemoryTree) query(ctx context.Context, q CollabRecordQuery, recor
 	defer t.mu.RUnlock()
 	var indexes []collabMemoryIndex
 	if records {
+		indexes = append(indexes, collabMemoryIndex{kind: "void"})
 		if q.Call != "" {
 			indexes = append(indexes, collabMemoryIndex{kind: "call", digest: q.Call}, collabMemoryIndex{kind: "plain", digest: q.Call})
 		}
@@ -628,7 +664,7 @@ func (t *collabMemoryTree) query(ctx context.Context, q CollabRecordQuery, recor
 
 func collabRecordExpiry(m CollabRecordMutation) time.Time {
 	switch m.Kind {
-	case CollabRecordMutationPending, CollabRecordMutationLocalEnding:
+	case CollabRecordMutationPending, CollabRecordMutationLocalEnding, CollabRecordMutationVoid:
 		return m.Issued.ExpiresAt
 	case CollabRecordMutationPlaintext:
 		return m.Plaintext.ExpiresAt

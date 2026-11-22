@@ -186,7 +186,7 @@ func TestCollabSharedReadersIgnoringCancellationStayBounded(t *testing.T) {
 	}}
 	s := NewSafeCollabRecordsStore(nil, shared, 1)
 	defer s.Close()
-	for i := 0; i < cap(s.readers)+2; i++ {
+	for i := 0; i < 66; i++ {
 		parent, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
 		ctx, cancel := WithCollabRecordReadBudget(parent)
 		start := time.Now()
@@ -199,7 +199,7 @@ func TestCollabSharedReadersIgnoringCancellationStayBounded(t *testing.T) {
 		cancel()
 		stop()
 	}
-	require.Equal(t, int64(cap(s.readers)), shared.reads.Load())
+	require.Equal(t, int64(64), shared.reads.Load())
 }
 func BenchmarkCollabRejectionIndexedLookup(b *testing.B) {
 	counter := NewCollabTerminalRejectionCounter(CollabRecordMaxEntries)

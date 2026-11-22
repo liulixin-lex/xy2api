@@ -87,15 +87,26 @@ func collabAggregateIssues(tokens []CollabIssuedEntry) []CollabIssuedRecord {
 	}
 	return result
 }
-func collabMergeRecords(remote, local CollabRecordLookup) CollabRecordLookup {
-	tokens := collabMergeIssueTokens(remote.IssuedTokens, local.IssuedTokens)
-	issued := collabAggregateIssues(tokens)
-
-	return CollabRecordLookup{
-		IssuedTokens: tokens, Issued: issued,
-		Plaintext: collabUnion(remote.Plaintext, local.Plaintext, func(r CollabPlaintextRecord) string { return string(r.Call) + ":" + string(r.Arguments) }),
-		Consumed:  collabUnion(remote.Consumed, local.Consumed, func(r CollabConsumedRecord) string { return collabDeliveryField("c", r.Key, r.Account) }),
+func collabApplyVoids(r *CollabRecordLookup) {
+	for i, entry := range r.IssuedTokens {
+		for _, token := range r.VoidedTokens {
+			if token.Scope == entry.Token.Scope && (token.Token == "" || token == entry.Token) {
+				r.IssuedTokens[i].Record.Status = CollabIssuedStatusVoid
+				break
+			}
+		}
 	}
+	r.Issued = collabAggregateIssues(r.IssuedTokens)
+}
+func collabMergeRecords(remote, local CollabRecordLookup) CollabRecordLookup {
+	result := CollabRecordLookup{
+		VoidedTokens: collabUnion(remote.VoidedTokens, local.VoidedTokens, func(t CollabIssuedToken) CollabIssuedToken { return t }),
+		IssuedTokens: collabMergeIssueTokens(remote.IssuedTokens, local.IssuedTokens),
+		Plaintext:    collabUnion(remote.Plaintext, local.Plaintext, func(r CollabPlaintextRecord) string { return string(r.Call) + ":" + string(r.Arguments) }),
+		Consumed:     collabUnion(remote.Consumed, local.Consumed, func(r CollabConsumedRecord) string { return collabDeliveryField("c", r.Key, r.Account) }),
+	}
+	collabApplyVoids(&result)
+	return result
 }
 
 func collabMergeDispositions(remote, local CollabDispositionLookup) CollabDispositionLookup {

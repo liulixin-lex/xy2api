@@ -93,6 +93,7 @@ type CollabIssuedEntry struct {
 	Record CollabIssuedRecord
 }
 type CollabRecordLookup struct {
+	VoidedTokens []CollabIssuedToken
 	IssuedTokens []CollabIssuedEntry
 	Issued       []CollabIssuedRecord
 	Plaintext    []CollabPlaintextRecord

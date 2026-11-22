@@ -26,8 +26,8 @@ func WithCollabRecordReadBudget(ctx context.Context) (context.Context, context.C
 	return context.WithValue(bounded, collabRecordDeadlineKey{}, &collabRecordReadBudget{}), cancel
 }
 
-// Evidence uses one bounded background writer. Required dispositions wait for
-// shared acknowledgement under a deadline and coalesce concurrent duplicates.
+// Evidence and dispositions persist asynchronously. Only pre-output ending
+// admission waits for shared storage. Close flushes invalidations on shutdown.
 // Construct once per service, never per request. Close at service shutdown.
 type SafeCollabRecordsStore struct {
 	local         CollabRecordsStore
@@ -39,6 +39,10 @@ type SafeCollabRecordsStore struct {
 	stop          context.Context
 	cancel        context.CancelFunc
 	once          sync.Once
+	deferredMu    sync.Mutex
+	deferred      map[collabPublicationKey]CollabRecordMutation
+	invalidations map[CollabRecordScope][]CollabRecordMutation
+	wake          chan struct{}
 }
 
 func NewSafeCollabRecordsStore(local CollabRecordsStore, shared CollabSharedRecordsStore, capacity int) *SafeCollabRecordsStore {
@@ -46,13 +50,30 @@ func NewSafeCollabRecordsStore(local CollabRecordsStore, shared CollabSharedReco
 		local = NoopCollabRecordsStore{}
 	}
 	stop, cancel := context.WithCancel(context.Background())
-	s := &SafeCollabRecordsStore{publications: make(map[collabPublicationKey]*collabPublication), local: local, shared: shared, writes: make(chan CollabRecordMutation, min(max(capacity, 1), 1024)), readers: make(chan struct{}, 64), stop: stop, cancel: cancel}
+	s := &SafeCollabRecordsStore{publications: make(map[collabPublicationKey]*collabPublication), deferred: make(map[collabPublicationKey]CollabRecordMutation), invalidations: make(map[CollabRecordScope][]CollabRecordMutation), wake: make(chan struct{}, 1), local: local, shared: shared, writes: make(chan CollabRecordMutation, min(max(capacity, 1), 1024)), readers: make(chan struct{}, 64), stop: stop, cancel: cancel}
 	if shared != nil {
 		go s.runWrites()
+		go s.runDeferred()
 	}
 	return s
 }
-func (s *SafeCollabRecordsStore) Close() { s.once.Do(s.cancel) }
+func (s *SafeCollabRecordsStore) Close() {
+	s.once.Do(func() {
+		s.cancel()
+		if s.shared == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), CollabRecordTimeout)
+		defer cancel()
+		done := make(chan struct{})
+		go func() { defer close(done); s.flushInvalidations(ctx) }()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			collabSafety.recordErrors.Add(1)
+		}
+	})
+}
 
 func (s *SafeCollabRecordsStore) enqueue(mutation CollabRecordMutation) {
 	if s.shared == nil {
@@ -261,20 +282,22 @@ func (s *SafeCollabRecordsStore) Consumed(ctx context.Context, value CollabConsu
 
 func (s *SafeCollabRecordsStore) Replaced(ctx context.Context, value CollabReplacedRecord) (ok bool) {
 	defer collabRecover(&collabSafety.recordPanics)
-	if !s.publish(ctx, CollabRecordMutation{Kind: CollabRecordMutationReplaced, Replaced: value}) {
+	if ctx.Err() != nil || s.stop.Err() != nil || !s.local.Replaced(ctx, value) {
 		return false
 	}
-	return s.local.Replaced(ctx, value)
+	s.deferMutation(CollabRecordMutation{Kind: CollabRecordMutationReplaced, Replaced: value})
+	return true
 }
 
 func (s *SafeCollabRecordsStore) Terminated(ctx context.Context, value CollabTerminatedRecord) (ok bool) {
 	defer collabRecover(&collabSafety.recordPanics)
 	value.CopiesTruncated = value.CopiesTruncated || len(value.Copies) > CollabRecordMaxCopies
 	value.Copies = slices.Clone(value.Copies[:min(len(value.Copies), CollabRecordMaxCopies)])
-	if !s.publish(ctx, CollabRecordMutation{Kind: CollabRecordMutationTerminated, Terminated: value}) {
+	if ctx.Err() != nil || s.stop.Err() != nil || !s.local.Terminated(ctx, value) {
 		return false
 	}
-	return s.local.Terminated(ctx, value)
+	s.deferMutation(CollabRecordMutation{Kind: CollabRecordMutationTerminated, Terminated: value})
+	return true
 }
 
 func (s *SafeCollabRecordsStore) PendingIssued(ctx context.Context, record CollabIssuedRecord) (token CollabIssuedToken, ok bool) {
@@ -289,7 +312,7 @@ func (s *SafeCollabRecordsStore) PendingIssued(ctx context.Context, record Colla
 func (s *SafeCollabRecordsStore) VoidIssued(ctx context.Context, token CollabIssuedToken) {
 	defer collabRecover(&collabSafety.recordPanics)
 	s.local.VoidIssued(ctx, token)
-	s.enqueue(CollabRecordMutation{Kind: CollabRecordMutationVoid, Token: token})
+	s.deferInvalidation(CollabRecordMutation{Kind: CollabRecordMutationVoid, Token: token})
 }
 
 // Deprecated: only the explicit pre-delivery reservation APIs may add a count.
@@ -359,9 +382,12 @@ func (s *SafeCollabRecordsStore) ReserveLocalEnding(ctx context.Context, records
 }
 func (s *SafeCollabRecordsStore) TerminalRejected(ctx context.Context, record CollabTerminalRejectionRecord) (count int, ok bool) {
 	defer collabRecover(&collabSafety.recordPanics)
+	if ctx.Err() != nil || s.stop.Err() != nil {
+		return 0, false
+	}
 	count, ok = s.local.TerminalRejected(ctx, record)
 	if ok {
-		ok = s.publish(ctx, CollabRecordMutation{Kind: CollabRecordMutationTerminalRejected, TerminalRejection: record})
+		s.deferMutation(CollabRecordMutation{Kind: CollabRecordMutationTerminalRejected, TerminalRejection: record})
 	}
 	return
 }

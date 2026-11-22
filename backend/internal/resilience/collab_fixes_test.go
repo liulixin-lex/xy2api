@@ -283,9 +283,9 @@ type collabLocalTestStore struct {
 	writes atomic.Int64
 }
 
-func (s *collabLocalTestStore) PendingIssued(context.Context, CollabIssuedRecord) (CollabIssuedToken, bool) {
+func (s *collabLocalTestStore) PendingIssued(_ context.Context, r CollabIssuedRecord) (CollabIssuedToken, bool) {
 	s.writes.Add(1)
-	return CollabIssuedToken{Token: "synthetic"}, true
+	return CollabIssuedToken{Token: "synthetic", Scope: r.Scope, Call: r.Call, Generation: r.Generation}, true
 }
 
 func TestCollabRecordsBatchDeadlineAndNonblockingWrites(t *testing.T) {
@@ -307,7 +307,7 @@ func TestCollabRecordsBatchDeadlineAndNonblockingWrites(t *testing.T) {
 	store := NewSafeCollabRecordsStore(local, shared, 1)
 	t.Cleanup(store.Close)
 	ctx := context.Background()
-	_, ok := store.PendingIssued(ctx, CollabIssuedRecord{})
+	_, ok := store.PendingIssued(ctx, CollabIssuedRecord{Scope: collabTestKey().Scope, Call: "call", Digest: "digest", Account: "account", ExpiresAt: time.Now().Add(time.Hour)})
 	require.True(t, ok)
 	select {
 	case <-started:
@@ -316,7 +316,7 @@ func TestCollabRecordsBatchDeadlineAndNonblockingWrites(t *testing.T) {
 	}
 	before := CollabSafetySnapshot().RecordDropped
 	for i := 0; i < 10; i++ {
-		_, ok = store.PendingIssued(ctx, CollabIssuedRecord{})
+		_, ok = store.PendingIssued(ctx, CollabIssuedRecord{Scope: collabTestKey().Scope, Call: "call", Digest: "digest", Account: "account", ExpiresAt: time.Now().Add(time.Hour)})
 		require.True(t, ok)
 	}
 	require.Equal(t, int64(11), local.writes.Load())

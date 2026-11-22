@@ -70,7 +70,9 @@ func TestCollabCapacitySharedConcreteReservation(t *testing.T) {
 	b := r.CollabRecordBatch{Scope: k.Scope, Queries: []r.CollabRecordQuery{q}, Dispositions: true}
 	before, err := s.LookupBatch(ctx, b)
 	require.NoError(t, err)
-	require.Empty(t, before.Dispositions[q].Terminated)
+	require.Len(t, before.Dispositions[q].Terminated, 1)
+	require.False(t, r.CollabTerminationEffective(before.Dispositions[q].Terminated[0], k, nil, time.Now()))
+	require.True(t, r.CollabTerminationEffective(before.Dispositions[q].Terminated[0], k, []r.CollabDigest{records[0].Event}, time.Now()))
 	for i := 0; i < 64; i++ {
 		x := k
 		x.Item = capacityDigest(200 + i)
@@ -226,6 +228,8 @@ func TestCollabCapacitySharedReservationRestartAndCopies(t *testing.T) {
 		copies[i] = capacityDigest(300 + i)
 	}
 	copyKey := capacityKey(1)
+	_, admitted := restarted.ReserveLocalEnding(ctx, []r.CollabTerminatedRecord{{Key: copyKey, Copies: copies, Event: capacityDigest(90), ExpiresAt: time.Now().Add(time.Hour)}})
+	require.True(t, admitted)
 	require.True(t, restarted.Terminated(ctx, r.CollabTerminatedRecord{Key: copyKey, Copies: copies, Event: capacityDigest(90), ExpiresAt: time.Now().Add(time.Hour)}))
 	copyKey.Item = copies[16]
 	q = r.CollabRecordQuery{Key: copyKey}

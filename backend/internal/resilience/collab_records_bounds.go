@@ -67,6 +67,12 @@ func NormalizeCollabRecordMutation(m CollabRecordMutation, now time.Time) (Colla
 			return n, nil, false
 		}
 		n.Token = m.Token
+		if m.Kind == CollabRecordMutationVoid {
+			n.Issued.ExpiresAt = m.Issued.ExpiresAt
+			if n.Issued.ExpiresAt.IsZero() {
+				n.Issued.ExpiresAt = now.Add(CollabRecordTTL)
+			}
+		}
 	case CollabRecordMutationPlaintext:
 		r := m.Plaintext
 		if r.Call == "" || r.Arguments == "" || !collabScopeBound(r.Scope) || !collabDigestBound(r.Call) || !collabDigestBound(r.Arguments) {
@@ -132,7 +138,7 @@ func NormalizeCollabRecordMutation(m CollabRecordMutation, now time.Time) (Colla
 		return t
 	}
 	switch n.Kind {
-	case CollabRecordMutationPending, CollabRecordMutationLocalEnding:
+	case CollabRecordMutationPending, CollabRecordMutationLocalEnding, CollabRecordMutationVoid:
 		n.Issued.ExpiresAt = clamp(n.Issued.ExpiresAt)
 	case CollabRecordMutationPlaintext:
 		n.Plaintext.ExpiresAt = clamp(n.Plaintext.ExpiresAt)

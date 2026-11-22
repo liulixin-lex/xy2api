@@ -61,6 +61,61 @@ local function dropTree(victim)
  local n=redis.call('ZCARD',tenant)
  if n==0 then redis.call('HDEL',KEYS[9],tenant) else redis.call('HSET',KEYS[9],tenant,n) end
 end
+local function evict(registry,excessOnly)
+ local victims=redis.call('ZRANGE',registry,0,-1)
+ for _,victim in ipairs(victims) do
+  local tenant=tenantKey(victim)
+  if victim~=KEYS[2] and redis.call('EXISTS',victim..':protected')==0 and (not excessOnly or tenant==KEYS[5] or redis.call('ZCARD',tenant)>share) then
+   dropTree(victim);return true
+  end
+ end
+ return false
+end
+local function admit()
+local tenantCount=redis.call('ZCARD',KEYS[5])
+local sharedUsed=0
+for _,n in ipairs(redis.call('HVALS',KEYS[9])) do sharedUsed=sharedUsed+math.max(0,tonumber(n)-share) end
+if not redis.call('ZSCORE',KEYS[1],KEYS[2]) then
+ if tenantCount>=maxTenant then
+  if not evict(KEYS[6],false) then return false end
+ elseif tenantCount>=share and sharedUsed>=sharedLimit then
+  if not evict(KEYS[4],true) then return false end
+ elseif redis.call('ZCARD',KEYS[1])>=maxTrees then
+  if not evict(KEYS[4],false) then return false end
+ end
+end
+return true
+end
+local function repair()
+ if redis.call('HLEN',KEYS[2])==0 then return true end
+ if not admit() then return false end
+ local stored=redis.call('HGETALL',KEYS[2])
+ local last=0;local protected=0
+ for i=1,#stored,2 do
+  local row=cjson.decode(stored[i+1]);local f=stored[i]
+  local untilTime=tonumber(redis.call('ZSCORE',KEYS[3],f) or '0')
+  if untilTime<=0 then untilTime=math.max(deadline,now+1);redis.call('ZADD',KEYS[3],untilTime,f) end
+  last=math.max(last,untilTime)
+  if part(row.Kind)~=0 or row.Kind=='void' or (row.Issued and row.Issued.Status=='void') then
+   protected=math.max(protected,untilTime);redis.call('ZREM',KEYS[8],f)
+  elseif not redis.call('ZSCORE',KEYS[8],f) then redis.call('ZADD',KEYS[8],now,f) end
+ end
+ redis.call('ZADD',KEYS[1],last,KEYS[2]);redis.call('ZADD',KEYS[5],last,KEYS[2])
+ redis.call('HSET',KEYS[9],KEYS[5],redis.call('ZCARD',KEYS[5]))
+ redis.call('PEXPIREAT',KEYS[2],last);redis.call('PEXPIREAT',KEYS[3],last);redis.call('PEXPIREAT',KEYS[8],last)
+ if protected>now then redis.call('SET',KEYS[7],protected);redis.call('PEXPIREAT',KEYS[7],protected) else redis.call('DEL',KEYS[7]) end
+ local eligible=math.max(now,protected)
+ redis.call('ZADD',KEYS[4],eligible,KEYS[2]);redis.call('ZADD',KEYS[6],eligible,KEYS[2])
+ local newest=redis.call('ZREVRANGE',KEYS[5],0,0,'WITHSCORES')
+ if #newest>0 then redis.call('PEXPIREAT',KEYS[5],newest[2]);redis.call('PEXPIREAT',KEYS[6],newest[2]) end
+ return true
+end
+local expected={'zset','hash','zset','zset','zset','zset','string','zset','hash'}
+for i,key in ipairs(KEYS) do
+ local typ=redis.call('TYPE',key).ok
+ if typ~='none' and typ~=expected[i] then return redis.error_reply('invalid collaboration key type') end
+end
+local function apply()
 local dead=redis.call('ZRANGEBYSCORE',KEYS[1],'-inf',now)
 for _,victim in ipairs(dead) do dropTree(victim) end
 local expired=redis.call('ZRANGEBYSCORE',KEYS[3],'-inf',now)
@@ -87,27 +142,23 @@ local function protect(untilTime)
  -- Eligibility is indexed by the protection deadline, so expiry needs no write.
  redis.call('ZADD',KEYS[4],protection,KEYS[2]);redis.call('ZADD',KEYS[6],protection,KEYS[2])
 end
-if kind=='confirm' or kind=='void' then
+if kind=='confirm' then
+ if redis.call('HEXISTS',KEYS[2],'v:')==1 or redis.call('HEXISTS',KEYS[2],'v:'..cjson.decode(value).Token.Token)==1 then return 0 end
  if not old then return 0 end
  local row=cjson.decode(old);local incoming=cjson.decode(value)
  if row.Token.Call~=incoming.Token.Call or row.Token.Generation~=incoming.Token.Generation then return 0 end
- if kind=='void' then row.Issued.Status='void'
- elseif row.Issued.Status=='void' then return 0
- else row.Issued.Status='confirmed' end
+ if row.Issued.Status=='void' then return 0 end
+ row.Issued.Status='confirmed'
  local updated=cjson.encode(row)
  if string.len(updated)>maxRowBytes or sizes[1]-charge(field,old)+charge(field,updated)>byteLimits[1] then return 0 end
  redis.call('HSET',KEYS[2],field,updated)
- if kind=='void' then
-  redis.call('ZREM',KEYS[8],field)
-  protect(tonumber(redis.call('ZSCORE',KEYS[3],field)))
- end
  return 1
 end
 local pending={}
 if ARGV[12]~='' then pending=cjson.decode(ARGV[12]) end
 if old and kind~='local_ending' then
  local row=cjson.decode(old)
- if row.Reserved and kind=='terminated' then
+ if kind=='terminated' then
   local incoming=cjson.decode(value)
   incoming.Terminated.ExpiresAt=row.Terminated.ExpiresAt
   if not same(incoming.Terminated,row.Terminated) then return 0 end
@@ -141,42 +192,35 @@ if partition==0 then
   local oldValue=redis.call('HGET',KEYS[2],f)
   if oldValue then
    local row=cjson.decode(oldValue)
-   if not row.Issued or row.Issued.Status~='void' then
+   if row.Kind~='void' and (not row.Issued or row.Issued.Status~='void') then
     redis.call('HDEL',KEYS[2],f);redis.call('ZREM',KEYS[3],f);redis.call('ZREM',KEYS[8],f)
     counts[1]=counts[1]-1;sizes[1]=sizes[1]-charge(f,oldValue)
    end
   end
  end
 end
+if kind=='void' and (counts[1]+extraCount[1]>maxRows or sizes[1]+extraSize[1]>byteLimits[1]) then
+ for i=1,#rows,2 do
+  if part(cjson.decode(rows[i+1]).Kind)==0 then redis.call('HDEL',KEYS[2],rows[i]);redis.call('ZREM',KEYS[3],rows[i]);redis.call('ZREM',KEYS[8],rows[i]) end
+ end
+ local row=cjson.decode(value);row.Token.Token='';row.Token.Call='';row.Token.Generation=0;value=cjson.encode(row);field='v:'
+ counts[1]=0;sizes[1]=0;extraCount[1]=1;extraSize[1]=charge(field,value)
+end
 if counts[1]+extraCount[1]>maxRows or sizes[1]+extraSize[1]>byteLimits[1] then return 0 end
-local function evict(registry,excessOnly)
- local victims=redis.call('ZRANGE',registry,0,-1)
- for _,victim in ipairs(victims) do
-  local tenant=tenantKey(victim)
-  if redis.call('EXISTS',victim..':protected')==0 and (not excessOnly or tenant==KEYS[5] or redis.call('ZCARD',tenant)>share) then
-   dropTree(victim);return true
-  end
- end
- return false
-end
-local tenantCount=redis.call('ZCARD',KEYS[5])
-local sharedUsed=0
-for _,n in ipairs(redis.call('HVALS',KEYS[9])) do sharedUsed=sharedUsed+math.max(0,tonumber(n)-share) end
-if not redis.call('ZSCORE',KEYS[1],KEYS[2]) then
- if tenantCount>=maxTenant then
-  if not evict(KEYS[6],false) then return 0 end
- elseif tenantCount>=share and sharedUsed>=sharedLimit then
-  if not evict(KEYS[4],true) then return 0 end
- elseif redis.call('ZCARD',KEYS[1])>=maxTrees then
-  if not evict(KEYS[4],false) then return 0 end
- end
-end
+if not admit() then return 0 end
 if not old then
- redis.call('HSET',KEYS[2],field,value);redis.call('ZADD',KEYS[3],deadline,field)
+ redis.call('ZADD',KEYS[3],deadline,field);redis.call('HSET',KEYS[2],field,value)
  if partition==0 then redis.call('ZADD',KEYS[8],now,field) end
 end
 for _,item in ipairs(additions) do
- redis.call('HSET',KEYS[2],item.field,item.value);redis.call('ZADD',KEYS[3],deadline,item.field)
+ redis.call('ZADD',KEYS[3],deadline,item.field);redis.call('HSET',KEYS[2],item.field,item.value)
+end
+if kind=='void' then
+ local token=cjson.decode(value).Token
+ for i=1,#rows,2 do
+  local row=cjson.decode(rows[i+1])
+  if row.Kind=='pending' and (token.Token=='' or row.Token.Token==token.Token) then row.Issued.Status='void';redis.call('HSET',KEYS[2],rows[i],cjson.encode(row));redis.call('ZREM',KEYS[8],rows[i]) end
+ end
 end
 local current=tonumber(redis.call('ZSCORE',KEYS[1],KEYS[2]) or '0')
 local treeDeadline=math.max(current,deadline)
@@ -191,6 +235,21 @@ local newest=redis.call('ZREVRANGE',KEYS[5],0,0,'WITHSCORES')
 if #newest>0 then redis.call('PEXPIREAT',KEYS[5],newest[2]);redis.call('PEXPIREAT',KEYS[6],newest[2]) end
 if kind=='local_ending' then return counts[3]+extraCount[3] end
 return 1
+end
+local ok,result=pcall(apply)
+if ok and type(result)=='number' and result>0 then
+ local repaired,complete=pcall(repair)
+ if repaired and complete then return result end
+ ok=false;result='collaboration metadata repair failed'
+end
+-- Runtime errors do not roll back Lua writes. Never leave an immortal hash.
+if redis.call('EXISTS',KEYS[2])==1 and redis.call('PTTL',KEYS[2])<0 then
+ local expiry=math.max(deadline,now+1)
+ redis.call('PEXPIREAT',KEYS[2],expiry);redis.call('PEXPIREAT',KEYS[3],expiry);redis.call('PEXPIREAT',KEYS[8],expiry)
+end
+if not ok then return redis.error_reply(tostring(result)) end
+return result
+
 `
 
 var collabLookupScript = redis.NewScript(`
@@ -370,4 +429,15 @@ func (c *collabSharedCache) ReserveLocalEnding(ctx context.Context, records []re
 		return resilience.CollabTreeLocalEndingLimit, false
 	}
 	return count, true
+}
+
+// WriteInvalidations uses its own caller deadline and never waits behind the
+// best-effort observation writer. This also permits a bounded shutdown flush.
+func (c *collabSharedCache) WriteInvalidations(ctx context.Context, rows []resilience.CollabRecordMutation) error {
+	for _, row := range rows {
+		if row.Kind != resilience.CollabRecordMutationVoid {
+			return errCollabAdmission
+		}
+	}
+	return c.ApplyBatch(ctx, rows)
 }

@@ -36,7 +36,10 @@ func TestCollabCapacityConcreteReservation(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, 1, n)
 	q := CollabRecordQuery{Key: key}
-	require.Empty(t, s.LookupBatch(ctx, CollabRecordBatch{Scope: key.Scope, Queries: []CollabRecordQuery{q}, Dispositions: true}).Dispositions[q].Terminated)
+	reserved := s.LookupBatch(ctx, CollabRecordBatch{Scope: key.Scope, Queries: []CollabRecordQuery{q}, Dispositions: true}).Dispositions[q].Terminated
+	require.Len(t, reserved, 1)
+	require.False(t, CollabTerminationEffective(reserved[0], key, nil, time.Now()))
+	require.True(t, CollabTerminationEffective(reserved[0], key, []CollabDigest{records[0].Event}, time.Now()))
 	for i := 0; i < 64; i++ {
 		k := key
 		k.Item = capacityDigest(200 + i)
@@ -155,7 +158,9 @@ func TestCollabCapacitySharedPublicationFailure(t *testing.T) {
 	defer safe.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	require.False(t, safe.Terminated(ctx, CollabTerminatedRecord{Key: capacityKey(0), Event: capacityDigest(90), ExpiresAt: time.Now().Add(time.Hour)}), "shared refusal must not be acknowledged")
+	start := time.Now()
+	require.True(t, safe.Terminated(ctx, CollabTerminatedRecord{Key: capacityKey(0), Event: capacityDigest(90), ExpiresAt: time.Now().Add(time.Hour)}), "success means local application; shared publication is asynchronous")
+	require.Less(t, time.Since(start), 10*time.Millisecond)
 }
 func TestCollabCapacitySharedReadsAtFiftyStreams(t *testing.T) {
 	shared := &collabSharedTestStore{lookup: func(ctx context.Context, b CollabRecordBatch) (CollabRecordBatchResult, error) {
@@ -287,11 +292,13 @@ func TestCollabCapacityDuplicatePublicationAndTenantFairness(t *testing.T) {
 	other := r
 	other.Key.Scope.Tenant = capacityDigest(99)
 	require.True(t, safe.Terminated(ctx, other))
-	require.Equal(t, int64(0), accepted.Load())
+	wg.Wait()
+	require.Equal(t, int64(256), accepted.Load())
 	// Wait for all duplicate callers to join, without holding a store lock.
 	time.Sleep(20 * time.Millisecond)
-	require.Equal(t, int64(2), calls.Load())
+	require.Equal(t, int64(1), calls.Load(), "duplicates share one in-flight publication")
 	close(release)
+	require.Eventually(t, func() bool { return calls.Load() == 2 }, time.Second, time.Millisecond)
 	wg.Wait()
 	require.Equal(t, int64(256), accepted.Load())
 }

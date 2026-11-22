@@ -80,24 +80,3 @@ func (s *SafeCollabRecordsStore) required(ctx context.Context, key collabPublica
 		return pending.count, true
 	}
 }
-func (s *SafeCollabRecordsStore) publish(ctx context.Context, m CollabRecordMutation) bool {
-	if s.stop.Err() != nil || ctx.Err() != nil {
-		return false
-	}
-	if s.shared == nil {
-		return true
-	}
-	normalized, _, ok := NormalizeCollabRecordMutation(m, time.Now())
-	if !ok {
-		return false
-	}
-	scope, field, _ := CollabRecordStorageIdentity(normalized)
-	_, ok = s.required(ctx, collabPublicationKey{scope: scope, field: field}, func(bounded context.Context) (int, bool) {
-		if s.shared.Apply(bounded, normalized) != nil {
-			collabSafety.recordErrors.Add(1)
-			return 0, false
-		}
-		return 1, true
-	})
-	return ok
-}
