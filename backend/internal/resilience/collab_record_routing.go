@@ -17,7 +17,7 @@ type CollabRoutingItem struct {
 // OrderCollabFailoverCandidates must be called separately inside each existing
 // admission/quality round. It returns the original slice when no rank changes.
 func OrderCollabFailoverCandidates(settings *Settings, candidates []int64, accounts map[int64]CollabDigest, items []CollabRoutingItem, now time.Time) []int64 {
-	if !settings.CollabRecordRoutingOn() || len(candidates) < 2 {
+	if !settings.CollabRecordsOn() || !settings.CollabRecordRoutingOn() || len(candidates) < 2 {
 		return candidates
 	}
 	var chosen *CollabRoutingItem

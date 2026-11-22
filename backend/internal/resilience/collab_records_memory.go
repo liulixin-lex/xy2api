@@ -7,12 +7,9 @@ import (
 	"encoding/json"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 )
-
-// Each tree has its own small bound; the product bounds the entire store.
-const CollabRecordMaxTrees = 256
-const CollabRecordMaxTreeEntries = CollabRecordMaxEntries / CollabRecordMaxTrees
 
 // CollabRecordStorageIdentity is shared by the local and Redis implementations.
 // All variable parts are already keyed digests, never raw request identifiers.
@@ -46,140 +43,205 @@ func validCollabScope(s CollabRecordScope) bool {
 	return s.Tenant != "" && s.Group != "" && s.Tree != ""
 }
 
+type collabMemoryEntry struct {
+	mutation CollabRecordMutation
+	charge   int
+}
+type collabMemoryIndex struct {
+	kind   string
+	digest CollabDigest
+	key    CollabDeliveryKey
+}
 type collabMemoryTree struct {
-	entries map[string]CollabRecordMutation
-	expires time.Time
+	mu      sync.RWMutex
+	entries map[string]collabMemoryEntry
+	index   map[collabMemoryIndex]map[string]struct{}
+	bytes   int
+	expires atomic.Int64
+	counter *CollabTerminalRejectionCounter
 }
 type MemoryCollabRecordsStore struct {
-	mu      sync.Mutex
-	trees   map[CollabRecordScope]*collabMemoryTree
-	counter *CollabTerminalRejectionCounter
+	mu    sync.RWMutex
+	trees map[CollabRecordScope]*collabMemoryTree
 }
 
 func NewMemoryCollabRecordsStore() *MemoryCollabRecordsStore {
-	return &MemoryCollabRecordsStore{trees: make(map[CollabRecordScope]*collabMemoryTree), counter: NewCollabTerminalRejectionCounter(CollabRecordMaxEntries)}
+	return &MemoryCollabRecordsStore{trees: make(map[CollabRecordScope]*collabMemoryTree)}
 }
-
-// ApplyMutation is also used to decode a bounded shared snapshot. Confirm never
-// creates an issue; a void is final for that token, including replayed pending.
-func (s *MemoryCollabRecordsStore) ApplyMutation(m CollabRecordMutation) bool {
-	scope, field, expires := CollabRecordStorageIdentity(m)
-	now := time.Now()
-	if !validCollabScope(scope) || field == "" {
-		return false
+func (s *MemoryCollabRecordsStore) tree(scope CollabRecordScope, create bool, now time.Time) *collabMemoryTree {
+	if !create {
+		if !s.mu.TryRLock() {
+			return nil
+		}
+		tree := s.trees[scope]
+		s.mu.RUnlock()
+		return tree
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tree := s.trees[scope]
-	if tree != nil && !tree.expires.After(now) {
-		delete(s.trees, scope)
-		tree = nil
+	if tree := s.trees[scope]; tree != nil && tree.expires.Load() > now.UnixNano() {
+		return tree
 	}
-	if m.Kind == CollabRecordMutationConfirm || m.Kind == CollabRecordMutationVoid {
-		if tree == nil {
+	delete(s.trees, scope)
+	if len(s.trees) >= CollabRecordMaxTrees {
+		for k, t := range s.trees {
+			if t.expires.Load() <= now.UnixNano() {
+				delete(s.trees, k)
+			}
+		}
+	}
+	if len(s.trees) >= CollabRecordMaxTrees {
+		return nil
+	}
+	tree := &collabMemoryTree{entries: make(map[string]collabMemoryEntry), index: make(map[collabMemoryIndex]map[string]struct{}), counter: NewCollabTerminalRejectionCounter(CollabRecordMaxTreeEntries)}
+	tree.expires.Store(now.Add(CollabRecordTTL).UnixNano())
+	s.trees[scope] = tree
+	return tree
+}
+func collabMutationIndexes(m CollabRecordMutation) []collabMemoryIndex {
+	switch m.Kind {
+	case CollabRecordMutationPending:
+		return []collabMemoryIndex{{kind: "call", digest: m.Issued.Call}, {kind: "cipher", digest: m.Issued.Digest}}
+	case CollabRecordMutationPlaintext:
+		return []collabMemoryIndex{{kind: "plain", digest: m.Plaintext.Call}}
+	case CollabRecordMutationConsumed:
+		return []collabMemoryIndex{{kind: "delivery", key: m.Consumed.Key}}
+	case CollabRecordMutationReplaced:
+		return []collabMemoryIndex{{kind: "delivery", key: m.Replaced.Key}}
+	case CollabRecordMutationTerminated:
+		r := m.Terminated
+		indexes := []collabMemoryIndex{{kind: "delivery", key: r.Key}, {kind: "event", digest: r.Event}}
+		for _, copy := range r.Copies {
+			k := r.Key
+			k.Item = copy
+			k.Digest = ""
+			indexes = append(indexes, collabMemoryIndex{kind: "copy", key: k})
+		}
+		return indexes
+	case CollabRecordMutationLocalEnding:
+		return []collabMemoryIndex{{kind: "ending"}}
+	default:
+		return nil
+	}
+}
+func (t *collabMemoryTree) remove(field string) {
+	old := t.entries[field]
+	t.bytes -= old.charge
+	for _, key := range collabMutationIndexes(old.mutation) {
+		delete(t.index[key], field)
+		if len(t.index[key]) == 0 {
+			delete(t.index, key)
+		}
+	}
+	delete(t.entries, field)
+}
+
+// ApplyMutation also reconstructs a normalized shared snapshot. No network or
+// caller callback runs under either lock; expensive normalization precedes locks.
+func (s *MemoryCollabRecordsStore) ApplyMutation(m CollabRecordMutation) bool {
+	now := time.Now()
+	m, payload, ok := NormalizeCollabRecordMutation(m, now)
+	if !ok {
+		return false
+	}
+	scope, field, expires := CollabRecordStorageIdentity(m)
+	if !validCollabScope(scope) || field == "" {
+		return false
+	}
+	transition := m.Kind == CollabRecordMutationConfirm || m.Kind == CollabRecordMutationVoid
+	if !transition && !expires.After(now) {
+		return false
+	}
+	switch m.Kind {
+	case CollabRecordMutationPending:
+		if m.Token.Token == "" || m.Issued.Call == "" || m.Issued.Digest == "" || m.Issued.Account == "" {
 			return false
 		}
-		old, ok := tree.entries[field]
-		if !ok || old.Token != m.Token || !old.Issued.ExpiresAt.After(now) {
+		switch m.Issued.Status {
+		case "":
+			m.Issued.Status = CollabIssuedStatusPending
+		case CollabIssuedStatusPending, CollabIssuedStatusConfirmed, CollabIssuedStatusVoid:
+		default:
+			return false
+		}
+	case CollabRecordMutationPlaintext:
+		if m.Plaintext.Call == "" || m.Plaintext.Arguments == "" {
+			return false
+		}
+	case CollabRecordMutationConsumed:
+		if !validCollabDelivery(m.Consumed.Key) || m.Consumed.Account == "" {
+			return false
+		}
+	case CollabRecordMutationReplaced:
+		if !validCollabDelivery(m.Replaced.Key) || m.Replaced.Account == "" {
+			return false
+		}
+	case CollabRecordMutationTerminated:
+		if !validCollabDelivery(m.Terminated.Key) || m.Terminated.Event == "" {
+			return false
+		}
+	case CollabRecordMutationTerminalRejected:
+		if !validCollabDelivery(m.TerminalRejection.Key) || m.TerminalRejection.Event == "" || m.TerminalRejection.Rejection == "" {
+			return false
+		}
+	case CollabRecordMutationLocalEnding:
+		if m.Event == "" {
+			return false
+		}
+	}
+	tree := s.tree(scope, !transition, now)
+	if tree == nil {
+		return false
+	}
+	tree.mu.Lock()
+	defer tree.mu.Unlock()
+	if transition {
+		old, exists := tree.entries[field]
+		if !exists || old.mutation.Token != m.Token || !old.mutation.Issued.ExpiresAt.After(now) {
 			return false
 		}
 		if m.Kind == CollabRecordMutationVoid {
-			old.Issued.Status = CollabIssuedStatusVoid
-		} else if old.Issued.Status != CollabIssuedStatusVoid {
-			old.Issued.Status = CollabIssuedStatusConfirmed
+			old.mutation.Issued.Status = CollabIssuedStatusVoid
+		} else if old.mutation.Issued.Status != CollabIssuedStatusVoid {
+			old.mutation.Issued.Status = CollabIssuedStatusConfirmed
 		} else {
 			return false
 		}
 		tree.entries[field] = old
 		return true
 	}
-	if m.Kind == CollabRecordMutationLocalEnding {
-		if m.Event == "" {
-			return false
-		}
-		// The mutation carries its expiry in Issued for the fixed wire contract.
-		if expires.IsZero() {
-			expires = now.Add(CollabRecordTTL)
-		}
-		m.Issued.ExpiresAt = expires
-	}
-	if !expires.After(now) {
-		return false
-	}
-	expires = collabEarlierTime(expires, now.Add(CollabRecordTTL))
-	switch m.Kind {
-	case CollabRecordMutationPending:
-		if m.Token.Token == "" || m.Token.Scope != scope || m.Token.Call != m.Issued.Call || m.Token.Generation != m.Issued.Generation || m.Issued.Call == "" || m.Issued.Digest == "" || m.Issued.Account == "" {
-			return false
-		}
-		m.Issued.ExpiresAt = expires
-	case CollabRecordMutationPlaintext:
-		m.Plaintext.ExpiresAt = expires
-		if m.Plaintext.Call == "" || m.Plaintext.Arguments == "" {
-			return false
-		}
-	case CollabRecordMutationConsumed:
-		m.Consumed.ExpiresAt = expires
-		if !validCollabDelivery(m.Consumed.Key) || m.Consumed.Account == "" {
-			return false
-		}
-	case CollabRecordMutationReplaced:
-		m.Replaced.ExpiresAt = expires
-		if !validCollabDelivery(m.Replaced.Key) || m.Replaced.Account == "" {
-			return false
-		}
-	case CollabRecordMutationTerminated:
-		m.Terminated.ExpiresAt = expires
-		if !validCollabDelivery(m.Terminated.Key) || m.Terminated.Event == "" {
-			return false
-		}
-		m.Terminated.Copies = slices.Clone(m.Terminated.Copies[:min(len(m.Terminated.Copies), CollabRecordMaxTreeEntries)])
-	case CollabRecordMutationTerminalRejected:
-		if !validCollabDelivery(m.TerminalRejection.Key) {
-			return false
-		}
-		m.TerminalRejection.ExpiresAt = expires
-	}
-	if tree == nil {
-		if len(s.trees) >= CollabRecordMaxTrees {
-			for k, v := range s.trees {
-				if !v.expires.After(now) {
-					delete(s.trees, k)
-				}
-			}
-		}
-		if len(s.trees) >= CollabRecordMaxTrees {
-			return false
-		}
-		tree = &collabMemoryTree{entries: make(map[string]CollabRecordMutation)}
-		s.trees[scope] = tree
-	}
-	if old, ok := tree.entries[field]; ok {
-		oldExpiry := collabRecordExpiry(old)
-		if oldExpiry.After(now) {
+	if old, exists := tree.entries[field]; exists {
+		if collabRecordExpiry(old.mutation).After(now) {
 			return true
 		}
-		delete(tree.entries, field)
+		tree.remove(field)
 	}
-	if len(tree.entries) >= CollabRecordMaxTreeEntries {
-		for k, v := range tree.entries {
-			exp := collabRecordExpiry(v)
-			if !exp.After(now) {
-				delete(tree.entries, k)
+	charge := collabRecordCharge(field, payload)
+	if len(tree.entries) >= CollabRecordMaxTreeEntries || tree.bytes+charge > CollabRecordMaxTreeBytes {
+		for f, old := range tree.entries {
+			if !collabRecordExpiry(old.mutation).After(now) {
+				tree.remove(f)
 			}
 		}
 	}
-	if len(tree.entries) >= CollabRecordMaxTreeEntries {
+	if len(tree.entries) >= CollabRecordMaxTreeEntries || tree.bytes+charge > CollabRecordMaxTreeBytes {
 		return false
 	}
 	if m.Kind == CollabRecordMutationTerminalRejected {
-		if _, ok := s.counter.Record(m.TerminalRejection, now); !ok {
+		if _, ok := tree.counter.Record(m.TerminalRejection, now); !ok {
 			return false
 		}
 	}
-	tree.entries[field] = m
-	if expires.After(tree.expires) {
-		tree.expires = expires
+	tree.entries[field] = collabMemoryEntry{mutation: m, charge: charge}
+	tree.bytes += charge
+	for _, key := range collabMutationIndexes(m) {
+		if tree.index[key] == nil {
+			tree.index[key] = make(map[string]struct{})
+		}
+		tree.index[key][field] = struct{}{}
+	}
+	if expires.UnixNano() > tree.expires.Load() {
+		tree.expires.Store(expires.UnixNano())
 	}
 	return true
 }
@@ -217,7 +279,11 @@ func (s *MemoryCollabRecordsStore) TerminalRejected(_ context.Context, r CollabT
 	if !s.ApplyMutation(CollabRecordMutation{Kind: CollabRecordMutationTerminalRejected, TerminalRejection: r}) {
 		return 0, false
 	}
-	for _, c := range s.counter.Counts(r.Key, time.Now()) {
+	tree := s.tree(r.Key.Scope, false, time.Now())
+	if tree == nil {
+		return 0, false
+	}
+	for _, c := range tree.counter.Counts(r.Key, time.Now()) {
 		if c.Rejection == r.Rejection {
 			return c.Count, true
 		}
@@ -228,15 +294,14 @@ func (s *MemoryCollabRecordsStore) IncrementTreeLocalEnding(ctx context.Context,
 	ok := s.ApplyMutation(CollabRecordMutation{Kind: CollabRecordMutationLocalEnding, Scope: scope, Event: event})
 	return s.LookupBatch(ctx, CollabRecordBatch{Scope: scope, Dispositions: true}).TreeLocalEndings, ok
 }
-func (s *MemoryCollabRecordsStore) LookupBatch(_ context.Context, b CollabRecordBatch) CollabRecordBatchResult {
+
+func (s *MemoryCollabRecordsStore) LookupBatch(ctx context.Context, b CollabRecordBatch) CollabRecordBatchResult {
 	result := CollabRecordBatchResult{}
-	if !b.Records && !b.Dispositions {
+	if ctx.Err() != nil || (!b.Records && !b.Dispositions) {
 		return result
 	}
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tree := s.trees[b.Scope]
+	b = collabBoundBatch(b)
+	tree := s.tree(b.Scope, false, time.Now())
 	if tree == nil {
 		return result
 	}
@@ -247,82 +312,105 @@ func (s *MemoryCollabRecordsStore) LookupBatch(_ context.Context, b CollabRecord
 		result.Dispositions = make(map[CollabRecordQuery]CollabDispositionLookup)
 	}
 	for _, q := range b.Queries {
+		if ctx.Err() != nil {
+			break
+		}
 		if q.Key.Scope != b.Scope {
 			continue
 		}
+		// A contended optional lookup is absence; it must never wait behind writes.
+		rows := tree.query(ctx, q, b.Records, b.Dispositions)
 		var r CollabRecordLookup
 		var d CollabDispositionLookup
-		for _, m := range tree.entries {
-			expires := collabRecordExpiry(m)
-			if !expires.After(now) {
-				continue
-			}
-			if b.Records {
-				switch m.Kind {
-				case CollabRecordMutationPending:
-					v := m.Issued
-					if (q.Call != "" && q.Call == v.Call || q.Key.Digest != "" && q.Key.Digest == v.Digest) && (q.Account == "" || q.Account == v.Account) {
-						r.Issued = append(r.Issued, v)
-					}
-				case CollabRecordMutationPlaintext:
-					v := m.Plaintext
-					if q.Call == v.Call && (q.Arguments == "" || q.Arguments == v.Arguments) {
-						r.Plaintext = append(r.Plaintext, v)
-					}
-				case CollabRecordMutationConsumed:
-					v := m.Consumed
-					if q.Key == v.Key && (q.Account == "" || q.Account == v.Account) {
-						r.Consumed = append(r.Consumed, v)
-					}
+		for _, m := range rows {
+			switch m.Kind {
+			case CollabRecordMutationPending:
+				v := m.Issued
+				if b.Records && (q.Account == "" || q.Account == v.Account) {
+					r.IssuedTokens = append(r.IssuedTokens, CollabIssuedEntry{Token: m.Token, Record: v})
 				}
-			}
-			if b.Dispositions {
-				switch m.Kind {
-				case CollabRecordMutationReplaced:
-					v := m.Replaced
-					if q.Key == v.Key && (q.Account == "" || q.Account == v.Account) {
-						d.Replaced = append(d.Replaced, v)
-					}
-				case CollabRecordMutationTerminated:
+			case CollabRecordMutationPlaintext:
+				if b.Records && (q.Arguments == "" || q.Arguments == m.Plaintext.Arguments) {
+					r.Plaintext = append(r.Plaintext, m.Plaintext)
+				}
+			case CollabRecordMutationConsumed:
+				if b.Records && (q.Account == "" || q.Account == m.Consumed.Account) {
+					r.Consumed = append(r.Consumed, m.Consumed)
+				}
+			case CollabRecordMutationReplaced:
+				if b.Dispositions && (q.Account == "" || q.Account == m.Replaced.Account) {
+					d.Replaced = append(d.Replaced, m.Replaced)
+				}
+			case CollabRecordMutationTerminated:
+				if b.Dispositions {
 					v := m.Terminated
-					if q.Key == v.Key || (q.Event != "" && q.Event == v.Event) || (q.Key.Thread == v.Key.Thread && q.Key.Delivery == v.Key.Delivery && slices.Contains(v.Copies, q.Key.Item)) {
-						v.Copies = slices.Clone(v.Copies)
-						d.Terminated = append(d.Terminated, v)
-					}
+					v.Copies = slices.Clone(v.Copies)
+					d.Terminated = append(d.Terminated, v)
 				}
 			}
 		}
 		if b.Records {
-			// Concurrent tokens for one call are independent. An active token
-			// survives another token's void; emit a tombstone only if all are void.
-			issues := make(map[collabIssueIdentity]CollabIssuedRecord)
-			for _, issue := range r.Issued {
-				key := collabIssueID(issue)
-				old, exists := issues[key]
-				if !exists || issue.Status == CollabIssuedStatusConfirmed || old.Status == CollabIssuedStatusVoid {
-					issues[key] = issue
-				}
-			}
-			r.Issued = nil
-			for _, issue := range issues {
-				r.Issued = append(r.Issued, issue)
-			}
+			r.Issued = collabAggregateIssues(r.IssuedTokens)
 			result.Records[q] = r
 		}
-		if b.Dispositions {
-			d.TerminalRejections = s.counter.Counts(q.Key, now)
+		if b.Dispositions && ctx.Err() == nil {
+			d.TerminalRejections = tree.counter.Counts(q.Key, time.Now())
 			result.Dispositions[q] = d
 		}
 	}
-	if b.Dispositions {
-		for _, m := range tree.entries {
-			if m.Kind == CollabRecordMutationLocalEnding && m.Issued.ExpiresAt.After(now) {
+	if b.Dispositions && ctx.Err() == nil && tree.mu.TryRLock() {
+		now := time.Now()
+		for field := range tree.index[collabMemoryIndex{kind: "ending"}] {
+			if tree.entries[field].mutation.Issued.ExpiresAt.After(now) {
 				result.TreeLocalEndings++
 			}
 		}
+		tree.mu.RUnlock()
 		result.TreeLocalEndings = min(result.TreeLocalEndings, CollabTreeLocalEndingLimit)
 	}
 	return result
+}
+func (t *collabMemoryTree) query(ctx context.Context, q CollabRecordQuery, records, dispositions bool) []CollabRecordMutation {
+	if ctx.Err() != nil || !t.mu.TryRLock() {
+		return nil
+	}
+	defer t.mu.RUnlock()
+	var indexes []collabMemoryIndex
+	if records {
+		if q.Call != "" {
+			indexes = append(indexes, collabMemoryIndex{kind: "call", digest: q.Call}, collabMemoryIndex{kind: "plain", digest: q.Call})
+		}
+		if q.Key.Digest != "" {
+			indexes = append(indexes, collabMemoryIndex{kind: "cipher", digest: q.Key.Digest})
+		}
+	}
+	if records || dispositions {
+		indexes = append(indexes, collabMemoryIndex{kind: "delivery", key: q.Key})
+	}
+	if dispositions {
+		if q.Event != "" {
+			indexes = append(indexes, collabMemoryIndex{kind: "event", digest: q.Event})
+		}
+		copyKey := q.Key
+		copyKey.Digest = ""
+		indexes = append(indexes, collabMemoryIndex{kind: "copy", key: copyKey})
+	}
+	seen := make(map[string]bool)
+	var rows []CollabRecordMutation
+	now := time.Now()
+	for _, index := range indexes {
+		for field := range t.index[index] {
+			if ctx.Err() != nil {
+				return rows
+			}
+			m := t.entries[field].mutation
+			if !seen[field] && collabRecordExpiry(m).After(now) {
+				seen[field] = true
+				rows = append(rows, m)
+			}
+		}
+	}
+	return rows
 }
 
 func collabRecordExpiry(m CollabRecordMutation) time.Time {

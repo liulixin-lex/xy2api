@@ -12,24 +12,6 @@ func collabIssueID(r CollabIssuedRecord) collabIssueIdentity {
 	return collabIssueIdentity{r.Scope, r.Call, r.Digest, r.Account, r.Site, r.Generation}
 }
 
-// Local voids mask only the matching issue, never unrelated remote evidence.
-func collabMergeIssues(remote, local []CollabIssuedRecord) []CollabIssuedRecord {
-	result := slices.Clone(remote)
-	for _, v := range local {
-		found := false
-		for i, r := range result {
-			if collabIssueID(r) == collabIssueID(v) {
-				result[i] = v
-				found = true
-				break
-			}
-		}
-		if !found {
-			result = append(result, v)
-		}
-	}
-	return result
-}
 func collabUnion[T any, K comparable](remote, local []T, key func(T) K) []T {
 	result := slices.Clone(remote)
 	for _, v := range local {
@@ -47,13 +29,75 @@ func collabUnion[T any, K comparable](remote, local []T, key func(T) K) []T {
 	}
 	return result
 }
+
+func collabTokenStatusRank(status CollabIssuedStatus) int {
+	switch status {
+	case CollabIssuedStatusVoid:
+		return 3
+	case CollabIssuedStatusConfirmed:
+		return 2
+	case CollabIssuedStatusPending:
+		return 1
+	default:
+		return 0
+	}
+}
+func collabMergeIssueTokens(remote, local []CollabIssuedEntry) []CollabIssuedEntry {
+	result := slices.Clone(remote)
+	index := make(map[CollabIssuedToken]int, len(remote)+len(local))
+	for i, r := range result {
+		index[r.Token] = i
+	}
+	for _, v := range local {
+		if i, ok := index[v.Token]; ok {
+			if collabTokenStatusRank(v.Record.Status) > collabTokenStatusRank(result[i].Record.Status) {
+				result[i] = v
+			}
+		} else {
+			index[v.Token] = len(result)
+			result = append(result, v)
+		}
+	}
+	return result
+}
+func collabAggregateIssues(tokens []CollabIssuedEntry) []CollabIssuedRecord {
+	var result []CollabIssuedRecord
+	index := make(map[collabIssueIdentity]int)
+	rank := func(s CollabIssuedStatus) int {
+		switch s {
+		case CollabIssuedStatusConfirmed:
+			return 3
+		case CollabIssuedStatusPending:
+			return 2
+		default:
+			return 1
+		}
+	}
+	for _, token := range tokens {
+		r := token.Record
+		key := collabIssueID(r)
+		if i, ok := index[key]; ok {
+			if rank(r.Status) > rank(result[i].Status) {
+				result[i] = r
+			}
+		} else {
+			index[key] = len(result)
+			result = append(result, r)
+		}
+	}
+	return result
+}
 func collabMergeRecords(remote, local CollabRecordLookup) CollabRecordLookup {
+	tokens := collabMergeIssueTokens(remote.IssuedTokens, local.IssuedTokens)
+	issued := collabAggregateIssues(tokens)
+
 	return CollabRecordLookup{
-		Issued:    collabMergeIssues(remote.Issued, local.Issued),
+		IssuedTokens: tokens, Issued: issued,
 		Plaintext: collabUnion(remote.Plaintext, local.Plaintext, func(r CollabPlaintextRecord) string { return string(r.Call) + ":" + string(r.Arguments) }),
 		Consumed:  collabUnion(remote.Consumed, local.Consumed, func(r CollabConsumedRecord) string { return collabDeliveryField("c", r.Key, r.Account) }),
 	}
 }
+
 func collabMergeDispositions(remote, local CollabDispositionLookup) CollabDispositionLookup {
 	// Counts are snapshots, not increments. Combining two replicas must not
 	// double count the same terminal; use the larger observation.

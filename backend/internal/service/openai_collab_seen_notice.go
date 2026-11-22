@@ -22,14 +22,14 @@ func (s *OpenAIGatewayService) ParseCollabSeenNotices(body []byte, senders map[s
 	var out []resilience.CollabSeenNotice
 	items := root.Get("input").Array()
 	lastOutput := -1
+	ambiguous := false
 	for i, item := range items {
-		switch item.Get("type").String() {
-		case "function_call", "custom_tool_call", "reasoning", "compaction":
+		kind := item.Get("type")
+		if !item.IsObject() || !codexCollabUniqueObject(item) || (kind.Exists() && kind.Type != gjson.String) || (!kind.Exists() && item.Get("role").Type != gjson.String) {
+			ambiguous = true
+		}
+		if !collabProvenInput(item) {
 			lastOutput = i
-		case "message", "":
-			if item.Get("role").String() == "assistant" {
-				lastOutput = i
-			}
 		}
 	}
 	for i, item := range items {
@@ -67,7 +67,7 @@ func (s *OpenAIGatewayService) ParseCollabSeenNotices(body []byte, senders map[s
 				if len(event) < 1 || len(event) > 128 || strings.ContainsAny(event, " \t\r\n[]") {
 					continue
 				}
-				out = append(out, resilience.CollabSeenNotice{Event: s.CollabDigest(resilience.CollabDigestDomainEvent, event), Sender: senders[sender], FinalAnswer: final, Current: i > lastOutput})
+				out = append(out, resilience.CollabSeenNotice{Event: s.CollabDigest(resilience.CollabDigestDomainEvent, event), Sender: senders[sender], FinalAnswer: final, Current: !ambiguous && i > lastOutput})
 			}
 		}
 	}
@@ -83,4 +83,51 @@ func collabNoticeEnvelope(text string) (string, bool) {
 		return "", false
 	}
 	return sender, true
+}
+
+// Unknown types and ambiguous objects are turn boundaries, including future
+// built-in model outputs. Only explicit input shapes may preserve a notice.
+func collabProvenInput(item gjson.Result) bool {
+	if !item.IsObject() || !codexCollabUniqueObject(item) {
+		return false
+	}
+	switch item.Get("type").String() {
+	case "agent_message":
+		return collabInputContent(item.Get("content"), false)
+	case "function_call_output", "custom_tool_call_output":
+		return item.Get("call_id").Type == gjson.String && item.Get("call_id").String() != "" && (item.Get("output").Type == gjson.String || collabInputContent(item.Get("output"), false))
+	case "message", "":
+		role := item.Get("role")
+		if role.Type != gjson.String || (role.String() != "user" && role.String() != "developer") {
+			return false
+		}
+		content := item.Get("content")
+		return collabInputContent(content, true)
+	default:
+		return false
+	}
+}
+
+func collabInputContent(content gjson.Result, textAllowed bool) bool {
+	if textAllowed && content.Type == gjson.String {
+		return true
+	}
+	if !content.IsArray() || len(content.Array()) == 0 {
+		return false
+	}
+	for _, part := range content.Array() {
+		if !part.IsObject() || !codexCollabUniqueObject(part) {
+			return false
+		}
+		switch part.Get("type").String() {
+		case "input_text":
+			if part.Get("text").Type != gjson.String {
+				return false
+			}
+		case "input_image", "input_file", "input_audio":
+		default:
+			return false
+		}
+	}
+	return true
 }

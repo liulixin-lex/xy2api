@@ -21,7 +21,6 @@ type CollabRecordDeliveryInput struct {
 type collabDeliveredCall struct {
 	token     resilience.CollabIssuedToken
 	plaintext resilience.CollabPlaintextRecord
-	payload   resilience.CollabDigest
 	sequence  int64
 	written   bool
 }
@@ -30,10 +29,13 @@ type collabDeliveredCall struct {
 // digests and tokens, never message bodies or final-frame snapshots.
 type CollabRecordDelivery struct {
 	resilience.NoopCollabDeliveryConsumer
-	service *OpenAIGatewayService
-	input   CollabRecordDeliveryInput
-	calls   map[resilience.CollabDigest]collabDeliveredCall
-	closed  bool
+	service       *OpenAIGatewayService
+	input         CollabRecordDeliveryInput
+	calls         map[resilience.CollabDigest]collabDeliveredCall
+	closed        bool
+	frameSequence int64
+	frameDigest   resilience.CollabDigest
+	frameCalls    []resilience.CollabDigest
 }
 
 func (s *OpenAIGatewayService) NewCollabRecordDelivery(in CollabRecordDeliveryInput) *CollabRecordDelivery {
@@ -47,13 +49,25 @@ func (s *OpenAIGatewayService) NewCollabRecordDelivery(in CollabRecordDeliveryIn
 	return &CollabRecordDelivery{service: s, input: in, calls: make(map[resilience.CollabDigest]collabDeliveredCall)}
 }
 func (c *CollabRecordDelivery) accepts(e resilience.CollabDeliveryEvent) bool {
+	switch e.EventType {
+	case "response.output_item.done", "response.completed", "response.done", "response.json":
+	default:
+		return false
+	}
 	return c != nil && !c.closed && e.Generation == c.input.Generation && e.SendSeq == c.input.SendSeq && e.Executable && e.Payload != "" && len(e.Payload) <= 1<<20
 }
 func (c *CollabRecordDelivery) AboutToWrite(ctx context.Context, e resilience.CollabDeliveryEvent) {
 	if !c.accepts(e) {
 		return
 	}
-	c.eachCall(e, func(call gjson.Result) {
+	digest := c.service.CollabDigest(resilience.CollabDigestDomainBody, e.Payload)
+	if c.frameDigest == digest && c.frameSequence == e.Sequence {
+		return
+	}
+	c.frameDigest = digest
+	c.frameSequence = e.Sequence
+	c.frameCalls = c.frameCalls[:0]
+	c.eachCall(e, func(call gjson.Result, arguments, message string) {
 		id := c.service.CollabDigest(resilience.CollabDigestDomainCall, call.Get("call_id").String())
 		if id == "" || len(c.calls) >= resilience.CollabRecordMaxTreeEntries {
 			return
@@ -61,9 +75,7 @@ func (c *CollabRecordDelivery) AboutToWrite(ctx context.Context, e resilience.Co
 		if _, exists := c.calls[id]; exists {
 			return
 		}
-		arguments := call.Get("arguments").String()
-		message := gjson.Get(arguments, "message").String()
-		snapshot := collabDeliveredCall{payload: c.service.CollabDigest(resilience.CollabDigestDomainBody, call.Raw), sequence: e.Sequence}
+		snapshot := collabDeliveredCall{sequence: e.Sequence}
 		marker := call.Get("encrypted_function_args")
 		expiry := time.Now().Add(resilience.CollabRecordTTL)
 		if marker.IsArray() && len(marker.Array()) == 0 {
@@ -81,32 +93,29 @@ func (c *CollabRecordDelivery) AboutToWrite(ctx context.Context, e resilience.Co
 			snapshot.token, _ = c.service.collabRecords.PendingIssued(ctx, record)
 		}
 		c.calls[id] = snapshot
+		c.frameCalls = append(c.frameCalls, id)
 	})
 }
 func (c *CollabRecordDelivery) Written(ctx context.Context, e resilience.CollabDeliveryEvent) {
 	if !c.accepts(e) {
 		return
 	}
-	if e.WriteError != nil {
-		for id, v := range c.calls {
-			if !v.written && v.sequence == e.Sequence {
-				c.service.collabRecords.VoidIssued(ctx, v.token)
-				delete(c.calls, id)
-			}
-		}
+
+	if e.Sequence != c.frameSequence || c.frameDigest == "" {
 		return
 	}
-	c.eachCall(e, func(call gjson.Result) {
-		id := c.service.CollabDigest(resilience.CollabDigestDomainCall, call.Get("call_id").String())
+	matched := e.WriteError == nil && c.frameDigest == c.service.CollabDigest(resilience.CollabDigestDomainBody, e.Payload)
+	for _, id := range c.frameCalls {
 		v, ok := c.calls[id]
 		if !ok || v.written || v.sequence != e.Sequence {
-			return
+			continue
 		}
-		// A writer must report the same final bytes at both phases.
-		if v.payload != c.service.CollabDigest(resilience.CollabDigestDomainBody, call.Raw) {
-			c.service.collabRecords.VoidIssued(ctx, v.token)
+		if !matched {
+			if v.token.Token != "" {
+				c.service.collabRecords.VoidIssued(ctx, v.token)
+			}
 			delete(c.calls, id)
-			return
+			continue
 		}
 		if v.token.Token != "" {
 			c.service.collabRecords.ConfirmIssued(ctx, v.token)
@@ -116,7 +125,9 @@ func (c *CollabRecordDelivery) Written(ctx context.Context, e resilience.CollabD
 		}
 		v.written = true
 		c.calls[id] = v
-	})
+	}
+	c.frameCalls = c.frameCalls[:0]
+
 }
 func (c *CollabRecordDelivery) Completed(ctx context.Context, e resilience.CollabDeliveryEvent) {
 	if c == nil || c.closed || e.Generation != c.input.Generation || e.SendSeq != c.input.SendSeq {
@@ -129,21 +140,29 @@ func (c *CollabRecordDelivery) Completed(ctx context.Context, e resilience.Colla
 	}
 	c.closed = true
 	c.calls = nil
+	c.frameCalls = nil
+	c.frameDigest = ""
 }
-func (c *CollabRecordDelivery) eachCall(e resilience.CollabDeliveryEvent, visit func(gjson.Result)) {
+func (c *CollabRecordDelivery) eachCall(e resilience.CollabDeliveryEvent, visit func(gjson.Result, string, string)) {
 	payload := strings.TrimSpace(e.Payload)
 	// Hooks may receive an SSE write or its JSON data. Neither form is modified.
 	if !strings.HasPrefix(payload, "{") {
-		var data string
-		for _, line := range strings.Split(payload, "\n") {
+
+		var data strings.Builder
+		data.Grow(len(payload))
+		first := true
+		for line := range strings.SplitSeq(payload, "\n") {
 			if strings.HasPrefix(line, "data:") {
-				if data != "" {
-					data += "\n"
+				if !first {
+					_ = data.WriteByte('\n')
 				}
-				data += strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+				first = false
+				value := strings.TrimSuffix(strings.TrimPrefix(line, "data:"), "\r")
+				value = strings.TrimPrefix(value, " ")
+				_, _ = data.WriteString(value)
 			}
 		}
-		payload = data
+		payload = data.String()
 	}
 	if !gjson.Valid(payload) {
 		return
@@ -160,14 +179,18 @@ func (c *CollabRecordDelivery) eachCall(e resilience.CollabDeliveryEvent, visit 
 			return
 		}
 		args := call.Get("arguments")
-		if call.Get("call_id").Type != gjson.String || call.Get("call_id").String() == "" || args.Type != gjson.String || !gjson.Valid(args.String()) {
+		if call.Get("call_id").Type != gjson.String || call.Get("call_id").String() == "" || args.Type != gjson.String {
 			return
 		}
-		parsed := gjson.Parse(args.String())
+		arguments := args.String()
+		if !gjson.Valid(arguments) {
+			return
+		}
+		parsed := gjson.Parse(arguments)
 		if !parsed.IsObject() || !codexCollabUniqueObject(parsed) || parsed.Get("message").Type != gjson.String {
 			return
 		}
-		visit(call)
+		visit(call, arguments, parsed.Get("message").String())
 	}
 	switch e.EventType {
 	case "response.output_item.done":

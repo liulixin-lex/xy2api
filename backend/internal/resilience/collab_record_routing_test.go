@@ -34,8 +34,9 @@ func TestCollabOrderingPreservesCandidatesAndRound(t *testing.T) {
 	settings.Collab.RecordRouting = false
 	require.Equal(t, candidates, OrderCollabFailoverCandidates(&settings, candidates, accounts, []CollabRoutingItem{item}, now))
 	settings.Collab.RecordRouting = true
-	settings.Collab.Records = false // reading is independent
-	require.Equal(t, ordered, OrderCollabFailoverCandidates(&settings, candidates, accounts, []CollabRoutingItem{item}, now))
+	settings.Collab.Records = false // dispositions remain independent; routing evidence does not
+	require.Equal(t, candidates, OrderCollabFailoverCandidates(&settings, candidates, accounts, []CollabRoutingItem{item}, now))
+	settings.Collab.Records = true
 	newer := item
 	newer.Key.Item = "new"
 	newer.Records = CollabRecordLookup{}

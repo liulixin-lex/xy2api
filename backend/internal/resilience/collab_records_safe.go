@@ -10,7 +10,10 @@ import (
 )
 
 type collabRecordDeadlineKey struct{}
-type collabRecordReadBudget struct{ used atomic.Bool }
+type collabRecordReadBudget struct {
+	used    atomic.Bool
+	queries atomic.Int64
+}
 
 // Create once at the first batch read and reuse for the whole request. Nesting
 // never renews the budget. Without this context the adapter serves local only.
@@ -56,8 +59,13 @@ func (s *SafeCollabRecordsStore) enqueue(mutation CollabRecordMutation) {
 		collabSafety.recordDropped.Add(1)
 		return
 	}
+	normalized, _, ok := NormalizeCollabRecordMutation(mutation, time.Now())
+	if !ok {
+		collabSafety.recordDropped.Add(1)
+		return
+	}
 	select {
-	case s.writes <- mutation:
+	case s.writes <- normalized:
 	default:
 		collabSafety.recordDropped.Add(1)
 	}
@@ -127,6 +135,16 @@ func (s *SafeCollabRecordsStore) lookupShared(ctx context.Context, batch CollabR
 	return result
 }
 func (s *SafeCollabRecordsStore) LookupBatch(ctx context.Context, batch CollabRecordBatch) CollabRecordBatchResult {
+	batch = collabBoundBatch(batch)
+	if budget, ok := ctx.Value(collabRecordDeadlineKey{}).(*collabRecordReadBudget); ok {
+		requested := int64(len(batch.Queries))
+		previous := budget.queries.Add(requested) - requested
+		allowed := max(int64(0), min(requested, int64(CollabRecordMaxQueries)-previous))
+		batch.Queries = batch.Queries[:int(allowed)]
+	}
+	if ctx.Err() != nil {
+		return CollabRecordBatchResult{}
+	}
 	local := s.lookupLocal(ctx, batch)
 	deadline, bounded := ctx.Deadline()
 	budget, budgeted := ctx.Value(collabRecordDeadlineKey{}).(*collabRecordReadBudget)
@@ -155,7 +173,20 @@ func (s *SafeCollabRecordsStore) LookupBatch(ctx context.Context, batch CollabRe
 		if ctx.Err() != nil {
 			return local
 		}
-		local = s.lookupLocal(ctx, batch)
+		fresh := s.lookupLocal(ctx, batch)
+		for q, r := range fresh.Records {
+			if local.Records == nil {
+				local.Records = make(map[CollabRecordQuery]CollabRecordLookup)
+			}
+			local.Records[q] = collabMergeRecords(local.Records[q], r)
+		}
+		for q, d := range fresh.Dispositions {
+			if local.Dispositions == nil {
+				local.Dispositions = make(map[CollabRecordQuery]CollabDispositionLookup)
+			}
+			local.Dispositions[q] = collabMergeDispositions(local.Dispositions[q], d)
+		}
+		local.TreeLocalEndings = max(local.TreeLocalEndings, fresh.TreeLocalEndings)
 		// Local state wins over delayed shared writes, including pending voids.
 		remote.Records = maps.Clone(remote.Records)
 		remote.Dispositions = maps.Clone(remote.Dispositions)
@@ -214,6 +245,9 @@ func (s *SafeCollabRecordsStore) Replaced(ctx context.Context, value CollabRepla
 
 func (s *SafeCollabRecordsStore) Terminated(ctx context.Context, value CollabTerminatedRecord) (ok bool) {
 	defer collabRecover(&collabSafety.recordPanics)
+	if len(value.Copies) > CollabRecordMaxCopies {
+		return false
+	}
 	value.Copies = slices.Clone(value.Copies)
 	if !s.local.Terminated(ctx, value) {
 		return false

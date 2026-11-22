@@ -109,9 +109,12 @@ func TestCollabSafeUnionAndVoidDuringRemoteRead(t *testing.T) {
 	remoteIssue.Status = CollabIssuedStatusConfirmed
 	remoteOther := remoteIssue
 	remoteOther.Call = "other-call"
+	otherToken := token
+	otherToken.Token = "other-token"
+	otherToken.Call = remoteOther.Call
 	shared := &collabSharedTestStore{lookup: func(context.Context, CollabRecordBatch) (CollabRecordBatchResult, error) {
 		local.VoidIssued(ctx, token)
-		return CollabRecordBatchResult{Records: map[CollabRecordQuery]CollabRecordLookup{q: {Issued: []CollabIssuedRecord{remoteIssue, remoteOther}, Plaintext: []CollabPlaintextRecord{{Scope: key.Scope, Call: "plain", Arguments: "args", ExpiresAt: expiry}}}}}, nil
+		return CollabRecordBatchResult{Records: map[CollabRecordQuery]CollabRecordLookup{q: {Issued: []CollabIssuedRecord{remoteIssue, remoteOther}, IssuedTokens: []CollabIssuedEntry{{Token: token, Record: remoteIssue}, {Token: otherToken, Record: remoteOther}}, Plaintext: []CollabPlaintextRecord{{Scope: key.Scope, Call: "plain", Arguments: "args", ExpiresAt: expiry}}}}}, nil
 	}}
 	store := NewSafeCollabRecordsStore(local, shared, 4)
 	defer store.Close()

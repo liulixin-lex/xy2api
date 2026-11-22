@@ -84,10 +84,17 @@ type CollabTerminatedRecord struct {
 	ExpiresAt time.Time
 }
 
+// Token snapshots are merged before deriving Issued. A void cannot erase a
+// different request's confirmed delivery.
+type CollabIssuedEntry struct {
+	Token  CollabIssuedToken
+	Record CollabIssuedRecord
+}
 type CollabRecordLookup struct {
-	Issued    []CollabIssuedRecord
-	Plaintext []CollabPlaintextRecord
-	Consumed  []CollabConsumedRecord
+	IssuedTokens []CollabIssuedEntry
+	Issued       []CollabIssuedRecord
+	Plaintext    []CollabPlaintextRecord
+	Consumed     []CollabConsumedRecord
 }
 
 type CollabDispositionLookup struct {
@@ -168,16 +175,16 @@ const (
 )
 
 type CollabRecordMutation struct {
-	TerminalRejection CollabTerminalRejectionRecord
-	Kind              CollabRecordMutationKind
-	Token             CollabIssuedToken
-	Issued            CollabIssuedRecord
-	Plaintext         CollabPlaintextRecord
-	Consumed          CollabConsumedRecord
-	Replaced          CollabReplacedRecord
-	Terminated        CollabTerminatedRecord
-	Scope             CollabRecordScope
-	Event             CollabDigest
+	TerminalRejection CollabTerminalRejectionRecord `json:",omitzero"`
+	Kind              CollabRecordMutationKind      `json:",omitzero"`
+	Token             CollabIssuedToken             `json:",omitzero"`
+	Issued            CollabIssuedRecord            `json:",omitzero"`
+	Plaintext         CollabPlaintextRecord         `json:",omitzero"`
+	Consumed          CollabConsumedRecord          `json:",omitzero"`
+	Replaced          CollabReplacedRecord          `json:",omitzero"`
+	Terminated        CollabTerminatedRecord        `json:",omitzero"`
+	Scope             CollabRecordScope             `json:",omitzero"`
+	Event             CollabDigest                  `json:",omitzero"`
 }
 
 // The shared implementation is called only on bounded background workers.

@@ -17,7 +17,7 @@ func (c *gatewayCache) CollabRecords() resilience.CollabSharedRecordsStore {
 
 type collabSharedCache struct{ rdb *redis.Client }
 
-const collabCachePrefix = "collab:records:v1:"
+const collabCachePrefix = "collab:records:v2:"
 
 func collabCacheKeys(scope resilience.CollabRecordScope) []string {
 	b, _ := json.Marshal(scope)
@@ -37,6 +37,16 @@ local expired=redis.call('ZRANGEBYSCORE',KEYS[3],'-inf',now)
 for _,f in ipairs(expired) do redis.call('HDEL',KEYS[2],f) end
 redis.call('ZREMRANGEBYSCORE',KEYS[3],'-inf',now)
 local old=redis.call('HGET',KEYS[2],field)
+local function charge(f,v) return string.len(v)+2*string.len(f)+32 end
+local function fits(value)
+ if string.len(value)>tonumber(ARGV[8]) then return false end
+ local total=charge(field,value)
+ local rows=redis.call('HGETALL',KEYS[2])
+ for i=1,#rows,2 do
+  if rows[i]~=field then total=total+charge(rows[i],rows[i+1]) end
+ end
+ return total<=tonumber(ARGV[9])
+end
 if kind=='confirm' or kind=='void' then
  if not old then return 0 end
  local row=cjson.decode(old)
@@ -45,13 +55,16 @@ if kind=='confirm' or kind=='void' then
  if kind=='void' then row.Issued.Status='void'
  elseif row.Issued.Status=='void' then return 0
  else row.Issued.Status='confirmed' end
- redis.call('HSET',KEYS[2],field,cjson.encode(row))
+ local updated=cjson.encode(row)
+ if not fits(updated) then return 0 end
+ redis.call('HSET',KEYS[2],field,updated)
  return 1
 end
 if old then return 1 end
 if deadline<=now then return 0 end
 if not redis.call('ZSCORE',KEYS[1],KEYS[2]) and redis.call('ZCARD',KEYS[1])>=tonumber(ARGV[6]) then return 0 end
 if redis.call('HLEN',KEYS[2])>=tonumber(ARGV[7]) then return 0 end
+if not fits(ARGV[5]) then return 0 end
 redis.call('HSET',KEYS[2],field,ARGV[5])
 redis.call('ZADD',KEYS[3],deadline,field)
 local current=tonumber(redis.call('ZSCORE',KEYS[1],KEYS[2]) or '0')
@@ -79,36 +92,28 @@ func (c *collabSharedCache) ApplyBatch(ctx context.Context, batch []resilience.C
 			if m.Kind == resilience.CollabRecordMutationPending {
 				m.Issued.Status = resilience.CollabIssuedStatusPending
 			}
-			scope, field, expiry := resilience.CollabRecordStorageIdentity(m)
+
+			now := time.Now()
+			normalized, payload, ok := resilience.NormalizeCollabRecordMutation(m, now)
+			if !ok {
+				continue
+			}
+			scope, field, expiry := resilience.CollabRecordStorageIdentity(normalized)
 			if scope.Tenant == "" || scope.Group == "" || scope.Tree == "" || field == "" {
 				continue
 			}
-			now := time.Now()
-			if m.Kind == resilience.CollabRecordMutationLocalEnding && expiry.IsZero() {
-				expiry = now.Add(resilience.CollabRecordTTL)
-				m.Issued.ExpiresAt = expiry
-			}
-			if expiry.After(now.Add(resilience.CollabRecordTTL)) {
-				expiry = now.Add(resilience.CollabRecordTTL)
-			}
-			if m.Kind != resilience.CollabRecordMutationConfirm && m.Kind != resilience.CollabRecordMutationVoid {
-				// Reuse validation so direct shared calls cannot introduce malformed evidence.
-				if !resilience.NewMemoryCollabRecordsStore().ApplyMutation(m) {
-					continue
-				}
-			}
-			payload, encodeErr := json.Marshal(m)
-			if encodeErr != nil {
-				return encodeErr
-			}
+
 			// EVAL, rather than EVALSHA, also works after Redis restarts mid-pipeline.
-			pipe.Eval(ctx, collabApplySource, collabCacheKeys(scope), now.UnixMilli(), expiry.UnixMilli(), field, string(m.Kind), string(payload), resilience.CollabRecordMaxTrees, resilience.CollabRecordMaxTreeEntries)
+			pipe.Eval(ctx, collabApplySource, collabCacheKeys(scope), now.UnixMilli(), expiry.UnixMilli(), field, string(m.Kind), string(payload), resilience.CollabRecordMaxTrees, resilience.CollabRecordMaxTreeEntries, resilience.CollabRecordMaxRowBytes, resilience.CollabRecordMaxTreeBytes)
 		}
 		return nil
 	})
 	return err
 }
 func (c *collabSharedCache) LookupBatch(ctx context.Context, b resilience.CollabRecordBatch) (resilience.CollabRecordBatchResult, error) {
+	if ctx.Err() != nil {
+		return resilience.CollabRecordBatchResult{}, ctx.Err()
+	}
 	if !b.Records && !b.Dispositions {
 		return resilience.CollabRecordBatchResult{}, nil
 	}
@@ -119,6 +124,12 @@ func (c *collabSharedCache) LookupBatch(ctx context.Context, b resilience.Collab
 	}
 	local := resilience.NewMemoryCollabRecordsStore()
 	for _, value := range values {
+		if ctx.Err() != nil {
+			return resilience.CollabRecordBatchResult{}, ctx.Err()
+		}
+		if len(value) > resilience.CollabRecordMaxRowBytes {
+			continue
+		}
 		var mutation resilience.CollabRecordMutation
 		if json.Unmarshal([]byte(value), &mutation) != nil {
 			continue
