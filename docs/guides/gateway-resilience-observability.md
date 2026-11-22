@@ -152,11 +152,15 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 |---|---|---|
 | `sched_quality.loading` | 进度 / 完成 Info，加载失败 Warn | 带 `component=sched_quality`；`status` 为 `page`、`complete` 或 `incomplete`、累计 `rows`、`pages`；`page` 和 `incomplete` 另有 `layering=false`，失败有 `error`；加载完成前不分层 |
 | `sched_quality.replay` | Debug | 处理积压的事务提交后；带组件，`horizon` 为处理水位，`batches`、`assessments` 为补跑批次与判定次数，需启用 Debug |
-| `sched_quality.summary` | Info | 每实例每 5 分钟汇总，含 `cycles`、`cycles_failed`、`cycle_ms_max`、`cooled`、`released`、`trial`、`clear` |
-| `sched_quality.state` | Info | 产生判定动作时；含 `at`、`rule_version`、`account_id`、`model`、`group_id`、`action`、`line`、`level`、`until`、`basis`、`attempt_ids` |
+| `sched_quality.summary` | Info | 带 `component=sched_quality`；每实例每 5 分钟汇总，含 `cycles`、`cycles_failed`、`cycle_ms_max`、`cooled`、`released`、`trial`、`relax`、`clear` |
+| `sched_quality.state` | Info | 带 `component=sched_quality`；判定事务提交后每动作一条，含保存门槛引发的重评。字段见下文 |
+| `sched_quality.history_missing` | Info | 带 `component=sched_quality`；事务提交后按线汇总缺历史或试用在途资料不全的评估。含 `account_id`、`model`、`group_id`、`line`、`first_at`、`last_at`（首末评估时刻）、`assessments`（次数） |
+| `sched_quality.missing_deadline` | Warn | 带 `component=sched_quality`；后排或试用记录缺期限，按发现时到期处理并提交动作后记录。含 `at`、`account_id`、`model`、`group_id`、`line` |
+| `sched_quality.performance_ready` | Info | 不带组件，只查应用日志。每次进程启动首次发布完整长期表现时记一次，部分装载不记；`snapshot_at`、`from` 为统计窗口终点和起点，`rows` 为装入的尝试样本数，`load_ms` 为首次加载到发布的毫秒数（含重试等待） |
+| `sched_quality.performance_load` | Warn | 不带组件，按事件名查；长期表现加载或配置读取失败，含 `error` |
 | `sched_quality.first_output_avoid` | Info | 原归属号等够首输出时限后记录避让结果。含 `gateway_request_id`、`group_id`、`model`、`account_id`、`owner_gen`、`expires_at_ms`、`reason`、`confirmed`，存储错误或超时另有 `error_class` |
-| `sched_quality.session_switch` | Info | 会话绑定事务结束，或放弃救场交接、接管或迁移，见下表 |
-| `sched_quality.new_pick` | Info | 新会话按 12 小时表现尝试改派，或符合改派条件但已达上限。带 `component=sched_quality`，可在系统日志查 |
+| `sched_quality.session_switch` | Info | 带 `component=sched_quality`；会话绑定事务结束，或放弃会话变更，见下表 |
+| `sched_quality.new_session` | Info | 带 `component=sched_quality`；新会话首次普通选号返回时记录去向或无号原因，字段见下文 |
 | `resilience.budget_timeout_plan` | Info | 首输出时限计划。含 `gateway_request_id`、`attempt_seq`、`group_id`、`account_id`、`model` 与时限诊断字段 |
 | `openai.sticky_bypass` | `reason=first_output_avoid` 时为 Info | `reason=first_output_avoid` 表示仅因首输出避让绕开仍合格的归属号，另选账号临时服务。含 `gateway_request_id`、`group_id`、`owner`、`selected`。此原因带 `component=sched_quality`，可在系统日志查询。会改绑定的原因和 `unrecorded` 记为 Warn |
 | `sched_quality.attempt_finished` | 成功 Debug，其余 Info | 尝试收尾；请求、尝试 ID、分类、状态来源、终态及实际输出字节，见下文 |
@@ -181,9 +185,19 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 | `sched_quality.release_trial_group` | Warn | 试用结束后整组名额释放失败；`account_id`、`model`、`group_id`、`error` |
 | `sched_quality.capability_mark_evicted` | Info | 能力标记满额时替换最早到期的一条；`account_id`、`limit`；不带组件，仅应用标准输出 |
 
-`summary` 的 `cycles` 是引擎每 5 秒的工作周期，正常每 5 分钟约 60 次；与每 5 分钟一次的普通质量判定不同。`cooled` 计进入、续期、试用失败；`released` 计到期达标、试用达标、试用超时；`trial` 计进入试用，`clear` 计档位清零。只统计提交成功的变化，管理员恢复不计入这些变化数。
+`summary` 的 `cycles` 是引擎每 5 秒的工作周期，正常每 5 分钟约 60 次；与每 5 分钟一次的普通质量判定不同。`cooled` 计进入后排、续期、试用失败；`released` 计试用放回；`trial` 计进入试用；`relax` 计门槛放宽写入的动作；`clear` 计再犯档位清零动作。只统计提交成功的动作，回滚的重评不发布也不计数；管理员手动恢复不计入这些计数。
 
-`state` 的 `line` 是 `ttfo`、`error` 或 `cache`，一次动作对应一条线。动作包括 `enter`、`renew`、`release`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`reset`、`relax`、`clear`，含义见 [判定记录](group-quality-gate.md#判定记录)。`level` 为 0–4，对应 20、40、60、90、120 分钟。`until` 仅在进入 / 续期 / 试用失败时写后排期限，进入试用时写试用期限，其余为空。`basis` 包含门槛、证据来源和该线的证据；`attempt_ids` 最多 50 个。首字证据有时间折扣与同伴比较，不能只看 P50 推断判定。
+**`sched_quality.state`** 的 `at` 是逻辑判定时刻，`rule_version` 当前为 `3.1`；用 `account_id`、`model`、`group_id`、`line` 定位线，`line` 为 `ttfo`、`error` 或 `cache`。新 `action` 取 `enter`、`renew`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`relax`、`clear`，见 [判定记录](group-quality-gate.md#判定记录)；旧日志仍可见 `release`。`level` 为 0–4，对应 20、40、80、160、240 分钟。`until` 在进入后排、续期、试用失败时写后排期限，进入试用时写试用期限，其余为零值。
+
+| 字段 | 含义 |
+|---|---|
+| `release_reason` | `qualified`（满 15 分钟且达标）、`no_samples`（满 60 分钟无本线可用样本）、`deadline`（到期）；未放回为空串 |
+| `trial_duration_seconds` | 放回时记录实际试用秒数；未放回为 0。按期限放回时旧轮通常为 3600、新轮为 7200 |
+| `history_missing` | 是否缺少这次评估所需的历史，含试用 60 分钟检查时在途资料不全 |
+| `basis` | 门槛、证据来源和逐线证据，也含放回原因、试用时长和缺历史标记；`own_sample_at_60` 为 `true`（有）或 `false`（确定没有），未检查或资料不全时省略；缺期限时另有 `missing_deadline`，为 `true` |
+| `attempt_ids` | 相关尝试 ID，最多 50 个 |
+
+首字证据有时间折扣与同伴比较，不能只看 P50 推断判定。
 
 **`sched_quality.first_output_avoid`** 的 `confirmed=true` 表示写入成功，且回执已由当前请求确认。未确认时，`reason` 可为 `session_disabled`（开关已关）、`protocol_ineligible`（请求无交接资格）、`binding_changed`（原绑定不匹配）、`rejected`（存储拒绝）、`error`（存储错误）、`timeout`（超时）、`expired`（避让期已过）或 `receipt_stale`（回执已不匹配当前轮次）。`error_class` 只记录错误类别。
 
@@ -216,21 +230,26 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 - `pre_dispatch_invalidated`（目标未实际派发）、`incomplete_delivery`（未完整交付）、`canceled`（请求取消）、`missing_clock`（缺计时）、`not_faster`（首输出相等或更慢）。
 - `binding_changed`（原绑定不匹配或已变化）、`commit_error`（绑定提交出错）。
 
-接管或质量迁移放弃变更时，相关放弃事件每个请求最多记一条，`committed=false`。可按 `reason=target_avoided`（目标仍在首输出避让期）、`avoid_read_error`（读避让失败）或 `quality_owned`（由会话质量路由持有）查询。提交复验挡下的变更另可查 `commit_result=target_avoided`。
+接管或质量迁移放弃变更时，相关放弃事件每个请求最多记一条，`committed=false`。可按 `reason=target_avoided`（目标仍在首输出避让期）、`avoid_read_error`（读避让失败）或 `quality_owned`（由会话质量路由持有）查询。提交复验挡下的变更另可查 `commit_result=target_avoided`。因转换身份冲突决定换号重发、因此放弃原会话变更时，可见 `reason=identity_conflict`。
 
-**`sched_quality.new_pick`** 字段
+**`sched_quality.new_session`** 在首次普通选号且确认没有会话绑定（含旧绑定）时使用。选号返回可以是已取得槽位，也可以是等待计划；用 `gateway_request_id` 关联尝试记录的 `request_id` 核实实际发送，关联换号事件的 `kind=create`、`committed=true` 核实建立归属。
 
 | 字段 | 含义 |
 |---|---|
-| `component`、`gateway_request_id`、`group_id`、`model` | `sched_quality`、网关本地请求 ID、分组、实际调度模型 |
-| `from`、`to`、`from_score`、`to_score`、`snapshot_at` | 原选号、目标账号、两端分数（整数百万分位）及统计快照时刻 |
-| `from_priority`、`to_priority` | 两端优先级 |
-| `from_rate_known`、`to_rate_known`、`from_rate`、`to_rate` | 两端排序倍率是否已知及倍率。未知倍率为 `null`，已知零倍率为 `0` |
-| `first10`、`first30` | 目标账号在本组本模型近 10、30 分钟的首派数 |
-| `first15`、`window`、`used` | 目标账号近 15 分钟首派数（上限基数）、UTC 时段起点、预留后的占用数（含在途）。`capped` 记录当前占用 |
-| `result` | `picked`（选中）、`target_recheck_failed`（复核失败）、`target_slot_busy`（拿不到槽）、`target_vetoed`（终检或返回前校验否决）、`capped`（达上限） |
+| `component`、`gateway_request_id`、`group_id`、`platform` | `sched_quality`、网关本地请求 ID、分组 ID（无分组为 0）、调度平台 `openai` |
+| `requested_model`、`actual_model` | 传入调度的模型、选中号的调度模型；无选中号时后者为 `null`。透传加模型映射的账号实际出站模型可能不同 |
+| `entry` | `messages`、`responses`、`chat_completions`、`responses_websocket`；内部调用回退到入口能力名，无能力名时为 `scheduler` |
+| `selected_account_id`、`selected_quality_position` | 选中账号 ID、参与排序时的质量位置：`front`（前排）、`trial_with_seat`（试用有位）、`trial_full`（满位）、`trial_unknown`（名额未知）、`rear`（后排）。无选中号时 ID 为 `null`；没有位置记录时位置为空串 |
+| `selected_sort_rate_multiplier`、`selected_sort_rate_source` | 排序用倍率和来源：`upstream_probe`（探测）、`account_stored`（账号存储）、`oauth_setting`（OAuth 设置）、`default`（默认）、`not_used`（不比价）、`unknown`（未知）；不用或未知时倍率为 `null` |
+| `cheapest_downgraded_account_id`、`cheapest_downgraded_rate_multiplier`、`cheapest_downgraded_rate_source`、`cheapest_downgraded_reason` | 已排序账号中已知倍率最低的降层号、倍率、同上来源、降层原因数组（后排线名 `ttfo`、`error`、`cache`，或 `trial_full`、`unknown`）。有选中号时只比同优先级、同固定状态；同价按原排序。无可比降层号时均为 `null` |
+| `next_higher_rate_multiplier`、`next_higher_is_downgraded` | 比上一项倍率高的最近一档，仍限其同优先级、同固定状态；该价档有前排或有位试用即为 `false`。没有这一档则两项均为 `null` |
+| `candidate_pool_count`、`eligible_candidate_count` | 初筛候选数、通过初筛数；刷新不叠加同一批 |
+| `filtered_model_not_supported_count`、`filtered_profit_floor_count`、`filtered_profit_ceiling_count`、`filtered_profit_invalid_rate_count` | 初筛按每个号首个失败原因分别计模型不支持、低于倍率下限、高于倍率上限、倍率无效 |
+| `front_or_trial_with_seat_count`、`trial_full_count`、`trial_unknown_count`、`rear_count` | 本次实际排过序的不同账号数，分别计前排加有位试用、满位试用、名额未知试用、后排；跨优先级和固定状态 |
+| `load_full_skipped_count`、`slot_unavailable_skipped_count` | 实际因负载满、拿不到并发槽而跳过的账号数，各自按账号去重 |
+| `no_candidate_reason` | 选中则为空串；无号原因见下文 |
 
-`picked` 在公共调度调用成功返回目标账号时才记。用 `gateway_request_id` 关联尝试记录的 `request_id`，在目标账号上确认实际发送。再用同一个请求 ID 与同一个目标账号关联 `kind=create`、`committed=true` 的换号事件，统计建成归属数。
+无号原因：`profit_ceiling`（倍率上限）、`profit_floor`（倍率下限）、`model_unsupported`（模型不支持）、`no_schedulable_candidate`（初筛无可调度号）、`candidate_read_failed`（候选读取失败）、`selection_failed`（选号失败）、`cached_no_candidate`（命中无号缓存）、`request_cancelled`（取消或到期）、`capacity_unavailable`（观察到容量不足）、`no_candidate`（无其他具体原因）。
 
 **`resilience.budget_timeout_plan`** 是 Info 事件，没有 `component=sched_quality`，默认不写入 `ops_system_logs`。统计截止次数时查进程的结构化日志（容器部署时查容器日志）。只查 `ops_system_logs` 会少算。
 
@@ -239,6 +258,37 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 **`sched_quality.attempt_finished`**：`request_id` 是网关本地 ID，`attempt_id` 标识本次发送；`outcome`、`class` 是采样结果与归责类别，`http_status`、`status_origin` 分开记录状态与来源。`client_disconnect`、`terminal_seen`、`terminal_event`、`terminal_failed`、`error_source`、`send_error`、`context_done` 用于区分终态、网络、取消与清理。`terminal_ms`、`finished_ms` 相对本次尝试开始；`first_output_request_ms` 是请求级端到端首输出；`output_bytes` 是实际写给客户端的字节，含已写前奏，不等同语义输出字节。
 
 以下同前缀名称是管理审计动作，不是上述运行日志事件：`sched_quality.reset`、`sched_quality.override`、`sched_quality.clear_override`、`sched_quality.clear_auto_state`、`sched_quality.policy`、`sched_quality.ttft_rule`。恢复审计记录已清、保留及失败数量；配置保存的运行依据看 `sched_quality.policy_changed`。
+
+### 协议转换
+
+| 事件 | 级别 | 何时写 / 在哪查 |
+|---|---|---|
+| `upstream_conversion_failed` | Warn | 转换错误取得终态写入权时记一次。不带 `component=sched_quality`，在系统日志按事件名查 |
+| `openai_conversion_retry` | Info | Chat 请求走 Responses 上游，遇到可识别的输出条目身份冲突时，每请求记一次是否换号实发及结果。不带 `component=sched_quality`，只查应用日志 |
+
+两条日志共用下面的固定诊断字段。它们不记录错误原文、生成内容、实际条目 ID、调用 ID 或工具名称。
+
+| 字段 | 取值 |
+|---|---|
+| `source_protocol` | `responses`、`chat`、`anthropic`、`gemini`、`unknown` |
+| `conversion_field` | 响应与条目：`response`、`output`、`output_index`、`content`、`content_index`、`summary_index`、`item_id`、`response_error`、`response_output`、`response_status`、`response_output_content_text`、`delta`；工具与推理：`arguments`、`reasoning`、`encrypted_function_args`、`tool_calls`、`tool_calls_index`、`output_arguments`、`output_status`；状态与其他：`status`、`stream`、`finish_reason`、`stop_reason`、`choices_index`、`choices_message_content`、`choices_delta_content`、`other` |
+| `conversion_reason` | 身份：`ambiguous_output_identity`、`conflicting_output_identity`、`conflicting_output_index`、`ambiguous_unindexed_output`、`tool_identity_conflict`；内容和工具：`invalid_content_index`、`invalid_summary_index`、`conflicting_content_part_types`、`ambiguous_unindexed_content_part`、`invalid_tool_arguments`、`incomplete_tool_call`、`conflicting_tool_arguments`、`conflicting_reasoning`、`unsupported_tool`、`unsupported_choice_index`；响应与终态：`invalid_response`、`unsupported_terminal`、`missing_response`、`missing_terminal`、`upstream_response_failed`、`invalid_event` |
+| `identity_conflict` | 身份类原因另有子类：按条目 ID 匹配为 `item_id_call_id`、`item_id_type`、`item_id_name`、`item_id_output_index`；按调用 ID 匹配为 `call_id_item_id`、`call_id_type`、`call_id_name`、`call_id_output_index`；按输出序号匹配为 `output_index_item_id`、`output_index_call_id`、`output_index_type`、`output_index_name`；多条目歧义为 `item_id_call_id_multiple_items`、`unindexed_multiple_items`；未细分为 `unspecified` |
+| `upstream_status` | 真实上游响应状态，读不到时为 0；换号日志里是原尝试的状态 |
+
+`upstream_conversion_failed` 另有 `client_status`（客户端实际 HTTP 状态）和 `client_error_status`（转换错误的逻辑状态 502）。流式响应已开场时，客户端实际状态可能仍是 200；也不能把逻辑 502 归给上游。
+
+`openai_conversion_retry` 的 `retried` 为布尔值，只在补发实际越过发送边界后为 `true`。`skip_reason` 在实发时为空串，未实发时取下表的固定值。
+
+| 检查环节 | `skip_reason` |
+|---|---|
+| 交付或取消 | `client_canceled`（客户端取消或断开）、`output_started`（已经输出）、`usage_seen`（上游已报告用量） |
+| 重放资格 | `missing_replay_marker`（缺标记）、`replay_marker_false`（标记为否）、`state_continuation`（状态续接或受保护交接）、`missing_wire_body`（缺原出站体）、`duplicate_key`（JSON 有重复键）、`wire_model_mapped`（原号出站模型与调度模型不同） |
+| 请求结构 | `unrecognized_input`（请求体或输入结构不识别）、`unrecognized_tools`（工具定义或选择方式不识别）、`provider_tools`（上游代执行工具）、`custom_tools`（自定义工具） |
+| 预算 | `missing_budget`（没有请求预算）、`budget_exhausted`（时间或派发次数无余量）、`replay_limit`（已用过本次换号重发额度）、`switch_budget`（换号额度用完） |
+| 选号与准备 | `no_candidate`（无合规候选）、`candidate_protocol`（候选不走 Responses）、`candidate_wire`（候选模型不符、改写路径不同或发送前出站体校验不符）、`slot_unavailable`（未取得并发槽）、`prepare_failed`（未完成发送准备）。无号且两类候选检查都失败时，优先记 `candidate_wire` |
+
+`result` 为 `success`（重发成功）、`conversion_error`（首输出前再次遇到转换错误）、`interrupted`（补发已输出后中断）、`canceled`（取消或断开）、`upstream_error`（其他失败）或 `not_retried`（未重发，沿用原错误收口）。统计补发次数以 `retried` 为准，前置准备失败也会记录结果。重发条件见 [调度](scheduling.md#协议转换失败时换号重发)。
 
 ### 采样写入丢弃
 
@@ -282,8 +332,8 @@ Responses 拒参修复（包括流内修复）在既有上游错误事件中记�
 
 **OpenAI 账号的后排、试用、恢复或会话搬动看不明白**：先按组件 `sched_quality` 筛选系统日志；不带组件的告警另按事件名找，仅标准输出的 Info 到应用日志里查，清单见 [质量状态](#质量状态)。
 
-1. 重启后先看 `sched_quality.loading`：`page` 表示仍在分页加载，`incomplete` 带错误，加载完成前不分层；`complete` 表示证据加载完成。再看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 个周期；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明引擎周期变慢或失败。`cycle` 的 Error 不带组件，须按事件名找，结合错误字段排查。
-2. 再按账号看 `sched_quality.state`：何时进入后排、试用或清零，哪条线（`line`）、依据来自哪里（`basis`），以及到期复核结果。
-3. 会话搬动看 `sched_quality.session_switch`，先确认 `committed`：用其中的 `gateway_request_id` 对上访问日志的同名字段与尝试记录的 `request_id`，找到触发绑定事务的请求；再用 `sched_quality.attempt_finished` 的 `request_id` / `attempt_id` 区分首输出截止、真实上游失败、取消和修复重发（访问日志要开启“将访问日志写入数据库”才在系统日志里）。
+1. 重启后先看 `sched_quality.loading`：`page` 表示仍在分页加载，`incomplete` 带错误，加载完成前不分层；`complete` 表示证据加载完成。长期表现另看应用日志里的 `sched_quality.performance_ready`。再看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 个周期；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明引擎周期变慢或失败。`cycle` 的 Error 不带组件，须按事件名找，结合错误字段排查。
+2. 再按账号看 `sched_quality.state`：何时进入后排、试用或清零，哪条线（`line`）、依据来自哪里（`basis`），以及放回原因（`release_reason`）。补判资料或期限不全时，再看 `sched_quality.history_missing`、`sched_quality.missing_deadline`。
+3. 新会话没选到号先看 `sched_quality.new_session`；会话搬动看 `sched_quality.session_switch` 的 `committed`，用 `gateway_request_id` 连到访问日志和尝试记录的 `request_id`。`sched_quality.attempt_finished` 可区分首输出截止、真实上游失败与取消；怀疑协议转换失败时查 [协议转换日志](#协议转换)。
 
 **设置保存后其他实例行为没变**：其他实例每 10 秒刷新；若长时间未生效，查找 `resilience.settings_refresh_failed`。
