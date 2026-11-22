@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -134,11 +135,37 @@ func TestConversionRetryQualification(t *testing.T) {
 
 func captureConversionTestWire(t *testing.T, c *gin.Context, account *Account, body string) *http.Request {
 	t.Helper()
+	return captureConversionTestSend(t, c, account, body, nil)
+}
+
+func captureConversionTestSend(t *testing.T, c *gin.Context, account *Account, body string, names map[string]string) *http.Request {
+	t.Helper()
 	r, err := http.NewRequest(http.MethodPost, "https://fixture.invalid/v1/responses", strings.NewReader(body))
 	require.NoError(t, err)
-	_, err = (&OpenAIGatewayService{}).prepareOpenAIConversionWire(c.Request.Context(), c, r, account, APIProtocolChatCompletions)
+	_, err = (&OpenAIGatewayService{}).prepareOpenAIConversionWire(c.Request.Context(), c, r, account, APIProtocolChatCompletions, conversionSendBody{wire: []byte(body), reverse: names})
 	require.NoError(t, err)
 	return r
+}
+
+func TestConversionRetryOrdinarySendBorrowsBuilderBody(t *testing.T) {
+	c, _ := conversionRetryTestContext(t, `{"model":"gpt-4.1"}`)
+	ctx := WithGroupSystemPrompt(c.Request.Context(), GroupSystemPromptConfig{Prompt: "group instruction"}, "gpt-4.1")
+	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	svc := &OpenAIGatewayService{}
+	input := []byte(`{"model":"gpt-4.1","input":"` + strings.Repeat("x", 1<<20) + `"}`)
+	req, wire, err := svc.buildUpstreamRequestWithBody(ctx, c, a, input, "fixture", true, "", false)
+	require.NoError(t, err)
+	require.Contains(t, gjson.GetBytes(wire, "instructions").String(), "group instruction")
+	actual, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, actual, wire)
+	req.GetBody = func() (io.ReadCloser, error) { t.Fatal("ordinary send reread the frozen request"); return nil, nil }
+	names := map[string]string{"alias": "original"}
+	_, err = svc.prepareOpenAIConversionWire(ctx, c, req, a, APIProtocolChatCompletions, conversionSendBody{wire: wire, reverse: names})
+	require.NoError(t, err)
+	state := openAIConversionRetryFrom(ctx)
+	require.Same(t, &wire[0], &state.wire[0])
+	require.Equal(t, reflect.ValueOf(names).Pointer(), reflect.ValueOf(state.reverse).Pointer())
 }
 
 func TestConversionRetryWireUsesFinalRequest(t *testing.T) {
@@ -149,10 +176,11 @@ func TestConversionRetryWireUsesFinalRequest(t *testing.T) {
 	a := &Account{ID: 1}
 	setCodexToolNameReverse(c, map[string]string{"alias": "before repair"})
 	captureConversionTestWire(t, c, a, original)
-	setCodexToolNameReverse(c, map[string]string{"alias": "name at send"})
-	captureConversionTestWire(t, c, a, repaired)
+	names := map[string]string{"alias": "name at send"}
+	setCodexToolNameReverse(c, names)
+	captureConversionTestSend(t, c, a, repaired, names)
 	codexToolNameReverseFromContext(c)["alias"] = "changed after send"
-	scope.replay = scope.wire
+	scope.startReplay()
 	setCodexToolNameReverse(c, map[string]string{"second": "new builder"})
 	second := captureConversionTestWire(t, c, &Account{ID: 2}, original)
 	actual, err := io.ReadAll(second.Body)
@@ -160,7 +188,7 @@ func TestConversionRetryWireUsesFinalRequest(t *testing.T) {
 	require.Equal(t, repaired, string(actual))
 	require.EqualValues(t, len(repaired), second.ContentLength)
 	require.Equal(t, map[string]string{"alias": "name at send"}, codexToolNameReverseFromContext(c))
-	require.Nil(t, scope.replay)
+	require.False(t, scope.pendingReplay)
 }
 
 func TestConversionRetryCandidateWireScope(t *testing.T) {
@@ -177,6 +205,8 @@ func TestConversionRetryCandidateWireScope(t *testing.T) {
 	} {
 		captureConversionTestWire(t, c, first, tc.wire)
 		state := openAIConversionRetryFrom(c.Request.Context())
+		state.startReplay()
+		state.pendingReplay = false // next iteration captures another source send
 		require.Equal(t, tc.compatible, svc.matchesConversionWire(c.Request.Context(), next, state))
 	}
 	// A later edit to the selected row must not change the captured namespace.

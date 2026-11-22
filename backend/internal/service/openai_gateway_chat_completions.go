@@ -351,6 +351,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 	logger.L().Debug("openai chat_completions: model mapping applied", logFields...)
 
+	var toolNames map[string]string
 	if account.UsesOpenAICodexProtocol() {
 		var reqBody map[string]any
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
@@ -365,7 +366,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			WriteTargetProtocolError(c, PreOutputProtocolChat, http.StatusBadRequest, "invalid_request_error", "", "", codexResult.Error.Error())
 			return nil, codexResult.Error
 		}
-		setCodexToolNameReverse(c, codexResult.ToolNameReverse)
+		toolNames = codexResult.ToolNameReverse
+		setCodexToolNameReverse(c, toolNames)
 		if !isResponsesShape {
 			ensureCodexOAuthInstructionsField(reqBody)
 		}
@@ -434,10 +436,6 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// 6. Build upstream request
 	s.prepareM7EncryptedRepair(c, account, requestRepair, responsesBody, token)
 retryChatResponsesWire:
-	requestRepair.setBody(body)
-	if requestRepair != nil && requestRepair.encryptedTried {
-		requestRepair.setBody(responsesBody)
-	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	cancelUpstream := func() {}
 	if clientStream {
@@ -453,19 +451,27 @@ retryChatResponsesWire:
 	if err != nil {
 		return nil, err
 	}
-	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
+	upstreamReq, wire, err := s.buildUpstreamRequestWithBody(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	if wire, wireErr := s.prepareOpenAIConversionWire(ctx, c, upstreamReq, account, inbound); wireErr != nil {
-		return nil, wireErr
-	} else if wire != nil {
-		responsesBody = wire
+	send, err := s.prepareOpenAIConversionWire(ctx, c, upstreamReq, account, inbound, conversionSendBody{wire: wire, responsesInput: responsesBody, reverse: toolNames})
+	if err != nil {
+		return nil, err
 	}
+	// Keep local repairs before builder injection. A replay has already been
+	// converted (and may have been repaired); never restart it from ingress.
+	responsesBody, toolNames = send.responsesInput, send.reverse
+	repairResponses := conversionRetry != nil && conversionRetry.used || requestRepair != nil && requestRepair.encryptedTried
+	repairBody := body
+	if repairResponses {
+		repairBody = responsesBody
+	}
+	requestRepair.setBody(repairBody)
 	bindM7ResponsesWireBody(c, account, responsesBody)
-	actualReasoningEffort := extractOpenAIReasoningEffortFromRequest(upstreamReq)
+	actualReasoningEffort := extractOpenAIReasoningEffortFromBody(send.wire)
 
 	if promptCacheKey != "" {
 		upstreamReq.Header.Set("session_id", compatSessionUUID)
@@ -476,7 +482,8 @@ retryChatResponsesWire:
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	if retry := openAIConversionRetryFrom(ctx); retry != nil && retry.used && !retry.resent {
+	var resendStart time.Time
+	if retry := conversionRetry; retry != nil && retry.used && !retry.resent {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -484,10 +491,13 @@ retryChatResponsesWire:
 			WriteOpenAIConversionRetryFailure(c, retry.failure, "budget_exhausted")
 			return nil, retry.failure.cause
 		}
+		resendStart = time.Now()
 	}
-	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, responsesBody, clientStream, &schedCapture)
-	if retry := openAIConversionRetryFrom(ctx); retry != nil && retry.used {
-		retry.resent = retry.resent || resp != nil || schedCapture != nil
+	resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, send.wire, clientStream, &schedCapture)
+	if !resendStart.IsZero() {
+		// Only this candidate send counts, including a dial that returned no response.
+		sent := resilience.StateFrom(ctx).SessionDispatchStart(ctx, account.ID)
+		conversionRetry.resent = !sent.Before(resendStart)
 	}
 	noteOpenAIRequestRepairResent(ctx, c, account)
 	if firstEvent.expired() {
@@ -542,10 +552,6 @@ retryChatResponsesWire:
 			closeAttempt()
 			return s.forwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated, rejectedFieldRetryState)
 		}
-		repairBody := body
-		if requestRepair != nil && requestRepair.encryptedTried {
-			repairBody = responsesBody
-		}
 		if retryBody, reason, changed, repairErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, repairBody, respBody); repairErr == nil &&
 			changed && rejectedFieldRetryState.Allow(retryBody) {
 			defer recordM7RejectedFieldReplay(ctx, c, account, resp, respBody, repairBody, retryBody)()
@@ -556,7 +562,7 @@ retryChatResponsesWire:
 				zap.String("form", "http"),
 				zap.String("path", "chat"),
 			)
-			if requestRepair != nil && requestRepair.encryptedTried {
+			if repairResponses {
 				responsesBody = retryBody
 				goto retryChatResponsesWire
 			}
@@ -595,7 +601,7 @@ retryChatResponsesWire:
 		schedCapture.finish(result, handleErr)
 		closeAttempt()
 		ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
-		if kind == resilience.ReasonEncryptedContent || requestRepair != nil && requestRepair.encryptedTried {
+		if kind == resilience.ReasonEncryptedContent || repairResponses {
 			responsesBody = next
 			goto retryChatResponsesWire
 		}
@@ -617,7 +623,7 @@ retryChatResponsesWire:
 	// fast policy filter/force 之后）里的 tier，policy filter 删掉字段后不再
 	// 按原请求 Fast 计费。
 	if handleErr == nil && result != nil {
-		if tier := resolvedOpenAIUpstreamServiceTier(c, extractOpenAIServiceTierFromBody(responsesBody)); tier != nil {
+		if tier := resolvedOpenAIUpstreamServiceTier(c, extractOpenAIServiceTierFromBody(send.wire)); tier != nil {
 			result.ServiceTier = tier
 		}
 

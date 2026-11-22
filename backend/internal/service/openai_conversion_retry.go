@@ -133,7 +133,7 @@ func (s *OpenAIGatewayService) StartOpenAIConversionRetry(c *gin.Context, accoun
 		return false
 	}
 	state.used = true
-	state.replay = state.wire
+	state.startReplay()
 	filter := func(candidate *Account) bool {
 		if candidate == nil || candidate.Platform == PlatformGrok || s.resolveUpstreamProtocolFor(ctx, candidate, state.inbound, state.model) != APIProtocolResponses {
 			state.protocolRejected.Store(true)
@@ -198,6 +198,10 @@ func CompleteOpenAIConversionRetry(c *gin.Context, result *OpenAIForwardResult, 
 	reason := ""
 	if !state.resent {
 		reason = "prepare_failed"
+		if !state.pendingReplay {
+			// The candidate built and installed its replay, but never crossed transport entry.
+			reason = "send_not_started"
+		}
 		if outcome == "canceled" {
 			reason = "client_canceled"
 		}
