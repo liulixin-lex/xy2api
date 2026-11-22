@@ -3,7 +3,9 @@
 package service
 
 import (
+	"context"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -33,4 +35,10 @@ func TestCollabAttemptIsolatesMutableLegacyState(t *testing.T) {
 	value, _ := c.Get(openAIM3ContextKey)
 	require.Same(t, lineage, value)
 	require.Equal(t, 2, fields.attempts)
+	flag := &atomic.Bool{}
+	parent := context.WithValue(context.Background(), openAITerminalRejectionScopeKey{}, openAITerminalRejectionScope{session: "synthetic-thread", selectionPreservesBinding: flag})
+	child := WithCollabAttemptIsolation(parent)
+	openAIRejectionScope(child).selectionPreservesBinding.Store(true)
+	require.False(t, flag.Load())
+	require.Equal(t, openAIRejectionScope(parent).session, openAIRejectionScope(child).session)
 }

@@ -76,6 +76,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	child.SetBudget(optionalBudget)
 	ctx = resilience.WithRequestState(ctx, child)
 	ctx = resilience.WithCollabAttempt(ctx, resilience.CollabAttempt{Optional: true})
+	ctx = service.WithCollabAttemptIsolation(ctx)
 	model := gjson.GetBytes(seam.body, "model").String()
 	accounts := map[int64]*service.Account{}
 	rejected := map[service.CollabRejectedBody]bool{}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
@@ -59,4 +60,16 @@ func TestCollabChildStateKeepsIdentityAndSeparatesBudget(t *testing.T) {
 	require.Same(t, parent.CollabSettingsSnapshot(), child.CollabSettingsSnapshot())
 	child.SetRecoveryOutcome("completed")
 	require.Nil(t, parent.RecoveryOutcome())
+}
+
+func TestCollabOptionalQuotaSnapshotDoesNotWriteAccount(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		repo := &rateLimitAccountRepoStub{}
+		svc := &OpenAIGatewayService{accountRepo: repo}
+		ctx := resilience.WithCollabAttempt(context.Background(), resilience.CollabAttempt{Optional: true})
+		used := float64(100)
+		svc.updateCodexUsageSnapshot(ctx, 7, &OpenAICodexUsageSnapshot{PrimaryUsedPercent: &used})
+		synctest.Wait()
+		require.Zero(t, repo.updateExtraCalls)
+	})
 }
