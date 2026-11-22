@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.6.14] - 2026-11-22
+
+本版解决 Codex 请求被第三方中转以“function_call_output requires call_id on HTTP requests”拒绝的问题：网关把客户端自动附带的上下文条目改写为普通用户消息后重试，并新增对应的设置与错误码。同时补上内容审计此前漏掉的两类用户输入。无数据库迁移。
+
 ### 内容审计
 
 - 内容审计现在会覆盖两类此前漏审的用户输入：Chat 接口用 `input` 而不是 `messages` 发送的文字和图片，以及 Responses 请求里用户消息之后还跟着 developer 消息、工具输出、工具声明等条目时的那条用户消息。关键词与语义审计都会检查它们，因此被审计、命中后按站点规则处理的请求会变多；补审时不把工具输出和工具声明当作用户内容。历史里保留了模型调用条目的请求，在工具循环续轮时不会重复审计之前的用户消息。
@@ -2551,7 +2555,8 @@ XY2API 首个独立版本：基于 Sub2API 0.1.184 的代码建立独立的仓�
 - 切换前备份数据库和 Redis；不要让新旧实例长时间同时运行迁移或后台写任务。
 - 切换步骤与兼容边界见 [品牌与迁移兼容边界](https://github.com/liulixin-lex/xy2api/blob/v0.0.1/docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md)。
 
-[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.13...HEAD
+[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.14...HEAD
+[0.6.14]: https://github.com/liulixin-lex/xy2api/compare/v0.6.13...v0.6.14
 [0.6.13]: https://github.com/liulixin-lex/xy2api/compare/v0.6.12...v0.6.13
 [0.6.12]: https://github.com/liulixin-lex/xy2api/compare/v0.6.11...v0.6.12
 [0.6.11]: https://github.com/liulixin-lex/xy2api/compare/v0.6.10...v0.6.11
