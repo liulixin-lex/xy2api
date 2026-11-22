@@ -203,6 +203,215 @@ func TestExtractContentModerationInput_ResponsesLastIsAssistantSkipped(t *testin
 	require.Empty(t, input.Images)
 }
 
+func TestExtractContentModerationInput_ResponsesTrailingWindow(t *testing.T) {
+	const (
+		oldUser   = `{"type":"message","role":"user","content":[{"type":"input_text","text":"old question"}]}`
+		newUser   = `{"type":"message","role":"user","content":[{"type":"input_text","text":"new question"}]}`
+		assistant = `{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}`
+		developer = `{"type":"message","role":"developer","content":"developer note"}`
+		system    = `{"role":"system","content":"system note"}`
+		call      = `{"type":"function_call","call_id":"call_1","name":"shell","arguments":"{}"}`
+		paired    = `{"type":"function_call_output","call_id":"call_1","output":"tool result"}`
+		agent     = `{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"page context"}`
+		withText  = `{"type":"custom_tool_call_output","call_id":"call_2","content":"output in content"}`
+		reminder  = `{"role":"user","content":"<system-reminder>reminder</system-reminder>"}`
+		picture   = `{"role":"user","content":[{"type":"input_image","image_url":"https://example.test/a.png"}]}`
+		unlabeled = `{"type":"message","content":"UNLABELED"}`
+		roleTool  = `{"type":"custom_tool_call_output","role":"user","content":"output with a user role"}`
+		tools     = `{"type":"additional_tools","role":"developer","tools":[]}`
+		toolsUser = `{"type":"additional_tools","role":"user","content":"declaration"}`
+		trigger   = `{"type":"compaction_trigger"}`
+		reference = `{"type":"item_reference","id":"msg_1"}`
+	)
+	for _, tc := range []struct {
+		name     string
+		items    []string
+		keyword  string
+		semantic string
+		images   []string
+	}{
+		{"user then a standalone tool output", []string{newUser, agent}, "new question", "new question", nil},
+		{"user then a developer message", []string{newUser, developer}, "new question", "new question", nil},
+		{"user then a system message", []string{newUser, system}, "new question", "new question", nil},
+		{"user then a tool output of an earlier response", []string{newUser, paired}, "new question", "new question", nil},
+		{"user then several client items", []string{newUser, agent, developer, agent}, "new question", "new question", nil},
+		{"user then a blank user message", []string{newUser, `{"role":"user","content":" "}`}, "new question", "new question", nil},
+		{"image then a developer message", []string{picture, developer}, "", "", []string{"https://example.test/a.png"}},
+		{"the new user message of the last turn", []string{oldUser, assistant, newUser, agent}, "new question", "new question", nil},
+		{"the last of two user messages", []string{oldUser, newUser, developer}, "new question", "new question", nil},
+		{"a steering message after tool outputs", []string{oldUser, call, paired, newUser, developer}, "new question", "new question", nil},
+		{"a user message that ends a tool loop", []string{oldUser, call, paired, newUser}, "new question", "new question", nil},
+		{"a message without a role does not hide the user", []string{newUser, unlabeled, developer}, "new question", "new question", nil},
+		{"tool items with a user role do not hide the user", []string{newUser, roleTool, toolsUser, developer}, "new question", "new question", nil},
+		{"user then tool declarations", []string{newUser, tools}, "new question", "new question", nil},
+		{"user then a compaction trigger", []string{newUser, trigger}, "new question", "new question", nil},
+		{"user, standalone output, then both transparent types", []string{newUser, agent, tools, trigger}, "new question", "new question", nil},
+		{"tool declarations before the user", []string{oldUser, assistant, tools, newUser, agent}, "new question", "new question", nil},
+		{"a reminder is filtered from semantic only", []string{oldUser, reminder, developer}, "<system-reminder>reminder</system-reminder>", "", nil},
+
+		{"continuation", []string{oldUser, call, paired}, "", "", nil},
+		{"continuation with a standalone tool output", []string{oldUser, call, paired, agent}, "", "", nil},
+		{"continuation with a developer message", []string{oldUser, call, paired, developer}, "", "", nil},
+		{"continuation with text in an earlier tool output", []string{oldUser, call, withText, agent}, "", "", nil},
+		{"continuation with a compaction trigger", []string{oldUser, call, paired, trigger}, "", "", nil},
+		{"continuation with tool declarations", []string{oldUser, call, paired, tools}, "", "", nil},
+		{"only a message without a role in the window", []string{oldUser, assistant, unlabeled, developer}, "", "", nil},
+		{"only tool items with a user role in the window", []string{oldUser, assistant, roleTool, toolsUser, developer}, "", "", nil},
+		{"an item reference bounds the window", []string{newUser, reference}, "", "", nil},
+		{"an empty object bounds the window", []string{newUser, `{}`}, "", "", nil},
+		{"an unknown type bounds the window", []string{newUser, `{"type":"future_item"}`}, "", "", nil},
+		{"no user after the last model output", []string{oldUser, assistant, developer}, "", "", nil},
+		{"model output last", []string{oldUser, agent, assistant}, "", "", nil},
+		{"only client context", []string{developer, agent}, "", "", nil},
+		{"empty", nil, "", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := `"input":[` + strings.Join(tc.items, ",") + `]`
+			body := []byte(`{` + input + `}`)
+			for _, protocol := range []string{ContentModerationProtocolOpenAIResponses, ContentModerationProtocolOpenAIChat} {
+				got := ExtractContentModerationInput(protocol, body)
+				require.Equal(t, tc.semantic, got.Text, protocol)
+				require.ElementsMatch(t, tc.images, got.Images, protocol)
+				require.Equal(t, tc.keyword, extractContentModerationKeywordText(protocol, body), protocol)
+			}
+			// Other protocols keep the last-item rule.
+			for _, protocol := range []string{"unknown", ""} {
+				require.Equal(t, baselineExtractModerationInput(protocol, body, true), ExtractContentModerationInput(protocol, body), protocol)
+				require.Equal(t, baselineExtractModerationInput(protocol, body, false).Text, extractContentModerationKeywordText(protocol, body), protocol)
+			}
+		})
+	}
+}
+
+func TestExtractContentModerationInput_OpenAIChatInput(t *testing.T) {
+	const image = "https://example.test/a.png"
+	for _, tc := range []struct {
+		name, body, text string
+		images           []string
+	}{
+		{"string input", `{"input":"plain question"}`, "plain question", nil},
+		{"string input that looks like a tool output", `{"input":"{\"type\":\"function_call_output\"}"}`, `{"type":"function_call_output"}`, nil},
+		{"object input", `{"input":{"role":"user","content":"object question"}}`, "object question", nil},
+		{"text and image", `{"input":[{"role":"user","content":[{"type":"input_text","text":"what is this"},{"type":"input_image","image_url":"` + image + `"}]}]}`, "what is this", []string{image}},
+		{"input ending with assistant", `{"input":[{"role":"user","content":"q"},{"role":"assistant","content":"a"}]}`, "", nil},
+		{"messages win over input", `{"messages":[{"role":"user","content":"from messages"}],"input":"from input"}`, "from messages", nil},
+		{"messages without a last user still win", `{"messages":[{"role":"assistant","content":"a"}],"input":"from input"}`, "", nil},
+		{"empty messages still win", `{"messages":[],"input":"from input"}`, "", nil},
+		{"null messages still win", `{"messages":null,"input":"from input"}`, "", nil},
+		{"neither", `{"model":"gpt-5.1"}`, "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, []byte(tc.body))
+			require.Equal(t, tc.text, got.Text)
+			require.ElementsMatch(t, tc.images, got.Images)
+			require.Equal(t, tc.text, extractContentModerationKeywordText(ContentModerationProtocolOpenAIChat, []byte(tc.body)))
+		})
+	}
+}
+
+// An item's own content or text field is not the user's words on the paths
+// Chat and the trailing window add. Responses keeps taking such a last item,
+// as it always did.
+func TestExtractContentModerationInput_LastItemWithOwnContent(t *testing.T) {
+	const (
+		user      = `{"role":"user","content":"Q"}`
+		call      = `{"type":"function_call","call_id":"c","name":"f","arguments":"{}"}`
+		side      = `{"type":"function_call_output","output":"MACHINE","content":"SIDE_CONTENT"}`
+		sideText  = `{"type":"custom_tool_call_output","output":"MACHINE","text":"SIDE_CONTENT","content":[{"type":"input_image","image_url":"https://example.test/side.png"}]}`
+		sideRole  = `{"type":"custom_tool_call_output","role":"user","content":"SIDE_CONTENT"}`
+		declared  = `{"type":"additional_tools","role":"user","content":"DECLARED"}`
+		unlabeled = `{"type":"message","content":"UNLABELED"}`
+	)
+	for _, tc := range []struct{ name, input, responses, chat string }{
+		{"only a tool output", `[` + side + `]`, "SIDE_CONTENT", ""},
+		{"tool output after the user", `[` + user + `,` + side + `]`, "SIDE_CONTENT", "Q"},
+		{"tool output in a continuation", `[` + user + `,` + call + `,` + side + `]`, "SIDE_CONTENT", ""},
+		{"tool output with a user role", `[` + user + `,` + sideRole + `]`, "SIDE_CONTENT", "Q"},
+		{"tool output with text and an image", `[` + sideText + `]`, "", ""},
+		{"tool output object", side, "SIDE_CONTENT", ""},
+		{"tool output object with a user role", sideRole, "SIDE_CONTENT", ""},
+		{"tool declarations", `[` + user + `,` + declared + `]`, "DECLARED", "Q"},
+		{"tool declarations object", declared, "DECLARED", ""},
+		{"message without a role", `[` + user + `,` + unlabeled + `]`, "UNLABELED", "UNLABELED"},
+		{"message without a role object", unlabeled, "UNLABELED", "UNLABELED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"input":` + tc.input + `}`)
+			responses := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+			require.Equal(t, baselineExtractModerationInput(ContentModerationProtocolOpenAIResponses, body, true), responses, "Responses keeps the last-item rule")
+			require.Equal(t, tc.responses, responses.Text)
+			require.Equal(t, baselineExtractModerationInput(ContentModerationProtocolOpenAIResponses, body, false).Text, extractContentModerationKeywordText(ContentModerationProtocolOpenAIResponses, body))
+
+			chat := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
+			require.Equal(t, tc.chat, chat.Text)
+			require.Empty(t, chat.Images)
+			require.Equal(t, tc.chat, extractContentModerationKeywordText(ContentModerationProtocolOpenAIChat, body))
+		})
+	}
+}
+
+func TestExtractContentModerationInput_UnknownProtocolKeepsLastItemRule(t *testing.T) {
+	for body, want := range map[string]string{
+		`{"input":[{"role":"user","content":"Q"},{"role":"developer","content":"note"}],"messages":[{"role":"user","content":"chat Q"}]}`: "chat Q",
+		`{"input":[{"role":"user","content":"Q"}],"messages":[{"role":"user","content":"chat Q"}]}`:                                       "Q chat Q",
+	} {
+		for _, protocol := range []string{"unknown", ""} {
+			require.Equal(t, want, ExtractContentModerationText(protocol, []byte(body)), "each field once")
+			require.Equal(t, want, extractContentModerationKeywordText(protocol, []byte(body)))
+		}
+	}
+}
+
+func TestContentModerationCheck_SemanticEndpointGetsOnlyUserWords(t *testing.T) {
+	const side = `{"type":"function_call_output","output":"MACHINE","content":"SIDE_CONTENT"}`
+	for _, tc := range []struct {
+		name, protocol, body string
+		want                 []string
+	}{
+		{"chat tool output", ContentModerationProtocolOpenAIChat, `{"input":[` + side + `]}`, []string{}},
+		{"chat tool output object", ContentModerationProtocolOpenAIChat, `{"input":` + side + `}`, []string{}},
+		{"chat user then tool output", ContentModerationProtocolOpenAIChat, `{"input":[{"role":"user","content":"Q"},` + side + `]}`, []string{"Q"}},
+		{"chat skips a message without a role", ContentModerationProtocolOpenAIChat, `{"input":[{"role":"user","content":"Q"},{"type":"message","content":"UNLABELED"},{"role":"developer","content":"D"}]}`, []string{"Q"}},
+		{"responses skips a message without a role", ContentModerationProtocolOpenAIResponses, `{"input":[{"role":"user","content":"Q"},{"type":"message","content":"UNLABELED"},{"role":"developer","content":"D"}]}`, []string{"Q"}},
+		{"unknown protocol keeps its input", "unknown", `{"input":[{"role":"user","content":"Q"},{"role":"developer","content":"D"}],"messages":[{"role":"user","content":"chat Q"}]}`, []string{"chat Q"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			inputs := []string{}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var payload struct {
+					Input string `json:"input"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Error(err)
+				}
+				mu.Lock()
+				inputs = append(inputs, payload.Input)
+				mu.Unlock()
+				_ = json.NewEncoder(w).Encode(moderationAPIResponse{Results: []moderationAPIResult{{}}})
+			}))
+			defer server.Close()
+			cfg := defaultContentModerationConfig()
+			cfg.Enabled = true
+			cfg.Mode = ContentModerationModePreBlock
+			cfg.BaseURL = server.URL
+			cfg.APIKeys = []string{"sk-test"}
+			raw, err := json.Marshal(cfg)
+			require.NoError(t, err)
+			svc := NewContentModerationService(&contentModerationTestSettingRepo{values: map[string]string{
+				SettingKeyRiskControlEnabled:      "true",
+				SettingKeyContentModerationConfig: string(raw),
+			}}, &contentModerationTestRepo{}, &contentModerationTestHashCache{}, nil, nil, nil, nil, nil)
+			decision, err := svc.Check(context.Background(), ContentModerationCheckInput{Protocol: tc.protocol, Body: []byte(tc.body)})
+			require.NoError(t, err)
+			require.False(t, decision.Blocked)
+			mu.Lock()
+			defer mu.Unlock()
+			require.Equal(t, tc.want, inputs)
+		})
+	}
+}
+
 func fcoModerationSettings(mode string, adminNames ...string) *resilience.Settings {
 	cfg := resilience.Defaults()
 	cfg.Enabled = true
@@ -312,14 +521,16 @@ func TestModerationFCOSharedRules(t *testing.T) {
 				added:    []string{wrap("first context"), wrap("second context")},
 			},
 			{
-				name:  "thread start with context after the user message",
-				items: []string{user("q"), item("first context")},
-				added: []string{wrap("first context")},
+				name:     "thread start with context after the user message",
+				items:    []string{user("q"), item("first context")},
+				question: "q",
+				added:    []string{wrap("first context")},
 			},
 			{
-				name:  "context before and after the user message",
-				items: []string{user("q1"), item("old after"), assistant("a1"), item("now before"), user("q2"), item("now after")},
-				added: []string{wrap("now before"), wrap("now after")},
+				name:     "context before and after the user message",
+				items:    []string{user("q1"), item("old after"), assistant("a1"), item("now before"), user("q2"), item("now after")},
+				question: "q2",
+				added:    []string{wrap("now before"), wrap("now after")},
 			},
 			{
 				name:  "only standalone items",
@@ -412,20 +623,24 @@ func TestModerationFCOSharedRules(t *testing.T) {
 			{"compaction_trigger shaped like an item", `{"type":"compaction_trigger","namespace":"agent","name":"browser_info","output":"triggered"}`},
 		} {
 			cases = append(cases, windowCase{
-				name:  transparent.label + " right after the user message",
-				items: []string{user("q"), transparent.item, item("late")},
-				added: []string{wrap("late")},
+				name:     transparent.label + " right after the user message",
+				items:    []string{user("q"), transparent.item, item("late")},
+				question: "q",
+				added:    []string{wrap("late")},
 			}, windowCase{
-				name:  transparent.label + " after a standalone item",
-				items: []string{user("q"), item("first"), transparent.item, item("second")},
-				added: []string{wrap("first"), wrap("second")},
+				name:     transparent.label + " after a standalone item",
+				items:    []string{user("q"), item("first"), transparent.item, item("second")},
+				question: "q",
+				added:    []string{wrap("first"), wrap("second")},
 			}, windowCase{
-				name:  transparent.label + " last after a standalone item",
-				items: []string{user("q"), item("page"), transparent.item},
-				added: []string{wrap("page")},
+				name:     transparent.label + " last after a standalone item",
+				items:    []string{user("q"), item("page"), transparent.item},
+				question: "q",
+				added:    []string{wrap("page")},
 			}, windowCase{
-				name:  transparent.label + " last after the user message adds nothing itself",
-				items: []string{assistant("a"), user("q"), transparent.item},
+				name:     transparent.label + " last after the user message adds nothing itself",
+				items:    []string{assistant("a"), user("q"), transparent.item},
+				question: "q",
 			}, windowCase{
 				name:     transparent.label + " before the user message",
 				items:    []string{item("page"), transparent.item, user("q")},
@@ -544,7 +759,8 @@ func TestModerationFCOSharedRules(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				for _, protocol := range []string{ContentModerationProtocolOpenAIResponses, ContentModerationProtocolOpenAIChat} {
 					semantic, keyword := fcoModerationExtract(tc.ctx, protocol, tc.body)
-					wantSemantic, wantKeyword := moderationBaseline(protocol, tc.body)
+					// These bodies have no messages, so Chat reads input like Responses.
+					wantSemantic, wantKeyword := moderationBaseline(ContentModerationProtocolOpenAIResponses, tc.body)
 					require.Equal(t, wantSemantic, semantic, "audit input must match the behavior without the fco extraction")
 					require.Equal(t, wantKeyword, keyword)
 				}
@@ -560,7 +776,7 @@ func TestModerationFCOSharedRules(t *testing.T) {
 
 	// Items that spell type or namespace with JSON escapes are outside the
 	// rewrite. A request whose only items are spelled that way gets no added
-	// keyword text.
+	// keyword text: it keeps what the user text extraction alone yields.
 	t.Run("escaped type or namespace", func(t *testing.T) {
 		for name, fields := range map[string]string{
 			"namespace": `"type":"function_call_output","namespace":"\u0061gent"`,
@@ -573,8 +789,7 @@ func TestModerationFCOSharedRules(t *testing.T) {
 					body := []byte(`{"input":[` + input + `]}`)
 					for _, mode := range []string{resilience.FCOCompatModeReactive, resilience.FCOCompatModeProactive} {
 						_, keyword := fcoModerationExtract(fcoModerationContext(fcoModerationSettings(mode), body), ContentModerationProtocolOpenAIResponses, body)
-						_, wantKeyword := moderationBaseline(ContentModerationProtocolOpenAIResponses, body)
-						require.Equal(t, wantKeyword, keyword, "%s %s", mode, body)
+						require.Equal(t, extractContentModerationKeywordText(ContentModerationProtocolOpenAIResponses, body), keyword, "%s %s", mode, body)
 						require.NotContains(t, keyword, "escaped page")
 					}
 				}

@@ -269,7 +269,7 @@ func TestFCOE2EReactiveAuditsOnce(t *testing.T) {
 	require.Equal(t, []byte(body), up.bodies[0])
 	requireFCOE2ERewrite(t, up.bodies[0], up.bodies[1], 1, "browser_info", fcoE2EOutput)
 	require.Equal(t, up.accounts[0], up.accounts[1], "replay stays on the selected account")
-	requireFCOE2EAudit(t, audit, fcoE2EWrapped("browser_info", fcoE2EOutput))
+	requireFCOE2EAudit(t, audit, "hello "+fcoE2EWrapped("browser_info", fcoE2EOutput), "hello")
 }
 
 func TestFCOE2EKeywordBlocksBeforeSendAndSkipsHistory(t *testing.T) {
@@ -292,11 +292,11 @@ func TestFCOE2EKeywordBlocksBeforeSendAndSkipsHistory(t *testing.T) {
 			require.Equal(t, "content_policy_violation", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 			require.Equal(t, "fixture keyword blocked", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 			require.Empty(t, up.bodies)
-			requireFCOE2EAudit(t, audit, fcoE2EWrapped("browser_info", "page forbidden_marker"))
+			requireFCOE2EAudit(t, audit, "hello "+fcoE2EWrapped("browser_info", "page forbidden_marker"))
 			select {
 			case log := <-audit.logs:
 				require.Equal(t, service.ContentModerationActionKeywordBlock, log.Action)
-				require.Equal(t, fcoE2EWrapped("browser_info", "page forbidden_marker"), log.InputExcerpt)
+				require.Equal(t, "hello "+fcoE2EWrapped("browser_info", "page forbidden_marker"), log.InputExcerpt)
 			case <-time.After(5 * time.Second):
 				t.Fatal("keyword audit log was not recorded")
 			}
@@ -314,7 +314,7 @@ func TestFCOE2EKeywordSeesPastTransparentItems(t *testing.T) {
 			rec := captureRequest(router, "/v1/responses", fcoE2EBody(fcoE2EUser, fcoE2EItem("browser_info", "page forbidden_marker"), trailing))
 			require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 			require.Empty(t, up.bodies)
-			requireFCOE2EAudit(t, audit, fcoE2EWrapped("browser_info", "page forbidden_marker"))
+			requireFCOE2EAudit(t, audit, "hello "+fcoE2EWrapped("browser_info", "page forbidden_marker"))
 		})
 	}
 }
@@ -329,7 +329,7 @@ func TestFCOE2EProactive(t *testing.T) {
 			requireFCOE2ESuccess(t, captureRequest(router, "/v1/responses", body), false)
 			require.Len(t, up.bodies, 1)
 			requireFCOE2ERewrite(t, []byte(body), up.bodies[0], 1, tc.name, fcoE2EOutput)
-			requireFCOE2EAudit(t, audit, fcoE2EWrapped(tc.name, fcoE2EOutput))
+			requireFCOE2EAudit(t, audit, "hello "+fcoE2EWrapped(tc.name, fcoE2EOutput), "hello")
 		})
 	}
 }
@@ -346,7 +346,7 @@ func TestFCOE2EOffPreservesWireAndError(t *testing.T) {
 	require.JSONEq(t, string(up.replies[0]), rec.Body.String(), "off returns the upstream error unchanged, without the new error code")
 	require.Contains(t, rec.Body.String(), "function_call_output requires call_id on HTTP requests")
 	require.False(t, gjson.GetBytes(rec.Body.Bytes(), "error.code").Exists())
-	requireFCOE2EAudit(t, audit, "")
+	requireFCOE2EAudit(t, audit, "hello", "hello")
 }
 
 func TestFCOE2EUnsupportedName(t *testing.T) {
@@ -359,7 +359,7 @@ func TestFCOE2EUnsupportedName(t *testing.T) {
 	require.Equal(t, "upstream_standalone_tool_output_unsupported", gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
 	require.Equal(t, "invalid_request_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 	require.False(t, gjson.GetBytes(rec.Body.Bytes(), "error.param").Exists())
-	requireFCOE2EAudit(t, audit, "")
+	requireFCOE2EAudit(t, audit, "hello", "hello")
 }
 
 func TestFCOE2EAdminNames(t *testing.T) {
@@ -378,7 +378,7 @@ func TestFCOE2EAdminNames(t *testing.T) {
 			}
 			require.Len(t, up.bodies, wantCalls)
 			requireFCOE2ERewrite(t, []byte(body), up.bodies[wantCalls-1], 1, "zz_unknown", fcoE2EOutput)
-			requireFCOE2EAudit(t, audit, fcoE2EWrapped("zz_unknown", fcoE2EOutput))
+			requireFCOE2EAudit(t, audit, "hello "+fcoE2EWrapped("zz_unknown", fcoE2EOutput), "hello")
 		})
 	}
 }
@@ -395,12 +395,12 @@ func TestFCOE2EAccountOverride(t *testing.T) {
 				require.Equal(t, http.StatusBadRequest, rec.Code)
 				require.Equal(t, []byte(body), up.bodies[0])
 				require.JSONEq(t, string(up.replies[0]), rec.Body.String())
-				requireFCOE2EAudit(t, audit, "")
+				requireFCOE2EAudit(t, audit, "hello", "hello")
 				return
 			}
 			requireFCOE2ESuccess(t, rec, false)
 			requireFCOE2ERewrite(t, []byte(body), up.bodies[0], 1, "browser_info", fcoE2EOutput)
-			requireFCOE2EAudit(t, audit, fcoE2EWrapped("browser_info", fcoE2EOutput))
+			requireFCOE2EAudit(t, audit, "hello "+fcoE2EWrapped("browser_info", fcoE2EOutput), "hello")
 		})
 	}
 }
@@ -428,7 +428,7 @@ func TestFCOE2EGatingExclusions(t *testing.T) {
 				require.JSONEq(t, gjson.Get(body, "input.1").Raw, gjson.GetBytes(up.bodies[0], "input.1").Raw)
 				require.NotContains(t, rec.Body.String(), "upstream_standalone_tool_output_unsupported")
 				require.Contains(t, rec.Body.String(), "function_call_output requires call_id on HTTP requests")
-				requireFCOE2EAudit(t, audit, fcoE2EWrapped("browser_info", fcoE2EOutput))
+				requireFCOE2EAudit(t, audit, "hello "+fcoE2EWrapped("browser_info", fcoE2EOutput), "hello")
 			})
 		}
 	}
@@ -443,7 +443,7 @@ func TestFCOE2EDuplicateIngressMember(t *testing.T) {
 			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 			require.Len(t, up.bodies, 1)
 			require.Equal(t, gjson.Get(body, "input").Raw, gjson.GetBytes(up.bodies[0], "input").Raw)
-			requireFCOE2EAudit(t, audit, "")
+			requireFCOE2EAudit(t, audit, "hello", "hello")
 		})
 	}
 }
@@ -470,7 +470,7 @@ func TestFCOE2EIngressSnapshotSurvivesReload(t *testing.T) {
 			require.Len(t, up.bodies, 2)
 			require.Equal(t, []byte(body), up.bodies[0])
 			requireFCOE2ERewrite(t, up.bodies[0], up.bodies[1], 1, "zz_unknown", fcoE2EOutput)
-			requireFCOE2EAudit(t, audit, fcoE2EWrapped("zz_unknown", fcoE2EOutput))
+			requireFCOE2EAudit(t, audit, "hello "+fcoE2EWrapped("zz_unknown", fcoE2EOutput), "hello")
 		})
 	}
 }
@@ -512,7 +512,7 @@ func TestFCOE2EChatNativeInput(t *testing.T) {
 	require.Equal(t, gjson.Get(body, "input").Raw, gjson.GetBytes(up.bodies[0], "input").Raw)
 	requireFCOE2ERewrite(t, up.bodies[0], up.bodies[1], 1, "browser_info", fcoE2EOutput)
 	require.Equal(t, []string{"https://relay.example.test/v1/responses", "https://relay.example.test/v1/responses"}, up.urls)
-	requireFCOE2EAudit(t, audit, fcoE2EWrapped("browser_info", fcoE2EOutput))
+	requireFCOE2EAudit(t, audit, "hello "+fcoE2EWrapped("browser_info", fcoE2EOutput), "hello")
 }
 
 func TestFCOE2EWSHTTPBridgeTurnReplay(t *testing.T) {
@@ -574,8 +574,8 @@ func TestFCOE2EWSHTTPBridgeTurnReplay(t *testing.T) {
 	require.Equal(t, "follow-up question", gjson.GetBytes(up.bodies[2], "input.2.content").String())
 	require.Len(t, audit.snapshotCalls(), 2)
 	require.Equal(t, []string{"first_turn", "subsequent_turn"}, []string{audit.snapshotCalls()[0].stage, audit.snapshotCalls()[1].stage})
-	require.Equal(t, []string{strings.Join(strings.Fields(fcoE2EWrapped("browser_info", fcoE2EOutput)), " "), "follow-up question"}, audit.snapshotKeywords())
-	require.Equal(t, []string{"follow-up question"}, audit.snapshotInputs())
+	require.Equal(t, []string{strings.Join(strings.Fields("hello "+fcoE2EWrapped("browser_info", fcoE2EOutput)), " "), "follow-up question"}, audit.snapshotKeywords())
+	require.Equal(t, []string{"hello", "follow-up question"}, audit.snapshotInputs())
 }
 
 // The semantic endpoint receives the user's words only, and in a tool loop the

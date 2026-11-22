@@ -119,7 +119,7 @@ func TestExtractContentModerationKeywordText_Boundaries(t *testing.T) {
 		{ContentModerationProtocolAnthropicMessages, `{"messages":[{"role":"user","content":"old"},{"role":"assistant","content":"今晚打老虎"}]}`},
 		{ContentModerationProtocolOpenAIChat, `{"messages":[{"role":"user","content":"old"},{"role":"tool","content":"今晚打老虎"}]}`},
 		{ContentModerationProtocolOpenAIChat, `{"messages":[{"role":"user","content":"old"},{"role":"assistant","content":"今晚打老虎"}]}`},
-		{ContentModerationProtocolOpenAIResponses, `{"input":[{"role":"user","content":"old"},{"type":"function_call_output","output":"今晚打老虎"}]}`},
+		{ContentModerationProtocolOpenAIResponses, `{"input":[{"role":"user","content":"old"},{"type":"function_call","name":"shell","arguments":"{}"},{"type":"function_call_output","output":"今晚打老虎"}]}`},
 		{ContentModerationProtocolOpenAIResponses, `{"input":[{"role":"user","content":"old"},{"role":"assistant","content":"今晚打老虎"}]}`},
 		{ContentModerationProtocolGemini, `{"contents":[{"role":"user","parts":[{"text":"old"}]},{"role":"user","parts":[{"functionResponse":{"response":{"text":"今晚打老虎"}}}]}]}`},
 		{ContentModerationProtocolGemini, `{"contents":[{"role":"user","parts":[{"text":"old"}]},{"role":"model","parts":[{"text":"今晚打老虎"}]}]}`},
