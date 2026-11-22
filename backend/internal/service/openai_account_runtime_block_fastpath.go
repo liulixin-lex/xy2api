@@ -98,6 +98,9 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		return false
 	}
+	if s.collabOwnershipCooldown(ctx, account, statusCode, headers, responseBody, firstRequestedModel(canonicalModel)) {
+		return false
+	}
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}

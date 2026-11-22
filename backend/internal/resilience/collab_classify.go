@@ -59,6 +59,13 @@ func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
 		default:
 			out.Ownership = CollabOwnershipClassUnknownSuffix
 		}
+		if out.Ownership != CollabOwnershipClassUnknownSuffix {
+			if in.Shape.ContinuationPointer {
+				out.Ownership = CollabOwnershipClassContinuation
+			} else if in.HTTPStatus == 429 || in.HTTPStatus == 503 || status == 429 || status == 503 {
+				out.Ownership = CollabOwnershipClassCapacity
+			}
+		}
 		return out
 	}
 	// Policy and context errors cannot be promoted by a quoted decryption phrase.
