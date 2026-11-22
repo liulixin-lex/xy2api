@@ -130,3 +130,26 @@ func TestCollabEvidenceAcceptancePrecedesReasoningOutput(t *testing.T) {
 	body.observe([]byte("event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"reasoning\",\"summary\":[]}}\n\n"))
 	require.True(t, observer.Accepted())
 }
+
+func TestCollabEvidenceRescuableTracksOnlyLatestSend(t *testing.T) {
+	observer := NewCollabSendObserver(ParseCollabBody([]byte(collabBodyFixture)))
+	ctx := WithCollabSendObserver(context.Background(), observer)
+	beginCollabObservedSend(ctx)
+	observer.record(CollabRejection{Payload: []byte(`{"error":{"code":"invalid_encrypted_content"}}`)}, 1)
+	require.True(t, observer.Rescuable())
+	beginCollabObservedSend(ctx)
+	require.False(t, observer.Rescuable())
+	observer.record(CollabRejection{Payload: []byte(`{"error":{"code":"invalid_encrypted_content"}}`)}, 1)
+	require.False(t, observer.Rescuable(), "late read of old response cannot delay newer success")
+	for _, tc := range []struct {
+		body string
+		pass bool
+	}{
+		{`{"error":{"code":"invalid_request_error"}}`, false},
+		{`{"error":{"code":"invalid_encrypted_content"}}`, true},
+		{`{"error":{"code":"invalid_encrypted_content","item_id":"amsg_absent"}}`, false},
+	} {
+		observer.record(CollabRejection{Payload: []byte(tc.body), Passthrough: tc.pass}, 2)
+		require.False(t, observer.Rescuable())
+	}
+}

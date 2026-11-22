@@ -13,6 +13,13 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func collabCanRescue(seam *collabSeam) *atomic.Bool {
+	if seam == nil || seam.observer == nil {
+		return nil
+	}
+	return seam.observer.RescuableFlag()
+}
+
 func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, saved *collabWithheld) {
 	if seam.observer == nil || seam.settle == nil {
 		return
@@ -137,6 +144,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 			c.Request = parentRequest.WithContext(resilience.WithCollabAttempt(parentRequest.Context(), resilience.CollabAttempt{Optional: true, Delivered: true}))
 			parent.NoteGatewaySend(id)
 			parent.AdoptCollabDelivery(id, child)
+			h.gatewayService.CommitCollabResponseIdentity(c, accounts[id], result, seam.writer.deliveredPrelude().ID)
 			seam.settle(accounts[id], result, err)
 			c.Request = parentRequest
 			return resilience.CollabEvidence{}, true

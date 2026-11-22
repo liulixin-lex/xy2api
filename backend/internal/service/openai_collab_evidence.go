@@ -67,9 +67,39 @@ func (s *OpenAIGatewayService) collabDuplicateSend(ctx context.Context, account 
 // CollabSendObserver retains at most eight bounded rejection payloads. It does
 // not read ahead, run callbacks, or alter transport errors and read boundaries.
 type CollabSendObserver struct {
-	mu         sync.Mutex
-	rejections []CollabRejection
-	accepted   atomic.Bool
+	mu           sync.Mutex
+	rejections   []CollabRejection
+	accepted     atomic.Bool
+	rescuable    atomic.Bool
+	evidenceSeen atomic.Bool
+	stopReason   atomic.Pointer[string]
+	generation   atomic.Uint64
+	body         CollabBody
+}
+
+func NewCollabSendObserver(body CollabBody) *CollabSendObserver {
+	return &CollabSendObserver{body: body}
+}
+func (o *CollabSendObserver) Rescuable() bool    { return o != nil && o.rescuable.Load() }
+func (o *CollabSendObserver) RescuableFlag() *atomic.Bool { return &o.rescuable }
+func (o *CollabSendObserver) EvidenceSeen() bool { return o != nil && o.evidenceSeen.Load() }
+func (o *CollabSendObserver) IneligibleReason() string {
+	if o == nil {
+		return "no_observer"
+	}
+	if reason := o.stopReason.Load(); reason != nil {
+		return *reason
+	}
+	return "none"
+}
+func (o *CollabSendObserver) reason(value string) { o.stopReason.Store(&value) }
+
+func beginCollabObservedSend(ctx context.Context) {
+	if o, _ := ctx.Value(collabSendObserverKey{}).(*CollabSendObserver); o != nil {
+		o.generation.Add(1)
+		o.rescuable.Store(false)
+		o.reason("later_response_open")
+	}
 }
 
 func WithCollabSendObserver(ctx context.Context, observer *CollabSendObserver) context.Context {
@@ -91,11 +121,44 @@ func (o *CollabSendObserver) Rejections() []CollabRejection {
 
 func (o *CollabSendObserver) Accepted() bool { return o != nil && o.accepted.Load() }
 
-func (o *CollabSendObserver) record(rejection CollabRejection) {
+func (o *CollabSendObserver) record(rejection CollabRejection, generation uint64) {
+	if generation == o.generation.Load() {
+		evidence := o.body.ResolveEvidence(rejection.Evidence(o.body.Shape))
+		if evidence.Grade == resilience.CollabEvidenceGradeVerified || evidence.Grade == resilience.CollabEvidenceGradeClaimed {
+			o.evidenceSeen.Store(true)
+		}
+		eligible := !rejection.Passthrough && !o.body.Shape.Ambiguous && !o.body.Shape.ContinuationPointer && (evidence.Grade == resilience.CollabEvidenceGradeVerified || evidence.Grade == resilience.CollabEvidenceGradeClaimed)
+		o.reason("none")
+		if !eligible {
+			switch {
+			case rejection.Passthrough:
+				o.reason("passthrough")
+			case o.body.Shape.Ambiguous:
+				o.reason("ambiguous_body")
+			case o.body.Shape.ContinuationPointer:
+				o.reason("continuation")
+			default:
+				o.reason("unclaimed_latest_error")
+			}
+		}
+		if evidence.Named != nil {
+			located := false
+			for _, item := range o.body.Items {
+				if item.Identity != "" && item.Identity == evidence.Named.Identity {
+					located = true
+				}
+			}
+			eligible = eligible && located && !evidence.Named.Ambiguous
+			if !located || evidence.Named.Ambiguous {
+				o.reason("named_unlocatable")
+			}
+		}
+		o.rescuable.Store(eligible)
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if len(o.rejections) == collabRejectionLimit {
-		return
+		o.rejections = o.rejections[:collabRejectionLimit-1]
 	}
 	rejection.Payload = bytes.Clone(rejection.Payload[:min(len(rejection.Payload), collabEvidenceLimit)])
 	o.rejections = append(o.rejections, rejection)
@@ -117,19 +180,21 @@ func (s *OpenAIGatewayService) observeCollabHTTP(ctx context.Context, account *A
 		}
 	}
 	resp.Body = &collabEvidenceBody{ReadCloser: resp.Body, observer: observer,
-		rejection: CollabRejection{AccountID: account.ID, Passthrough: account.IsOpenAIPassthroughEnabled(), Status: resp.StatusCode, BodyDigest: s.CollabDigest(resilience.CollabDigestDomainBody, string(body)), Source: source},
-		stream:    resp.StatusCode < 400 && isEventStreamResponse(resp.Header)}
+		generation: observer.generation.Load(),
+		rejection:  CollabRejection{AccountID: account.ID, Passthrough: account.IsOpenAIPassthroughEnabled(), Status: resp.StatusCode, BodyDigest: s.CollabDigest(resilience.CollabDigestDomainBody, string(body)), Source: source},
+		stream:     resp.StatusCode < 400 && isEventStreamResponse(resp.Header)}
 }
 
 type collabEvidenceBody struct {
 	io.ReadCloser
-	observer  *CollabSendObserver
-	rejection CollabRejection
-	stream    bool
-	mu        sync.Mutex
-	pending   []byte
-	overflow  bool
-	done      bool
+	observer   *CollabSendObserver
+	generation uint64
+	rejection  CollabRejection
+	stream     bool
+	mu         sync.Mutex
+	pending    []byte
+	overflow   bool
+	done       bool
 }
 
 func (b *collabEvidenceBody) Read(p []byte) (int, error) {
@@ -195,9 +260,11 @@ func (b *collabEvidenceBody) frame() {
 		if event == "error" || event == "response.failed" || typ == "error" || typ == "response.failed" {
 			rejection := b.rejection
 			rejection.Payload, rejection.Event = payload, event
-			b.observer.record(rejection)
+			b.observer.record(rejection, b.generation)
 		} else if typ == "response.output_item.added" || event == "response.output_item.added" || resilience.ResponsesEventOutputDisposition(event, payload).SemanticOutput {
 			b.observer.accepted.Store(true)
+			b.observer.rescuable.Store(false)
+			b.observer.reason("accepted_response")
 		}
 	})
 }
@@ -211,7 +278,7 @@ func (b *collabEvidenceBody) finish() {
 		if b.rejection.Status >= 400 || gjson.GetBytes(b.pending, "status").String() == "failed" {
 			b.rejection.Payload = b.pending
 			b.rejection.Truncated = b.overflow
-			b.observer.record(b.rejection)
+			b.observer.record(b.rejection, b.generation)
 		} else if gjson.ValidBytes(b.pending) && gjson.GetBytes(b.pending, "status").String() == "completed" {
 			b.observer.accepted.Store(true)
 		}

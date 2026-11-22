@@ -47,3 +47,13 @@ func TestCollabWatchAcceptanceWaitersAndJoin(t *testing.T) {
 		require.EqualValues(t, 2, queries.Load())
 	})
 }
+
+func TestCollabWatchInitialQueueReadConsumesDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		ctx, stop := watchCollabTakeover(context.Background(), time.Second, func() bool { return false }, func(context.Context) bool { time.Sleep(200 * time.Millisecond); return false })
+		defer stop()
+		<-ctx.Done()
+		require.Equal(t, time.Second, time.Since(started))
+	})
+}

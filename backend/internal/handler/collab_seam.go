@@ -57,6 +57,7 @@ type collabSeam struct {
 	started          time.Time
 	losslessDuration time.Duration
 	lossless         bool
+	terminalRecorded bool
 }
 
 // armCollabSeam installs the seam for requests the ladder covers: native
@@ -92,7 +93,7 @@ func (h *OpenAIGatewayHandler) armCollabSeam(c *gin.Context, body []byte, previo
 	}
 	seam := &collabSeam{original: c.Writer, body: body, rescue: h.collabRescue}
 	seam.lossless = resilience.StateFrom(c.Request.Context()).CollabSettingsSnapshot().CollabLosslessFirstOn()
-	seam.observer = &service.CollabSendObserver{}
+	seam.observer = service.NewCollabSendObserver(parsed)
 	eligible := h.collabRescuable(seam)
 	if eligible == nil {
 		return nil
@@ -160,9 +161,10 @@ func collabSeamMetered(result *service.OpenAIForwardResult) bool {
 }
 
 func (s *collabSeam) recordTerminal(c *gin.Context) {
-	if s.terminalRejected == nil || s.observer == nil {
+	if s.terminalRecorded || s.terminalRejected == nil || s.observer == nil {
 		return
 	}
+	s.terminalRecorded = true
 	defer func() { _ = recover() }()
 	rejections := s.observer.Rejections()
 	if len(rejections) != 0 {
