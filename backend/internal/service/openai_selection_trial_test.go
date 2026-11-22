@@ -382,7 +382,9 @@ func TestOpenAISelectionTrialCommitBeforeConcurrentRelease(t *testing.T) {
 	f.session.cache = barrier
 	// Isolate the ordering assertion from the fixture's slot event slice.
 	slotReleased := make(chan struct{})
-	f.session.slots = &selectionConcurrentSlots{released: slotReleased}
+	f.session.acquireSlot = func(context.Context, *Account) (*AcquireResult, error) {
+		return &AcquireResult{Acquired: true, ReleaseFunc: func() { close(slotReleased) }}, nil
+	}
 	ctx := resilience.WithRequestState(context.Background(), resilience.NewRequestState())
 	result := f.session.selectOwner(ctx, 7, "session", "m", f.owner, f.candidates, selectionRequest{Room: func(int64, string) bool { return true }})
 	require.NotNil(t, result)
@@ -396,12 +398,6 @@ func TestOpenAISelectionTrialCommitBeforeConcurrentRelease(t *testing.T) {
 	<-released
 	require.True(t, leases.held[trialTestKey(1, "m", 7, "s:session")])
 	require.Equal(t, int64(1), f.binding.owner)
-}
-
-type selectionConcurrentSlots struct{ released chan struct{} }
-
-func (s *selectionConcurrentSlots) tryAcquireAccountSlot(context.Context, int64, int) (*AcquireResult, error) {
-	return &AcquireResult{Acquired: true, ReleaseFunc: func() { close(s.released) }}, nil
 }
 
 func TestOpenAISelectionTrialConcurrentSessionFailureKeepsCommittedLease(t *testing.T) {

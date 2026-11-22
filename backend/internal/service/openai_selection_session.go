@@ -11,16 +11,12 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
-type selectionSessionSlots interface {
-	tryAcquireAccountSlot(context.Context, int64, int) (*AcquireResult, error)
-}
-
 // selectionSession receives already admitted candidates. Recheck repeats fresh
 // account admission before and after acquiring a slot; view always reads latest.
 type selectionSession struct {
 	view              func() schedquality.View
 	now               func() time.Time
-	slots             selectionSessionSlots
+	acquireSlot       func(context.Context, *Account) (*AcquireResult, error)
 	cache             OpenAIStickyVersionedCache
 	store             ResilienceStore
 	cacheKey          func(string) string
@@ -240,7 +236,7 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 		if target == nil || !s.candidateAllowed(s.view(), groupID, model, owner, target, migrate, req, s.now()) {
 			continue
 		}
-		slot, err := s.slots.tryAcquireAccountSlot(ctx, target.ID, target.Concurrency)
+		slot, err := s.acquireSlot(ctx, target)
 		if err != nil || slot == nil || !slot.Acquired {
 			if err == nil && slot != nil && !slot.Acquired {
 				s.marks.Mark(target.ID, s.now())

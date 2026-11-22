@@ -137,7 +137,7 @@ func (s *OpenAIGatewayService) selectBySessionHash(
 		noteBypass("first_output_avoid")
 		return nil, false, nil
 	}
-	result, acquireErr := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
+	result, acquireErr := s.acquireSelectionSlot(ctx, account, req.candidateConstraint)
 	if acquireErr != nil && req.DisableStickyEscape {
 		noteBypass("sticky_capacity_error")
 		return nil, false, acquireErr
