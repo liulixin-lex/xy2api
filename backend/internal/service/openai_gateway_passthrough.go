@@ -479,6 +479,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			// Peek only to identify an invalid task. Restore the body so the existing
 			// passthrough error handling sees the same response after recovery fails.
 			probeBody := s.readUpstreamErrorBody(resp)
+			observeOpenAIFCOHTTPError(ctx, c, body, probeBody, resp.StatusCode, DefaultOpenAIFCORules(nil))
 			schedCapture.finishHTTP(resp, probeBody)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
@@ -556,6 +557,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 			}
 			return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
+		}
+		if bytes.Contains(body, []byte("function_call_output")) {
+			observeOpenAIFCOSuccess(ctx, body, DefaultOpenAIFCORules(nil))
 		}
 
 		if mapping, ok := openAIResponsesClientToolMapping(c); ok && isEventStreamResponse(resp.Header) {

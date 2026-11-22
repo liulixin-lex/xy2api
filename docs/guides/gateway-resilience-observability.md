@@ -125,6 +125,7 @@ COMMIT;
 | `resilience.stall`、`resilience.fast_fail`、`resilience.turn_cap`、`resilience.abuse_guard` | 对应能力触发 |
 | `resilience.post_output_failure` | 已输出后的上游失败，含 `group_id`、`account_id`、`reason`、窗口内次数与是否施加冷却 |
 | `resilience.state_rejection` | 请求级会话状态拒绝，含 `family`、`path`、`stage` 等，不记正文；HTTP 续接细分为 `continuation_owner_mismatch`、`http_continuation_unsupported`、`tool_output_missing_call_id`、`upstream_continuation_expired`，本地拒绝的 `stage=local`，尚未选中账号时不伪造账号字段 |
+| `resilience.fco_shape` | Responses 出站独立 `function_call_output` 的结构摘要；只记录数量和有限枚举（层、名称桶、call_id/output 形态、previous_response_id、出站重复键），不记录正文、ID 或 URL。 |
 | `resilience.collab_plaintext` | 协作消息明文化遇到冲突、异常计数或转换后被拒 |
 | `resilience.web_search_history_rejected` | 补 web_search 声明重放后仍失败 |
 | `resilience.wrapped_error_malformed` | 识别到形似中转包装帧但字段不一致的错误帧 |

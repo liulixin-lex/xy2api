@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -568,10 +569,14 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return nil, fmt.Errorf("upstream http bridge request failed: %s", safeErr)
 		}
 		if resp.StatusCode < 400 {
+			if bytes.Contains(body, []byte("function_call_output")) {
+				observeOpenAIFCOSuccess(ctx, body, DefaultOpenAIFCORules(nil))
+			}
 			break
 		}
 
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, openAIWSHTTPBridgeErrorBodyLimitBytes))
+		observeOpenAIFCOHTTPError(ctx, c, body, respBody, resp.StatusCode, DefaultOpenAIFCORules(nil))
 		schedCapture.finishHTTP(resp, respBody)
 		_ = resp.Body.Close()
 		markOpenAICyberPolicyEvent(c, respBody, resp.StatusCode, nil)

@@ -483,9 +483,10 @@ type OpsUpstreamErrorEvent struct {
 	Kind string `json:"kind,omitempty"`
 	// Stage/Scope/Reason distinguish credential acquisition from inference
 	// without overloading upstream_status_code with a synthetic HTTP status.
-	Stage  string `json:"stage,omitempty"`
-	Scope  string `json:"scope,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	Stage    string           `json:"stage,omitempty"`
+	Scope    string           `json:"scope,omitempty"`
+	Reason   string           `json:"reason,omitempty"`
+	FCOShape *FCOShapeSummary `json:"fco_shape,omitempty"`
 
 	Message string `json:"message,omitempty"`
 	Detail  string `json:"detail,omitempty"`

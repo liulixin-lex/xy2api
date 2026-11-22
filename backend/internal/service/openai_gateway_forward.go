@@ -1230,6 +1230,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Handle error response
 		if resp.StatusCode >= 400 {
 			respBody := s.readUpstreamErrorBody(resp)
+			observeOpenAIFCOHTTPError(ctx, c, body, respBody, resp.StatusCode, DefaultOpenAIFCORules(nil))
 			schedCapture.finishHTTP(resp, respBody)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
@@ -1355,6 +1356,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 		}
 		defer func() { _ = resp.Body.Close() }()
+		if bytes.Contains(body, []byte("function_call_output")) {
+			observeOpenAIFCOSuccess(ctx, body, DefaultOpenAIFCORules(nil))
+		}
 
 		if mapping, ok := openAIResponsesClientToolMapping(c); ok && isEventStreamResponse(resp.Header) {
 			maxLineSize := defaultMaxLineSize

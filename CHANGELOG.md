@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 网关韧性
+
+- 上游中转以“function_call_output requires call_id on HTTP requests”拒绝 OpenAI Responses 请求时，日志 `resilience.fco_shape` 记录该请求里独立工具输出条目的结构摘要（数量、名称桶、call_id 与 output 形态，不含正文和 ID），用来判断是哪一类条目被拒；转发行为不变。[观测参考](docs/guides/gateway-resilience-observability.md)
+
 ## [0.6.13] - 2026-11-22
 
 本版调整 OpenAI 分组的后排与试用：恢复要先经过试用，反复不达标会逐档延长后排，界面显示实际复核时刻和试用起止。新会话回到原排序，近 12 小时分数留作参考；Chat 请求只在转换遇到输出条目身份冲突（`conflicting_output_identity`）且满足条件时，才会在首输出前换号重发一次。仅允许 OAuth 的分组会挡住新增 API Key 绑定，运维也能查到新会话去向和转换失败原因；另含电脑端界面修整。本版无需数据库迁移。代价是恢复变慢：试用最快 15 分钟、最长 120 分钟，没有新的确认不达标时连续受限最长约 6 小时（原来约 3 小时）；受限期间，新会话可能改由同优先级的其他账号承接，费用可能更高，仍受利润上限约束；换号重发可能多一次上游费用，能救回多少尚无估计。
