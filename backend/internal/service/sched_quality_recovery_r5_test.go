@@ -364,6 +364,12 @@ func TestRecoveryDiagnosticLogsAfterCommit(t *testing.T) {
 			require.True(t, d.Basis.MissingDeadline)
 		}
 	}
+	output.Reset()
+	f.cycle() // Publish the committed state again at the same horizon.
+	for _, r := range schedObsLogRecords(t, output) {
+		require.NotEqual(t, "sched_quality.missing_deadline", r["msg"])
+		require.NotEqual(t, "sched_quality.history_missing", r["msg"])
+	}
 }
 
 // Acceptance 6: quality's temporary predecessor mask also applies to the
