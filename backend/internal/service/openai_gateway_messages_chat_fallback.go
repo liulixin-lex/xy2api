@@ -196,7 +196,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 	}
 	anthropicResp, err := apicompat.ChatCompletionsResponseToAnthropicWithBridgeOptions(ccResp, originalModel, opts)
 	if err != nil {
-		writeCCStreamReadError(c, PreOutputProtocolAnthropic, err)
+		writeCCStreamReadError(c, PreOutputProtocolAnthropic, err, resp)
 		return &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, ReasoningEffort: reasoningEffort, ServiceTier: resolvedOpenAIUpstreamServiceTier(c, serviceTier), Duration: time.Since(startTime)}, err
 	}
 
@@ -288,7 +288,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	if scan.Err != nil {
 		noUsageBeforeOutput := !c.Writer.Written() && anthropicState.Err() != nil && !openAIUsageHasTokens(&scan.Usage)
 		if !ProtocolTerminalClaimed(c) {
-			writeCCStreamReadError(c, PreOutputProtocolAnthropic, scan.Err)
+			writeCCStreamReadError(c, PreOutputProtocolAnthropic, scan.Err, resp)
 		}
 		if noUsageBeforeOutput {
 			return nil, scan.Err

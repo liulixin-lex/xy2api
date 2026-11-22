@@ -330,7 +330,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		chatResp, usageObj2, err := geminiResponseToChatCompletions(collected, originalModel, collectedBytes, usageObj, geminiCompatConversionOptions(ctx))
 		if err != nil {
 			// Same as the direct JSON reader: write the specific error and keep the usage read.
-			writeGeminiCompatConversionError(c, PreOutputProtocolChat, err)
+			writeGeminiCompatConversionError(c, resp, PreOutputProtocolChat, err)
 			responseErr = err
 			if usageObj != nil && (usageObj.InputTokens > 0 || usageObj.OutputTokens > 0 || usageObj.CacheReadInputTokens > 0) {
 				usageObj2 = usageObj
@@ -548,7 +548,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsNonStreamingResponseF
 
 	chatResp, usage, err := geminiResponseToChatCompletions(geminiResp, originalModel, respBody, nil, geminiCompatResponseOptions(c))
 	if err != nil {
-		writeGeminiCompatConversionError(c, PreOutputProtocolChat, err)
+		writeGeminiCompatConversionError(c, resp, PreOutputProtocolChat, err)
 		return usage, err
 	}
 
@@ -644,7 +644,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 		var conversion *apicompat.UpstreamConversionError
 		if errors.As(retErr, &conversion) {
 			result = &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}
-			writeGeminiCompatConversionError(c, PreOutputProtocolChat, retErr)
+			writeGeminiCompatConversionError(c, resp, PreOutputProtocolChat, retErr)
 		}
 	}()
 	firstChunk := true

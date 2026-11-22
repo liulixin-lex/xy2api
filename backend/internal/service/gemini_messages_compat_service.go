@@ -1172,7 +1172,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			claudeResp, usageObj2, conversionErr := convertGeminiToClaudeMessage(collected, originalModel, collectedBytes, false, geminiCompatConversionOptions(ctx))
 			if conversionErr != nil {
 				// Same as the direct JSON reader: write the specific error and keep the usage read.
-				writeGeminiCompatConversionError(c, PreOutputProtocolAnthropic, conversionErr)
+				writeGeminiCompatConversionError(c, resp, PreOutputProtocolAnthropic, conversionErr)
 				responseErr = conversionErr
 			} else {
 				c.JSON(http.StatusOK, claudeResp)
@@ -2282,7 +2282,7 @@ func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context,
 
 	claudeResp, usage, err := convertGeminiToClaudeMessage(geminiResp, originalModel, unwrappedBody, false, geminiCompatResponseOptions(c))
 	if err != nil {
-		writeGeminiCompatConversionError(c, PreOutputProtocolAnthropic, err)
+		writeGeminiCompatConversionError(c, resp, PreOutputProtocolAnthropic, err)
 		return usage, err
 	}
 	c.JSON(http.StatusOK, claudeResp)
@@ -2349,7 +2349,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 		var conversion *apicompat.UpstreamConversionError
 		if errors.As(retErr, &conversion) {
 			result = &geminiStreamResult{usage: &usage, firstTokenMs: firstTokenMs}
-			writeGeminiCompatConversionError(c, PreOutputProtocolAnthropic, retErr)
+			writeGeminiCompatConversionError(c, resp, PreOutputProtocolAnthropic, retErr)
 		}
 	}()
 	var toolArguments []string
@@ -3679,12 +3679,12 @@ func geminiFunctionCallArguments(call map[string]any) string {
 	return string(raw)
 }
 
-func writeGeminiCompatConversionError(c *gin.Context, protocol string, err error) {
+func writeGeminiCompatConversionError(c *gin.Context, resp *http.Response, protocol string, err error) {
 	errType := "server_error"
 	if protocol == PreOutputProtocolAnthropic {
 		errType = "api_error"
 	}
-	WriteTargetProtocolError(c, protocol, http.StatusBadGateway, errType, "upstream_protocol_error", "", err.Error())
+	writeUpstreamConversionError(c, resp, "gemini", protocol, errType, "", err.Error(), err)
 }
 
 func convertClaudeMessagesToGeminiGenerateContent(body []byte) ([]byte, error) {

@@ -328,7 +328,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	}
 
 	if err := evidence.finish(readErr, finalResp != nil); err != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Upstream stream ended without a complete response")
+		writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolResponses, "server_error", "", "Upstream stream ended without a complete response", nil)
 		return nil, err
 	}
 
@@ -347,7 +347,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 
 	responsesResp, conversionErr := apicompat.AnthropicToResponsesResponseWithBridgeOptions(finalResp, opts)
 	if conversionErr != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", conversionErr.Error())
+		writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolResponses, "server_error", "", conversionErr.Error(), conversionErr)
 		return nil, conversionErr
 	}
 	responsesResp.Model = originalModel
@@ -581,7 +581,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 		evidence.observe(eventType, payload)
 		outputStarted = outputStarted || semanticSSEBlock([]byte("event: "+eventType+"\ndata: "+payload))
 		if evidence.err != nil {
-			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Invalid upstream Anthropic stream")
+			writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolResponses, "server_error", "", "Invalid upstream Anthropic stream", nil)
 			return resultWithUsage(), evidence.err
 		}
 		observeSchedPayload(c, []byte(payload))
@@ -595,14 +595,14 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 
 		processAnthropicEvent(&event)
 		if err := state.Err(); err != nil {
-			WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+			writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolResponses, "server_error", "", err.Error(), err)
 			return resultWithUsage(), err
 		}
 	}
 
 	if !evidence.stopped {
 		err := &apicompat.UpstreamConversionError{Field: "stream", Reason: "missing Anthropic terminal event", SourceProtocol: "anthropic"}
-		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolResponses, "server_error", "", err.Error(), err)
 		return resultWithUsage(), err
 	}
 
@@ -611,7 +611,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	// 避免流截断时终态帧携带改写后的工具名。
 	finalEvents := apicompat.FinalizeAnthropicResponsesStreamWithBridgeOptions(state, opts)
 	if err := state.Err(); err != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", err.Error())
+		writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolResponses, "server_error", "", err.Error(), err)
 		return resultWithUsage(), err
 	}
 	if len(finalEvents) > 0 && !clientDisconnected {

@@ -544,7 +544,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	}
 
 	if err := evidence.finish(readErr, finalResp != nil); err != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", "Upstream stream ended without a complete response")
+		writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolResponses, "server_error", "", "Upstream stream ended without a complete response", nil)
 		return nil, err
 	}
 
@@ -565,7 +565,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 
 	responsesResp, conversionErr := apicompat.AnthropicToResponsesResponseWithBridgeOptions(finalResp, opts)
 	if conversionErr != nil {
-		WriteTargetProtocolError(c, PreOutputProtocolResponses, http.StatusBadGateway, "server_error", OpenAIUpstreamProtocolErrorCode, "", conversionErr.Error())
+		writeUpstreamConversionError(c, resp, "anthropic", PreOutputProtocolResponses, "server_error", "", conversionErr.Error(), conversionErr)
 		return nil, conversionErr
 	}
 	responsesResp.Model = originalModel // Use original model name

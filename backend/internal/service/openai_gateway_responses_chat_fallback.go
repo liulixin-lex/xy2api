@@ -187,7 +187,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	}
 	responsesResp, err := apicompat.ChatCompletionsResponseToResponsesWithBridgeOptions(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools, opts)
 	if err != nil {
-		writeCCStreamReadError(c, PreOutputProtocolResponses, err)
+		writeCCStreamReadError(c, PreOutputProtocolResponses, err, resp)
 		return &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, ReasoningEffort: reasoningEffort, ServiceTier: resolvedOpenAIUpstreamServiceTier(c, serviceTier), Duration: time.Since(startTime)}, err
 	}
 	s.cacheReasoningItemsFromOutput(responsesResp.Output)
@@ -298,7 +298,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	if scan.Err != nil {
 		noUsageBeforeOutput := !c.Writer.Written() && state.Err() != nil && !openAIUsageHasTokens(&scan.Usage)
 		if !ProtocolTerminalClaimed(c) {
-			writeCCStreamReadError(c, PreOutputProtocolResponses, scan.Err)
+			writeCCStreamReadError(c, PreOutputProtocolResponses, scan.Err, resp)
 		}
 		if noUsageBeforeOutput {
 			return nil, scan.Err
