@@ -80,18 +80,29 @@ type CollabSendObserver struct {
 	body         CollabBody
 	parseOnce    sync.Once
 	original     []byte
+	facts        *CollabBodyContext
 }
 
 func NewCollabSendObserver(body CollabBody) *CollabSendObserver {
 	return &CollabSendObserver{body: body}
 }
-func NewLazyCollabSendObserver(body []byte) *CollabSendObserver {
-	return &CollabSendObserver{original: body}
+func NewLazyCollabSendObserver(body []byte, facts ...CollabBodyContext) *CollabSendObserver {
+	observer := &CollabSendObserver{original: body}
+	if len(facts) > 0 {
+		copy := facts[0]
+		copy.Consumed = maps.Clone(copy.Consumed)
+		observer.facts = &copy
+	}
+	return observer
 }
 func (o *CollabSendObserver) Body() CollabBody {
 	o.parseOnce.Do(func() {
 		if o.original != nil {
-			o.body = ParseCollabBody(o.original)
+			if o.facts != nil {
+				o.body = ParseCollabBodyWithContext(o.original, *o.facts)
+			} else {
+				o.body = ParseCollabBody(o.original)
+			}
 		}
 	})
 	return o.body

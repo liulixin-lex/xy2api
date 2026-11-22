@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -187,6 +189,9 @@ func checkReplayOn(snapshot resilience.Settings, mode string, want, got []replay
 				continue
 			}
 			if mode == "ladder" {
+				continue
+			}
+			if replayReasoningTradeoff(before.Case, old, next) {
 				continue
 			}
 			for _, content := range old.Survived {
@@ -388,4 +393,85 @@ func TestCollaborationReplayFixtureHygiene(t *testing.T) {
 		require.NoError(t, err)
 		require.Error(t, validateReplayFixture(raw))
 	}
+}
+
+func TestCollaborationReplayReasoningTradeoff(t *testing.T) {
+	name := "task_then_reasoning_elsewhere/pass_false/stream_false/attempts_2"
+	old := replayOutcome{Status: 200, Success: true, Survived: []string{"reasoning", "reasoning_summary", "question"}}
+	next := replayOutcome{Status: 200, Success: true, Survived: []string{"task", "reasoning_summary", "question"}}
+	check := func(before, after replayOutcome) error {
+		return checkReplayOn(resilience.Defaults(), "lossless_first", []replayGolden{{Case: name, Turns: []replayOutcome{before}}}, []replayGolden{{Case: name, Turns: []replayOutcome{after}}})
+	}
+	require.NoError(t, check(old, next))
+	t.Run("no protected gain", func(t *testing.T) {
+		bad := next
+		bad.Survived = []string{"reasoning_summary", "question"}
+		require.Error(t, check(old, bad))
+	})
+	t.Run("protected loss", func(t *testing.T) {
+		before := old
+		before.Survived = append([]string{"task"}, old.Survived...)
+		bad := next
+		bad.Survived = []string{"reasoning_summary", "question"}
+		require.Error(t, check(before, bad))
+	})
+	t.Run("summary loss", func(t *testing.T) {
+		bad := next
+		bad.Survived = []string{"task", "question"}
+		require.Error(t, check(old, bad))
+	})
+	t.Run("new failure", func(t *testing.T) { bad := next; bad.Success = false; require.Error(t, check(old, bad)) })
+	t.Run("ordinary content loss", func(t *testing.T) {
+		before := old
+		before.Survived = append([]string{"ordinary"}, old.Survived...)
+		require.Error(t, check(before, next))
+	})
+	t.Run("unidentified task", func(t *testing.T) { name = "synthetic unknown"; require.Error(t, check(old, next)) })
+}
+
+// The only permitted exchange loses reasoning ciphertext, retains its readable
+// summary and gains protected input that the successful legacy path replaced.
+func replayReasoningTradeoff(name string, old, next replayOutcome) bool {
+	if !old.Success || !next.Success {
+		return false
+	}
+	summaries := map[string]string{"reasoning": "reasoning_summary", "reasoning_second": "reasoning_summary_second", "reasoning_third": "reasoning_summary_third"}
+	lost := false
+	for _, item := range old.Survived {
+		if slices.Contains(next.Survived, item) {
+			continue
+		}
+		summary, ok := summaries[item]
+		if !ok || !slices.Contains(next.Survived, summary) {
+			return false
+		}
+		lost = true
+	}
+	if !lost {
+		return false
+	}
+	for _, fixture := range collaborationReplayCorpus() {
+		if fixture.Name != name {
+			continue
+		}
+		raw, err := json.Marshal(map[string]any{"input": fixture.Items})
+		if err != nil {
+			return false
+		}
+		parsed := service.ParseCollabBody(raw)
+		if parsed.Shape.Ambiguous {
+			return false
+		}
+		for _, item := range parsed.Items {
+			if item.Class != resilience.CollabItemClassProtected || item.Family != resilience.CollabFamilyAgentMessage && item.Family != resilience.CollabFamilyToolOutput {
+				continue
+			}
+			for _, content := range replaySurvived([]byte("{\"input\":[" + string(fixture.Items[item.Index]) + "]}")) {
+				if content == "task" && !slices.Contains(old.Survived, content) && slices.Contains(next.Survived, content) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

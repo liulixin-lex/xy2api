@@ -14,17 +14,19 @@ import (
 // delivery, settlement and restoring that terminal; this loop owns derivations.
 // Select must return immediately and Send must report actual client delivery.
 type CollabLadder struct {
-	Body           CollabBody
-	First          int64
-	Current        int64
-	Progress       *CollabLadderProgress
-	BeforeDisposal func(context.Context, resilience.CollabEvidence) bool
-	Evidence       resilience.CollabEvidence
-	MaxAttempts    int
-	Select         func(context.Context, int64, map[int64]bool) (int64, func())
-	Send           func(context.Context, int64, []byte, resilience.CollabAction) (resilience.CollabEvidence, bool)
-	Continue       func() bool
-	Sent           func() bool
+	Body                  CollabBody
+	First                 int64
+	Current               int64
+	Progress              *CollabLadderProgress
+	BeforeDisposal        func(context.Context, resilience.CollabEvidence) bool
+	Evidence              resilience.CollabEvidence
+	MaxAttempts           int
+	ReturnToLegacy        bool
+	NamedReasoningAllowed func(int64) bool
+	Select                func(context.Context, int64, map[int64]bool) (int64, func())
+	Send                  func(context.Context, int64, []byte, resilience.CollabAction) (resilience.CollabEvidence, bool)
+	Continue              func() bool
+	Sent                  func() bool
 }
 
 func (l CollabLadder) Run(ctx context.Context) bool {
@@ -83,7 +85,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 					break
 				}
 			}
-			if item == nil || handled[current][named] {
+			if item == nil || handled[current][named] || item.Family == resilience.CollabFamilyReasoning && l.NamedReasoningAllowed != nil && !l.NamedReasoningAllowed(current) {
 				return false
 			}
 			if item.Family != resilience.CollabFamilyReasoning && item.Class != resilience.CollabItemClassReplaceable && !switched && l.MaxAttempts != 1 {
@@ -142,6 +144,12 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 			if replaced[prefer] {
 				prefer = 0
 			}
+		}
+		// Early entry returns to the existing first-account repair planner
+		// before a broad fallback could discard unrelated content. Terminal
+		// entry still gets every remaining repair under the shared quotas.
+		if l.ReturnToLegacy && prefer == l.First && (action == resilience.CollabActionDropUnprotected || action == resilience.CollabActionReplaceAll) {
+			return false
 		}
 		account, release := l.Select(ctx, prefer, exclude)
 		if account == 0 && prefer > 0 && action == resilience.CollabActionNamedRepair && prefer != l.First {

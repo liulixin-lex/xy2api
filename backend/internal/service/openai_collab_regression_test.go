@@ -374,3 +374,29 @@ func TestCollabRegressionDigestFraming(t *testing.T) {
 		}
 	}
 }
+
+func TestCollabRegressionEarlyFallbackKeepsLegacyRepair(t *testing.T) {
+	l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, Evidence: collabRegressionVerified("cmp_a"), Select: collabRegressionSelect, ReturnToLegacy: true}
+	sends := 0
+	l.Send = func(_ context.Context, id int64, body []byte, action resilience.CollabAction) (resilience.CollabEvidence, bool) {
+		sends++
+		if id == 1 {
+			t.Fatal("broad early fallback replaced content before legacy single-item repair")
+		}
+		return collabRegressionVerified(""), false
+	}
+	if l.Run(context.Background()) || sends == 0 {
+		t.Fatal("original switch not attempted")
+	}
+}
+
+func TestCollabRegressionExhaustedNamedReasoning(t *testing.T) {
+	l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, Evidence: collabRegressionVerified("rs_a"), Select: collabRegressionSelect, NamedReasoningAllowed: func(int64) bool { return false }}
+	l.Send = func(context.Context, int64, []byte, resilience.CollabAction) (resilience.CollabEvidence, bool) {
+		t.Fatal("renewed exhausted legacy repair")
+		return resilience.CollabEvidence{}, false
+	}
+	if l.Run(context.Background()) {
+		t.Fatal("unexpected delivery")
+	}
+}

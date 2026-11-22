@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -89,7 +90,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	}
 	child := resilience.NewCollabChildState(parent)
 	settings := parent.CollabSettingsSnapshot().Clone()
-	settings.Budget.MaxAttempts = 0
+	settings.Budget.MaxAttempts = math.MaxInt
 	optionalBudget := resilience.NewBudget(ctx, &settings, resilience.KindText, time.Now())
 	child.SetBudget(optionalBudget)
 	ctx = resilience.WithRequestState(ctx, child)
@@ -113,9 +114,14 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		service.IsolateCollabAttempt(c)
 		c.Request = parentRequest.Clone(ctx)
 	}
-	l := service.CollabLadder{Body: parsed, First: rejections[0].AccountID, Current: last.AccountID, Progress: &seam.progress, Evidence: evidence, Continue: func() bool { return ctx.Err() == nil && time.Since(entered) < duration }}
+	l := service.CollabLadder{Body: parsed, First: rejections[0].AccountID, Current: last.AccountID, Progress: &seam.progress, ReturnToLegacy: seam.losslessDuration > 0, Evidence: evidence, Continue: func() bool { return ctx.Err() == nil && time.Since(entered) < duration }}
 	if budget := parent.Budget(); budget != nil {
 		l.MaxAttempts = budget.MaxAttempts()
+		l.NamedReasoningAllowed = func(account int64) bool {
+			// A terminal takeover cannot renew a reasoning repair that the
+			// existing account exhausted under its in-place retry admission.
+			return account != last.AccountID || budget.Attempts()+1 < budget.MaxAttempts()
+		}
 	}
 	l.BeforeDisposal = func(_ context.Context, current resilience.CollabEvidence) bool {
 		if seam.localEnding == nil || current.Grade != resilience.CollabEvidenceGradeVerified || parentRequest.Context().Err() != nil {
