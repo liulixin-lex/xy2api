@@ -52,6 +52,8 @@ type OpenAIGatewayHandler struct {
 	imageLimiter               *imageConcurrencyLimiter
 	maxAccountSwitches         int
 	cfg                        *config.Config
+	// collabRescue is the collaboration ladder; nil leaves every saved error as it is.
+	collabRescue collabRescue
 }
 
 type openAIWSTurnChannelMappingSnapshot struct {
@@ -752,8 +754,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
 	}
 
+	// xy2api collaboration: the ladder takes over only from the final error of
+	// the loop below. finish runs before all other deferred cleanup; restore
+	// runs after the heartbeat wrapper above the seam is gone.
+	collabSeam := h.armCollabSeam(c, forwardBody, previousResponseID, requestPlatform, legacyCompact)
+	defer collabSeam.restore(c)
 	// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
 	defer stopPreOutputKeepalive(c)
+	defer collabSeam.finish(c)
 	for {
 		// Streaming Forward intentionally detaches the upstream request so usage can
 		// be drained after a disconnect. Re-check the client context before every
