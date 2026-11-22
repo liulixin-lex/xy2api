@@ -245,7 +245,7 @@ Codex 客户端会发出不带 `call_id` 的具名 `function_call_output`（`nam
 - CRS 同步与复制账号遇到不合法的值时删除该键（即继承全局），不让同步或复制失败；同步时本地已有的合法值保留。
 - 生效模式：总开关 `enabled` 关闭或本节 `mode` 为 `off` 时，所有账号一律按 `off` 处理，账号覆盖不能绕过；否则账号覆盖优先于本节的 `mode`。
 - 生效范围：只处理实际走 HTTP Responses 出口、平台为 OpenAI、类型为 API Key、`base_url` 指向第三方中转的账号（WebSocket 入站经桥接走 HTTP 出站时同样适用）。OAuth、官方直连（`api.openai.com` 及其子域、Azure OpenAI）、compact 请求和 Chat / Anthropic 协议上游不处理。
-- 改写内容：命中的条目原位替换为一条 `role=user` 的消息，文本为 `<external_名称>原 output</external_名称>`（页面快照类在标签内各加一个换行），其余条目的字节不变。只改写 `call_id` 缺失或为 `null`、`output` 为字符串的条目；`call_id` 为空串或空白、`output` 为数组或对象的条目保持原样。内置名单里除 `untrusted_content`、`proposed_plan` 外的名字以及追加名单要求 `output` 去掉首尾空白后非空；两类页面快照还要求 `output` 符合页面快照格式。请求里任何一层有重复的 JSON 成员时整个请求不改写。`namespace` 或 `type` 用 JSON 转义拼写的条目不处理。
+- 改写内容：命中的条目原位替换为一条 `role=user` 的消息，文本为 `<external_名称>原 output</external_名称>`（页面快照类在标签内各加一个换行），其余条目的字节不变。只改写 `call_id` 缺失或为 `null`、`output` 为字符串的条目；`call_id` 为空串或空白、`output` 为数组或对象的条目保持原样。内置名单里除 `untrusted_content`、`proposed_plan` 外的名字以及追加名单要求 `output` 去掉首尾空白后非空；两类页面快照还要求 `output` 符合页面快照格式。请求里任何一层有重复的 JSON 成员时整个请求不改写。请求里的 `function_call_output` 或 `"agent"` 只以 JSON 转义拼写出现（没有任何一处按字面写出）时，整个请求不改写，也不参与关键词检查。
 - `reactive` 的重试：每个入站请求（WebSocket 为每一轮）最多一次，在同一账号上进行，计入请求的重试预算；已经向客户端输出内容（含首包前的保活帧）或客户端已断开时不重试。一次请求里证实需要改写之后，这次请求后续换到的账号直接按改写后的内容发送。
 - `reactive` 与 `proactive` 的取舍：`reactive` 只在被拒后才改写，被拒的那次请求要完整上传两遍；同一会话里中转有时拒绝、有时放行原形，发出的历史前缀随之变化，会降低上游提示缓存的命中。`proactive` 每次都改写，前缀稳定、不重发，适合长期使用。
 - 仍被拒绝时：上游以该原因拒绝而网关已没有可做的改写（条目不在名单内、改写后仍被拒、重试额度已用完），客户端收到 400 / `upstream_standalone_tool_output_unsupported`，见[客户端约定](gateway-resilience-client.md)。`off` 以及不在生效范围内的账号仍原样返回上游的错误。
