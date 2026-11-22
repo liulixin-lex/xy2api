@@ -52,8 +52,8 @@ type OpenAIGatewayHandler struct {
 	imageLimiter               *imageConcurrencyLimiter
 	maxAccountSwitches         int
 	cfg                        *config.Config
-	// collabRescue is the collaboration ladder and collabRescuable whether it
-	// could act on an error. Without both, no request gets a seam.
+	// collabRescue is the collaboration ladder and collabRescuable yields the
+	// flag of whether it could act. Without both, no request gets a seam.
 	collabRescue    collabRescue
 	collabRescuable collabRescuable
 }

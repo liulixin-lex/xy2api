@@ -27,11 +27,11 @@ var (
 // it worked is decided by what reached the client, never by what it returns.
 type collabRescue func(c *gin.Context, seam *collabSeam, saved *collabWithheld)
 
-// collabRescuable reports whether the rescue could act on an error written
-// now, so nothing else is withheld or delayed. It is asked under the writer's
-// lock, possibly off the request goroutine: it has to be cheap and must
-// neither write nor use the gin context.
-type collabRescuable func(seam *collabSeam) bool
+// collabRescuable returns, once when the seam is armed, the flag that the
+// rescue keeps current: whether it could act on an error written now. Nothing
+// else is withheld or delayed. The flag is read with locks of the response
+// writers held, where calling out could deadlock.
+type collabRescuable func(seam *collabSeam) *atomic.Bool
 
 // collabSeam is where the collaboration ladder takes over. The existing path
 // runs to its end with all of its side effects at their own time. Only then,
@@ -71,8 +71,11 @@ func (h *OpenAIGatewayHandler) armCollabSeam(c *gin.Context, body []byte, previo
 		return nil
 	}
 	seam := &collabSeam{original: c.Writer, body: body, rescue: h.collabRescue}
-	rescuable := h.collabRescuable
-	seam.writer = newCollabSeamWriter(c.Writer, func() bool { return rescuable(seam) })
+	eligible := h.collabRescuable(seam)
+	if eligible == nil {
+		return nil
+	}
+	seam.writer = newCollabSeamWriter(c.Writer, eligible)
 	c.Writer = seam.writer
 	return seam
 }
@@ -107,7 +110,8 @@ func (s *collabSeam) beforeSettlement(c *gin.Context, result *service.OpenAIForw
 
 func (s *collabSeam) decide(c *gin.Context, mayTakeOver bool) bool {
 	collabSeamWithheld.Add(1)
-	if mayTakeOver && s.takeOver(c) {
+	// What was rescuable when it was withheld may not be any more.
+	if mayTakeOver && s.writer.intercepts() && s.takeOver(c) {
 		s.writer.release()
 		return true
 	}
@@ -154,7 +158,7 @@ func (s *collabSeam) takeOver(c *gin.Context) (delivered bool) {
 	// A takeover rewrites request-scoped keys and contexts. If it does not
 	// deliver, later readers have to see the existing path's values. Pointed-to
 	// state is shared, so a takeover uses its own request state.
-	request, keys := c.Request, original
+	request, keys, ginErrors := c.Request, original, len(c.Errors)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			logger.FromContext(request.Context()).Error("collab.takeover_panic", zap.Stack("stack"))
@@ -167,6 +171,9 @@ func (s *collabSeam) takeOver(c *gin.Context) (delivered bool) {
 			s.heartbeats.Restore()
 			c.Request = request
 			collabSeamSetKeys(c, keys)
+			if len(c.Errors) > ginErrors {
+				c.Errors = c.Errors[:ginErrors:ginErrors]
+			}
 		}
 	}()
 	collabSeamClearTerminal(c)

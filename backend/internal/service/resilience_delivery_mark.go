@@ -11,27 +11,36 @@ type DeliveryHeartbeatMark struct {
 }
 
 // MarkDeliveryHeartbeats folds the stopped heartbeats of the request into its
-// count and returns the mark. Call it only once every heartbeat is stopped.
+// count and returns the mark. Call it on the request goroutine, only once
+// every heartbeat is stopped.
 func MarkDeliveryHeartbeats(c *gin.Context) DeliveryHeartbeatMark {
 	w := deliveryWriterFrom(c)
 	if w == nil {
 		return DeliveryHeartbeatMark{}
 	}
-	// Added before forgotten: the probe may run at any time and must never
-	// take a heartbeat for output.
+	var stopped int64
 	if k := w.sse.Load(); k != nil {
 		k.mu.Lock()
-		w.heartbeat.Add(int64(k.bytes))
+		stopped += int64(k.bytes)
 		k.mu.Unlock()
-		w.sse.Store(nil)
 	}
 	if k := w.images.Load(); k != nil {
 		k.mu.Lock()
-		w.heartbeat.Add(int64(k.bytes))
+		stopped += int64(k.bytes)
 		k.mu.Unlock()
-		w.images.Store(nil)
 	}
+	w.moveHeartbeats(w.heartbeat.Load() + stopped)
 	return DeliveryHeartbeatMark{writer: w, bytes: w.heartbeat.Load()}
+}
+
+// moveHeartbeats replaces all sources by one count, as one step for the probe.
+// It takes no lock: the probe may already hold a heartbeat's.
+func (w *deliveryWriter) moveHeartbeats(total int64) {
+	w.heartbeatEpoch.Add(1)
+	w.heartbeat.Store(total)
+	w.sse.Store(nil)
+	w.images.Store(nil)
+	w.heartbeatEpoch.Add(1)
 }
 
 // Restore drops the heartbeats counted since the mark, which were discarded.
@@ -39,7 +48,5 @@ func (m DeliveryHeartbeatMark) Restore() {
 	if m.writer == nil {
 		return
 	}
-	m.writer.sse.Store(nil)
-	m.writer.images.Store(nil)
-	m.writer.heartbeat.Store(m.bytes)
+	m.writer.moveHeartbeats(m.bytes)
 }

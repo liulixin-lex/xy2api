@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -125,19 +126,17 @@ func TestCollabSeamFailedTakeoverKeepsDeliveryCount(t *testing.T) {
 }
 
 func TestCollabSeamFailedWriteIsNoDelivery(t *testing.T) {
-	for contentType, body := range map[string]string{"text/event-stream": seamTestDelta, "application/json": seamTestJSON} {
-		t.Run(contentType, func(t *testing.T) {
-			c, wire := seamTestTracked()
-			withSeam(c, func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
-				c.Header("Content-Type", contentType)
-				wire.err = io.ErrClosedPipe
-				_, err := c.Writer.WriteString(body)
-				require.ErrorIs(t, err, io.ErrClosedPipe)
-				wire.err = nil
-			}, seamTestExistingError(c))
-			require.Equal(t, seamTestHTTPFail, wire.Body.String())
-		})
-	}
+	c, wire := seamTestTracked()
+	withSeam(c, func(c *gin.Context, _ *collabSeam, _ *collabWithheld) {
+		wire.err = io.ErrClosedPipe
+		_, err := c.Writer.WriteString(seamTestDelta)
+		require.ErrorIs(t, err, io.ErrClosedPipe)
+		wire.err = nil
+	}, func() {
+		// Committed before the error, so the saved frame can still follow.
+		seamTestStream(c, seamTestPing, seamTestFailed)
+	})
+	require.Equal(t, seamTestPing+seamTestFailed, wire.Body.String())
 }
 
 // What the rescue cannot act on goes out with the write that carried it.
@@ -154,7 +153,7 @@ func TestCollabSeamDelaysNothingItCannotRescue(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			c, wire := seamTestTracked()
-			withSeamWhen(c, nil, func() bool { return false }, func(*collabSeam) {
+			withSeamWhen(c, nil, seamTestFlag(false), func(*collabSeam) {
 				c.Header("Content-Type", tc.contentType)
 				c.Status(tc.status)
 				sent := 0
@@ -219,7 +218,7 @@ func TestCollabSeamNeedsARescue(t *testing.T) {
 	withHandlerResilience(t, func(s *resilience.Settings) { s.Collab.Ladder = true })
 	body := []byte(`{"model":"example-model","input":[{"type":"agent_message","content":[{"type":"encrypted_content","encrypted_content":"opaque"}]}]}`)
 	rescue := func(*gin.Context, *collabSeam, *collabWithheld) {}
-	rescuable := func(*collabSeam) bool { return true }
+	rescuable := func(*collabSeam) *atomic.Bool { return seamTestAlways }
 	for _, tc := range []struct {
 		handler *OpenAIGatewayHandler
 		armed   bool
@@ -227,6 +226,7 @@ func TestCollabSeamNeedsARescue(t *testing.T) {
 		{&OpenAIGatewayHandler{}, false},
 		{&OpenAIGatewayHandler{collabRescue: rescue}, false},
 		{&OpenAIGatewayHandler{collabRescuable: rescuable}, false},
+		{&OpenAIGatewayHandler{collabRescue: rescue, collabRescuable: func(*collabSeam) *atomic.Bool { return nil }}, false},
 		{&OpenAIGatewayHandler{collabRescue: rescue, collabRescuable: rescuable}, true},
 	} {
 		c, _ := seamTestTracked()

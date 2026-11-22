@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,7 +62,8 @@ func TestCollaborationReplaySeamTransparent(t *testing.T) {
 		snapshot.Collab.Ladder = true
 		setReplayHandler(t, func(h *OpenAIGatewayHandler, _ *openAIWSUsageHandlerUsageLogRepoStub) {
 			h.collabRescue = func(*gin.Context, *collabSeam, *collabWithheld) {}
-			h.collabRescuable = func(*collabSeam) bool { return rescuable == "always" }
+			eligible := seamTestFlag(rescuable == "always")
+			h.collabRescuable = func(*collabSeam) *atomic.Bool { return eligible }
 		})
 	}
 	withheld := collabSeamWithheld.Load()
@@ -125,7 +127,7 @@ func TestCollaborationReplaySeamBeforeSettlement(t *testing.T) {
 				setReplayHandler(t, func(h *OpenAIGatewayHandler, usage *openAIWSUsageHandlerUsageLogRepoStub) {
 					usage.delay = 7 * time.Second
 					h.collabRescue = rescue
-					h.collabRescuable = func(*collabSeam) bool { return true }
+					h.collabRescuable = func(*collabSeam) *atomic.Bool { return seamTestAlways }
 				})
 				settings := resilience.Defaults()
 				settings.Collab.Ladder = rescue != nil

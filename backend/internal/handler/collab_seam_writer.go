@@ -62,8 +62,8 @@ type collabWithheld struct {
 }
 
 // collabSeamWriter lets the existing path run unchanged and withholds only a
-// terminal error before any output, and only while rescuable says that a
-// takeover could act on it: a status >= 400, a response.failed or error frame,
+// terminal error before any output, and only while rescuable is set because
+// a takeover could act on it: a status >= 400, a response.failed or error frame,
 // or a failed JSON response. Everything else goes out when it is written, and
 // what is withheld can be replayed call by call, so a request that is not
 // rescued ends byte for byte as it does today.
@@ -82,8 +82,10 @@ type collabSeamWriter struct {
 	pending []byte
 	checked int
 	sent    int
-	// rescuable may be called with mu held and must not write.
-	rescuable func() bool
+	// document follows the JSON response of a takeover.
+	document collabJSONScan
+	// rescuable is only read here: no callback ever runs under the writer locks.
+	rescuable *atomic.Bool
 	// quiet is set during a takeover: until it has semantic output nothing of
 	// it reaches the client, neither headers, prelude, heartbeats nor errors,
 	// whether or not the existing path had committed the headers.
@@ -94,29 +96,21 @@ type collabSeamWriter struct {
 	commitHeader http.Header
 }
 
-func newCollabSeamWriter(inner gin.ResponseWriter, rescuable func() bool) *collabSeamWriter {
+func newCollabSeamWriter(inner gin.ResponseWriter, rescuable *atomic.Bool) *collabSeamWriter {
 	return &collabSeamWriter{ResponseWriter: inner, armHeader: inner.Header().Clone(), rescuable: rescuable}
 }
 
 // intercepts reports whether a terminal error written now is withheld.
-func (w *collabSeamWriter) intercepts() (yes bool) {
-	if w.quiet {
-		return true
-	}
-	if w.rescuable == nil {
-		return false
-	}
-	defer func() {
-		if recover() != nil {
-			yes = false
-		}
-	}()
-	return w.rescuable()
+func (w *collabSeamWriter) intercepts() bool {
+	return w.quiet || w.rescuable != nil && w.rescuable.Load()
 }
 
 func (w *collabSeamWriter) unsent() int { return len(w.pending) - w.sent }
 
-func (w *collabSeamWriter) forget() { w.pending, w.checked, w.sent = nil, 0, 0 }
+func (w *collabSeamWriter) forget() {
+	w.pending, w.checked, w.sent = nil, 0, 0
+	w.document = collabJSONScan{}
+}
 
 func (w *collabSeamWriter) current() collabSeamMode { return collabSeamMode(w.mode.Load()) }
 func (w *collabSeamWriter) set(mode collabSeamMode) { w.mode.Store(int32(mode)) }
@@ -209,7 +203,8 @@ func (w *collabSeamWriter) pass(kind collabSeamOpKind, data []byte) (int, error)
 }
 
 // writeJSON collects a takeover's JSON response. It may come in any number of
-// writes and replaces the saved error only when it is complete and has output.
+// writes and replaces the saved error only when the write that closes the
+// document leaves it valid and with output. Later writes pass through.
 func (w *collabSeamWriter) writeJSON(kind collabSeamOpKind, data []byte, committed bool) (int, error) {
 	earlier := len(w.pending)
 	buf := data
@@ -218,17 +213,19 @@ func (w *collabSeamWriter) writeJSON(kind collabSeamOpKind, data []byte, committ
 	} else if !committed {
 		w.commitHeader = w.Header().Clone()
 	}
-	body := bytes.TrimSpace(buf)
-	// Validity is only worth checking where an object can end.
-	complete := len(body) > 0 && body[len(body)-1] == '}' && gjson.ValidBytes(body)
+	w.document.feed(data)
 	switch {
-	case complete && collabSeamJSONOutput(body):
+	case w.document.closed:
 		w.forget()
+		if !collabSeamJSONOutput(buf) {
+			w.hold(kind, buf)
+			break
+		}
 		n, err := w.pass(kind, buf)
 		if err != nil {
 			return min(len(data), max(0, n-earlier)), err
 		}
-	case complete, len(body) > 0 && body[0] != '{', len(buf) > collabSeamQuietLimit:
+	case w.document.notObject, len(buf) > collabSeamQuietLimit:
 		w.forget()
 		w.hold(kind, buf)
 	case earlier > 0:
@@ -237,6 +234,46 @@ func (w *collabSeamWriter) writeJSON(kind collabSeamOpKind, data []byte, committ
 		w.pending = bytes.Clone(buf)
 	}
 	return len(data), nil
+}
+
+// collabJSONScan finds where an object that arrives in parts closes, looking
+// at every byte once. It does not validate: that happens once, at the end.
+type collabJSONScan struct {
+	depth             int
+	quoted, escaped   bool
+	closed, notObject bool
+}
+
+func (j *collabJSONScan) feed(data []byte) {
+	for _, b := range data {
+		switch {
+		case j.closed || j.notObject:
+			return
+		case j.escaped:
+			j.escaped = false
+		case j.quoted:
+			switch b {
+			case '\\':
+				j.escaped = true
+			case '"':
+				j.quoted = false
+			}
+		case b == ' ' || b == '\t' || b == '\r' || b == '\n':
+		case j.depth == 0:
+			if b == '{' {
+				j.depth = 1
+			} else {
+				j.notObject = true
+			}
+		case b == '"':
+			j.quoted = true
+		case b == '{' || b == '[':
+			j.depth++
+		case b == '}' || b == ']':
+			j.depth--
+			j.closed = j.depth == 0
+		}
+	}
 }
 
 func (w *collabSeamWriter) writeFrames(kind collabSeamOpKind, data []byte, committed bool) (int, error) {
@@ -408,6 +445,13 @@ func (w *collabSeamWriter) commitOnly(kind collabSeamOpKind) {
 		w.hold(kind, nil)
 		return
 	}
+	if w.current() == collabSeamWatching && w.unsent() > 0 && !w.intercepts() {
+		// Held back as rescuable, which it no longer is.
+		if _, err := w.forward(collabSeamWrite, w.pending[w.sent:]); err != nil {
+			w.set(collabSeamPassing)
+		}
+		w.sent = len(w.pending)
+	}
 	if w.current() == collabSeamWatching && !w.ResponseWriter.Written() {
 		if len(w.pending) == 0 && w.Status() >= http.StatusBadRequest && w.intercepts() {
 			w.hold(kind, nil)
@@ -511,7 +555,14 @@ func (w *collabSeamWriter) resume(saved *collabWithheld) bool {
 	}
 	w.quiet, w.commitHeader = false, nil
 	w.forget()
-	if !saved.committed && !w.ResponseWriter.Written() {
+	switch {
+	case saved.committed:
+	case w.ResponseWriter.Written():
+		// An attempt committed the response and then could not write. The saved
+		// status and headers cannot come back, so its body does not follow them.
+		// That is still no delivery.
+		saved = &collabWithheld{committed: true, header: saved.header}
+	default:
 		w.ResponseWriter.WriteHeader(saved.status)
 	}
 	collabSeamSetHeader(w.Header(), saved.header)

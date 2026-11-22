@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,7 +73,14 @@ func (s *seamTestServer) do(t *testing.T, run func(*gin.Context)) seamTestWire {
 	return seamTestWire{status: resp.StatusCode, header: header, body: string(body)}
 }
 
-func seamTestAlways() bool { return true }
+func seamTestFlag(value bool) *atomic.Bool {
+	var flag atomic.Bool
+	flag.Store(value)
+	return &flag
+}
+
+// seamTestAlways is never changed by a test.
+var seamTestAlways = seamTestFlag(true)
 
 // withSeam installs the seam the way the Responses handler does, for a
 // request of which the rescue could act on any error.
@@ -80,7 +88,7 @@ func withSeam(c *gin.Context, rescue collabRescue, existingPath func()) {
 	withSeamWhen(c, rescue, seamTestAlways, func(*collabSeam) { existingPath() })
 }
 
-func withSeamWhen(c *gin.Context, rescue collabRescue, rescuable func() bool, existingPath func(*collabSeam)) {
+func withSeamWhen(c *gin.Context, rescue collabRescue, rescuable *atomic.Bool, existingPath func(*collabSeam)) {
 	seam := &collabSeam{original: c.Writer, rescue: rescue}
 	seam.writer = newCollabSeamWriter(c.Writer, rescuable)
 	c.Writer = seam.writer
@@ -181,15 +189,23 @@ func TestCollabSeamIsTransparentWithoutTakeover(t *testing.T) {
 			var seen []string
 			wire := server.do(t, func(c *gin.Context) {
 				done := 0
+				var eligible atomic.Bool
+				update := func() {
+					if seam {
+						eligible.Store(rescuable(done))
+					}
+				}
+				update()
 				path := func() {
 					for _, op := range ops {
 						op.apply(c)
 						done++
+						update()
 						seen = append(seen, fmt.Sprint(op.kind, c.Writer.Written(), c.Writer.Size(), c.Writer.Status()))
 					}
 				}
 				if seam {
-					withSeamWhen(c, nil, func() bool { return rescuable(done) }, func(*collabSeam) { path() })
+					withSeamWhen(c, nil, &eligible, func(*collabSeam) { path() })
 				} else {
 					path()
 				}
