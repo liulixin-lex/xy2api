@@ -78,11 +78,12 @@ type CollabReplacedRecord struct {
 }
 
 type CollabTerminatedRecord struct {
-	Key       CollabDeliveryKey
-	Copies    []CollabDigest
-	Event     CollabDigest
-	Parent    CollabDigest
-	ExpiresAt time.Time
+	Key             CollabDeliveryKey
+	CopiesTruncated bool `json:",omitempty"`
+	Copies          []CollabDigest
+	Event           CollabDigest
+	Parent          CollabDigest
+	ExpiresAt       time.Time
 }
 
 // Token snapshots are merged before deriving Issued. A void cannot erase a
@@ -104,8 +105,7 @@ type CollabDispositionLookup struct {
 	Terminated         []CollabTerminatedRecord
 }
 
-// Local methods are strictly in-process and bounded: no network I/O, waits or
-// callbacks. SafeCollabRecordsStore is the request-facing adapter: it recovers
+// Local methods are strictly in-process and bounded, with short mutation locks. SafeCollabRecordsStore is the request-facing adapter: it recovers
 // panics, batches reads under one request deadline and queues shared writes.
 // Pending issues are visible locally before a frame, but cannot create a lease
 // until confirmation. Dispositions remain independent of the records switch.
@@ -120,10 +120,7 @@ type CollabRecordsStore interface {
 	Replaced(context.Context, CollabReplacedRecord) bool
 	// Register only after complete delivery; provisional until this request has a receipt.
 	Terminated(context.Context, CollabTerminatedRecord) bool
-	// Reserve once before ANY output, atomically and idempotently per event.
-	// Keep the charge after attempted or ambiguous delivery; never increment on
-	// completion. With shared storage, the safe adapter reserves there synchronously.
-	// False or unknown means exhausted. Compatibility name; prefer the reserver API.
+	// Deprecated and disabled. Use CollabLocalEndingAdmission before delivery.
 	IncrementTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool)
 }
 
@@ -187,6 +184,7 @@ const (
 )
 
 type CollabRecordMutation struct {
+	Reserved          bool                          `json:",omitempty"`
 	TerminalRejection CollabTerminalRejectionRecord `json:",omitzero"`
 	Kind              CollabRecordMutationKind      `json:",omitzero"`
 	Token             CollabIssuedToken             `json:",omitzero"`
@@ -199,7 +197,7 @@ type CollabRecordMutation struct {
 	Event             CollabDigest                  `json:",omitzero"`
 }
 
-// The shared implementation is called only on bounded background workers.
+// The shared implementation is called only on bounded workers.
 // Apply must be idempotent and preserve pending/confirm/void ordering. An
 // unknown confirmation cannot fabricate an issue; overflow is absence.
 type CollabSharedRecordsStore interface {
@@ -225,8 +223,14 @@ type CollabTerminalRejectionCount struct {
 	ExpiresAt time.Time
 }
 
-// Reserve before writing any local-ending notice. Implementations atomically
-// test the tree limit and count this event. Failed delivery may remain counted.
+// Count-only compatibility capability. It does not authorize output; delivery
+// must use CollabLocalEndingAdmission to reserve the concrete dispositions.
+// CollabLocalEndingAdmission reserves all concrete dispositions with the count.
+// Publication only reveals already admitted rows after complete delivery.
+type CollabLocalEndingAdmission interface {
+	ReserveLocalEnding(context.Context, []CollabTerminatedRecord) (int, bool)
+}
+
 type CollabLocalEndingReserver interface {
 	ReserveTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool)
 }

@@ -97,7 +97,12 @@ func TestCollabRound2SharedTenantIsolationAndEviction(t *testing.T) {
 	for i := 0; i < resilience.CollabRecordMaxTenantTrees; i++ {
 		k := key
 		k.Scope.Tree = resilience.CollabDigest("protected-" + fmt.Sprint(i))
-		require.NoError(t, shared.Apply(ctx, resilience.CollabRecordMutation{Kind: resilience.CollabRecordMutationTerminated, Terminated: resilience.CollabTerminatedRecord{Key: k, Event: "event", ExpiresAt: time.Now().Add(time.Hour)}}))
+		err := shared.Apply(ctx, resilience.CollabRecordMutation{Kind: resilience.CollabRecordMutationTerminated, Terminated: resilience.CollabTerminatedRecord{Key: k, Event: "event", ExpiresAt: time.Now().Add(time.Hour)}})
+		if i == resilience.CollabRecordMaxTenantTrees-1 {
+			require.ErrorIs(t, err, errCollabAdmission)
+		} else {
+			require.NoError(t, err)
+		}
 	}
 	unavailable := protected
 	unavailable.Tree = "unavailable"

@@ -9,21 +9,36 @@ import (
 // across 4096 trees. Redis allocator/object overhead is additional; at most
 // 536576 rows exist (64 evidence + 64 dispositions + 3 reservations/tree). These are shared-cache limits, not per tenant limits.
 const (
-	CollabRecordMaxTrees         = 4096
-	CollabRecordMaxTreeEntries   = 64
-	CollabRecordMaxRowBytes      = 4096
-	CollabRecordMaxTreeBytes     = 32 << 10
-	CollabRecordMaxQueries       = 256
-	CollabRecordMaxCopies        = 16
-	CollabRecordMaxTenantTrees   = 64
+	CollabRecordMaxTrees       = 4096
+	CollabRecordMaxTreeEntries = 64
+	CollabRecordMaxRowBytes    = 4096
+	CollabRecordMaxTreeBytes   = 32 << 10
+	CollabRecordMaxQueries     = 256
+	CollabRecordMaxCopies      = 16
+	// Eight tenant shares are kept outside the common spare pool.
+	CollabRecordTenantShare      = 64
+	CollabRecordSharedTrees      = 3584
+	CollabRecordMaxTenantTrees   = CollabRecordTenantShare + CollabRecordSharedTrees
 	CollabRecordEvidenceBytes    = 16 << 10
-	CollabRecordDispositionBytes = 14 << 10
-	CollabRecordCounterBytes     = 2 << 10
+	CollabRecordDispositionBytes = 13 << 10
+	CollabRecordCounterBytes     = 3 << 10
 )
 
-func collabDigestBound(d CollabDigest) bool { return len(d) <= 64 }
+func collabDigestBound(d CollabDigest) bool {
+	if len(d) > 64 {
+		return false
+	}
+	// Keyed digests are printable ASCII. Exclude JSON escape expansion so the
+	// three maximum-width counter rows fit their reserved partition.
+	for _, c := range d {
+		if c < 33 || c > 126 || c == '"' || c == '\\' || c == '<' || c == '>' || c == '&' {
+			return false
+		}
+	}
+	return true
+}
 func collabScopeBound(s CollabRecordScope) bool {
-	return collabDigestBound(s.Tenant) && collabDigestBound(s.Group) && collabDigestBound(s.Tree)
+	return validCollabScope(s) && collabDigestBound(s.Tenant) && collabDigestBound(s.Group) && collabDigestBound(s.Tree)
 }
 func collabKeyBound(k CollabDeliveryKey) bool {
 	return collabScopeBound(k.Scope) && collabDigestBound(k.Thread) && collabDigestBound(k.Item) && collabDigestBound(k.Delivery) && collabDigestBound(k.Digest)
@@ -37,7 +52,7 @@ func NormalizeCollabRecordMutation(m CollabRecordMutation, now time.Time) (Colla
 	switch m.Kind {
 	case CollabRecordMutationPending:
 		r := m.Issued
-		if !collabScopeBound(r.Scope) || !collabDigestBound(r.Call) || !collabDigestBound(r.Digest) || !collabDigestBound(r.Account) || !collabDigestBound(r.Site) || !collabDigestBound(m.Token.Token) || m.Token.Scope != r.Scope || m.Token.Call != r.Call || m.Token.Generation != r.Generation {
+		if r.Call == "" || r.Digest == "" || r.Account == "" || m.Token.Token == "" || !collabScopeBound(r.Scope) || !collabDigestBound(r.Call) || !collabDigestBound(r.Digest) || !collabDigestBound(r.Account) || !collabDigestBound(r.Site) || !collabDigestBound(m.Token.Token) || m.Token.Scope != r.Scope || m.Token.Call != r.Call || m.Token.Generation != r.Generation {
 			return n, nil, false
 		}
 		switch r.Status {
@@ -54,19 +69,19 @@ func NormalizeCollabRecordMutation(m CollabRecordMutation, now time.Time) (Colla
 		n.Token = m.Token
 	case CollabRecordMutationPlaintext:
 		r := m.Plaintext
-		if !collabScopeBound(r.Scope) || !collabDigestBound(r.Call) || !collabDigestBound(r.Arguments) {
+		if r.Call == "" || r.Arguments == "" || !collabScopeBound(r.Scope) || !collabDigestBound(r.Call) || !collabDigestBound(r.Arguments) {
 			return n, nil, false
 		}
 		n.Plaintext = r
 	case CollabRecordMutationConsumed:
 		r := m.Consumed
-		if !collabKeyBound(r.Key) || !collabDigestBound(r.Account) {
+		if !validCollabDelivery(r.Key) || r.Account == "" || !collabKeyBound(r.Key) || !collabDigestBound(r.Account) {
 			return n, nil, false
 		}
 		n.Consumed = r
 	case CollabRecordMutationReplaced:
 		r := m.Replaced
-		if !collabKeyBound(r.Key) || !collabDigestBound(r.Account) {
+		if !validCollabDelivery(r.Key) || r.Account == "" || !collabKeyBound(r.Key) || !collabDigestBound(r.Account) {
 			return n, nil, false
 		}
 		switch r.Placeholder {
@@ -77,7 +92,7 @@ func NormalizeCollabRecordMutation(m CollabRecordMutation, now time.Time) (Colla
 		n.Replaced = r
 	case CollabRecordMutationTerminated:
 		r := m.Terminated
-		if !collabKeyBound(r.Key) || !collabDigestBound(r.Event) || !collabDigestBound(r.Parent) {
+		if !validCollabDelivery(r.Key) || r.Event == "" || !collabKeyBound(r.Key) || !collabDigestBound(r.Event) || !collabDigestBound(r.Parent) {
 			return n, nil, false
 		}
 		copies := make([]CollabDigest, 0, min(len(r.Copies), CollabRecordMaxCopies))
@@ -86,16 +101,18 @@ func NormalizeCollabRecordMutation(m CollabRecordMutation, now time.Time) (Colla
 				copies = append(copies, copy)
 			}
 		}
+		r.CopiesTruncated = r.CopiesTruncated || len(r.Copies) > CollabRecordMaxCopies
 		r.Copies = copies
+		n.Reserved = m.Reserved
 		n.Terminated = r
 	case CollabRecordMutationTerminalRejected:
 		r := m.TerminalRejection
-		if !collabKeyBound(r.Key) || !collabDigestBound(r.Rejection) || !collabDigestBound(r.Event) {
+		if !validCollabDelivery(r.Key) || r.Rejection == "" || r.Event == "" || !collabKeyBound(r.Key) || !collabDigestBound(r.Rejection) || !collabDigestBound(r.Event) {
 			return n, nil, false
 		}
 		n.TerminalRejection = r
 	case CollabRecordMutationLocalEnding:
-		if !collabScopeBound(m.Scope) || !collabDigestBound(m.Event) {
+		if m.Event == "" || !collabScopeBound(m.Scope) || !collabDigestBound(m.Event) {
 			return n, nil, false
 		}
 		n.Scope = m.Scope

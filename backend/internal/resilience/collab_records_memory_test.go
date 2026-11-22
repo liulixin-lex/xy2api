@@ -31,6 +31,12 @@ func TestCollabMemoryRecordsLifecycleAndIsolation(t *testing.T) {
 	require.True(t, s.PlaintextDelivered(ctx, CollabPlaintextRecord{Scope: key.Scope, Call: "call", Arguments: "arguments", ExpiresAt: expiry}))
 	require.True(t, s.Consumed(ctx, CollabConsumedRecord{Key: key, Account: "account", ExpiresAt: expiry}))
 	require.True(t, s.Replaced(ctx, CollabReplacedRecord{Key: key, Account: "account", Placeholder: CollabPlaceholderMessage, ExpiresAt: expiry}))
+	count, ok := s.ReserveTreeLocalEnding(ctx, key.Scope, "event")
+	require.True(t, ok)
+	require.Equal(t, 1, count)
+	count, ok = s.ReserveTreeLocalEnding(ctx, key.Scope, "event")
+	require.True(t, ok)
+	require.Equal(t, 1, count)
 	copies := []CollabDigest{"copy"}
 	require.True(t, s.Terminated(ctx, CollabTerminatedRecord{Key: key, Copies: copies, Event: "event", Parent: "parent", ExpiresAt: expiry}))
 	copies[0] = "mutated"
@@ -43,12 +49,10 @@ func TestCollabMemoryRecordsLifecycleAndIsolation(t *testing.T) {
 	b.Records = false
 	require.Empty(t, s.LookupBatch(ctx, b).Records)
 	require.Len(t, s.LookupBatch(ctx, b).Dispositions[q].Terminated, 1)
-	count, ok := s.IncrementTreeLocalEnding(ctx, key.Scope, "event")
-	require.True(t, ok)
-	require.Equal(t, 1, count)
-	count, ok = s.IncrementTreeLocalEnding(ctx, key.Scope, "event")
-	require.True(t, ok)
-	require.Equal(t, 1, count)
+	count, ok = s.IncrementTreeLocalEnding(ctx, key.Scope, "after-delivery")
+	require.False(t, ok)
+	require.Equal(t, CollabTreeLocalEndingLimit, count)
+	require.Equal(t, 1, s.LookupBatch(ctx, b).LocalEndingCount())
 	other := b
 	other.Scope.Tenant = "other"
 	isolated := s.LookupBatch(ctx, other)
@@ -182,16 +186,20 @@ func TestCollabSharedReadersIgnoringCancellationStayBounded(t *testing.T) {
 	}}
 	s := NewSafeCollabRecordsStore(nil, shared, 1)
 	defer s.Close()
-	for i := 0; i < 6; i++ {
+	for i := 0; i < cap(s.readers)+2; i++ {
 		parent, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
 		ctx, cancel := WithCollabRecordReadBudget(parent)
 		start := time.Now()
-		s.LookupBatch(ctx, CollabRecordBatch{Records: true})
+		result := s.LookupBatch(ctx, CollabRecordBatch{Records: true, Dispositions: true})
+		require.False(t, result.RecordsComplete)
+		require.False(t, result.DispositionsComplete)
+		require.False(t, result.TreeLocalEndingsKnown)
+		require.Equal(t, CollabTreeLocalEndingLimit, result.LocalEndingCount())
 		require.Less(t, time.Since(start), 100*time.Millisecond)
 		cancel()
 		stop()
 	}
-	require.Equal(t, int64(4), shared.reads.Load())
+	require.Equal(t, int64(cap(s.readers)), shared.reads.Load())
 }
 func BenchmarkCollabRejectionIndexedLookup(b *testing.B) {
 	counter := NewCollabTerminalRejectionCounter(CollabRecordMaxEntries)

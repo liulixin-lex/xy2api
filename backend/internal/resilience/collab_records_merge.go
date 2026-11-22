@@ -120,6 +120,6 @@ func collabMergeDispositions(remote, local CollabDispositionLookup) CollabDispos
 	return CollabDispositionLookup{
 		TerminalRejections: counts,
 		Replaced:           collabUnion(remote.Replaced, local.Replaced, func(r CollabReplacedRecord) string { return collabDeliveryField("r", r.Key, r.Account) }),
-		Terminated:         collabUnion(remote.Terminated, local.Terminated, func(r CollabTerminatedRecord) string { return collabDeliveryField("t", r.Key, "") }),
+		Terminated:         collabUnion(remote.Terminated, local.Terminated, func(r CollabTerminatedRecord) string { return collabDeliveryField("t", r.Key, r.Event) }),
 	}
 }

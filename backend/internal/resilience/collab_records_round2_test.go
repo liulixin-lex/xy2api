@@ -18,10 +18,8 @@ func TestCollabRound2EvidenceCannotCrowdOutDispositions(t *testing.T) {
 	for i := 0; i < CollabRecordMaxTreeEntries; i++ {
 		require.True(t, s.PlaintextDelivered(ctx, CollabPlaintextRecord{Scope: key.Scope, Call: CollabDigest(fmt.Sprint(i)), Arguments: "args", ExpiresAt: time.Now().Add(time.Hour)}))
 	}
-	require.True(t, s.Terminated(ctx, CollabTerminatedRecord{Key: key, Event: "event", ExpiresAt: time.Now().Add(time.Hour)}))
-	require.True(t, s.Replaced(ctx, CollabReplacedRecord{Key: key, Account: "account", Placeholder: CollabPlaceholderMessage, ExpiresAt: time.Now().Add(time.Hour)}))
 	for i := 0; i < 10; i++ {
-		count, ok := s.IncrementTreeLocalEnding(ctx, key.Scope, CollabDigest(fmt.Sprint(i)))
+		count, ok := s.ReserveTreeLocalEnding(ctx, key.Scope, CollabDigest(fmt.Sprint(i)))
 		if i < 3 {
 			require.True(t, ok)
 			require.Equal(t, i+1, count)
@@ -30,6 +28,12 @@ func TestCollabRound2EvidenceCannotCrowdOutDispositions(t *testing.T) {
 			require.Equal(t, CollabTreeLocalEndingLimit, count)
 		}
 	}
+	require.True(t, s.Terminated(ctx, CollabTerminatedRecord{Key: key, Event: "event", ExpiresAt: time.Now().Add(time.Hour)}))
+	require.True(t, s.Replaced(ctx, CollabReplacedRecord{Key: key, Account: "account", Placeholder: CollabPlaceholderMessage, ExpiresAt: time.Now().Add(time.Hour)}))
+	count, ok := s.IncrementTreeLocalEnding(ctx, key.Scope, "after-delivery")
+	require.False(t, ok)
+	require.Equal(t, CollabTreeLocalEndingLimit, count)
+	require.Equal(t, 3, s.LookupBatch(ctx, CollabRecordBatch{Scope: key.Scope, Dispositions: true}).LocalEndingCount())
 }
 func TestCollabRound2TenantCapacityRecovers(t *testing.T) {
 	s := NewMemoryCollabRecordsStore()
@@ -67,7 +71,7 @@ func TestCollabRound2CounterContentionCannotLookLikeZero(t *testing.T) {
 	ctx := context.Background()
 	key := collabTestKey()
 	for i := 0; i < 3; i++ {
-		_, ok := s.IncrementTreeLocalEnding(ctx, key.Scope, CollabDigest(fmt.Sprint(i)))
+		_, ok := s.ReserveTreeLocalEnding(ctx, key.Scope, CollabDigest(fmt.Sprint(i)))
 		require.True(t, ok)
 	}
 	tree := s.tree(key.Scope, false, time.Now())

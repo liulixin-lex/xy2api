@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestCollabSharedCacheLifecycleAndBounds(t *testing.T) {
 	void := resilience.CollabRecordMutation{Kind: resilience.CollabRecordMutationVoid, Token: token}
 	q := resilience.CollabRecordQuery{Key: key, Call: "call"}
 	b := resilience.CollabRecordBatch{Scope: scope, Queries: []resilience.CollabRecordQuery{q}, Records: true, Dispositions: true}
-	require.NoError(t, shared.Apply(ctx, confirm))
+	require.ErrorIs(t, shared.Apply(ctx, confirm), errCollabAdmission)
 	result, err := shared.LookupBatch(ctx, b)
 	require.NoError(t, err)
 	require.Empty(t, result.Records[q].Issued)
@@ -56,7 +57,7 @@ func TestCollabSharedCacheLifecycleAndBounds(t *testing.T) {
 	require.Len(t, result.Dispositions[q].Terminated, 1)
 	require.Equal(t, 2, result.Dispositions[q].TerminalRejections[0].Count)
 	require.Equal(t, 1, result.TreeLocalEndings)
-	require.NoError(t, batch.ApplyBatch(ctx, []resilience.CollabRecordMutation{void, pending, confirm}))
+	require.ErrorIs(t, batch.ApplyBatch(ctx, []resilience.CollabRecordMutation{void, pending, confirm}), errCollabAdmission)
 	result, err = shared.LookupBatch(ctx, b)
 	require.NoError(t, err)
 	require.Equal(t, resilience.CollabIssuedStatusVoid, result.Records[q].Issued[0].Status)
@@ -83,6 +84,29 @@ func TestCollabSharedCacheLifecycleAndBounds(t *testing.T) {
 	}
 	require.LessOrEqual(t, client.HLen(ctx, collabCacheKeys(scope)[1]).Val(), int64(2*resilience.CollabRecordMaxTreeEntries+3))
 	require.True(t, client.HExists(ctx, collabCacheKeys(scope)[1], "e:event").Val(), "evidence never evicts the counter")
+
+	oldQuery := resilience.CollabRecordQuery{Key: key, Call: "0"}
+	newestQuery := resilience.CollabRecordQuery{Key: key, Call: resilience.CollabDigest(fmt.Sprint(resilience.CollabRecordMaxTreeEntries + 9))}
+	retained, err := shared.LookupBatch(ctx, resilience.CollabRecordBatch{Scope: scope, Queries: []resilience.CollabRecordQuery{oldQuery, newestQuery}, Records: true})
+	require.NoError(t, err)
+	require.Empty(t, retained.Records[oldQuery].Plaintext)
+	require.Len(t, retained.Records[newestQuery].Plaintext, 1)
+	plainCount, maxCharge, otherCount, otherBytes := 0, 0, 0, 0
+	for field, value := range client.HGetAll(ctx, collabCacheKeys(scope)[1]).Val() {
+		var row resilience.CollabRecordMutation
+		require.NoError(t, json.Unmarshal([]byte(value), &row))
+		charge := len(value) + 3*len(field) + 32
+		switch row.Kind {
+		case resilience.CollabRecordMutationPlaintext:
+			plainCount++
+			maxCharge = max(maxCharge, charge)
+		case resilience.CollabRecordMutationPending, resilience.CollabRecordMutationConsumed:
+			otherCount++
+			otherBytes += charge
+		}
+	}
+	require.Positive(t, maxCharge)
+	require.GreaterOrEqual(t, plainCount, min(resilience.CollabRecordMaxTreeEntries-otherCount, (resilience.CollabRecordEvidenceBytes-otherBytes)/maxCharge)-1)
 	server.FastForward(resilience.CollabRecordTTL + time.Second)
 	result, err = shared.LookupBatch(ctx, b)
 	require.NoError(t, err)

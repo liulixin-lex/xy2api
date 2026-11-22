@@ -52,7 +52,13 @@ func TestCollabFixSharedTreeBytesAndNormalizedTTL(t *testing.T) {
 	m.Plaintext.Arguments = resilience.CollabDigest(strings.Repeat("x", 300000))
 	for i := 0; i < resilience.CollabRecordMaxTreeEntries; i++ {
 		m.Terminated.Key.Item = resilience.CollabDigest(fmt.Sprint(i))
-		require.NoError(t, shared.Apply(ctx, m))
+		err := shared.Apply(ctx, m)
+		_, field, _ := resilience.CollabRecordStorageIdentity(m)
+		if client.HExists(ctx, collabCacheKeys(scope)[1], field).Val() {
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, errCollabAdmission)
+		}
 	}
 	rows := client.HGetAll(ctx, collabCacheKeys(scope)[1]).Val()
 	require.NotEmpty(t, rows)
@@ -86,16 +92,16 @@ func TestCollabFixThousandsOfSharedTrees(t *testing.T) {
 	for start := 0; start < resilience.CollabRecordMaxTrees+1; start += 64 {
 		var batch []resilience.CollabRecordMutation
 		for i := start; i < min(start+64, resilience.CollabRecordMaxTrees+1); i++ {
-			scope := resilience.CollabRecordScope{Tenant: resilience.CollabDigest(fmt.Sprint(i / resilience.CollabRecordMaxTenantTrees)), Group: "group", Tree: resilience.CollabDigest(fmt.Sprint(i))}
+			scope := resilience.CollabRecordScope{Tenant: resilience.CollabDigest(fmt.Sprint(i / resilience.CollabRecordTenantShare)), Group: "group", Tree: resilience.CollabDigest(fmt.Sprint(i))}
 			batch = append(batch, resilience.CollabRecordMutation{Kind: resilience.CollabRecordMutationPlaintext, Plaintext: resilience.CollabPlaintextRecord{Scope: scope, Call: "call", Arguments: "args", ExpiresAt: time.Now().Add(time.Hour)}})
 		}
 		require.NoError(t, writer.ApplyBatch(ctx, batch))
 	}
 	require.Equal(t, int64(resilience.CollabRecordMaxTrees), client.ZCard(ctx, collabCachePrefix+"trees").Val())
-	last := resilience.CollabRecordScope{Tenant: resilience.CollabDigest(fmt.Sprint((resilience.CollabRecordMaxTrees - 1) / resilience.CollabRecordMaxTenantTrees)), Group: "group", Tree: resilience.CollabDigest(fmt.Sprint(resilience.CollabRecordMaxTrees - 1))}
+	last := resilience.CollabRecordScope{Tenant: resilience.CollabDigest(fmt.Sprint((resilience.CollabRecordMaxTrees - 1) / resilience.CollabRecordTenantShare)), Group: "group", Tree: resilience.CollabDigest(fmt.Sprint(resilience.CollabRecordMaxTrees - 1))}
 	overflow := last
 	overflow.Tree = resilience.CollabDigest(fmt.Sprint(resilience.CollabRecordMaxTrees))
-	overflow.Tenant = resilience.CollabDigest(fmt.Sprint(resilience.CollabRecordMaxTrees / resilience.CollabRecordMaxTenantTrees))
+	overflow.Tenant = resilience.CollabDigest(fmt.Sprint(resilience.CollabRecordMaxTrees / resilience.CollabRecordTenantShare))
 	require.Equal(t, int64(1), client.HLen(ctx, collabCacheKeys(last)[1]).Val())
 	require.Equal(t, int64(1), client.HLen(ctx, collabCacheKeys(overflow)[1]).Val(), "old evidence releases capacity")
 }

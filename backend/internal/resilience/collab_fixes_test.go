@@ -375,6 +375,10 @@ func (collabPanicLocal) Terminated(context.Context, CollabTerminatedRecord) bool
 func (collabPanicLocal) IncrementTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool) {
 	panic("synthetic")
 }
+func (collabPanicLocal) ReserveTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool) {
+	panic("synthetic")
+}
+
 func TestCollabRecordsPanicsAndErrorsAreAbsence(t *testing.T) {
 	before := CollabSafetySnapshot()
 	store := NewSafeCollabRecordsStore(collabPanicLocal{}, nil, 1)
@@ -389,7 +393,10 @@ func TestCollabRecordsPanicsAndErrorsAreAbsence(t *testing.T) {
 	require.False(t, store.Consumed(ctx, CollabConsumedRecord{}))
 	require.False(t, store.Replaced(ctx, CollabReplacedRecord{}))
 	require.False(t, store.Terminated(ctx, CollabTerminatedRecord{}))
-	_, ok = store.IncrementTreeLocalEnding(ctx, CollabRecordScope{}, "")
+	count, ok := store.IncrementTreeLocalEnding(ctx, CollabRecordScope{}, "")
+	require.Equal(t, CollabTreeLocalEndingLimit, count)
+	require.False(t, ok)
+	_, ok = store.ReserveTreeLocalEnding(ctx, CollabRecordScope{}, "")
 	require.False(t, ok)
 	_, ok = store.TerminalRejected(ctx, CollabTerminalRejectionRecord{})
 	require.False(t, ok)

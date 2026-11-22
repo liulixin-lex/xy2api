@@ -26,19 +26,19 @@ func WithCollabRecordReadBudget(ctx context.Context) (context.Context, context.C
 	return context.WithValue(bounded, collabRecordDeadlineKey{}, &collabRecordReadBudget{}), cancel
 }
 
-// One writer and at most four shared reads/reservations per store. Separate
-// bounded queues reserve disposition throughput. A full queue drops a
-// shared write after the local mutation; no delivery waits for the network.
+// Evidence uses one bounded background writer. Required dispositions wait for
+// shared acknowledgement under a deadline and coalesce concurrent duplicates.
 // Construct once per service, never per request. Close at service shutdown.
 type SafeCollabRecordsStore struct {
-	local        CollabRecordsStore
-	shared       CollabSharedRecordsStore
-	writes       chan CollabRecordMutation
-	dispositions chan CollabRecordMutation
-	readers      chan struct{}
-	stop         context.Context
-	cancel       context.CancelFunc
-	once         sync.Once
+	local         CollabRecordsStore
+	shared        CollabSharedRecordsStore
+	writes        chan CollabRecordMutation
+	publicationMu sync.Mutex
+	publications  map[collabPublicationKey]*collabPublication
+	readers       chan struct{}
+	stop          context.Context
+	cancel        context.CancelFunc
+	once          sync.Once
 }
 
 func NewSafeCollabRecordsStore(local CollabRecordsStore, shared CollabSharedRecordsStore, capacity int) *SafeCollabRecordsStore {
@@ -46,7 +46,7 @@ func NewSafeCollabRecordsStore(local CollabRecordsStore, shared CollabSharedReco
 		local = NoopCollabRecordsStore{}
 	}
 	stop, cancel := context.WithCancel(context.Background())
-	s := &SafeCollabRecordsStore{dispositions: make(chan CollabRecordMutation, 256), local: local, shared: shared, writes: make(chan CollabRecordMutation, min(max(capacity, 1), 1024)), readers: make(chan struct{}, 4), stop: stop, cancel: cancel}
+	s := &SafeCollabRecordsStore{publications: make(map[collabPublicationKey]*collabPublication), local: local, shared: shared, writes: make(chan CollabRecordMutation, min(max(capacity, 1), 1024)), readers: make(chan struct{}, 64), stop: stop, cancel: cancel}
 	if shared != nil {
 		go s.runWrites()
 	}
@@ -68,9 +68,6 @@ func (s *SafeCollabRecordsStore) enqueue(mutation CollabRecordMutation) {
 		return
 	}
 	queue := s.writes
-	if collabRecordPartition(normalized.Kind) != 0 {
-		queue = s.dispositions
-	}
 	select {
 	case queue <- normalized:
 	default:
@@ -84,28 +81,16 @@ func (s *SafeCollabRecordsStore) runWrites() {
 		select {
 		case <-s.stop.Done():
 			return
-		case first = <-s.dispositions:
-		default:
-			select {
-			case <-s.stop.Done():
-				return
-			case first = <-s.dispositions:
-			case first = <-s.writes:
-			}
+		case first = <-s.writes:
 		}
 		batch := []CollabRecordMutation{first}
 	drain:
 		for len(batch) < 64 {
 			select {
-			case next := <-s.dispositions:
+			case next := <-s.writes:
 				batch = append(batch, next)
 			default:
-				select {
-				case next := <-s.writes:
-					batch = append(batch, next)
-				default:
-					break drain
-				}
+				break drain
 			}
 		}
 		s.applySharedBatch(batch)
@@ -276,21 +261,20 @@ func (s *SafeCollabRecordsStore) Consumed(ctx context.Context, value CollabConsu
 
 func (s *SafeCollabRecordsStore) Replaced(ctx context.Context, value CollabReplacedRecord) (ok bool) {
 	defer collabRecover(&collabSafety.recordPanics)
-	if !s.local.Replaced(ctx, value) {
+	if !s.publish(ctx, CollabRecordMutation{Kind: CollabRecordMutationReplaced, Replaced: value}) {
 		return false
 	}
-	s.enqueue(CollabRecordMutation{Kind: CollabRecordMutationReplaced, Replaced: value})
-	return true
+	return s.local.Replaced(ctx, value)
 }
 
 func (s *SafeCollabRecordsStore) Terminated(ctx context.Context, value CollabTerminatedRecord) (ok bool) {
 	defer collabRecover(&collabSafety.recordPanics)
+	value.CopiesTruncated = value.CopiesTruncated || len(value.Copies) > CollabRecordMaxCopies
 	value.Copies = slices.Clone(value.Copies[:min(len(value.Copies), CollabRecordMaxCopies)])
-	if !s.local.Terminated(ctx, value) {
+	if !s.publish(ctx, CollabRecordMutation{Kind: CollabRecordMutationTerminated, Terminated: value}) {
 		return false
 	}
-	s.enqueue(CollabRecordMutation{Kind: CollabRecordMutationTerminated, Terminated: value})
-	return true
+	return s.local.Terminated(ctx, value)
 }
 
 func (s *SafeCollabRecordsStore) PendingIssued(ctx context.Context, record CollabIssuedRecord) (token CollabIssuedToken, ok bool) {
@@ -308,8 +292,9 @@ func (s *SafeCollabRecordsStore) VoidIssued(ctx context.Context, token CollabIss
 	s.enqueue(CollabRecordMutation{Kind: CollabRecordMutationVoid, Token: token})
 }
 
-func (s *SafeCollabRecordsStore) IncrementTreeLocalEnding(ctx context.Context, scope CollabRecordScope, event CollabDigest) (int, bool) {
-	return s.ReserveTreeLocalEnding(ctx, scope, event)
+// Deprecated: only the explicit pre-delivery reservation APIs may add a count.
+func (s *SafeCollabRecordsStore) IncrementTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool) {
+	return CollabTreeLocalEndingLimit, false
 }
 func (s *SafeCollabRecordsStore) ReserveTreeLocalEnding(ctx context.Context, scope CollabRecordScope, event CollabDigest) (count int, ok bool) {
 	count = CollabTreeLocalEndingLimit
@@ -317,60 +302,68 @@ func (s *SafeCollabRecordsStore) ReserveTreeLocalEnding(ctx context.Context, sco
 	if ctx.Err() != nil || s.stop.Err() != nil {
 		return count, false
 	}
-	if s.shared == nil {
-		count, ok = s.local.IncrementTreeLocalEnding(ctx, scope, event)
-		if !ok {
-			count = CollabTreeLocalEndingLimit
-		}
-		return
-	}
-	reserver, supported := s.shared.(CollabLocalEndingReserver)
+	local, supported := s.local.(CollabLocalEndingReserver)
 	if !supported {
 		return count, false
 	}
-	select {
-	case s.readers <- struct{}{}:
-	default:
+	if s.shared == nil {
+		return local.ReserveTreeLocalEnding(ctx, scope, event)
+	}
+	shared, supported := s.shared.(CollabLocalEndingReserver)
+	if !supported {
 		return count, false
 	}
-	bounded, cancel := context.WithTimeout(ctx, CollabRecordTimeout)
-	defer cancel()
-	type reservation struct {
-		count int
-		ok    bool
+	count, ok = s.required(ctx, collabPublicationKey{scope: scope, field: "e:" + string(event)}, func(bounded context.Context) (int, bool) { return shared.ReserveTreeLocalEnding(bounded, scope, event) })
+	if !ok {
+		return CollabTreeLocalEndingLimit, false
 	}
-	done := make(chan reservation, 1)
-	go func() {
-		defer func() { <-s.readers }()
-		result := reservation{count: CollabTreeLocalEndingLimit}
-		func() {
-			defer collabRecover(&collabSafety.recordPanics)
-			result.count, result.ok = reserver.ReserveTreeLocalEnding(bounded, scope, event)
-		}()
-		done <- result
-	}()
-	select {
-	case <-bounded.Done():
-		return count, false
-	case result := <-done:
-		if !result.ok || bounded.Err() != nil {
-			return count, false
-		}
-		localCount, localOK := s.local.IncrementTreeLocalEnding(ctx, scope, event)
-		if !localOK {
-			return count, false
-		}
-		return max(localCount, result.count), true
+	localCount, ok := local.ReserveTreeLocalEnding(ctx, scope, event)
+	if !ok {
+		return CollabTreeLocalEndingLimit, false
 	}
+	return max(count, localCount), true
 }
-
+func (s *SafeCollabRecordsStore) ReserveLocalEnding(ctx context.Context, records []CollabTerminatedRecord) (count int, ok bool) {
+	count = CollabTreeLocalEndingLimit
+	defer collabRecover(&collabSafety.recordPanics)
+	rows, valid := PrepareCollabLocalEnding(records, time.Now())
+	if !valid || ctx.Err() != nil || s.stop.Err() != nil {
+		return count, false
+	}
+	// Freeze caller-owned slices before asynchronous shared I/O.
+	records = make([]CollabTerminatedRecord, 0, len(rows)-1)
+	for _, m := range rows[1:] {
+		records = append(records, m.Terminated)
+	}
+	local, supported := s.local.(CollabLocalEndingAdmission)
+	if !supported {
+		return count, false
+	}
+	if s.shared == nil {
+		return local.ReserveLocalEnding(ctx, records)
+	}
+	shared, supported := s.shared.(CollabLocalEndingAdmission)
+	if !supported {
+		return count, false
+	}
+	// Include the complete normalized plan in coalescing identity.
+	count, ok = s.required(ctx, collabAdmissionPublicationKey(rows), func(bounded context.Context) (int, bool) { return shared.ReserveLocalEnding(bounded, records) })
+	if !ok {
+		return CollabTreeLocalEndingLimit, false
+	}
+	localCount, ok := local.ReserveLocalEnding(ctx, records)
+	if !ok {
+		return CollabTreeLocalEndingLimit, false
+	}
+	return max(count, localCount), true
+}
 func (s *SafeCollabRecordsStore) TerminalRejected(ctx context.Context, record CollabTerminalRejectionRecord) (count int, ok bool) {
 	defer collabRecover(&collabSafety.recordPanics)
 	count, ok = s.local.TerminalRejected(ctx, record)
 	if ok {
-		s.enqueue(CollabRecordMutation{Kind: CollabRecordMutationTerminalRejected, TerminalRejection: record})
+		ok = s.publish(ctx, CollabRecordMutation{Kind: CollabRecordMutationTerminalRejected, TerminalRejection: record})
 	}
-	return count, ok
+	return
 }
 
 func collabBudgetQueries(queries []CollabRecordQuery, seen *map[CollabRecordQuery]bool, truncated bool) ([]CollabRecordQuery, bool) {
