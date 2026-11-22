@@ -43,6 +43,18 @@ describe('GroupSelector simple-mode binding policy', () => {
     const wrapper = mountSelector([1, 2])
     expect(wrapper.emitted('update:modelValue')).toEqual([[[1]]])
   })
+
+  it('preserves unavailable settings choices when explicitly requested', async () => {
+    authState.isSimpleMode = true
+    const wrapper = mount(GroupSelector, {
+      props: { modelValue: [1, 2, 7], groups, preserveUnavailable: true },
+      global: { stubs: { GroupBadge: true, Icon: true } }
+    })
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    await wrapper.get('input[type="checkbox"]').setValue(false)
+    expect(wrapper.emitted('update:modelValue')).toEqual([[[2, 7]]])
+    wrapper.unmount()
+  })
 })
 
 describe('GroupSelector exclusive tag', () => {

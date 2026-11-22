@@ -35,6 +35,7 @@
 | 分组与模型 | [分组](guides/groups.md) · [提示词缓存](guides/caching.md) · [智商检测](guides/iq-check.md) · [模型降档识别](guides/quality-routing.md) · [Codex STATE](guides/codex-state.md) · [渠道监控](guides/channel-monitor.md) |
 | 计费与运营 | [内置支付](guides/payment.md)（[English](guides/payment.en.md)） · [用量指标与导出](guides/usage.md) · [上游余额](guides/upstream-balance.md) · [在线客服与工单](guides/customer-support.md) |
 | 管理与集成 | [管理员与权限](guides/admin-permissions.md) · [OpenAI 账号 2FA 导入](guides/openai-totp.md) · [只读 MCP](guides/mcp.md) · [管理 MCP](guides/management-mcp.md) · [管理员密钥](guides/admin-api-keys.md) |
+| Codex 协作 | [消息可见范围、用户说明与逐站验收](guides/codex-collaboration.md)（[English](guides/codex-collaboration.en.md)） |
 
 ## API 参考
 

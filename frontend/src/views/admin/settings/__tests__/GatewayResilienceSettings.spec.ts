@@ -2,11 +2,15 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import GatewayResilienceSettings from '../GatewayResilienceSettings.vue'
 import type { GatewayResilienceSettings as Settings } from '@/api/admin/resilience'
+import { collaborationDefaults, COLLAB_BOOLEAN_FIELDS } from '@/utils/collaborationSettings'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn() }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), groups: vi.fn() }))
+vi.mock('vue-i18n', async () => ({
+  ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'),
+  useI18n: () => ({ t: (key: string) => key })
+}))
 vi.mock('vue-router', () => ({ RouterLink: { props: ['to'], template: '<a><slot /></a>' } }))
-vi.mock('@/api/admin', () => ({ adminAPI: { resilience: { getSettings: mocks.get, updateSettings: mocks.save } } }))
+vi.mock('@/api/admin', () => ({ adminAPI: { resilience: { getSettings: mocks.get, updateSettings: mocks.save }, groups: { getAllIncludingInactive: mocks.groups } } }))
 
 function settings(): Settings {
   return {
@@ -47,6 +51,7 @@ function settings(): Settings {
 
 function mountSettings() {
   return mount(GatewayResilienceSettings, { global: { stubs: {
+    GroupSelector: { props: { modelValue: Array, groups: Array, preserveUnavailable: Boolean }, emits: ['update:modelValue'], template: '<button type="button" @click="$emit(\'update:modelValue\', [7, 9])">Groups</button>' },
     Toggle: { props: ['modelValue', 'disabled'], emits: ['update:modelValue'], template: '<button type="button" :disabled="disabled" @click="$emit(\'update:modelValue\', !modelValue)">Toggle</button>' }
   } } })
 }
@@ -54,8 +59,256 @@ function mountSettings() {
 describe('gateway resilience settings', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.groups.mockResolvedValue([])
     mocks.get.mockResolvedValue({ settings: settings(), defaults: settings() })
     mocks.save.mockImplementation(async (payload: Settings) => ({ settings: payload, defaults: settings() }))
+  })
+
+  it.each([
+    null, { ladder: null }, { records: 'future' }, { local_ending: null },
+    { local_ending: { mode: 'future', groups: [] } }, { local_ending: { groups: null } }
+  ])('isolates unsupported server collaboration values on load and save: %j', async (collab) => {
+    const current = { ...settings(), collab }
+    mocks.get.mockResolvedValue({ settings: current, defaults: current })
+    mocks.save.mockResolvedValue({ settings: current, defaults: current })
+    const w = mountSettings(); await flushPromises()
+    expect(w.find('[data-testid="resilience-field-maxAttempts"]').exists()).toBe(true)
+    expect(w.text()).toContain('admin.resilience.settings.collab.unsupported')
+    expect(w.get('[data-testid="resilience-collab-ladder"]').attributes('disabled')).toBeDefined()
+    // Applying an unchanged server document is not an edit to its unsupported section.
+    await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+    expect(w.text()).not.toContain('admin.resilience.settings.invalidJson')
+    await w.get('[data-testid="resilience-field-maxAttempts"]').setValue('3')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(mocks.save.mock.calls[0][0]).not.toHaveProperty('collab')
+    expect(w.text()).toContain('admin.resilience.settings.saved')
+    w.unmount()
+  })
+
+  it.each([false, true])('preserves opaque server fields and missing defaults on ordinary or JSON saves (%s)', async (advanced) => {
+    const collab = { ladder: true, future_policy: { mode: 'observe' }, local_ending: { mode: 'off', future_scope: ['synthetic'] } }
+    mocks.get.mockResolvedValue({ settings: { ...settings(), collab }, defaults: settings() })
+    const w = mountSettings(); await flushPromises()
+    const json = JSON.parse(w.get<HTMLTextAreaElement>('[data-testid="resilience-json"]').element.value)
+    expect(json.collab).toEqual(collab)
+    if (advanced) {
+      json.budget.max_attempts = 3
+      await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify(json))
+      await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+    } else {
+      await w.get('[data-testid="resilience-field-maxAttempts"]').setValue('3')
+    }
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0].collab).toEqual(collab)
+    expect(w.get('[data-testid="resilience-save"]').attributes('disabled')).toBeDefined()
+    w.unmount()
+  })
+
+  it('preserves opaque fields when changing a known switch or local ending mode', async () => {
+    const collab = { ladder: true, future_policy: 'observe', local_ending: { mode: 'off', future_scope: 'synthetic' } }
+    mocks.get.mockResolvedValue({ settings: { ...settings(), collab }, defaults: settings() })
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-testid="resilience-collab-records"]').trigger('click')
+    await w.get('[data-testid="resilience-collab-local-ending-all"]').setValue(true)
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0].collab).toEqual({
+      ...collab, records: false, local_ending: { ...collab.local_ending, mode: 'all' }
+    })
+    w.unmount()
+  })
+
+  it.each([{ future_option: true }, { local_ending: { future_scope: 'synthetic' } }])('rejects unknown JSON fields not returned by the server: %j', async (collab) => {
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify({ ...settings(), collab }))
+    await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+    expect(w.text()).toContain('admin.resilience.settings.invalidJson')
+    expect(w.get('[data-testid="resilience-save"]').attributes('disabled')).toBeDefined()
+    w.unmount()
+  })
+
+  it('gates lossless-first on ladder and retains its saved choice', async () => {
+    const w = mountSettings(); await flushPromises()
+    const toggle = w.get('[data-testid="resilience-collab-lossless_first"]')
+    expect(toggle.attributes('disabled')).toBeDefined()
+    expect(w.getComponent('[data-testid="resilience-collab-lossless_first"]').props('modelValue')).toBe(false)
+    expect(w.text()).toContain('admin.resilience.settings.collab.lossless_firstHint')
+    await w.get('[data-testid="resilience-collab-ladder"]').trigger('click')
+    await toggle.trigger('click')
+    await w.get('[data-testid="resilience-collab-ladder"]').trigger('click')
+    expect(toggle.attributes('disabled')).toBeDefined()
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0].collab).toEqual({ ladder: false, lossless_first: true })
+    w.unmount()
+  })
+
+  it('preserves server extensions through reset and partial JSON edits', async () => {
+    const collab = { ladder: true, future_policy: 'observe', local_ending: { mode: 'all', future_scope: 'synthetic' } }
+    mocks.get.mockResolvedValue({ settings: { ...settings(), collab }, defaults: { ...settings(), collab: collaborationDefaults() } })
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify({ ...settings(), collab: { records: false } }))
+    await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0].collab).toEqual({ ...collab, records: false })
+    const reset = w.findAll('button').find((button) => button.text() === 'admin.resilience.settings.resetDefaults')!
+    await reset.trigger('click')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[1][0].collab).toEqual({
+      ...collab, ladder: false, records: true, local_ending: { ...collab.local_ending, mode: 'off' }
+    })
+    w.unmount()
+  })
+
+  it('rejects changes to opaque server fields while accepting a reordered JSON round trip', async () => {
+    const collab = { ladder: true, future_policy: { mode: 'observe', enabled: true }, local_ending: { mode: 'off', future_scope: 'synthetic' } }
+    mocks.get.mockResolvedValue({ settings: { ...settings(), collab }, defaults: settings() })
+    const w = mountSettings(); await flushPromises()
+    for (const changed of [
+      { ...collab, future_policy: { mode: 'enforce', enabled: true } },
+      { ...collab, local_ending: { ...collab.local_ending, future_scope: 'changed' } }
+    ]) {
+      await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify({ ...settings(), collab: changed }))
+      await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+      expect(w.text()).toContain('admin.resilience.settings.invalidJson')
+      expect(w.get('[data-testid="resilience-save"]').attributes('disabled')).toBeDefined()
+    }
+    await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify({
+      ...settings(), collab: { ...collab, future_policy: { enabled: true, mode: 'observe' } }
+    }))
+    await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+    expect(w.text()).not.toContain('admin.resilience.settings.invalidJson')
+    await w.get('[data-testid="resilience-field-maxAttempts"]').setValue('3')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0].collab).toEqual(collab)
+    w.unmount()
+  })
+
+  it('allows an explicit valid JSON replacement for unsupported server values', async () => {
+    mocks.get.mockResolvedValue({ settings: { ...settings(), collab: { ladder: null } }, defaults: settings() })
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify({ ...settings(), collab: { ladder: true } }))
+    await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+    expect(w.find('[data-testid="resilience-collab-unsupported"]').exists()).toBe(false)
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0].collab).toEqual({ ladder: true })
+    w.unmount()
+  })
+
+  it('shows missing collaboration defaults without sending an untouched section', async () => {
+    const w = mountSettings(); await flushPromises()
+    for (const key of COLLAB_BOOLEAN_FIELDS) {
+      expect(w.getComponent('[data-testid="resilience-collab-' + key + '"]').props('modelValue')).toBe(key === 'records')
+    }
+    expect(w.get('[data-testid="resilience-save"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-testid="collaboration-plaintext-consent"]').findAll('li')).toHaveLength(3)
+    await w.get('[data-testid="resilience-field-maxAttempts"]').setValue('3')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0]).not.toHaveProperty('collab')
+    expect(mocks.groups).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('saves every collaboration switch and group scope, preserving dependent choices with ladder off', async () => {
+    const w = mountSettings(); await flushPromises()
+    const routing = w.get('[data-testid="resilience-collab-record_routing"]')
+    const ending = w.get('[data-testid="resilience-collab-local-ending-groups"]')
+    expect(routing.attributes('disabled')).toBeDefined()
+    expect(ending.element.closest('fieldset')?.disabled).toBe(true)
+    for (const key of COLLAB_BOOLEAN_FIELDS) await w.get('[data-testid="resilience-collab-' + key + '"]').trigger('click')
+    expect(routing.attributes('disabled')).toBeUndefined()
+    await ending.setValue(true); await flushPromises()
+    expect(mocks.groups).toHaveBeenCalledTimes(1)
+    expect(w.getComponent('[data-testid="resilience-collab-groups"]').props('preserveUnavailable')).toBe(true)
+    await w.get('[data-testid="resilience-collab-groups"]').trigger('click')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0].collab).toEqual({
+      incremental_declarations: true, records: false, tree_affinity: true, ladder: true, lossless_first: true,
+      local_ending: { mode: 'groups', groups: [7, 9] }, record_routing: true, strict_marker_veto: true
+    })
+    expect(w.get('[data-testid="resilience-save"]').attributes('disabled')).toBeDefined()
+    await w.get('[data-testid="resilience-collab-ladder"]').trigger('click')
+    expect(routing.attributes('disabled')).toBeDefined()
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[1][0].collab).toMatchObject({
+      ladder: false, record_routing: true, local_ending: { mode: 'groups', groups: [7, 9] }
+    })
+    w.unmount()
+  })
+
+  it.each(['off', 'groups', 'all'] as const)('reads and writes local ending mode %s', async (mode) => {
+    const current = settings()
+    current.collab = { ...collaborationDefaults(), ladder: true, local_ending: { mode, groups: [7] } }
+    mocks.get.mockResolvedValue({ settings: current, defaults: settings() })
+    const w = mountSettings(); await flushPromises()
+    expect(w.get<HTMLInputElement>('[data-testid="resilience-collab-local-ending-' + mode + '"]').element.checked).toBe(true)
+    await w.get('[data-testid="resilience-field-maxAttempts"]').setValue('3')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0].collab).toEqual(current.collab)
+    w.unmount()
+  })
+
+  it('returns to defaults when an older backend drops the collaboration section on save', async () => {
+    mocks.save.mockResolvedValue({ settings: settings(), defaults: settings() })
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-testid="resilience-collab-ladder"]').trigger('click')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(w.getComponent('[data-testid="resilience-collab-ladder"]').props('modelValue')).toBe(false)
+    expect(w.getComponent('[data-testid="resilience-collab-records"]').props('modelValue')).toBe(true)
+    expect(w.get('[data-testid="resilience-save"]').attributes('disabled')).toBeDefined()
+    await w.get('[data-testid="resilience-field-maxAttempts"]').setValue('3')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[1][0]).not.toHaveProperty('collab')
+    w.unmount()
+  })
+
+  it('keeps the collaboration draft when an older JSON document omits it', async () => {
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-testid="resilience-collab-ladder"]').trigger('click')
+    await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify(settings()))
+    await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0].collab.ladder).toBe(true)
+    w.unmount()
+  })
+
+  it.each([
+    null, [], { ladder: 'true' }, { records: null },
+    { local_ending: null }, { local_ending: { mode: 'invalid' } },
+    { local_ending: { groups: [0] } }, { local_ending: { groups: ['7'] } }
+  ])('rejects malformed collaboration JSON without changing the draft: %j', async (collab) => {
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify({ ...settings(), collab }))
+    await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+    expect(w.text()).toContain('admin.resilience.settings.invalidJson')
+    expect(w.get('[data-testid="resilience-save"]').attributes('disabled')).toBeDefined()
+    expect(mocks.save).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('displays partial JSON with defaults but sends only edited fields and obeys the master switch', async () => {
+    const w = mountSettings(); await flushPromises()
+    await w.get('[data-testid="resilience-json"]').setValue(JSON.stringify({ ...settings(), collab: { ladder: true } }))
+    await w.get('[data-testid="resilience-apply-json"]').trigger('click')
+    for (const key of COLLAB_BOOLEAN_FIELDS) expect(w.getComponent('[data-testid="resilience-collab-' + key + '"]').props('modelValue')).toBe(key === 'records' || key === 'ladder')
+    await w.get('[data-testid="resilience-enabled"]').trigger('click')
+    for (const key of COLLAB_BOOLEAN_FIELDS) expect(w.get('[data-testid="resilience-collab-' + key + '"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-testid="resilience-collab-local-ending-all"]').element.closest('fieldset')?.disabled).toBe(true)
+    await w.get('[data-testid="resilience-save"]').trigger('click'); await flushPromises()
+    expect(mocks.save.mock.calls[0][0].collab).toEqual({ ladder: true })
+    w.unmount()
+  })
+
+  it('preserves saved groups after a group load failure and supports retry', async () => {
+    const current = settings()
+    current.collab = { ...collaborationDefaults(), ladder: true, local_ending: { mode: 'groups', groups: [7] } }
+    mocks.get.mockResolvedValue({ settings: current, defaults: settings() })
+    mocks.groups.mockRejectedValueOnce(new Error('unavailable')).mockResolvedValue([])
+    const w = mountSettings(); await flushPromises()
+    expect(w.text()).toContain('admin.resilience.settings.collab.groupsFailed')
+    expect(w.get('[data-testid="resilience-save"]').attributes('disabled')).toBeDefined()
+    await w.get('[data-testid="resilience-card-collab"] [role="alert"] button').trigger('click'); await flushPromises()
+    expect(w.getComponent('[data-testid="resilience-collab-groups"]').props('modelValue')).toEqual([7])
+    w.unmount()
   })
 
   it('saves a section switch and a numeric field as one document', async () => {

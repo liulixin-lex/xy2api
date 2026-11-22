@@ -156,6 +156,7 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.openai.collaborationPlaintextDesc') }}
             </p>
+            <CollaborationPlaintextConsent id="bulk-edit-openai-collaboration-consent" />
           </div>
           <input
             v-model="enableOpenAICollaborationPlaintext"
@@ -177,6 +178,7 @@
             role="switch"
             :disabled="!enableOpenAICollaborationPlaintext"
             :aria-checked="openaiCollaborationPlaintextEnabled"
+            aria-describedby="bulk-edit-openai-collaboration-consent"
             aria-labelledby="bulk-edit-openai-collaboration-plaintext-label"
             :class="[
               'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -1598,6 +1600,7 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import { useAdminAccessStore } from '@/stores/adminAccess'
 import { applyOperatorAccountPayloadRules, operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 import GroupSelector from '@/components/common/GroupSelector.vue'
+import CollaborationPlaintextConsent from '@/components/common/CollaborationPlaintextConsent.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
 import {

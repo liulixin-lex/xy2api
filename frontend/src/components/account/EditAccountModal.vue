@@ -1854,14 +1854,16 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.openai.collaborationPlaintextDesc') }}
             </p>
+            <CollaborationPlaintextConsent id="edit-openai-collaboration-consent" />
           </div>
           <button
             type="button"
             role="switch"
             :aria-checked="openaiCollaborationPlaintextEnabled"
             aria-labelledby="edit-openai-collaboration-plaintext-label"
+            aria-describedby="edit-openai-collaboration-consent"
             data-testid="edit-openai-collaboration-plaintext-toggle"
-            @click="openaiCollaborationPlaintextEnabled = !openaiCollaborationPlaintextEnabled"
+            @click="openaiCollaborationPlaintextEnabled = !openaiCollaborationPlaintextEnabled; openaiCollaborationPlaintextTouched = true"
             :class="[
               'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
               openaiCollaborationPlaintextEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
@@ -3247,6 +3249,7 @@ import { useAdminAccessStore } from '@/stores/adminAccess'
 import { REFRESHABLE_ACCOUNT_TYPES, applyOperatorAccountPayloadRules, operatorAccountErrorMessage } from '@/components/account/operatorAccountRules'
 import CodexAccountTicketSettings from '@/components/account/CodexAccountTicketSettings.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
+import CollaborationPlaintextConsent from '@/components/common/CollaborationPlaintextConsent.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
@@ -3833,6 +3836,7 @@ const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openaiCollaborationPlaintextEnabled = ref(false)
+const openaiCollaborationPlaintextTouched = ref(false)
 const openAILongContextBillingEnabled = ref(false)
 // OpenAI 订阅档位（Plus / Pro 20x / Pro 5x / Business Standard / Business Premium / Free）手动覆盖值,
 // 存于 credentials.plan_type;'' 表示清空/自动识别
@@ -4332,6 +4336,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openaiCollaborationPlaintextEnabled.value = false
+  openaiCollaborationPlaintextTouched.value = false
   openAILongContextBillingEnabled.value = false
   editPlanType.value = ''
   openAICompactMode.value = 'auto'
@@ -5867,11 +5872,9 @@ const handleSubmit = async () => {
       } else {
         delete newExtra.openai_responses_flatten_namespaces
       }
-      // 缺省即关闭，同样不写空值
-      if (openaiCollaborationPlaintextEnabled.value) {
-        newExtra.openai_collaboration_plaintext = true
-      } else {
-        delete newExtra.openai_collaboration_plaintext
+      // This endpoint replaces extra; untouched edits must retain the stored value verbatim.
+      if (openaiCollaborationPlaintextTouched.value) {
+        newExtra.openai_collaboration_plaintext = openaiCollaborationPlaintextEnabled.value
       }
       if (isSparkShadow.value) {
         delete newExtra.openai_long_context_billing_enabled

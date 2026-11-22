@@ -42,6 +42,16 @@
   "anthropic_latency_hold": { "enabled": true },
   "same_site_hold": { "enabled": true },
   "collaboration_plaintext": { "enabled": false, "models": [] },
+  "collab": {
+    "incremental_declarations": false,
+    "records": true,
+    "tree_affinity": false,
+    "ladder": false,
+    "lossless_first": false,
+    "local_ending": { "mode": "off", "groups": [] },
+    "record_routing": false,
+    "strict_marker_veto": false
+  },
   "last_resort": { "enabled": true },
   "balance": { "enabled": true, "pause_seconds": 300 },
   "budget": {
@@ -130,6 +140,24 @@
 |---|---|---|---|
 | `enabled` | false | 布尔 | 功能开关 |
 | `models` | `[]` | 最多 16 条，每条去首尾空白后 1–128 字符 | 已验证的实际出站模型；不区分大小写，重复项自动合并。清单为空时不转换任何请求 |
+
+### 协作恢复 `collab`
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `incremental_declarations` | false | 适配会话中途新增的协作工具声明；关闭沿用现有处理 |
+| `records` | true | 记录签发、成功读取及明文投递，不改变转发；关闭后阶梯按没有这些记录处理 |
+| `tree_affinity` | false | 加强会话树内账号粘性；关闭沿用现有选号 |
+| `ladder` | false | 先原样执行现有修复，仅在即将报错或不认领新密文证据时进入阶梯；关闭只走现有修复，不读取已终结、已替换状态 |
+| `lossless_first` | false | 依赖阶梯，把阶梯提前到现有修复之前，减少静默丢失；少数情况下可能增加报错，知情后单独决定 |
+| `local_ending.mode` | `off` | `off`、`groups`、`all`；依赖阶梯，对覆盖分组的符合条件回合进行本地收尾 |
+| `local_ending.groups` | `[]` | 分组 ID 数组，通过现有分组选择器编辑；仅在 `groups` 模式生效，空数组不覆盖任何分组 |
+| `record_routing` | false | 依赖阶梯，按记录排序恢复账号及为重派借用可读内容；关闭不带目标、不借用 |
+| `strict_marker_veto` | false | 强密文证据否决明文标记，整体为 JSON 不单独否决；可能增加报错，不建议开启；关闭沿用现有检查 |
+
+八项配置中，仅记录默认开启。优先保留内容、本地收尾与按记录路由在阶梯关闭时不可操作，但保留已保存选择。阶梯开启、记录关闭时，已终结及已替换状态仍读写；仅关闭本地收尾时不再产生新收尾，阶梯仍读取已有的已终结状态。各项修改只影响之后开始的请求。
+
+旧后端缺少本节时，页面显示默认值，不把未修改的本节附加到其他设置的保存请求中。高级 JSON 缺少本节时保留当前编辑值。旧版本保存导致字段丢失后，再升级恢复上述默认值。默认现有修复先执行，阶梯失败返回保存的原有错误，保持状态、代码与可重试性；优先保留内容及严格标记检查有额外报错风险。服务端本节含 null 或不支持的值时只禁用本节，其他保存不发送它；未知扩展字段在普通保存及 JSON 往返中保留，页面不发送未操作的默认字段，不接受服务端未返回的未知字段。知情说明、用户注意事项及逐站验收见 [Codex 协作消息与恢复](codex-collaboration.md)。
 
 ### 余额暂停 `balance`
 
