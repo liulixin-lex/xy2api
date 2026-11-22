@@ -30,6 +30,8 @@ func TestCollabEvidenceClassification(t *testing.T) {
 				{"opaque", "", "Cannot prove ownership of opaque conversation state", CollabEvidenceGradeUnclaimed, CollabFamilyNone},
 				{"ownership prose", "", "encrypted_agent_recovery_owner_conflict", CollabEvidenceGradeUnclaimed, CollabFamilyNone},
 				{"policy", "content_policy_violation", "Quoted: encrypted content could not be decrypted", CollabEvidenceGradeUnclaimed, CollabFamilyNone},
+				{"cyber policy", "cyber_policy", "encrypted content could not be decrypted", CollabEvidenceGradeUnclaimed, CollabFamilyNone},
+				{"context wording", "invalid_request_error", "maximum context length exceeded", CollabEvidenceGradeUnclaimed, CollabFamilyNone},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					payload, err := json.Marshal(map[string]any{"error": map[string]string{"code": tc.code, "message": tc.message}})
@@ -98,4 +100,11 @@ func TestCollabEvidenceConflictingNamesStayNamed(t *testing.T) {
 	got := ClassifyCollabEvidence(CollabEvidenceInput{Payload: []byte(`{"error":{"code":"invalid_encrypted_content","item_id":"rs_alpha","message":"for item amsg_task"}}`)})
 	require.NotNil(t, got.Named)
 	require.True(t, got.Named.Ambiguous)
+}
+
+func TestCollabEvidenceSavedLocationIsDetached(t *testing.T) {
+	index := 2
+	snapshot := NewCollabSavedTerminal(CollabTerminalSnapshot{Rejection: CollabEvidence{Named: &CollabNamedItem{InputIndex: &index}}})
+	index = 4
+	require.Equal(t, 2, *snapshot.Snapshot.Rejection.Named.InputIndex)
 }

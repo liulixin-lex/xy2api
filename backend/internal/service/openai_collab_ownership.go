@@ -12,6 +12,9 @@ import (
 // Ownership capacity is local to an account/model only in lossless-first.
 // A persistence failure must not widen this into an account-wide cooldown.
 func (s *OpenAIGatewayService) collabOwnershipCooldown(ctx context.Context, account *Account, status int, headers http.Header, body []byte, model string) bool {
+	if ctx == nil {
+		return false
+	}
 	if gate, _ := ctx.Value(collabLosslessKey{}).(*CollabLosslessGate); gate == nil {
 		return false
 	}

@@ -69,7 +69,8 @@ func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
 		return out
 	}
 	// Policy and context errors cannot be promoted by a quoted decryption phrase.
-	if code == "context_length_exceeded" || code == "content_policy_violation" || code == "invalid_prompt" || code == "cyber_policy_violation" {
+	if contentPolicyCode(code, strings.ToLower(object.Get("type").String()), strings.ToLower(object.Raw)) || contentPolicyText(400, message, strings.ToLower(object.Raw)) ||
+		code == "context_length_exceeded" || code == "context_window_exceeded" || code == "invalid_prompt" || code == "cyber_policy_violation" || strings.Contains(message, "maximum context length") {
 		return out
 	}
 	verified := IsEncryptedContentRejection(code, message) || code == "encrypted_content_rejected" ||

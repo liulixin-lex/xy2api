@@ -28,6 +28,10 @@ func NewCollabSavedTerminal(snapshot CollabTerminalSnapshot) *CollabSavedTermina
 	snapshot.Headers = snapshot.Headers.Clone()
 	if snapshot.Rejection.Named != nil {
 		named := *snapshot.Rejection.Named
+		if named.InputIndex != nil {
+			index := *named.InputIndex
+			named.InputIndex = &index
+		}
 		snapshot.Rejection.Named = &named
 	}
 	if snapshot.Rejection.Inner != nil {
