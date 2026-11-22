@@ -67,6 +67,10 @@ func (h *ResilienceHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "Request body too large or unreadable")
 		return
 	}
+	if err := checkCollabPatch(body); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
 	next := h.svc.GetSettings()
 	// A map in the body replaces the current one (decoding would merge into
 	// it, so keys could never be removed); slices are replaced anyway.

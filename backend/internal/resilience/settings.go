@@ -21,6 +21,7 @@ const SettingKey = "gateway_resilience_settings"
 // switch restores the pre-resilience behavior; newer child switches restore
 // the behavior preceding their own introduction.
 type Settings struct {
+	Collab                 CollabSettings                 `json:"collab"`
 	Enabled                bool                           `json:"enabled"`
 	Failure                FailureSettings                `json:"failure"`
 	Session                SessionSettings                `json:"session"`
@@ -295,6 +296,7 @@ type ReservationSettings struct {
 // Defaults returns the documented default settings (design §10).
 func Defaults() Settings {
 	return Settings{
+		Collab:                 DefaultCollabSettings(),
 		Enabled:                true,
 		Failure:                FailureSettings{TransientCooldownSeconds: 30, RetryAfterCapSeconds: 120, BalanceKeywordsExtra: []string{}, DecisionV2: true},
 		Session:                SessionSettings{Enabled: true, PostOutputRebind: true, StreakThreshold: 2, StreakWindowSeconds: 600, AvoidSeconds: 600},
@@ -449,6 +451,11 @@ func (s Settings) Validate() error {
 		}
 	}
 
+	check(ValidCollabLocalEndingMode(s.Collab.LocalEnding.Mode), "collab.local_ending.mode must be off, groups or all")
+	for _, group := range s.Collab.LocalEnding.Groups {
+		check(group > 0, "collab.local_ending.groups entries must be positive")
+	}
+
 	if len(p) > 0 {
 		return &ValidationError{Problems: p}
 	}
@@ -487,6 +494,7 @@ func Parse(raw string) (Settings, error) {
 
 // normalize fills nil collections so callers never branch on nil.
 func (s *Settings) normalize() {
+	s.Collab.normalize()
 	if s.Budget.BudgetStart == "" {
 		s.Budget.BudgetStart = BudgetStartArrival
 	}
@@ -694,6 +702,7 @@ func AnthropicLatencyHoldGeneration() uint64 { return anthropicLatencyHoldGen.Lo
 // it, for example) must not share its maps or slices.
 func (s Settings) Clone() Settings {
 	c := s
+	c.Collab.LocalEnding.Groups = slices.Clone(s.Collab.LocalEnding.Groups)
 	c.Failure.BalanceKeywordsExtra = append([]string(nil), s.Failure.BalanceKeywordsExtra...)
 	c.Keepalive.Edges = append([]string(nil), s.Keepalive.Edges...)
 	c.CollaborationPlaintext.Models = append([]string(nil), s.CollaborationPlaintext.Models...)

@@ -16,6 +16,8 @@ import (
 // update it through the request context. All methods are nil-safe so code
 // paths without a state (internal calls, tests) keep the 0.3.0 behaviour.
 type RequestState struct {
+	collabSettings        atomic.Pointer[Settings]
+	collab                *CollabRequestState
 	clientOutputBytes     atomic.Int64
 	upstreamHTTPStatus    int
 	upstreamHTTPAccount   int64
@@ -629,7 +631,11 @@ func SelectionEligibility[T any](s *RequestState) (gate T) {
 }
 
 // NewRequestState creates an empty state.
-func NewRequestState() *RequestState { return &RequestState{requestID: uuid.NewString()} }
+func NewRequestState() *RequestState {
+	s := &RequestState{requestID: uuid.NewString()}
+	s.collabSettings.Store(Current())
+	return s
+}
 
 // GatewayRequestID identifies this gateway request, even if a client reuses
 // its X-Request-ID. It does not replace any billing or correlation key.
@@ -693,6 +699,7 @@ func WithRequestState(ctx context.Context, st *RequestState) context.Context {
 	if st == nil {
 		return ctx
 	}
+	st.freezeCollabSettings()
 	return context.WithValue(ctx, stateKey{}, st)
 }
 
