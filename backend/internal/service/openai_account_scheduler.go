@@ -406,8 +406,8 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	markResilienceConfigError(ctx, err)
 	// xy2api resilience: last-resort soft selection instead of "no available
 	// account" (design §4.3). Continuations owned by an account keep failing
-	// as before.
-	if isNoAccountSelectionError(err) && strings.TrimSpace(previousResponseID) == "" {
+	// as before. A conversion retry cannot relax soft penalties.
+	if request.candidateConstraint == nil && isNoAccountSelectionError(err) && strings.TrimSpace(previousResponseID) == "" {
 		lrCtx := s.withOpenAIQuotaAutoPauseContext(ctx)
 		if requiredImageCapability == "" {
 			lrCtx = s.withOpenAIProfitControlGate(lrCtx, groupID)
@@ -417,7 +417,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			GroupID: groupID, Platform: NormalizeOpenAICompatiblePlatform(platform), SessionHash: sessionHash,
 			RequestedModel: requestedModel, RequiredTransport: requiredTransport, RequiredCapability: requiredCapability,
 			RequiredImageCapability: requiredImageCapability, RequireCompact: requireCompact, ExcludedIDs: origExcluded, firstOutputAvoided: firstOutputAvoided,
-			candidateConstraint: request.candidateConstraint, newSessionOutcome: newSessionLogState.outcome,
+			newSessionOutcome: newSessionLogState.outcome,
 			RequirePrivacySet: s.openAIGroupRequiresPrivacySet(lrCtx, groupID), UseUpstreamTokenCost: useUpstreamTokenCost,
 		}, avoided); lr != nil {
 			selection, err = lr, nil

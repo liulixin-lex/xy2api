@@ -478,7 +478,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	if requestCandidateConstraintFailure(req, account) != "" {
 		return nil, nil
 	}
-	result, acquireErr := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
+	result, acquireErr := s.acquireSelectionSlot(ctx, account, req.candidateConstraint)
 	if acquireErr == nil && result != nil && result.Acquired {
 		return withOpenAISelectionSlotGuard(result.ReleaseFunc, func(release func()) (*AccountSelectionResult, error) {
 			if req.candidateConstraint != nil {
