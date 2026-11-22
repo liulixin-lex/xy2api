@@ -92,6 +92,7 @@ const (
 	// upstream streams (design §7.8), per account.
 	MetricRelayKeepalive = "relay_keepalive"
 	MetricStateRejection = "state_rejection"
+	MetricFCOCompat      = "fco_compat"
 )
 
 // MetricsRetention bounds the history kept for the stats endpoint.

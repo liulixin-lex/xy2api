@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -533,6 +534,7 @@ retryChatResponsesWire:
 	if resp.StatusCode >= 400 {
 		_ = firstEvent.disarm()
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		observeOpenAIFCOHTTPError(ctx, c, responsesBody, respBody, resp.StatusCode, DefaultOpenAIFCORules(nil))
 		schedCapture.finishHTTP(resp, respBody)
 		if rejection := s.handleM7EncryptedFailure(ctx, c, account, respBody, resp.StatusCode, false, false); rejection != nil {
 			if next, _, ok := s.openAIRequestRepairAfterSignal(ctx, c, account, resp, rejection); ok {
@@ -587,6 +589,9 @@ retryChatResponsesWire:
 			return nil, foErr
 		}
 		return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
+	}
+	if bytes.Contains(responsesBody, []byte("function_call_output")) {
+		observeOpenAIFCOSuccess(ctx, responsesBody, DefaultOpenAIFCORules(nil))
 	}
 
 	// 9. Handle normal response

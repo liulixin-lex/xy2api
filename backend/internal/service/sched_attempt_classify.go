@@ -100,6 +100,13 @@ func schedMigrationMessage(message string) bool {
 			return true
 		}
 	}
+	for _, phrase := range []string{
+		"function_call_output requires call_id on http requests",
+	} {
+		if strings.Contains(m, phrase) {
+			return true
+		}
+	}
 	return false
 }
 

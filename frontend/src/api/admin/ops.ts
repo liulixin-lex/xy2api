@@ -23,6 +23,8 @@ export type OpsUpstreamErrorEvent = {
   kind?: string
   message?: string
   detail?: string
+  reason?: string
+  fco_shape?: Record<string, unknown>
 }
 
 export interface OpsDashboardOverview {
