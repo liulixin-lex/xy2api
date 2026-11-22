@@ -1,7 +1,10 @@
 package service
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"maps"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -59,4 +62,18 @@ func (s *OpenAIGatewayService) CollabDigest(domain resilience.CollabDigestDomain
 		framed = append(framed, part...)
 	}
 	return resilience.CollabDigest(s.cacheIdentityDigest("collab-v1/"+string(domain), string(framed)))
+}
+
+// collabBodyDigest matches the framed body digest without copying the request.
+func (s *OpenAIGatewayService) collabBodyDigest(body []byte) resilience.CollabDigest {
+	if s == nil || s.cfg == nil || s.cfg.JWT.Secret == "" {
+		return ""
+	}
+	h := hmac.New(sha256.New, []byte(s.cfg.JWT.Secret))
+	h.Write([]byte("collab-v1/" + string(resilience.CollabDigestDomainBody) + "\x00"))
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(body)))
+	h.Write(length[:])
+	h.Write(body)
+	return resilience.CollabDigest(hex.EncodeToString(h.Sum(nil)))
 }

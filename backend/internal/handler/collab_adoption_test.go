@@ -5,6 +5,7 @@ package handler
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/service"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestCollabUnmeteredErrorSettlesOnlyDeliveredRescue(t *testing.T) {
 	run := func(rescue bool) replayOutcome {
 		setReplayHandler(t, func(h *OpenAIGatewayHandler, usage *openAIWSUsageHandlerUsageLogRepoStub) {
 			usage.delay = 7 * time.Second
-			h.collabRescuable = func(*collabSeam) bool { return true }
+			h.collabRescuable = func(*collabSeam) *atomic.Bool { return seamTestAlways }
 			h.collabRescue = func(c *gin.Context, s *collabSeam, _ *collabWithheld) {
 				if !rescue {
 					return

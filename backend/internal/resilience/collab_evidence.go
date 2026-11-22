@@ -30,6 +30,7 @@ type CollabRequestShape struct {
 // Raw named identifiers remain transient until converted to a keyed digest.
 type CollabNamedItem struct {
 	InputIndex *int
+	Path       string
 	Identity   string
 	Family     CollabFamily
 	Located    bool

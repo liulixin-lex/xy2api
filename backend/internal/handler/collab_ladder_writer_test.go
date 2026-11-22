@@ -40,7 +40,7 @@ func TestCollabTakeoverContinuesDeliveredPrelude(t *testing.T) {
 func TestCollabPreludeTracksFragmentsAndPreservesTrailingBytes(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	w := newCollabSeamWriter(c.Writer, func() bool { return false })
+	w := newCollabSeamWriter(c.Writer, nil)
 	w.Header().Set("Content-Type", "text/event-stream")
 	created := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_seen\"}}\n\n"
 	for _, b := range []byte(created) {

@@ -37,7 +37,7 @@ func testCollabReplayCandidate(t *testing.T, mode string) {
 			snapshot.Collab.LosslessFirst = childMode == "lossless_first"
 			setReplayHandler(t, func(h *OpenAIGatewayHandler, _ *openAIWSUsageHandlerUsageLogRepoStub) {
 				h.collabRescue = h.rescueCollab
-				h.collabRescuable = func(s *collabSeam) bool { observed.Store(s); return collabCanRescue(s) }
+				h.collabRescuable = func(s *collabSeam) *atomic.Bool { observed.Store(s); return collabCanRescue(s) }
 			})
 		}
 		var got []replayGolden

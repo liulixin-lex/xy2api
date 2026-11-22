@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"maps"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -60,7 +61,7 @@ func (s *OpenAIGatewayService) collabDuplicateSend(ctx context.Context, account 
 	if !ok {
 		return false
 	}
-	digest := s.CollabDigest(resilience.CollabDigestDomainBody, string(body))
+	digest := s.collabBodyDigest(body)
 	return digest == "" || rejected[CollabRejectedBody{account.ID, digest}]
 }
 
@@ -69,19 +70,39 @@ func (s *OpenAIGatewayService) collabDuplicateSend(ctx context.Context, account 
 type CollabSendObserver struct {
 	mu           sync.Mutex
 	rejections   []CollabRejection
+	rejected     map[CollabRejectedBody]bool
 	accepted     atomic.Bool
+	semantic     atomic.Bool
 	rescuable    atomic.Bool
 	evidenceSeen atomic.Bool
 	stopReason   atomic.Pointer[string]
 	generation   atomic.Uint64
 	body         CollabBody
+	parseOnce    sync.Once
+	original     []byte
 }
 
 func NewCollabSendObserver(body CollabBody) *CollabSendObserver {
 	return &CollabSendObserver{body: body}
 }
-func (o *CollabSendObserver) Rescuable() bool    { return o != nil && o.rescuable.Load() }
-func (o *CollabSendObserver) RescuableFlag() *atomic.Bool { return &o.rescuable }
+func NewLazyCollabSendObserver(body []byte) *CollabSendObserver {
+	return &CollabSendObserver{original: body}
+}
+func (o *CollabSendObserver) Body() CollabBody {
+	o.parseOnce.Do(func() {
+		if o.original != nil {
+			o.body = ParseCollabBody(o.original)
+		}
+	})
+	return o.body
+}
+func (o *CollabSendObserver) Rescuable() bool { return o != nil && o.rescuable.Load() }
+func (o *CollabSendObserver) RescuableFlag() *atomic.Bool {
+	if o == nil {
+		return nil
+	}
+	return &o.rescuable
+}
 func (o *CollabSendObserver) EvidenceSeen() bool { return o != nil && o.evidenceSeen.Load() }
 func (o *CollabSendObserver) IneligibleReason() string {
 	if o == nil {
@@ -97,6 +118,8 @@ func (o *CollabSendObserver) reason(value string) { o.stopReason.Store(&value) }
 func beginCollabObservedSend(ctx context.Context) {
 	if o, _ := ctx.Value(collabSendObserverKey{}).(*CollabSendObserver); o != nil {
 		o.generation.Add(1)
+		o.accepted.Store(false)
+		o.semantic.Store(false)
 		o.rescuable.Store(false)
 		o.reason("later_response_open")
 	}
@@ -119,11 +142,26 @@ func (o *CollabSendObserver) Rejections() []CollabRejection {
 	return out
 }
 
+func (o *CollabSendObserver) RejectedBodies() map[CollabRejectedBody]bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return maps.Clone(o.rejected)
+}
+func (o *CollabSendObserver) SendCount() uint64 { return o.generation.Load() }
+
 func (o *CollabSendObserver) Accepted() bool { return o != nil && o.accepted.Load() }
 
 func (o *CollabSendObserver) record(rejection CollabRejection, generation uint64) {
 	if generation == o.generation.Load() {
-		evidence := o.body.ResolveEvidence(rejection.Evidence(o.body.Shape))
+		candidate := rejection.Evidence(resilience.CollabRequestShape{AgentCiphertext: true, ToolOutputCiphertext: true})
+		body := CollabBody{}
+		if candidate.Grade == resilience.CollabEvidenceGradeVerified || candidate.Grade == resilience.CollabEvidenceGradeClaimed {
+			body = o.Body()
+		}
+		evidence := body.ResolveEvidence(rejection.Evidence(body.Shape))
+		if !o.semantic.Load() {
+			o.accepted.Store(false)
+		}
 		if evidence.Grade == resilience.CollabEvidenceGradeVerified || evidence.Grade == resilience.CollabEvidenceGradeClaimed {
 			o.evidenceSeen.Store(true)
 		}
@@ -157,6 +195,10 @@ func (o *CollabSendObserver) record(rejection CollabRejection, generation uint64
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.rejected == nil {
+		o.rejected = map[CollabRejectedBody]bool{}
+	}
+	o.rejected[CollabRejectedBody{rejection.AccountID, rejection.BodyDigest}] = true
 	if len(o.rejections) == collabRejectionLimit {
 		o.rejections = o.rejections[:collabRejectionLimit-1]
 	}
@@ -180,29 +222,38 @@ func (s *OpenAIGatewayService) observeCollabHTTP(ctx context.Context, account *A
 		}
 	}
 	resp.Body = &collabEvidenceBody{ReadCloser: resp.Body, observer: observer,
-		generation: observer.generation.Load(),
-		rejection:  CollabRejection{AccountID: account.ID, Passthrough: account.IsOpenAIPassthroughEnabled(), Status: resp.StatusCode, BodyDigest: s.CollabDigest(resilience.CollabDigestDomainBody, string(body)), Source: source},
-		stream:     resp.StatusCode < 400 && isEventStreamResponse(resp.Header)}
+		generation: observer.generation.Load(), service: s, requestBody: body,
+		rejection: CollabRejection{AccountID: account.ID, Passthrough: account.IsOpenAIPassthroughEnabled(), Status: resp.StatusCode, Source: source},
+		stream:    resp.StatusCode < 400 && isEventStreamResponse(resp.Header)}
 }
 
 type collabEvidenceBody struct {
 	io.ReadCloser
-	observer   *CollabSendObserver
-	generation uint64
-	rejection  CollabRejection
-	stream     bool
-	mu         sync.Mutex
-	pending    []byte
-	overflow   bool
-	done       bool
+	observer    *CollabSendObserver
+	generation  uint64
+	rejection   CollabRejection
+	stream      bool
+	service     *OpenAIGatewayService
+	requestBody []byte
+	mu          sync.Mutex
+	pending     []byte
+	overflow    bool
+	done        bool
+	reading     bool
+	passthrough atomic.Bool
 }
 
 func (b *collabEvidenceBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
+	if b.passthrough.Load() {
+		return n, err
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !b.done {
+		b.reading = true
 		b.observe(p[:n])
+		b.reading = false
 		if err != nil {
 			b.finish()
 		}
@@ -247,22 +298,44 @@ func (b *collabEvidenceBody) observe(data []byte) {
 		if bytes.HasSuffix(b.pending, []byte("\n\n")) || bytes.HasSuffix(b.pending, []byte("\r\n\r\n")) {
 			if !b.overflow {
 				b.frame()
+				if b.reading && b.observer.semantic.Load() {
+					b.done = true
+					b.pending = nil
+					b.passthrough.Store(true)
+					return
+				}
 			}
-			b.pending = nil
+			b.pending = b.pending[:0]
 			b.overflow = false
 		}
 	}
 }
 
+func (b *collabEvidenceBody) record(rejection CollabRejection) {
+	if b.requestBody != nil {
+		rejection.BodyDigest = b.service.collabBodyDigest(b.requestBody)
+	}
+	b.observer.record(rejection, b.generation)
+}
+
 func (b *collabEvidenceBody) frame() {
+	if b.observer.Accepted() && !bytes.Contains(b.pending, []byte("response.failed")) && !bytes.Contains(b.pending, []byte("error")) {
+		return
+	}
 	forEachOpenAISSEFrame(string(b.pending), func(event string, payload []byte) {
 		typ := gjson.GetBytes(payload, "type").String()
 		if event == "error" || event == "response.failed" || typ == "error" || typ == "response.failed" {
 			rejection := b.rejection
 			rejection.Payload, rejection.Event = payload, event
-			b.observer.record(rejection, b.generation)
+			b.record(rejection)
 		} else if typ == "response.output_item.added" || event == "response.output_item.added" || resilience.ResponsesEventOutputDisposition(event, payload).SemanticOutput {
+			if b.generation != b.observer.generation.Load() {
+				return
+			}
 			b.observer.accepted.Store(true)
+			if resilience.ResponsesEventOutputDisposition(event, payload).SemanticOutput {
+				b.observer.semantic.Store(true)
+			}
 			b.observer.rescuable.Store(false)
 			b.observer.reason("accepted_response")
 		}
@@ -274,12 +347,15 @@ func (b *collabEvidenceBody) finish() {
 		return
 	}
 	b.done = true
+	if b.stream && !b.overflow && len(b.pending) > 0 {
+		b.frame()
+	}
 	if !b.stream {
-		if b.rejection.Status >= 400 || gjson.GetBytes(b.pending, "status").String() == "failed" {
+		if b.rejection.Status >= 400 || gjson.GetBytes(b.pending, "status").String() == "failed" || gjson.GetBytes(b.pending, "type").String() == "response.failed" && gjson.GetBytes(b.pending, "response.status").String() == "failed" {
 			b.rejection.Payload = b.pending
 			b.rejection.Truncated = b.overflow
-			b.observer.record(b.rejection, b.generation)
-		} else if gjson.ValidBytes(b.pending) && gjson.GetBytes(b.pending, "status").String() == "completed" {
+			b.record(b.rejection)
+		} else if b.generation == b.observer.generation.Load() && gjson.ValidBytes(b.pending) && gjson.GetBytes(b.pending, "status").String() == "completed" {
 			b.observer.accepted.Store(true)
 		}
 	}

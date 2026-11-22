@@ -73,10 +73,12 @@ func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
 		code == "context_length_exceeded" || code == "context_window_exceeded" || code == "invalid_prompt" || code == "cyber_policy_violation" || strings.Contains(message, "maximum context length") {
 		return out
 	}
-	verified := IsEncryptedContentRejection(code, message) || code == "encrypted_content_rejected" ||
-		strings.Contains(message, "encrypted content is invalid for this conversation") ||
-		strings.Contains(message, "failed to decrypt encrypted content") ||
-		strings.Contains(message, "encrypted function arguments could not be decrypted")
+	verified := IsEncryptedContentRejection(code, "") || code == "encrypted_content_rejected"
+	for _, prefix := range []string{"the encrypted content", "encrypted content", "failed to decrypt encrypted content", "encrypted function arguments", "encrypted function output"} {
+		if strings.HasPrefix(strings.TrimSpace(message), prefix) && !strings.ContainsAny(message, "{}\"") {
+			verified = verified || IsEncryptedContentRejection("", message) || strings.Contains(message, "could not be decrypted") || strings.Contains(message, "failed to decrypt") || strings.Contains(message, "is invalid for this conversation")
+		}
+	}
 	if !verified {
 		if wrapped && status == 400 && (in.Shape.AgentCiphertext || in.Shape.ToolOutputCiphertext) {
 			out.Grade = CollabEvidenceGradeClaimed
@@ -110,6 +112,9 @@ func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
 
 func collabErrorObject(root gjson.Result) gjson.Result {
 	if object := root.Get("response.error"); object.IsObject() {
+		if root.Get("error").Exists() {
+			return gjson.Result{}
+		}
 		return object
 	}
 	if object := root.Get("error"); object.IsObject() {
@@ -193,6 +198,9 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 				named.Ambiguous = true
 			} else {
 				named.InputIndex = &index
+				if field == "param" {
+					named.Path = object.Get(field).String()
+				}
 			}
 		}
 	}

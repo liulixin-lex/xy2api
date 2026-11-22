@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"maps"
 	"strconv"
 	"time"
 
@@ -13,13 +14,17 @@ import (
 // delivery, settlement and restoring that terminal; this loop owns derivations.
 // Select must return immediately and Send must report actual client delivery.
 type CollabLadder struct {
-	Body        CollabBody
-	First       int64
-	Evidence    resilience.CollabEvidence
-	MaxAttempts int
-	Select      func(context.Context, int64, map[int64]bool) (int64, func())
-	Send        func(context.Context, int64, []byte, resilience.CollabAction) (resilience.CollabEvidence, bool)
-	Continue    func() bool
+	Body           CollabBody
+	First          int64
+	Current        int64
+	Progress       *CollabLadderProgress
+	BeforeDisposal func(context.Context, resilience.CollabEvidence) bool
+	Evidence       resilience.CollabEvidence
+	MaxAttempts    int
+	Select         func(context.Context, int64, map[int64]bool) (int64, func())
+	Send           func(context.Context, int64, []byte, resilience.CollabAction) (resilience.CollabEvidence, bool)
+	Continue       func() bool
+	Sent           func() bool
 }
 
 func (l CollabLadder) Run(ctx context.Context) bool {
@@ -31,16 +36,27 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 	if !eligible {
 		return false
 	}
-	derived := map[int64][]byte{}
-	probed := map[int64]bool{}
-	replaced := map[int64]bool{}
-	handled := map[int64]map[string]bool{}
-	namedFamilies := map[int64]map[resilience.CollabFamily]bool{}
-	var switched, dropped bool
-	optional, replacements := 0, 0
-	current := l.First
+	progress := l.Progress
+	if progress == nil {
+		progress = &CollabLadderProgress{}
+	}
+	if progress.derived == nil {
+		progress.derived = map[int64][]byte{}
+		progress.probed = map[int64]bool{}
+		progress.replaced = map[int64]bool{}
+		progress.handled = map[int64]map[string]bool{}
+		progress.namedFamilies = map[int64]map[resilience.CollabFamily]bool{}
+	}
+	derived, probed, replaced := progress.derived, maps.Clone(progress.probed), progress.replaced
+	switched, dropped := progress.switched, progress.dropped
+	handled, namedFamilies := progress.handled, progress.namedFamilies
+	current := l.Current
+	if current == 0 {
+		current = l.First
+	}
 	evidence := l.Evidence
-	var switchedNamed *resilience.CollabNamedItem
+	final := false
+
 	for ctx.Err() == nil && (l.Continue == nil || l.Continue()) {
 		if evidence.Ownership == resilience.CollabOwnershipClassCapacity || evidence.Ownership == resilience.CollabOwnershipClassContinuation {
 			return false
@@ -48,11 +64,14 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		if evidence.Grade != resilience.CollabEvidenceGradeVerified && evidence.Grade != resilience.CollabEvidenceGradeClaimed {
 			return false
 		}
+		claimed = evidence.Grade == resilience.CollabEvidenceGradeClaimed
 		var action resilience.CollabAction
 		named := ""
 		prefer := current
 		var exclude map[int64]bool
-		if evidence.Named != nil {
+		if final {
+			action = resilience.CollabActionReplaceAll
+		} else if evidence.Named != nil {
 			if evidence.Named.Ambiguous {
 				return false
 			}
@@ -71,7 +90,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				action = resilience.CollabActionSwitchOriginal
 			} else {
 				action = resilience.CollabActionNamedRepair
-				if item.Family == resilience.CollabFamilyCompaction || item.Class == resilience.CollabItemClassProtected || item.Class == resilience.CollabItemClassUnreadMessage {
+				if item.Family != resilience.CollabFamilyReasoning && (item.Family == resilience.CollabFamilyCompaction || item.Class == resilience.CollabItemClassProtected || item.Class == resilience.CollabItemClassUnreadMessage) {
 					prefer = l.First
 				}
 				if namedFamilies[current][item.Family] {
@@ -90,6 +109,8 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 			action = resilience.CollabActionSwitchOriginal
 		} else if !claimed && evidence.Ownership == resilience.CollabOwnershipClassSourceConflict && !dropped {
 			action = resilience.CollabActionDropUnprotected
+		} else if progress.sourceBody != nil && !switched && l.MaxAttempts != 1 {
+			action = resilience.CollabActionSwitchOriginal
 		} else if !claimed && l.Body.Shape.ReasoningCiphertext && !probed[current] && l.MaxAttempts != 1 {
 			action = resilience.CollabActionProbeReasoning
 		} else if !switched && l.MaxAttempts != 1 {
@@ -99,12 +120,11 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		} else {
 			action = resilience.CollabActionReplaceAll
 		}
-		if action != resilience.CollabActionReplaceAll && optional >= resilience.CollabOptionalSendLimit {
+		if collabOptionalAction(action) && progress.optional >= resilience.CollabOptionalSendLimit {
 			action = resilience.CollabActionReplaceAll
 			named = ""
 		}
 		if action == resilience.CollabActionSwitchOriginal {
-			switchedNamed = evidence.Named
 			prefer = 0
 			exclude = map[int64]bool{current: true}
 			switched = true
@@ -117,9 +137,6 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 			probed[current] = true
 		}
 		if action == resilience.CollabActionReplaceAll {
-			if replacements >= 2 {
-				return false
-			}
 			prefer = l.First
 			exclude = replaced
 			if replaced[prefer] {
@@ -127,7 +144,10 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 			}
 		}
 		account, release := l.Select(ctx, prefer, exclude)
-		if account == 0 && prefer > 0 && (action == resilience.CollabActionDropUnprotected || action == resilience.CollabActionReplaceAll) {
+		if account == 0 && prefer > 0 && action == resilience.CollabActionNamedRepair && prefer != l.First {
+			account, release = l.Select(ctx, l.First, exclude)
+		}
+		if account == 0 && prefer > 0 && (action == resilience.CollabActionNamedRepair || action == resilience.CollabActionDropUnprotected || action == resilience.CollabActionReplaceAll) {
 			account, release = l.Select(ctx, 0, exclude)
 		}
 		if account == 0 {
@@ -142,10 +162,22 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		body := derived[account]
 		if body == nil {
 			body = l.Body.Original
+			if progress.sourceBody != nil {
+				body = progress.sourceBody
+			}
 		}
 		next, changed := body, action == resilience.CollabActionSwitchOriginal
 		if !changed {
-			next, changed = l.Body.Derive(body, action, named, claimed)
+			derivation := l.Body
+			if action == resilience.CollabActionDropUnprotected && evidence.Ownership == resilience.CollabOwnershipClassSourceConflict {
+				derivation.Items = nil
+				for _, item := range l.Body.Items {
+					if item.Family == resilience.CollabFamilyAgentMessage && item.Class == resilience.CollabItemClassReplaceable {
+						derivation.Items = append(derivation.Items, item)
+					}
+				}
+			}
+			next, changed = derivation.Derive(body, action, named, claimed)
 		}
 		if !changed {
 			release()
@@ -154,41 +186,69 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 			}
 			continue
 		}
-		if action == resilience.CollabActionReplaceAll {
-			replacements++
-			replaced[account] = true
-		} else {
-			optional++
-		}
-		if handled[account] == nil {
-			handled[account] = map[string]bool{}
-		}
-		if action != resilience.CollabActionSwitchOriginal {
-			for _, item := range l.Body.Items {
-				path := "input." + strconv.Itoa(item.Index)
-				if item.Identity != "" && gjson.GetBytes(body, path).Raw != gjson.GetBytes(next, path).Raw {
-					handled[account][item.Identity] = true
-				}
+		if l.BeforeDisposal != nil && (action == resilience.CollabActionReplaceAll || action == resilience.CollabActionNamedRepair && collabProtectedTask(l.Body, named)) {
+			if l.BeforeDisposal(ctx, evidence) {
+				release()
+				return true
 			}
-			if named != "" {
-				if namedFamilies[account] == nil {
-					namedFamilies[account] = map[resilience.CollabFamily]bool{}
-				}
+		}
+		nextEvidence, delivered := func() (resilience.CollabEvidence, bool) { defer release(); return l.Send(ctx, account, next, action) }()
+		if l.Sent == nil || l.Sent() {
+			if action == resilience.CollabActionSwitchOriginal {
+				progress.switched = true
+			}
+			if action == resilience.CollabActionDropUnprotected {
+				progress.dropped = true
+			}
+			if action == resilience.CollabActionProbeReasoning {
+				progress.probed[account] = true
+			}
+			if action == resilience.CollabActionReplaceAll {
+				replaced[account] = true
+			} else if collabOptionalAction(action) {
+				progress.optional++
+			}
+			if handled[account] == nil {
+				handled[account] = map[string]bool{}
+			}
+			if action != resilience.CollabActionSwitchOriginal && action != resilience.CollabActionProbeReasoning {
 				for _, item := range l.Body.Items {
-					if item.Identity == named {
-						namedFamilies[account][item.Family] = true
+					path := "input." + strconv.Itoa(item.Index)
+					if item.Identity != "" && gjson.GetBytes(body, path).Raw != gjson.GetBytes(next, path).Raw {
+						handled[account][item.Identity] = true
+					}
+				}
+				if named != "" {
+					if namedFamilies[account] == nil {
+						namedFamilies[account] = map[resilience.CollabFamily]bool{}
+					}
+					for _, item := range l.Body.Items {
+						if item.Identity == named {
+							namedFamilies[account][item.Family] = true
+						}
 					}
 				}
 			}
+			if action != resilience.CollabActionProbeReasoning {
+				derived[account] = next
+			}
+			if action == resilience.CollabActionDropUnprotected && evidence.Ownership == resilience.CollabOwnershipClassSourceConflict {
+				progress.sourceBody = next
+			}
+		} else if action == resilience.CollabActionNamedRepair || action == resilience.CollabActionReplaceAll {
+			return false
 		}
-		derived[account] = next
-		nextEvidence, delivered := func() (resilience.CollabEvidence, bool) { defer release(); return l.Send(ctx, account, next, action) }()
 		if delivered {
 			return true
 		}
-		if action == resilience.CollabActionSwitchOriginal && nextEvidence.Named == nil && nextEvidence.Grade == resilience.CollabEvidenceGradeVerified {
-			nextEvidence.Named = switchedNamed
+		if nextEvidence.Grade != resilience.CollabEvidenceGradeVerified && nextEvidence.Grade != resilience.CollabEvidenceGradeClaimed || nextEvidence.Ownership == resilience.CollabOwnershipClassCapacity {
+			if action == resilience.CollabActionReplaceAll {
+				return false
+			}
+			final = true
+			nextEvidence = evidence
 		}
+
 		current, evidence = account, nextEvidence
 	}
 	return false
@@ -211,4 +271,28 @@ func CollabTakeoverDuration(now, started time.Time, retryable, committed bool, d
 		return 0
 	}
 	return limit
+}
+
+// Progress is request-owned and shared by early and terminal entry. Named and
+// account-specific final repairs do not spend the optional switch/probe budget.
+type CollabLadderProgress struct {
+	derived           map[int64][]byte
+	probed, replaced  map[int64]bool
+	handled           map[int64]map[string]bool
+	namedFamilies     map[int64]map[resilience.CollabFamily]bool
+	switched, dropped bool
+	optional          int
+	sourceBody        []byte
+}
+
+func collabOptionalAction(action resilience.CollabAction) bool {
+	return action == resilience.CollabActionSwitchOriginal || action == resilience.CollabActionProbeReasoning || action == resilience.CollabActionDropUnprotected
+}
+func collabProtectedTask(body CollabBody, named string) bool {
+	for _, item := range body.Items {
+		if item.Identity == named {
+			return item.Family == resilience.CollabFamilyAgentMessage && item.Class == resilience.CollabItemClassProtected
+		}
+	}
+	return false
 }

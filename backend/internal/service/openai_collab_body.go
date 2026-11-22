@@ -22,6 +22,7 @@ const (
 // stay stable across derivations. Unknown message envelopes are protected.
 type CollabBodyItem struct {
 	Identity    string
+	WireID      string
 	Index       int
 	Family      resilience.CollabFamily
 	Class       resilience.CollabItemClass
@@ -42,21 +43,57 @@ func (p CollabBody) ResolveEvidence(evidence resilience.CollabEvidence) resilien
 	named := *evidence.Named
 	evidence.Named = &named
 	index := *named.InputIndex
-	items := gjson.GetBytes(p.Original, "input").Array()
-	if index < 0 || index >= len(items) {
+	var located *CollabBodyItem
+	for i := range p.Items {
+		if p.Items[i].Index == index {
+			located = &p.Items[i]
+			break
+		}
+	}
+	if located == nil || named.Identity != "" && named.Identity != located.Identity {
 		named.Ambiguous = true
 		return evidence
 	}
-	id := items[index].Get("id").String()
-	if named.Identity != "" && named.Identity != id {
-		named.Ambiguous = true
-		return evidence
+	if named.Path != "" {
+		path := strings.NewReplacer("[", ".", "]", "").Replace(named.Path)
+		base := "input." + strconv.Itoa(index)
+		valid := path == base
+		for _, candidate := range located.Paths {
+			valid = valid || path == candidate || path == candidate+".encrypted_content"
+		}
+		if located.Family == resilience.CollabFamilyCallArgs {
+			valid = valid || path == base+".encrypted_function_args" || path == base+".arguments"
+		}
+		if !valid {
+			named.Ambiguous = true
+		}
 	}
-	named.Identity = id
+	named.Identity = located.Identity
 	return evidence
 }
 
+// CollabBodyContext supplies request-local protection facts. Missing identity or
+// version is conservative; consumption must refer to the original item.
+type CollabBodyContext struct {
+	Thread             string
+	ModernTaskBoundary bool
+	ClientVersion      string
+	Consumed           map[string]bool
+}
+
 func ParseCollabBody(body []byte) CollabBody {
+	return ParseCollabBodyWithContext(body, CollabBodyContext{})
+}
+
+func ParseCollabBodyWithContext(body []byte, facts CollabBodyContext) CollabBody {
+	if facts.ClientVersion != "" {
+		parts := strings.Split(strings.TrimPrefix(facts.ClientVersion, "v"), ".")
+		if len(parts) >= 2 {
+			major, e1 := strconv.Atoi(parts[0])
+			minor, e2 := strconv.Atoi(parts[1])
+			facts.ModernTaskBoundary = e1 == nil && e2 == nil && (major > 0 || minor >= 168)
+		}
+	}
 	out := CollabBody{Original: body}
 	root := gjson.ParseBytes(body)
 	if !gjson.ValidBytes(body) || !root.IsObject() || !codexCollabUnambiguousJSON(root) || !root.Get("input").IsArray() {
@@ -68,7 +105,7 @@ func ParseCollabBody(body []byte) CollabBody {
 	input := root.Get("input").Array()
 	lastOutput := -1
 	for i, item := range input {
-		if item.Get("role").String() == "assistant" || item.Get("type").String() == "compaction" {
+		if collabModelOutput(item) {
 			lastOutput = i
 		}
 	}
@@ -83,7 +120,11 @@ func ParseCollabBody(body []byte) CollabBody {
 			return out
 		}
 		ids[id] = id != ""
-		entry := CollabBodyItem{Identity: id, Index: i, Class: resilience.CollabItemClassProtected, Placeholder: collabUnreadTask}
+		identity := id
+		if identity == "" {
+			identity = "@input:" + strconv.Itoa(i)
+		}
+		entry := CollabBodyItem{Identity: identity, WireID: id, Index: i, Class: resilience.CollabItemClassProtected, Placeholder: collabUnreadTask}
 		path := "input." + strconv.Itoa(i)
 		switch item.Get("type").String() {
 		case "reasoning":
@@ -143,11 +184,14 @@ func ParseCollabBody(body []byte) CollabBody {
 					// Unread tasks in one batch are all protected.
 					if i <= lastOutput {
 						for _, later := range input[i+1:] {
-							if later.Get("type").String() == "compaction" || later.Get("role").String() == "assistant" && later.Get("phase").String() == "final_answer" || later.Get("recipient").String() == item.Get("recipient").String() && collabEnvelopeKind(later) == "NEW_TASK" {
+							if later.Get("type").String() == "compaction" && (facts.ModernTaskBoundary || facts.Thread != "" && item.Get("recipient").String() != "" && item.Get("recipient").String() != facts.Thread) || later.Get("role").String() == "assistant" && later.Get("phase").String() == "final_answer" || later.Get("recipient").String() == item.Get("recipient").String() && collabEnvelopeKind(later) == "NEW_TASK" {
 								active = false
 								break
 							}
 						}
+					}
+					if facts.Consumed[identity] {
+						active = false
 					}
 					if active {
 						entry.Class = resilience.CollabItemClassProtected
@@ -158,12 +202,15 @@ func ParseCollabBody(body []byte) CollabBody {
 				}
 			}
 			if i < lastOutput {
-				if collabEnvelopeKind(item) != "NEW_TASK" {
+				if item.Get("type").String() != "agent_message" || collabEnvelopeKind(item) != "" && collabEnvelopeKind(item) != "NEW_TASK" {
 					entry.Class = resilience.CollabItemClassReplaceable
 				}
 				if entry.Class == resilience.CollabItemClassReplaceable && entry.Placeholder == collabUnreadTask {
 					entry.Placeholder = collabProcessedTask
 				}
+			}
+			if facts.Consumed[identity] {
+				entry.Class = resilience.CollabItemClassReplaceable
 			}
 			if len(entry.Paths) > 0 {
 				if entry.Family == resilience.CollabFamilyToolOutput {
@@ -206,7 +253,8 @@ func collabEnvelopeKind(item gjson.Result) string {
 		if candidate != "NEW_TASK" && candidate != "MESSAGE" && candidate != "FINAL_ANSWER" {
 			return ""
 		}
-		if !strings.Contains(text, "\nTask name: ") || !strings.Contains(text, "\nSender: ") || !strings.HasSuffix(text, "\nPayload:\n") {
+		lines := strings.Split(text, "\n")
+		if len(lines) != 5 || !strings.HasPrefix(lines[1], "Task name: ") || strings.TrimSpace(strings.TrimPrefix(lines[1], "Task name: ")) == "" || !strings.HasPrefix(lines[2], "Sender: ") || strings.TrimSpace(strings.TrimPrefix(lines[2], "Sender: ")) == "" || lines[3] != "Payload:" || lines[4] != "" {
 			return ""
 		}
 		kind = candidate
@@ -233,7 +281,7 @@ func (p CollabBody) Derive(current []byte, action resilience.CollabAction, named
 		case resilience.CollabActionNamedRepair:
 			selected = item.Identity != "" && item.Identity == named
 		case resilience.CollabActionDropUnprotected:
-			selected = item.Class != resilience.CollabItemClassProtected || item.Family == resilience.CollabFamilyReasoning || item.Family == resilience.CollabFamilyCompaction
+			selected = item.Class != resilience.CollabItemClassProtected || item.Family == resilience.CollabFamilyReasoning
 		case resilience.CollabActionReplaceAll:
 			selected = true
 		}
@@ -250,8 +298,8 @@ func (p CollabBody) Derive(current []byte, action resilience.CollabAction, named
 					continue
 				}
 				replacement := map[string]any{"type": "message", "role": "user", "content": []any{map[string]string{"type": "input_text", "text": item.Placeholder}}}
-				if item.Identity != "" {
-					replacement["id"] = item.Identity
+				if item.WireID != "" {
+					replacement["id"] = item.WireID
 				}
 				next, err = sjson.SetBytes(next, path, replacement)
 			default:
@@ -266,4 +314,15 @@ func (p CollabBody) Derive(current []byte, action resilience.CollabAction, named
 		}
 	}
 	return next, !bytes.Equal(next, current)
+}
+
+func collabModelOutput(item gjson.Result) bool {
+	if item.Get("role").String() == "assistant" {
+		return true
+	}
+	switch item.Get("type").String() {
+	case "compaction", "reasoning", "function_call", "custom_tool_call", "web_search_call", "file_search_call", "computer_call", "code_interpreter_call", "image_generation_call", "local_shell_call", "shell_call", "apply_patch_call", "mcp_call", "mcp_list_tools", "mcp_approval_request":
+		return true
+	}
+	return false
 }
