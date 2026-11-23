@@ -199,7 +199,7 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 		}
 	}
 	if id := object.Get("item_id"); id.Exists() {
-		if id.Type != gjson.String || id.Str == "" {
+		if id.Type != gjson.String {
 			named = &CollabNamedItem{Ambiguous: true}
 		} else {
 			add(id.Str)

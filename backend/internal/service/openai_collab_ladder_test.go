@@ -147,32 +147,42 @@ func TestCollabLadderUnavailableProbeDoesNotHideReadableAccount(t *testing.T) {
 }
 
 func TestCollabLadderReplaceAllCanTryTwoAccounts(t *testing.T) {
-	verified := resilience.CollabEvidence{Grade: resilience.CollabEvidenceGradeVerified}
-	l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, Evidence: verified, MaxAttempts: 1}
-	l.Select = func(_ context.Context, prefer int64, excluded map[int64]bool) (int64, func()) {
-		if prefer > 0 {
-			if excluded[prefer] {
+	for _, local := range []bool{false, true} {
+		t.Run(map[bool]string{false: "fallback", true: "local_ending"}[local], func(t *testing.T) {
+			verified := resilience.CollabEvidence{Grade: resilience.CollabEvidenceGradeVerified}
+			l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, Evidence: verified, MaxAttempts: 1}
+			l.Select = func(_ context.Context, prefer int64, excluded map[int64]bool) (int64, func()) {
+				if prefer > 0 {
+					if excluded[prefer] {
+						return 0, nil
+					}
+					return prefer, func() {}
+				}
+				for _, id := range []int64{1, 2} {
+					if !excluded[id] {
+						return id, func() {}
+					}
+				}
 				return 0, nil
 			}
-			return prefer, func() {}
-		}
-		for _, id := range []int64{1, 2} {
-			if !excluded[id] {
-				return id, func() {}
+			var sent []int64
+			l.Send = func(_ context.Context, id int64, _ []byte, action resilience.CollabAction) (resilience.CollabEvidence, bool) {
+				sent = append(sent, id)
+				require.Equal(t, resilience.CollabActionReplaceAll, action)
+				return verified, id == 2
 			}
-		}
-		return 0, nil
+			// Final disposal: ciphertext rejection after replace-all ends locally or falls back.
+			l.BeforeDisposal = func(context.Context, resilience.CollabEvidence) bool { return local && len(sent) > 0 }
+			delivered := l.Run(context.Background())
+			if !delivered && l.Body.LadderPolicy(l.LastEvidence, l.StopReason).LocalEnding {
+				delivered = l.BeforeDisposal(context.Background(), l.LastEvidence)
+			}
+			require.Equal(t, local, delivered)
+			require.Equal(t, CollabLadderFinalDisposal, l.StopReason)
+			require.Equal(t, []int64{1}, sent)
+		})
 	}
-	var sent []int64
-	l.Send = func(_ context.Context, id int64, _ []byte, action resilience.CollabAction) (resilience.CollabEvidence, bool) {
-		sent = append(sent, id)
-		require.Equal(t, resilience.CollabActionReplaceAll, action)
-		return verified, id == 2
-	}
-	require.True(t, l.Run(context.Background()))
-	require.Equal(t, []int64{1, 2}, sent)
 }
-
 func TestCollabNamedCallArgumentsSwitchWithoutEditing(t *testing.T) {
 	evidence := resilience.CollabEvidence{Grade: resilience.CollabEvidenceGradeVerified, Family: resilience.CollabFamilyCallArgs, Named: &resilience.CollabNamedItem{Identity: "fc_a"}}
 	l := CollabLadder{Body: ParseCollabBody([]byte(collabBodyFixture)), First: 1, Evidence: evidence}

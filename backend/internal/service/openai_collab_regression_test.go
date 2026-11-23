@@ -114,15 +114,25 @@ func TestCollabRegressionController(t *testing.T) {
 		l.Run(context.Background())
 	})
 	t.Run("third_account_all_placeholder_quota", func(t *testing.T) {
-		l := CollabLadder{Body: body, First: 1, Evidence: collabRegressionVerified(""), MaxAttempts: 1, Select: collabRegressionSelect}
-		n := 0
-		l.Send = func(_ context.Context, id int64, _ []byte, a resilience.CollabAction) (resilience.CollabEvidence, bool) {
-			n++
-			t.Logf("account=%d action=%s", id, a)
-			return collabRegressionVerified(""), id == 3
-		}
-		if !l.Run(context.Background()) {
-			t.Errorf("third eligible account can accept, stopped after %d account-specific placeholder attempts", n)
+		for _, local := range []bool{false, true} {
+			t.Run(fmt.Sprint(local), func(t *testing.T) {
+				l := CollabLadder{Body: body, First: 1, Evidence: collabRegressionVerified(""), MaxAttempts: 1, Select: collabRegressionSelect}
+				n := 0
+				l.Send = func(_ context.Context, id int64, _ []byte, a resilience.CollabAction) (resilience.CollabEvidence, bool) {
+					n++
+					t.Logf("account=%d action=%s", id, a)
+					return collabRegressionVerified(""), id == 3
+				}
+				// Final disposal: a later eligible account does not reopen replace-all.
+				l.BeforeDisposal = func(context.Context, resilience.CollabEvidence) bool { return local && n > 0 }
+				delivered := l.Run(context.Background())
+				if !delivered && l.Body.LadderPolicy(l.LastEvidence, l.StopReason).LocalEnding {
+					delivered = l.BeforeDisposal(context.Background(), l.LastEvidence)
+				}
+				if delivered != local || n != 1 || l.StopReason != CollabLadderFinalDisposal {
+					t.Errorf("replace-all endpoint: delivered=%t local=%t sends=%d stop=%v", delivered, local, n, l.StopReason)
+				}
+			})
 		}
 	})
 }
