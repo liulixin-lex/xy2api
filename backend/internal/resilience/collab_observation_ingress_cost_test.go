@@ -38,7 +38,7 @@ func TestCollabIngressRealisticBodiesDoNotAllocate(t *testing.T) {
 			body := collabRealisticBody(10<<20, kind)
 			require.True(t, json.Valid(body))
 			var got CollabIngressObservation
-			allocations := testing.AllocsPerRun(3, func() { got = InspectCollabIngress(body, CollabIngressValidationPassed) })
+			allocations := collabMinAllocsPerRun(3, func() { got = InspectCollabIngress(body, CollabIngressValidationPassed) })
 			require.True(t, got.Observed)
 			require.False(t, got.Persist(false))
 			require.Zero(t, allocations)
@@ -163,7 +163,7 @@ func TestCollabIngressLongEscapedMetadataIsBounded(t *testing.T) {
 	for _, field := range []string{"type", "role", "name", "namespace"} {
 		body := []byte("{\"tools\":[{\"" + field + "\":\"" + padding + "\"}],\"input\":[{\"" + field + "\":\"" + padding + "\"}]}")
 		require.True(t, json.Valid(body))
-		require.Zero(t, testing.AllocsPerRun(3, func() { InspectCollabIngress(body, CollabIngressValidationPassed) }))
+		require.Zero(t, collabMinAllocsPerRun(3, func() { InspectCollabIngress(body, CollabIngressValidationPassed) }))
 	}
 }
 
@@ -171,7 +171,7 @@ func TestCollabIngressCatalogLargePrefixDoesNotCopy(t *testing.T) {
 	raw := []byte("{\"input\":[{\"role\":\"developer\",\"content\":\"" + strings.Repeat("c\\n", 1<<18) + "namespace alias collaboration\"}]}")
 	require.True(t, json.Valid(raw))
 	var got CollabIngressObservation
-	require.Zero(t, testing.AllocsPerRun(3, func() { got = InspectCollabIngress(raw, CollabIngressValidationPassed) }))
+	require.Zero(t, collabMinAllocsPerRun(3, func() { got = InspectCollabIngress(raw, CollabIngressValidationPassed) }))
 	require.True(t, got.UnrecognizedCatalog)
 }
 

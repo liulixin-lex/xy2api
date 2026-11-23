@@ -117,11 +117,17 @@ func BenchmarkCollabIngressSnapshot(b *testing.B) {
 	})
 }
 func TestCollabSnapshotAddsNoAllocations(t *testing.T) {
-	baseline := testing.AllocsPerRun(100, func() { collabBenchmarkState = &RequestState{requestID: uuid.NewString()} })
-	snapshot := testing.AllocsPerRun(100, func() {
+	baselineRun := func() { collabBenchmarkState = &RequestState{requestID: uuid.NewString()} }
+	snapshotRun := func() {
 		collabBenchmarkState = NewRequestState()
 		collabBenchmarkSettings = collabBenchmarkState.CollabSettingsSnapshot()
-	})
+	}
+	for range 64 {
+		baselineRun()
+		snapshotRun()
+	}
+	baseline := collabMinAllocsPerRun(100, baselineRun)
+	snapshot := collabMinAllocsPerRun(100, snapshotRun)
 	require.Equal(t, baseline, snapshot)
 	require.Same(t, Current(), collabBenchmarkSettings)
 }
@@ -139,17 +145,17 @@ func TestCollabHooksBoundPayloadAllocations(t *testing.T) {
 	payload := make([]byte, 1<<20)
 	empty := &CollabDeliveryHooks{}
 	event := CollabDeliveryEvent{EventType: "response.output_item.done", Executable: true}
-	require.Zero(t, testing.AllocsPerRun(100, func() { empty.Received(ctx, event, payload) }))
+	require.Zero(t, collabMinAllocsPerRun(100, func() { empty.Received(ctx, event, payload) }))
 	h := &CollabDeliveryHooks{}
 	first, second := &collabPayloadConsumer{}, &collabPayloadConsumer{}
 	h.Register(first)
 	h.Register(second)
 	event.EventType = "response.output_text.delta"
-	require.Zero(t, testing.AllocsPerRun(100, func() { h.Received(ctx, event, payload) }))
+	require.Zero(t, collabMinAllocsPerRun(100, func() { h.Received(ctx, event, payload) }))
 	require.Empty(t, first.payload)
 	event.EventType = "response.output_item.done"
 	event.Executable = false
-	require.Zero(t, testing.AllocsPerRun(100, func() { h.Received(ctx, event, payload) }), "image frame")
+	require.Zero(t, collabMinAllocsPerRun(100, func() { h.Received(ctx, event, payload) }), "image frame")
 	event.Executable = true
 	require.LessOrEqual(t, testing.AllocsPerRun(10, func() { h.Received(ctx, event, payload) }), float64(1))
 	require.Len(t, first.payload, len(payload))

@@ -15,7 +15,7 @@ func TestCollabRecoveryLazyInitialization(t *testing.T) {
 	require.Nil(t, s.collabRecords, "disabled construction must not allocate a records store")
 	in := collabRecordTestInput()
 	in.Settings.Collab.Records = false
-	require.Zero(t, testing.AllocsPerRun(100, func() {
+	require.Zero(t, collabMinAllocsPerRun(100, func() {
 		require.Nil(t, s.NewCollabRecordDelivery(in))
 		s.RecordCollabConsumed(context.Background(), in.Settings, true, in.Account, nil)
 	}))

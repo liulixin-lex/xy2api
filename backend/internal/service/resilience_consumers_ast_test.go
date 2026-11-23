@@ -148,8 +148,11 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 			"internal/service/gemini_messages_compat_service.go:sleepGeminiBackoffCtx": 1,
 		},
 		"Remaining": {
-			"internal/resilience/request_timing.go:RequestState.NoteOpenAIDispatch": 1,
-			"internal/resilience/timeout_plan.go:RequestState.ResponseStagePlan":    1,
+			// Optional collaboration steps bound themselves to the slack beyond the existing repair budget.
+			"internal/handler/collab_borrow_wiring.go:OpenAIGatewayHandler.tryCollabBorrow": 1,
+			"internal/handler/collab_lossless.go:OpenAIGatewayHandler.armCollabLossless":    1,
+			"internal/resilience/request_timing.go:RequestState.NoteOpenAIDispatch":         1,
+			"internal/resilience/timeout_plan.go:RequestState.ResponseStagePlan":            1,
 		},
 		"ClampWait": {
 			"internal/handler/failover_loop.go:FailoverState.HandleSelectionExhausted":                 1,

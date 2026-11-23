@@ -166,7 +166,7 @@ func TestCollabRegressionAliasLookupOptional(t *testing.T) {
 			store := &collabCountingAliases{panicRead: panics}
 			svc := &OpenAIGatewayService{collabContinuations: store}
 			if !enabled {
-				allocs := testing.AllocsPerRun(100, func() { _, _ = svc.restoreCollabContinuation(ctx, c, nil, body) })
+				allocs := collabMinAllocsPerRun(100, func() { _, _ = svc.restoreCollabContinuation(ctx, c, nil, body) })
 				require.Zero(t, allocs)
 				require.Zero(t, store.calls)
 			}

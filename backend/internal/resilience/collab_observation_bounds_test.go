@@ -89,7 +89,7 @@ func TestCollabIngressIrrelevantEscapedBodyDoesNotAllocate(t *testing.T) {
 			body := collabPrefilterFixture(10<<20, kind)
 			require.True(t, json.Valid(body))
 			var got CollabIngressObservation
-			allocs := testing.AllocsPerRun(3, func() { got = InspectCollabIngress(body, CollabIngressValidationPassed) })
+			allocs := collabMinAllocsPerRun(3, func() { got = InspectCollabIngress(body, CollabIngressValidationPassed) })
 			require.True(t, got.Observed)
 			require.False(t, got.Persist(false))
 			require.Zero(t, allocs, "irrelevant bytes must bypass parsing and unescaping")

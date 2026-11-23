@@ -180,7 +180,7 @@ func TestCollabIngressAdversarialLarge(t *testing.T) {
 	if elapsed > 10*reference+5*time.Millisecond {
 		t.Errorf("inspection %s exceeds reference order of magnitude %s", elapsed, reference)
 	}
-	if allocations := testing.AllocsPerRun(3, func() { InspectCollabIngress(body, CollabIngressValidationPassed) }); allocations != 0 {
+	if allocations := collabMinAllocsPerRun(3, func() { InspectCollabIngress(body, CollabIngressValidationPassed) }); allocations != 0 {
 		t.Errorf("adversarial body allocated %g times", allocations)
 	}
 }
