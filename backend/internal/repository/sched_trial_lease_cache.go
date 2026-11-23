@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
@@ -189,6 +190,9 @@ func schedTrialFullKey(accountID int64, model string) string {
 }
 
 func (c *schedTrialLeaseCache) recordFull(ctx context.Context, accountID int64, model string, groupID int64) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	// Observability is best effort and must not turn a full seat into a dispatch error.
 	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()

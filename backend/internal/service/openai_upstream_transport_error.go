@@ -147,8 +147,8 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		return err
 	}
 
-	// Transport attempt reached the network path; count as Ollama Cloud / OpenCode Go activity.
-	if s != nil {
+	// Ordinary transport activity updates account scheduling history.
+	if s != nil && resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)
 		scheduleOpenCodeGoUsageActivity(s.deferredService, account)
 	}
