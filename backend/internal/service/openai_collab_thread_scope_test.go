@@ -52,7 +52,7 @@ func TestCollabThreadBindingInactiveAllocations(t *testing.T) {
 			if migration == 0 && legacy == "" {
 				continue
 			}
-			var counts []float64
+			var runs []func()
 			for _, on := range []bool{false, true} {
 				f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 				f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = migration&1 != 0
@@ -60,13 +60,22 @@ func TestCollabThreadBindingInactiveAllocations(t *testing.T) {
 				ctx, session := collabAtomicRequest(t, f, resilience.NewCollabTreeAffinity(32, time.Hour), "allocation-child", on, false, legacy)
 				require.Nil(t, openAICollabBindingFrom(ctx))
 				f.cache.sessionBindings["openai:"+session] = 1
-				counts = append(counts, collabMinAllocsPerRun(20, func() {
+				runs = append(runs, func() {
 					request := resilience.WithRequestState(ctx, resilience.NewRequestState())
 					result := selectTrialRuntime(t, f, request, session)
 					CompleteOpenAIStickyChange(request, result.Account.ID, true, false)
 					result.ReleaseFunc()
-				}))
+				})
 			}
+			// Bring both paths to steady state before measuring either: bounded
+			// process-wide state fills during the first runs of a process, and it
+			// must not favour whichever path happens to be measured first.
+			for range 64 {
+				for _, run := range runs {
+					run()
+				}
+			}
+			counts := []float64{collabMinAllocsPerRun(20, runs[0]), collabMinAllocsPerRun(20, runs[1])}
 			require.Equal(t, counts[0], counts[1], "migration=%d legacy=%s", migration, legacy)
 			t.Logf("migration=%d legacy=%s selection/completion allocations=%v", migration, legacy, counts)
 		}

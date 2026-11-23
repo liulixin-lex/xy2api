@@ -19,6 +19,9 @@ import (
 // delivery leases and queue recovery are independent of this gate.
 const openAICollabThreadBindingEnabled = false
 
+// Fails to compile if the gate ever becomes a variable.
+const _ = openAICollabThreadBindingEnabled
+
 // One request's view of a thread binding. Absent follows the tree; present zero
 // is the result of deletion. The service and identity are captured so detached
 // completion and failure recorders never fall back to the tree's writers.
