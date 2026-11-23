@@ -59,6 +59,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		current = l.First
 	}
 	evidence := l.Evidence
+	latestEvidence := evidence
 	final := false
 
 	for ctx.Err() == nil && (l.Continue == nil || l.Continue()) {
@@ -74,6 +75,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		prefer := current
 		var exclude map[int64]bool
 		endpoint := false
+		batchReasoning := false
 		if final {
 			action = resilience.CollabActionReplaceAll
 		} else if evidence.Named != nil {
@@ -92,7 +94,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				return false
 			}
 			if handled[current][named] {
-				if !collabProtectedTask(l.Body, named) || replaced[current] {
+				if !collabProtectedItem(l.Body, named) || replaced[current] {
 					return false
 				}
 				action = resilience.CollabActionReplaceAll
@@ -112,7 +114,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				}
 				if namedFamilies[current][item.Family] {
 					if item.Family == resilience.CollabFamilyReasoning {
-						action = resilience.CollabActionProbeReasoning
+						batchReasoning = true
 					}
 					if item.Family == resilience.CollabFamilyAgentMessage && item.Class == resilience.CollabItemClassReplaceable {
 						action = resilience.CollabActionDropUnprotected
@@ -203,7 +205,11 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 					}
 				}
 			}
-			next, changed = derivation.Derive(body, action, named, claimed)
+			deriveAction := action
+			if batchReasoning {
+				deriveAction = resilience.CollabActionProbeReasoning
+			}
+			next, changed = derivation.Derive(body, deriveAction, named, claimed)
 		}
 		if !changed {
 			release()
@@ -213,7 +219,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 			continue
 		}
 		if l.BeforeDisposal != nil && (action == resilience.CollabActionReplaceAll || action == resilience.CollabActionNamedRepair && collabProtectedTask(l.Body, named)) {
-			if l.BeforeDisposal(ctx, evidence) {
+			if l.BeforeDisposal(ctx, latestEvidence) {
 				release()
 				return true
 			}
@@ -267,6 +273,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		if delivered {
 			return true
 		}
+		latestEvidence = nextEvidence
 		if nextEvidence.Grade != resilience.CollabEvidenceGradeVerified && nextEvidence.Grade != resilience.CollabEvidenceGradeClaimed || nextEvidence.Ownership == resilience.CollabOwnershipClassCapacity {
 			if action == resilience.CollabActionReplaceAll {
 				return false
@@ -314,6 +321,15 @@ type CollabLadderProgress struct {
 func collabOptionalAction(action resilience.CollabAction) bool {
 	return action == resilience.CollabActionSwitchOriginal || action == resilience.CollabActionProbeReasoning || action == resilience.CollabActionDropUnprotected
 }
+func collabProtectedItem(body CollabBody, named string) bool {
+	for _, item := range body.Items {
+		if item.Identity == named {
+			return (item.Family == resilience.CollabFamilyAgentMessage || item.Family == resilience.CollabFamilyToolOutput) && item.Class == resilience.CollabItemClassProtected
+		}
+	}
+	return false
+}
+
 func collabProtectedTask(body CollabBody, named string) bool {
 	for _, item := range body.Items {
 		if item.Identity == named {

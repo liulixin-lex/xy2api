@@ -49,6 +49,11 @@ func TestCollabRegressionOptionalErrorPolicyPersistsCooldown(t *testing.T) {
 	}
 }
 func TestCollabRegressionContinuationAliasSentToWrongUpstream(t *testing.T) {
+	old := resilience.Current().Clone()
+	defer resilience.Publish(old)
+	settings := resilience.Defaults()
+	settings.Collab.Ladder = true
+	resilience.Publish(settings)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	state := resilience.NewRequestState()
 	state.InitDelivery(context.Background(), time.Now(), func() int64 { return 10 })
@@ -65,7 +70,8 @@ func TestCollabRegressionContinuationAliasSentToWrongUpstream(t *testing.T) {
 	body := []byte(`{"model":"synthetic-model","stream":false,"previous_response_id":"resp_old_failed","input":"continue"}`)
 	next, _ := gin.CreateTestContext(httptest.NewRecorder())
 	next.Request = httptest.NewRequest("POST", "/v1/responses", bytes.NewReader(body))
-	_, _ = svc.Forward(context.Background(), next, account, body)
+	next.Request = next.Request.WithContext(resilience.WithRequestState(context.Background(), resilience.NewRequestState()))
+	_, _ = svc.Forward(next.Request.Context(), next, account, body)
 	if upstream.lastReq == nil {
 		t.Fatal("next request never reached upstream fixture")
 	}

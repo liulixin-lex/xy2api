@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"maps"
 	"net/http"
@@ -235,7 +236,7 @@ func (s *OpenAIGatewayService) observeCollabHTTP(ctx context.Context, account *A
 		}
 	}
 	resp.Body = &collabEvidenceBody{ReadCloser: resp.Body, observer: observer,
-		generation: observer.generation.Load(), service: s, requestBody: body,
+		generation: observer.generation.Load(), service: s, requestBody: body, optional: resilience.CollabAttemptFrom(ctx).Optional,
 		rejection: CollabRejection{AccountID: account.ID, Passthrough: account.IsOpenAIPassthroughEnabled(), Status: resp.StatusCode, Source: source},
 		stream:    resp.StatusCode < 400 && isEventStreamResponse(resp.Header)}
 }
@@ -246,6 +247,7 @@ type collabEvidenceBody struct {
 	generation  uint64
 	rejection   CollabRejection
 	stream      bool
+	optional    bool
 	service     *OpenAIGatewayService
 	requestBody []byte
 	mu          sync.Mutex
@@ -274,13 +276,23 @@ func (b *collabEvidenceBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (b *collabEvidenceBody) Close() error {
+func (b *collabEvidenceBody) Close() (err error) {
+	if b.optional {
+		// Cleanup cannot erase a completed result before the request owner
+		// receives it for settlement.
+		defer func() {
+			if recover() != nil {
+				err = errors.New("optional response cleanup failed")
+			}
+		}()
+	}
+	defer func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		b.finish()
+	}()
 	// Close must remain able to unblock an underlying concurrent Read.
-	err := b.ReadCloser.Close()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.finish()
-	return err
+	return b.ReadCloser.Close()
 }
 
 func (b *collabEvidenceBody) observe(data []byte) {
@@ -337,7 +349,7 @@ func (b *collabEvidenceBody) record(rejection CollabRejection) {
 			remainingItems[item.Identity] = len(item.Paths) > 0
 		}
 		for _, item := range original.Items {
-			if item.WireID == "" || len(item.Paths) == 0 || current.Shape.Ambiguous {
+			if len(item.Paths) == 0 || current.Shape.Ambiguous {
 				continue
 			}
 			if !remainingItems[item.Identity] {
@@ -352,9 +364,6 @@ func (b *collabEvidenceBody) record(rejection CollabRejection) {
 }
 
 func (b *collabEvidenceBody) frame() {
-	if b.observer.Accepted() && !bytes.Contains(b.pending, []byte("response.failed")) && !bytes.Contains(b.pending, []byte("error")) {
-		return
-	}
 	forEachOpenAISSEFrame(string(b.pending), func(event string, payload []byte) {
 		typ := gjson.GetBytes(payload, "type").String()
 		if event == "error" || event == "response.failed" || typ == "error" || typ == "response.failed" {

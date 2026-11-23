@@ -37,15 +37,14 @@ type CollabBody struct {
 }
 
 func (p CollabBody) ResolveEvidence(evidence resilience.CollabEvidence) resilience.CollabEvidence {
-	if evidence.Named == nil || evidence.Named.InputIndex == nil {
+	if evidence.Named == nil {
 		return evidence
 	}
 	named := *evidence.Named
 	evidence.Named = &named
-	index := *named.InputIndex
 	var located *CollabBodyItem
 	for i := range p.Items {
-		if p.Items[i].Index == index {
+		if named.InputIndex != nil && p.Items[i].Index == *named.InputIndex || named.InputIndex == nil && p.Items[i].Identity == named.Identity {
 			located = &p.Items[i]
 			break
 		}
@@ -54,9 +53,12 @@ func (p CollabBody) ResolveEvidence(evidence resilience.CollabEvidence) resilien
 		named.Ambiguous = true
 		return evidence
 	}
+	if named.Family != "" && named.Family != resilience.CollabFamilyNone && named.Family != resilience.CollabFamilyOtherEncrypted && named.Family != located.Family {
+		named.Ambiguous = true
+	}
 	if named.Path != "" {
 		path := strings.NewReplacer("[", ".", "]", "").Replace(named.Path)
-		base := "input." + strconv.Itoa(index)
+		base := "input." + strconv.Itoa(located.Index)
 		valid := path == base
 		for _, candidate := range located.Paths {
 			valid = valid || path == candidate || path == candidate+".encrypted_content"
@@ -180,18 +182,15 @@ func ParseCollabBodyWithContext(body []byte, facts CollabBodyContext) CollabBody
 				if kind == "NEW_TASK" {
 					// A task survives intermediate assistant output until a final
 					// answer, compaction, or a newer task for the same recipient.
-					active := true
+					active := !(i <= lastOutput && facts.Thread != "" && item.Get("recipient").String() != "" && item.Get("recipient").String() != facts.Thread)
 					// Unread tasks in one batch are all protected.
 					if i <= lastOutput {
 						for _, later := range input[i+1:] {
-							if later.Get("type").String() == "compaction" && (facts.ModernTaskBoundary || facts.Thread != "" && item.Get("recipient").String() != "" && item.Get("recipient").String() != facts.Thread) || later.Get("role").String() == "assistant" && later.Get("phase").String() == "final_answer" || later.Get("recipient").String() == item.Get("recipient").String() && collabEnvelopeKind(later) == "NEW_TASK" {
+							if later.Get("type").String() == "compaction" && (facts.ModernTaskBoundary || facts.Consumed[identity] || facts.Thread != "" && item.Get("recipient").String() != "" && item.Get("recipient").String() != facts.Thread) || later.Get("role").String() == "assistant" && later.Get("phase").String() == "final_answer" || later.Get("recipient").String() == item.Get("recipient").String() && collabEnvelopeKind(later) == "NEW_TASK" {
 								active = false
 								break
 							}
 						}
-					}
-					if facts.Consumed[identity] {
-						active = false
 					}
 					if active {
 						entry.Class = resilience.CollabItemClassProtected
@@ -209,7 +208,7 @@ func ParseCollabBodyWithContext(body []byte, facts CollabBodyContext) CollabBody
 					entry.Placeholder = collabProcessedTask
 				}
 			}
-			if facts.Consumed[identity] {
+			if facts.Consumed[identity] && !(item.Get("type").String() == "agent_message" && collabEnvelopeKind(item) == "NEW_TASK") {
 				entry.Class = resilience.CollabItemClassReplaceable
 			}
 			if len(entry.Paths) > 0 {

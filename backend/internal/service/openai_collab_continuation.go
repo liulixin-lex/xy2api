@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -98,7 +99,15 @@ func collabAliasScope(c *gin.Context) CollabContinuationScope {
 	} // Keys of the same owner remain interoperable.
 	return scope
 }
-func (s *OpenAIGatewayService) restoreCollabContinuation(ctx context.Context, c *gin.Context, account *Account, body []byte) ([]byte, error) {
+func (s *OpenAIGatewayService) restoreCollabContinuation(ctx context.Context, c *gin.Context, account *Account, body []byte) (restored []byte, restoreErr error) {
+	if !resilience.StateFrom(ctx).CollabSettingsSnapshot().CollabLadderOn() {
+		return body, nil
+	}
+	defer func() {
+		if recover() != nil {
+			restored, restoreErr = body, nil
+		}
+	}()
 	store := s.collabAliasStore()
 	if store == nil {
 		return body, nil
@@ -109,7 +118,7 @@ func (s *OpenAIGatewayService) restoreCollabContinuation(ctx context.Context, c 
 	}
 	alias, ok, err := store.Get(ctx, collabAliasScope(c), id)
 	if err != nil {
-		return nil, err
+		return body, nil
 	}
 	if !ok {
 		return body, nil

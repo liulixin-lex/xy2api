@@ -9,7 +9,11 @@ import (
 )
 
 var collabNamedPattern = regexp.MustCompile("(?i)\\bfor\\s+item\\s+['\"`]?([a-z0-9]+_[a-z0-9_-]+)\\b")
-var collabIndexPattern = regexp.MustCompile(`\binput(?:\[([0-9]+)\]|\.([0-9]+))`)
+var collabIndexPattern = regexp.MustCompile(`\binput(?:\[([0-9]+)\]|\.([0-9]+))(?:(?:\.[a-zA-Z_0-9]+)|(?:\[[0-9]+\]))*`)
+
+// Text evidence must assert rejection of the encrypted subject itself. Locator
+// quotes are allowed; quoted examples and unrelated later clauses are not.
+var collabRejectionPattern = regexp.MustCompile(`(?i)^(?:(?:the )?encrypted (?:content|function arguments|function output(?: content)?)(?: (?:for item ['"` + "`" + `]?[a-z0-9]+_[a-z0-9_-]+['"` + "`" + `]?|at input(?:\[[0-9]+\]|\.[0-9]+)(?:\.[a-z_0-9]+)*))? (?:could not be (?:decrypted|decoded|verified)|hydration failed|is invalid for this conversation)|failed to decrypt encrypted content)(?:$|[ .,;:])`)
 
 // ClassifyCollabEvidence does not authorize repairs or change legacy predicates.
 // Only structured error fields are evidence: request echoes, output and prose
@@ -20,24 +24,34 @@ func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
 	if !gjson.ValidBytes(in.Payload) || !root.IsObject() || !collabErrorUnique(root, 0) {
 		return out
 	}
-	object := collabErrorObject(root)
-	status, wrapped, valid := collabErrorWrapper(root, in.Event)
-	if !valid {
-		return out
+	var object gjson.Result
+	status, wrapped := 0, false
+	for depth := 0; ; depth++ {
+		if depth > 8 {
+			return out
+		}
+		currentStatus, currentWrapped, valid := collabErrorWrapper(root, in.Event)
+		if !valid || root.Get("response.error").Exists() && root.Get("error").Exists() {
+			return out
+		}
+		object = collabErrorObject(root)
+		if !currentWrapped {
+			break
+		}
+		status, wrapped = currentStatus, true
+		inner := root.Get("upstream_body")
+		if !inner.Exists() {
+			break
+		}
+		if inner.Type == gjson.String {
+			inner = gjson.Parse(inner.Str)
+		}
+		if !gjson.Valid(inner.Raw) || !inner.IsObject() || !collabErrorUnique(inner, 0) {
+			return out
+		}
+		root = inner
 	}
 	if wrapped {
-		if inner := root.Get("upstream_body"); inner.Exists() {
-			if inner.Type == gjson.String {
-				inner = gjson.Parse(inner.Str)
-			}
-			if !gjson.Valid(inner.Raw) || !inner.IsObject() || !collabErrorUnique(inner, 0) {
-				return out
-			}
-			object = collabErrorObject(inner)
-			if !object.IsObject() {
-				return out
-			}
-		}
 		out.Inner = &CollabInnerError{Validated: true, Status: status, Code: object.Get("code").String(), Type: object.Get("type").String(), Message: object.Get("message").String(), Payload: []byte(object.Raw)}
 	}
 	if !object.IsObject() {
@@ -74,11 +88,7 @@ func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
 		return out
 	}
 	verified := IsEncryptedContentRejection(code, "") || code == "encrypted_content_rejected"
-	for _, prefix := range []string{"the encrypted content", "encrypted content", "failed to decrypt encrypted content", "encrypted function arguments", "encrypted function output"} {
-		if strings.HasPrefix(strings.TrimSpace(message), prefix) && !strings.ContainsAny(message, "{}\"") {
-			verified = verified || IsEncryptedContentRejection("", message) || strings.Contains(message, "could not be decrypted") || strings.Contains(message, "failed to decrypt") || strings.Contains(message, "is invalid for this conversation")
-		}
-	}
+	verified = verified || collabRejectionPattern.MatchString(strings.TrimSpace(message))
 	if !verified {
 		if wrapped && status == 400 && (in.Shape.AgentCiphertext || in.Shape.ToolOutputCiphertext) {
 			out.Grade = CollabEvidenceGradeClaimed
@@ -198,8 +208,16 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 				named.Ambiguous = true
 			} else {
 				named.InputIndex = &index
+				location := match[0]
 				if field == "param" {
-					named.Path = object.Get(field).String()
+					location = strings.TrimSpace(object.Get(field).String())
+				}
+				path := strings.NewReplacer("[", ".", "]", "").Replace(location)
+				if named.Path != "" && named.Path != path && !strings.HasPrefix(path, named.Path+".") && !strings.HasPrefix(named.Path, path+".") {
+					named.Ambiguous = true
+				}
+				if len(path) > len(named.Path) {
+					named.Path = path
 				}
 			}
 		}

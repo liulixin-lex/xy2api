@@ -18,7 +18,9 @@ func (s *OpenAIGatewayService) pickOpenAILastResort(ctx context.Context, req Ope
 	if s.concurrencyService != nil {
 		loads, _ = s.concurrencyService.GetAccountsLoadBatchFresh(ctx, selectionLoadRequests(accounts))
 	}
-	s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
+	if resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
+	}
 	request := s.selectionRequest(ctx, req, loads)
 	request.newSessionOutcome = req.newSessionOutcome
 	view, now := s.selectionView(), s.selectionNow()

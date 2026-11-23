@@ -178,7 +178,9 @@ func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts 
 	if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
 		outcome = req.newSessionOutcome
 	}
-	s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
+	if resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
+	}
 	available := make([]*Account, 0, len(accounts))
 	for _, a := range accounts {
 		if load := loads[a.ID]; load == nil || load.LoadRate < 100 {
