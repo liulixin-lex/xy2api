@@ -270,11 +270,3 @@ func collabSavedRetryable(saved *collabWithheld) bool {
 	}
 	return parseOpsErrorResponse(body).StreamFailure
 }
-
-// deliveredAccountID is available to the request owner's thread-binding adapter.
-func (s *collabSeam) deliveredAccountID() int64 {
-	if s == nil {
-		return 0
-	}
-	return s.deliveredAccount
-}

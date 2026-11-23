@@ -70,10 +70,10 @@ func (s *OpenAIGatewayService) collabBodyDigest(body []byte) resilience.CollabDi
 		return ""
 	}
 	h := hmac.New(sha256.New, []byte(s.cfg.JWT.Secret))
-	h.Write([]byte("collab-v1/" + string(resilience.CollabDigestDomainBody) + "\x00"))
+	_, _ = h.Write([]byte("collab-v1/" + string(resilience.CollabDigestDomainBody) + "\x00"))
 	var length [8]byte
 	binary.BigEndian.PutUint64(length[:], uint64(len(body)))
-	h.Write(length[:])
-	h.Write(body)
+	_, _ = h.Write(length[:])
+	_, _ = h.Write(body)
 	return resilience.CollabDigest(hex.EncodeToString(h.Sum(nil)))
 }

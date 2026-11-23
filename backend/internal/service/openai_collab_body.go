@@ -56,7 +56,7 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 		}
 		if len(candidates[i]) == 0 && id == "" {
 			for j, candidate := range original {
-				if candidate.Get("id").String() == "" && collabRemovedFieldsOnly(candidate, item) {
+				if candidate.Get("id").String() == "" && collabRepairedItemMatches(candidate, item) {
 					candidates[i] = append(candidates[i], j)
 				}
 			}
@@ -272,7 +272,7 @@ func ParseCollabBodyWithContext(body []byte, facts CollabBodyContext) CollabBody
 				if kind == "NEW_TASK" {
 					// A task survives intermediate assistant output until a final
 					// answer, compaction, or a newer task for the same recipient.
-					active := !(i <= lastOutput && facts.Thread != "" && item.Get("recipient").String() != "" && item.Get("recipient").String() != facts.Thread)
+					active := i > lastOutput || facts.Thread == "" || item.Get("recipient").String() == "" || item.Get("recipient").String() == facts.Thread
 					// Unread tasks in one batch are all protected.
 					if i <= lastOutput {
 						for _, later := range input[i+1:] {
@@ -298,7 +298,7 @@ func ParseCollabBodyWithContext(body []byte, facts CollabBodyContext) CollabBody
 					entry.Placeholder = collabProcessedTask
 				}
 			}
-			if facts.Consumed[identity] && !(item.Get("type").String() == "agent_message" && collabEnvelopeKind(item) == "NEW_TASK") {
+			if facts.Consumed[identity] && (item.Get("type").String() != "agent_message" || collabEnvelopeKind(item) != "NEW_TASK") {
 				entry.Class = resilience.CollabItemClassReplaceable
 			}
 			if len(entry.Paths) > 0 {
@@ -484,11 +484,13 @@ func (l *collabInputLineage) matches(raw string, index int) bool {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.items[sha256.Sum256([]byte(raw))][index] {
-		return true
+	if known := l.items[sha256.Sum256([]byte(raw))]; len(known) > 0 {
+		// Recorded derivations take precedence over structural similarities to
+		// other occurrences, including an unchanged copy of the same message.
+		return known[index]
 	}
 	for _, prior := range l.variants[index] {
-		if collabRemovedFieldsOnly(gjson.Parse(prior), gjson.Parse(raw)) {
+		if collabRepairedItemMatches(gjson.Parse(prior), gjson.Parse(raw)) {
 			return true
 		}
 	}
@@ -509,21 +511,26 @@ func (l *collabInputLineage) remember(raw string, index int) {
 	}
 	l.items[digest][index] = true
 }
-func collabRemovedFieldsOnly(before, after gjson.Result) bool {
+func collabRepairedItemMatches(before, after gjson.Result) bool {
 	if before.Raw == after.Raw {
 		return true
 	}
 	if !before.IsObject() || !after.IsObject() || after.Get("type").String() == "" || before.Get("type").String() != after.Get("type").String() {
 		return false
 	}
-	return collabNestedRemovalsOnly(before, after)
+	return collabNestedRepairsMatch(before, after)
 }
 
 // Compare structure recursively, retaining the original item's identity even
-// when a protocol repair removes a field inside content or an array element.
+// when a protocol repair removes a field or changes a boolean option inside
+// content or an array element. Text and identity-bearing strings still match
+// exactly; a setter must not make different messages interchangeable.
 // Ambiguous matches between different originals are rejected by inputPositions.
-func collabNestedRemovalsOnly(before, after gjson.Result) bool {
+func collabNestedRepairsMatch(before, after gjson.Result) bool {
 	if before.Raw == after.Raw {
+		return true
+	}
+	if (before.Type == gjson.True || before.Type == gjson.False) && (after.Type == gjson.True || after.Type == gjson.False) {
 		return true
 	}
 	if before.IsObject() && after.IsObject() {
@@ -535,7 +542,7 @@ func collabNestedRemovalsOnly(before, after gjson.Result) bool {
 			if exists && (kind == "agent_message" && key.Str == "content" || kind == "function_call_output" && key.Str == "output") && prior.IsArray() && value.IsArray() {
 				valid = collabLegacyPartsMatch(prior.Array(), value.Array())
 			} else {
-				valid = exists && collabNestedRemovalsOnly(prior, value)
+				valid = exists && collabNestedRepairsMatch(prior, value)
 			}
 			return valid
 		})
@@ -545,7 +552,7 @@ func collabNestedRemovalsOnly(before, after gjson.Result) bool {
 		previous, next := before.Array(), after.Array()
 		at := 0
 		for _, item := range next {
-			for at < len(previous) && !collabNestedRemovalsOnly(previous[at], item) {
+			for at < len(previous) && !collabNestedRepairsMatch(previous[at], item) {
 				at++
 			}
 			if at == len(previous) {
@@ -610,7 +617,7 @@ func collabLegacyPartsMatch(before, after []gjson.Result) bool {
 			at++
 			replacement := prior.Get("type").String() == "encrypted_content" && prior.Get("encrypted_content").Type == gjson.String &&
 				part.Get("type").String() == "input_text" && part.Get("text").String() == "[encrypted content omitted]" && len(part.Map()) == 2
-			if replacement || collabNestedRemovalsOnly(prior, part) {
+			if replacement || collabNestedRepairsMatch(prior, part) {
 				matched = true
 				break
 			}
