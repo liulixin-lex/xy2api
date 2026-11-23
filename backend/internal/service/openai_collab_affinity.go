@@ -25,6 +25,7 @@ type openAICollabAffinity struct {
 // identity. Parent uses the thread digest domain, so grandchildren can resolve
 // membership. Scope uses the same versioned CollabDigest identity as records;
 // the affinity store has its own namespace. Tenant/Group retain ingress isolation.
+// Hint and delivery state is independent of session-hash migration.
 // No existing session, cache or quality key is changed.
 func WithOpenAICollabTreeAffinity(ctx context.Context, store *resilience.CollabTreeAffinity, settings *resilience.Settings, groupID int64, identity resilience.CollabTreeHint, role resilience.CollabRole, encrypted bool) context.Context {
 	if ctx == nil || store == nil || !settings.CollabTreeAffinityOn() || identity.Scope.Tenant == "" || identity.Scope.Group == "" || identity.Thread == "" || (role != resilience.CollabRoleRoot && role != resilience.CollabRoleChild) {

@@ -56,7 +56,7 @@ func (c *selectionRuntimeCache) CommitSessionBinding(ctx context.Context, group 
 	}
 
 	c.casKeys = append(c.casKeys, key)
-	if c.sessionBindings[key] != expected.AccountID {
+	if c.sessionBindings[key] != expected.AccountID || expected.AccountID == 0 && expected.LegacyKey != "" && c.sessionBindings[expected.LegacyKey] != 0 {
 		return BindingCommitResult{Status: BindingChanged, ObservedGen: expected.Generation}, nil
 	}
 	c.sessionBindings[key] = next
@@ -79,7 +79,7 @@ func (c *selectionRuntimeCache) ResolveSessionBinding(ctx context.Context, group
 	return binding, err
 }
 
-func (c *selectionRuntimeCache) SyncSessionBindingAlias(_ context.Context, _ int64, primary, legacy string, owner int64, _ time.Duration, create bool) error {
+func (c *selectionRuntimeCache) SyncSessionBindingAlias(ctx context.Context, _ int64, primary, legacy string, owner int64, _ time.Duration, create bool) error {
 	current := c.sessionBindings[primary]
 	if current > 0 && (owner == 0 || current == owner) && (create || c.sessionBindings[legacy] != 0) {
 		c.sessionBindings[legacy] = current

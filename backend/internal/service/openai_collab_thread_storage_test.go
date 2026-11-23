@@ -2,6 +2,9 @@
 
 package service
 
+// Binding scenarios here exercise unfinished code through the test-only hook.
+// They do not establish equivalence or enable thread bindings in this release.
+
 import (
 	"context"
 	"fmt"
@@ -19,7 +22,7 @@ func TestCollabThreadBindingTrialIdentity(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, mode := range []string{"delete", "promote", "touch_tree", "touch_thread", "touch_after_bind", "recorder"} {
 		t.Run(mode, func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+			f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 			f.cache.sessionBindings["openai:shared-session"] = 1
 			ctx := prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "shared-session")
 			b := openAICollabBindingFrom(ctx)
@@ -77,76 +80,82 @@ func TestCollabThreadBindingTrialIdentity(t *testing.T) {
 // Compare the storage effects separately from the selection oracle so failed
 // attempts and provisional claims are observed before completion can promote.
 func TestCollabThreadBindingStorageOracle(t *testing.T) {
-	random := rand.New(rand.NewSource(23))
-	for i := range 300 {
-		owner, target := int64(random.Intn(3)), int64(1+random.Intn(2))
-		atomicCache, inherited := random.Intn(2) == 0, random.Intn(2) == 0
-		action := i % 4
-		ttl := []time.Duration{10 * time.Second, time.Hour}[random.Intn(2)]
-		synctest.Test(t, func(t *testing.T) {
-			outcome := func(on bool) string {
-				f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
-				NewOpenAISelectionBoard(f.svc, func() schedquality.View { return f.view }, newSelectionTrialLeaseFake())
-				cache := &collabEffectsCache{GatewayCache: f.svc.cache, values: map[string]int64{}, until: map[string]time.Time{}}
-				f.svc.cache = cache
-				if !atomicCache {
-					f.svc.cache = struct{ GatewayCache }{cache}
-				}
-				session := "v2:shared-session"
-				ctx := selectionReviewContext()
-				var binding *openAICollabThreadBinding
-				if on {
-					ctx = prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), session)
-					binding = openAICollabBindingFrom(ctx)
-				}
-				if !on || inherited {
-					if owner > 0 {
-						require.NoError(t, cache.SetSessionAccountID(ctx, 7, "openai:"+session, owner, time.Minute))
+	for migration := range 4 {
+		random := rand.New(rand.NewSource(23))
+		for i := range 300 {
+			owner, target := int64(random.Intn(3)), int64(1+random.Intn(2))
+			atomicCache, inherited := random.Intn(2) == 0, random.Intn(2) == 0
+			action := i % 4
+			ttl := []time.Duration{10 * time.Second, time.Hour}[random.Intn(2)]
+			synctest.Test(t, func(t *testing.T) {
+				outcome := func(on bool) string {
+					f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+					f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = migration&1 != 0
+					f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = migration&2 != 0
+					active := on && migration == 0
+					NewOpenAISelectionBoard(f.svc, func() schedquality.View { return f.view }, newSelectionTrialLeaseFake())
+					cache := &collabEffectsCache{GatewayCache: f.svc.cache, values: map[string]int64{}, until: map[string]time.Time{}}
+					f.svc.cache = cache
+					if !atomicCache {
+						f.svc.cache = struct{ GatewayCache }{cache}
 					}
-				} else {
-					require.NoError(t, cache.SetSessionAccountID(ctx, 7, "openai:"+session, 1, time.Minute))
-					require.NoError(t, binding.write(ctx, owner, time.Minute))
-				}
-				tree, treeErr := cache.GetSessionAccountID(ctx, 7, "openai:"+session)
-				time.Sleep(5 * time.Second)
-				var err error
-				switch action {
-				case 0, 1:
-					ctx = context.WithValue(ctx, openAIStickyPromotionKey{}, action == 1)
-					err = f.svc.setStickySessionAccountID(ctx, ptrInt64Selection(7), session, target, ttl)
-				case 2:
-					err = f.svc.refreshStickySessionTTL(ctx, ptrInt64Selection(7), session, ttl, target)
-				case 3:
-					err = f.svc.refreshStickySessionTTL(ctx, ptrInt64Selection(7), session, ttl)
-				}
-				id, readErr := f.svc.getStickySessionAccountID(ctx, ptrInt64Selection(7), session)
-				remaining := time.Duration(0)
-				if id > 0 {
-					remaining = time.Until(cache.until["openai:"+session])
-					if binding != nil && binding.present() {
-						remaining = time.Until(binding.until)
+					session := "v2:shared-session"
+					ctx := selectionReviewContext()
+					var binding *openAICollabThreadBinding
+					if on {
+						ctx = prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), session)
+						binding = openAICollabBindingFrom(ctx)
 					}
+					if !active || inherited {
+						if owner > 0 {
+							require.NoError(t, cache.SetSessionAccountID(ctx, 7, "openai:"+session, owner, time.Minute))
+						}
+					} else {
+						require.NoError(t, cache.SetSessionAccountID(ctx, 7, "openai:"+session, 1, time.Minute))
+						require.NoError(t, binding.write(ctx, owner, time.Minute))
+					}
+					tree, treeErr := cache.GetSessionAccountID(ctx, 7, "openai:"+session)
+					time.Sleep(5 * time.Second)
+					var err error
+					switch action {
+					case 0, 1:
+						ctx = context.WithValue(ctx, openAIStickyPromotionKey{}, action == 1)
+						err = f.svc.setStickySessionAccountID(ctx, ptrInt64Selection(7), session, target, ttl)
+					case 2:
+						err = f.svc.refreshStickySessionTTL(ctx, ptrInt64Selection(7), session, ttl, target)
+					case 3:
+						err = f.svc.refreshStickySessionTTL(ctx, ptrInt64Selection(7), session, ttl)
+					}
+					id, readErr := f.svc.getStickySessionAccountID(ctx, ptrInt64Selection(7), session)
+					remaining := time.Duration(0)
+					if id > 0 {
+						remaining = time.Until(cache.until["openai:"+session])
+						if binding != nil && binding.present() {
+							remaining = time.Until(binding.until)
+						}
+					}
+					if active {
+						after, afterErr := cache.GetSessionAccountID(ctx, 7, "openai:"+session)
+						require.Equal(t, tree, after)
+						require.Equal(t, treeErr, afterErr)
+					}
+					return fmt.Sprintf("owner=%d ttl=%v err=%v read=%v", id, remaining, err, readErr)
 				}
-				if on {
-					after, afterErr := cache.GetSessionAccountID(ctx, 7, "openai:"+session)
-					require.Equal(t, tree, after)
-					require.Equal(t, treeErr, afterErr)
-				}
-				return fmt.Sprintf("owner=%d ttl=%v err=%v read=%v", id, remaining, err, readErr)
-			}
-			require.Equal(t, outcome(false), outcome(true), "case=%d owner=%d target=%d atomic=%v inherited=%v action=%d ttl=%v", i, owner, target, atomicCache, inherited, action, ttl)
-		})
+				require.Equal(t, outcome(false), outcome(true), "case=%d owner=%d target=%d atomic=%v inherited=%v action=%d ttl=%v", i, owner, target, atomicCache, inherited, action, ttl)
+			})
+		}
 	}
 }
 
 func TestCollabThreadBindingPromotionKeepsTreeAlive(t *testing.T) {
+	t.Run("legacy_inactive", testCollabLegacyPromotion)
 	for _, operation := range []string{"promote", "detached_refresh", "detached_commit"} {
 		t.Run(operation, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+				f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 				cache := &collabEffectsCache{GatewayCache: f.svc.cache, values: map[string]int64{}, until: map[string]time.Time{}}
 				f.svc.cache = cache
-				ctx := prepareAffinityTest(f, withOpenAILegacySessionHash(collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "legacy"), "v2:shared-session")
+				ctx := prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "v2:shared-session")
 				b := openAICollabBindingFrom(ctx)
 				for _, key := range []string{"openai:" + b.session, "openai:legacy"} {
 					require.NoError(t, cache.SetSessionAccountID(ctx, 7, key, 1, time.Minute))
@@ -168,7 +177,7 @@ func TestCollabThreadBindingPromotionKeepsTreeAlive(t *testing.T) {
 					require.Equal(t, BindingCommitted, result.Status)
 				}
 				require.Equal(t, time.Hour, time.Until(cache.until["openai:"+b.session]))
-				require.Equal(t, 10*time.Minute, time.Until(cache.until["openai:legacy"]))
+				require.Equal(t, 50*time.Second, time.Until(cache.until["openai:legacy"]), "unreferenced legacy keys are untouched")
 				require.EqualValues(t, 1, cache.values["openai:"+b.session])
 				require.EqualValues(t, 1, cache.values["openai:legacy"])
 			})
@@ -177,7 +186,7 @@ func TestCollabThreadBindingPromotionKeepsTreeAlive(t *testing.T) {
 }
 
 func TestCollabThreadBindingLookupPreservesCacheGuard(t *testing.T) {
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 	ctx := prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "shared-session")
 	require.NoError(t, openAICollabBindingFrom(ctx).write(ctx, 1, time.Minute))
 	f.svc.cache = nil
@@ -192,7 +201,7 @@ func TestCollabThreadBindingDeleteBookkeepingOracle(t *testing.T) {
 		for _, ownerChecked := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/owner=%t", capability, ownerChecked), func(t *testing.T) {
 				outcome := func(on bool) bool {
-					f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+					f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 					NewOpenAISelectionBoard(f.svc, func() schedquality.View { return f.view }, newSelectionTrialLeaseFake())
 					cache := &collabEffectsCache{GatewayCache: f.svc.cache, values: map[string]int64{}, until: map[string]time.Time{}}
 					f.svc.cache = struct{ GatewayCache }{cache}
@@ -222,7 +231,7 @@ func TestCollabThreadBindingDeleteBookkeepingOracle(t *testing.T) {
 
 func TestCollabThreadBindingDetachedChangeLease(t *testing.T) {
 	withResilienceSettings(t, nil)
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 	f.cache.sessionBindings["openai:shared-session"] = 1
 	ctx := prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "shared-session")
 	b := openAICollabBindingFrom(ctx)

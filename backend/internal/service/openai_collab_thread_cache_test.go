@@ -2,6 +2,9 @@
 
 package service
 
+// Binding scenarios here exercise unfinished code through the test-only hook.
+// They do not establish equivalence or enable thread bindings in this release.
+
 import (
 	"context"
 	"errors"
@@ -24,11 +27,13 @@ func collabFakeThreadOperation(ctx context.Context, b StickyThreadBinding, cache
 		present = false
 		delete(values, b.Key)
 	}
+	marker := b.Key + ":deleted"
+	detached := values[marker] != 0 && (expires == nil || time.Now().Before(expires[marker]))
 	owner := prior
 	if !present {
-		owner, _ = cache.GetSessionAccountID(ctx, group, b.Parent)
-		if owner <= 0 && b.Fallback && b.Legacy != "" {
-			owner, _ = cache.GetSessionAccountID(ctx, group, b.Legacy)
+		owner = 0
+		if !detached {
+			owner, _ = cache.GetSessionAccountID(ctx, group, b.Parent)
 		}
 	}
 	if owner > 0 {
@@ -68,11 +73,21 @@ func collabFakeThreadOperation(ctx context.Context, b StickyThreadBinding, cache
 		}
 		if changed && b.RefreshTTL > 0 {
 			_ = cache.RefreshSessionTTL(ctx, group, b.Parent, b.RefreshTTL)
-			if b.Legacy != "" {
-				_ = cache.RefreshSessionTTL(ctx, group, b.Legacy, min(b.RefreshTTL, 10*time.Minute))
-			}
 		}
 		account, known := values[b.Key]
+		if known && changed || operation == "delete" && !restore {
+			values[marker] = 1
+			if expires != nil {
+				until := time.Now().Add(b.TTL)
+				for _, key := range []string{b.Key, b.Parent, marker} {
+					if expires[key].After(until) {
+						until = expires[key]
+					}
+				}
+				expires[marker] = until
+			}
+			detached = true
+		}
 		remaining := ttl
 		if expires != nil {
 			remaining = time.Until(expires[b.Key])
@@ -80,10 +95,15 @@ func collabFakeThreadOperation(ctx context.Context, b StickyThreadBinding, cache
 		if remaining <= 0 && expires == nil {
 			remaining = b.TTL
 		}
+		if !known && detached {
+			account, known = -1, true
+			if expires != nil {
+				remaining = time.Until(expires[marker])
+			}
+		}
 		parent, _ := cache.GetSessionAccountID(ctx, group, b.Parent)
-		legacy, _ := cache.GetSessionAccountID(ctx, group, b.Legacy)
 		if b.Observe != nil {
-			b.Observe(account, remaining, known, account == -1 || !known && parent <= 0 && legacy <= 0)
+			b.Observe(account, remaining, known, account == -1 || !known && parent <= 0)
 		}
 	}
 }

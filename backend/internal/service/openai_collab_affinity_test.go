@@ -18,6 +18,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func newCollabThreadFixture(t *testing.T, accounts ...Account) *selectionRuntimeFixture {
+	t.Helper()
+	f := newSelectionRuntimeFixture(t, accounts...)
+	f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = false
+	f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = false
+	return f
+}
+
 func collabAffinityIdentity(thread, parent string) resilience.CollabTreeHint {
 	return resilience.CollabTreeHint{Scope: resilience.CollabRecordScope{Tenant: "tenant-digest", Group: "group-digest", Tree: "tree-digest"}, Thread: resilience.CollabDigest(thread), Parent: resilience.CollabDigest(parent)}
 }
@@ -36,13 +44,14 @@ func collabAffinityContext(store *resilience.CollabTreeAffinity, settings *resil
 	return WithOpenAICollabTreeAffinity(selectionReviewContext(), store, settings, 7, collabAffinityIdentity(thread, parent), role, true)
 }
 
+// prepareAffinityTest exercises the unshipped binding through its test-only hook.
 func prepareAffinityTest(f *selectionRuntimeFixture, ctx context.Context, session string) context.Context {
 	f.svc.cfg.JWT = config.JWTConfig{Secret: "synthetic-affinity-secret"}
 	if openAIRejectionScope(ctx).session == "" {
 		ctx = context.WithValue(ctx, openAITerminalRejectionScopeKey{}, openAITerminalRejectionScope{session: "child-execution", preserveBinding: true, selectionPreservesBinding: &atomic.Bool{}})
 	}
 	ctx = withOpenAINoStickyMigration(ctx)
-	f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true)
+	f.svc.enableUnshippedCollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true)
 	return ctx
 }
 
@@ -56,7 +65,7 @@ func TestCollabAffinityAloneNeverAddsSlotWait(t *testing.T) {
 		for _, mode := range []string{"free", "busy", "unsupported-model", "excluded", "wrong-group", "cooldown", "unavailable", "constraint", "missing", "admission-veto", "privacy", "profit"} {
 			t.Run(fmt.Sprintf("on=%t/%s", on, mode), func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
-					f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 2), selectionFixtureAccount(2, 1))
+					f := newCollabThreadFixture(t, selectionFixtureAccount(1, 2), selectionFixtureAccount(2, 1))
 					f.loads.acquireResults = map[int64]bool{1: mode != "busy", 2: true}
 					s := resilience.NewCollabTreeAffinity(32, time.Hour)
 					settings := collabAffinitySettings()
@@ -143,7 +152,7 @@ func TestCollabAffinityDoesNotCrossEffectiveGroups(t *testing.T) {
 
 func TestCollabAffinityCrossModelGrandchildAndParentPrecedence(t *testing.T) {
 	withResilienceSettings(t, nil)
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 3), selectionFixtureAccount(2, 1), selectionFixtureAccount(3, 2))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 3), selectionFixtureAccount(2, 1), selectionFixtureAccount(3, 2))
 	s := resilience.NewCollabTreeAffinity(32, time.Hour)
 	settings := collabAffinitySettings()
 	root := collabAffinityContext(s, settings, "root", "")
@@ -172,7 +181,7 @@ func TestCollabAffinityCrossModelGrandchildAndParentPrecedence(t *testing.T) {
 
 func TestCollabAffinityChildRetryMovesBeforeFinalOutcome(t *testing.T) {
 	withResilienceSettings(t, nil)
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 3))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 3))
 	f.cache.sessionBindings["openai:shared-session"] = 1
 	s := resilience.NewCollabTreeAffinity(32, time.Hour)
 	settings := collabAffinitySettings()
@@ -277,29 +286,35 @@ func TestCollabAffinityLeaseGatesAndDelivery(t *testing.T) {
 }
 
 func TestCollabAffinityLeaseSuppressesQualityEvidenceOnlyWhenOptedIn(t *testing.T) {
-	for _, lossless := range []bool{false, true} {
-		t.Run(fmt.Sprint(lossless), func(t *testing.T) {
-			svc := &OpenAIGatewayService{}
-			c, _, _ := qualityTestContext(svc, 1, 0, "gpt-6-astra", "")
-			s := resilience.NewCollabTreeAffinity(32, time.Hour)
-			settings := collabAffinitySettings()
-			settings.Collab.Ladder, settings.Collab.LosslessFirst = lossless, lossless
-			identity := collabAffinityIdentity("root", "")
-			ctx := WithOpenAICollabTreeAffinity(c.Request.Context(), s, settings, 0, identity, resilience.CollabRoleRoot, false)
-			require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: identity.Scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: identity.Scope, Token: "token"}, AccountID: 1}))
-			account := selectionFixtureAccount(1, 1)
-			svc.qualityObserver(ctx, &account, "gpt-6-astra").ObserveOpenAI([]byte(`{"model":"gpt-5.6-luna"}`), "")
-			entry, exists := svc.openaiQualityStates.Load(qualityRequest(ctx).scope)
-			local, _ := entry.(*openAIQualityLocal)
-			if lossless {
-				if exists {
-					require.Zero(t, local.state.Generation)
-				}
-			} else {
-				require.True(t, exists)
-				require.Positive(t, local.state.Generation)
+	for migration := range 4 {
+		for _, legacy := range []string{"", "legacy"} {
+			for _, lossless := range []bool{false, true} {
+				t.Run(fmt.Sprint(lossless), func(t *testing.T) {
+					svc := &OpenAIGatewayService{cfg: &config.Config{}}
+					svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = migration&1 != 0
+					svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = migration&2 != 0
+					c, _, _ := qualityTestContext(svc, 1, 0, "gpt-6-astra", "")
+					s := resilience.NewCollabTreeAffinity(32, time.Hour)
+					settings := collabAffinitySettings()
+					settings.Collab.Ladder, settings.Collab.LosslessFirst = lossless, lossless
+					identity := collabAffinityIdentity("root", "")
+					ctx := WithOpenAICollabTreeAffinity(withOpenAILegacySessionHash(c.Request.Context(), legacy), s, settings, 0, identity, resilience.CollabRoleRoot, false)
+					require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: identity.Scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: identity.Scope, Token: "token"}, AccountID: 1}))
+					account := selectionFixtureAccount(1, 1)
+					svc.qualityObserver(ctx, &account, "gpt-6-astra").ObserveOpenAI([]byte(`{"model":"gpt-5.6-luna"}`), "")
+					entry, exists := svc.openaiQualityStates.Load(qualityRequest(ctx).scope)
+					local, _ := entry.(*openAIQualityLocal)
+					if lossless {
+						if exists {
+							require.Zero(t, local.state.Generation)
+						}
+					} else {
+						require.True(t, exists)
+						require.Positive(t, local.state.Generation)
+					}
+				})
 			}
-		})
+		}
 	}
 }
 
@@ -307,7 +322,7 @@ func TestCollabAffinityRejectionWrapperKeepsExistingTiming(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, on := range []bool{false, true} {
 		t.Run(fmt.Sprint(on), func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+			f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 			f.cache.sessionBindings["openai:shared-session"] = 1
 			s := resilience.NewCollabTreeAffinity(32, time.Hour)
 			settings := collabAffinitySettings()
@@ -335,7 +350,7 @@ func TestCollabAffinityRejectionWrapperKeepsExistingTiming(t *testing.T) {
 
 func TestCollabAffinityAvoidanceFallbackRetainsTenant(t *testing.T) {
 	withResilienceSettings(t, nil)
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 	s := resilience.NewCollabTreeAffinity(32, time.Hour)
 	settings := collabAffinitySettings()
 	first := collabAffinityIdentity("child", "root")
@@ -359,64 +374,76 @@ func TestCollabAffinityAvoidanceFallbackRetainsTenant(t *testing.T) {
 
 func TestCollabAffinityLeaseSuppressesPendingQualityMigration(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, hard := range []bool{false, true} {
-		t.Run(fmt.Sprint(hard), func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
-			c, _, session := qualityTestContext(f.svc, 1, 7, "gpt-6-astra", "")
-			q := qualityRequest(c.Request.Context())
-			q.loaded = true
-			q.state = OpenAIQualityState{Generation: 1, Owner: 1, Rotation: "rotation", Expires: time.Now().Add(time.Hour).UnixMilli(), Avoid: map[string]OpenAIQualityAvoid{"1": {Provider: "provider", Until: time.Now().Add(time.Hour).UnixMilli()}}}
-			s := resilience.NewCollabTreeAffinity(32, time.Hour)
-			settings := collabAffinitySettings()
-			settings.Collab.Ladder, settings.Collab.LosslessFirst = true, true
-			identity := collabAffinityIdentity("root", "")
-			ctx := WithOpenAICollabTreeAffinity(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()), s, settings, 7, identity, resilience.CollabRoleRoot, false)
-			require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: identity.Scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: identity.Scope, Token: "token"}, AccountID: 1}))
-			var excluded map[int64]struct{}
-			if hard {
-				excluded = map[int64]struct{}{1: {}}
+	for migration := range 4 {
+		for _, legacy := range []string{"", "legacy"} {
+			for _, hard := range []bool{false, true} {
+				t.Run(fmt.Sprint(hard), func(t *testing.T) {
+					f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+					f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = migration&1 != 0
+					f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = migration&2 != 0
+					c, _, session := qualityTestContext(f.svc, 1, 7, "gpt-6-astra", "")
+					q := qualityRequest(c.Request.Context())
+					q.loaded = true
+					q.state = OpenAIQualityState{Generation: 1, Owner: 1, Rotation: "rotation", Expires: time.Now().Add(time.Hour).UnixMilli(), Avoid: map[string]OpenAIQualityAvoid{"1": {Provider: "provider", Until: time.Now().Add(time.Hour).UnixMilli()}}}
+					s := resilience.NewCollabTreeAffinity(32, time.Hour)
+					settings := collabAffinitySettings()
+					settings.Collab.Ladder, settings.Collab.LosslessFirst = true, true
+					identity := collabAffinityIdentity("root", "")
+					ctx := WithOpenAICollabTreeAffinity(resilience.WithRequestState(withOpenAILegacySessionHash(c.Request.Context(), legacy), resilience.NewRequestState()), s, settings, 7, identity, resilience.CollabRoleRoot, false)
+					require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: identity.Scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: identity.Scope, Token: "token"}, AccountID: 1}))
+					var excluded map[int64]struct{}
+					if hard {
+						excluded = map[int64]struct{}{1: {}}
+					}
+					selection, _, err := f.svc.SelectAccountWithScheduler(ctx, ptrInt64Selection(7), "", session, "gpt-6-astra", excluded, OpenAIUpstreamTransportHTTPSSE, false)
+					require.NoError(t, err)
+					require.NotNil(t, selection)
+					defer selection.ReleaseFunc()
+					if hard {
+						require.EqualValues(t, 2, selection.Account.ID)
+					} else {
+						require.EqualValues(t, 1, selection.Account.ID)
+					}
+					require.EqualValues(t, 1, q.state.Generation, "suppression does not rewrite quality state")
+				})
 			}
-			selection, _, err := f.svc.SelectAccountWithScheduler(ctx, ptrInt64Selection(7), "", session, "gpt-6-astra", excluded, OpenAIUpstreamTransportHTTPSSE, false)
-			require.NoError(t, err)
-			require.NotNil(t, selection)
-			defer selection.ReleaseFunc()
-			if hard {
-				require.EqualValues(t, 2, selection.Account.ID)
-			} else {
-				require.EqualValues(t, 1, selection.Account.ID)
-			}
-			require.EqualValues(t, 1, q.state.Generation, "suppression does not rewrite quality state")
-		})
+		}
 	}
 }
 
 func TestCollabAffinityLeasePreservesQualityOwnerButNotHardExclusions(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, blocked := range []bool{false, true} {
-		t.Run(fmt.Sprint(blocked), func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 2), selectionFixtureAccount(2, 1))
-			f.cache.sessionBindings["openai:shared-session"] = 1
-			f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
-			before := maps.Clone(f.cache.sessionBindings)
-			s := resilience.NewCollabTreeAffinity(32, time.Hour)
-			settings := collabAffinitySettings()
-			settings.Collab.Ladder, settings.Collab.LosslessFirst = true, true
-			ctx := collabAffinityContext(s, settings, "root", "")
-			scope := collabAffinityIdentity("root", "").Scope
-			require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: scope, Token: "token"}, AccountID: 1}))
-			var excluded map[int64]struct{}
-			if blocked {
-				excluded = map[int64]struct{}{1: {}}
+	for migration := range 4 {
+		for _, legacy := range []string{"", "legacy"} {
+			for _, blocked := range []bool{false, true} {
+				t.Run(fmt.Sprint(blocked), func(t *testing.T) {
+					f := newCollabThreadFixture(t, selectionFixtureAccount(1, 2), selectionFixtureAccount(2, 1))
+					f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = migration&1 != 0
+					f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = migration&2 != 0
+					f.cache.sessionBindings["openai:shared-session"] = 1
+					f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
+					before := maps.Clone(f.cache.sessionBindings)
+					s := resilience.NewCollabTreeAffinity(32, time.Hour)
+					settings := collabAffinitySettings()
+					settings.Collab.Ladder, settings.Collab.LosslessFirst = true, true
+					ctx := WithOpenAICollabTreeAffinity(withOpenAILegacySessionHash(selectionReviewContext(), legacy), s, settings, 7, collabAffinityIdentity("root", ""), resilience.CollabRoleRoot, true)
+					scope := collabAffinityIdentity("root", "").Scope
+					require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: scope, Token: "token"}, AccountID: 1}))
+					var excluded map[int64]struct{}
+					if blocked {
+						excluded = map[int64]struct{}{1: {}}
+					}
+					selected, _, err := collabAffinitySelect(f, ctx, "m", excluded)
+					require.NoError(t, err)
+					defer selected.ReleaseFunc()
+					if blocked {
+						require.EqualValues(t, 2, selected.Account.ID)
+					} else {
+						require.EqualValues(t, 1, selected.Account.ID)
+						require.Equal(t, before, f.cache.sessionBindings)
+					}
+				})
 			}
-			selected, _, err := collabAffinitySelect(f, ctx, "m", excluded)
-			require.NoError(t, err)
-			defer selected.ReleaseFunc()
-			if blocked {
-				require.EqualValues(t, 2, selected.Account.ID)
-			} else {
-				require.EqualValues(t, 1, selected.Account.ID)
-				require.Equal(t, before, f.cache.sessionBindings)
-			}
-		})
+		}
 	}
 }

@@ -2,6 +2,9 @@
 
 package service
 
+// Binding scenarios here exercise unfinished code through the test-only hook.
+// They do not establish equivalence or enable thread bindings in this release.
+
 import (
 	"context"
 	"errors"
@@ -34,7 +37,7 @@ func TestCollabThreadBindingStoreFailureParity(t *testing.T) {
 	withResilienceSettings(t, nil)
 	var outcomes []string
 	for _, on := range []bool{false, true} {
-		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+		f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 		f.svc.selectionBoard.leases = newSelectionTrialLeaseFake()
 		local := resilience.NewCollabTreeAffinity(32, time.Hour)
 		ctx, session := collabAtomicRequest(t, f, local, "unavailable", on, false)
@@ -65,7 +68,7 @@ func TestCollabThreadBindingSharedNoneSuppressesTreeHint(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, plain := range []bool{false, true} {
 		t.Run(fmt.Sprint(plain), func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+			f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 			f.svc.selectionBoard.leases = newSelectionTrialLeaseFake()
 			if plain {
 				f.svc.cache = &f.cache.schedulerTestGatewayCache

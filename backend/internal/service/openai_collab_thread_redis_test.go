@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,10 +20,11 @@ import (
 )
 
 type collabRedisOperations struct {
-	count     atomic.Int64
-	mu        sync.Mutex
-	remaining int
-	after     func()
+	count            atomic.Int64
+	threadOperations atomic.Int64
+	mu               sync.Mutex
+	remaining        int
+	after            func()
 }
 
 func (h *collabRedisOperations) arm(n int, after func()) {
@@ -38,6 +40,12 @@ func (h *collabRedisOperations) DialHook(next redis.DialHook) redis.DialHook {
 }
 func (h *collabRedisOperations) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
+		for _, arg := range cmd.Args() {
+			if value, ok := arg.(string); ok && strings.Contains(value, "collab-thread-binding-v1:") {
+				h.threadOperations.Add(1)
+				break
+			}
+		}
 		err := next(ctx, cmd)
 		if !redis.HasErrorPrefix(err, "NOSCRIPT") {
 			h.count.Add(1)
@@ -83,6 +91,52 @@ func TestCollabThreadAtomicRedis(t *testing.T) {
 	t.Run("selection_interleavings", func(t *testing.T) {
 		service.RunCollabInterleavedSelection(t, repository.NewGatewayCache(rdb), repository.NewSchedTrialLeaseCache(rdb), func() {
 			require.NoError(t, rdb.FlushDB(context.Background()).Err())
-		}, operations.arm, members)
+		}, operations.arm, members, operations.count.Load)
 	})
+}
+
+func TestCollabThreadAliasRedis(t *testing.T) {
+	srv := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: srv.Addr(), MaxRetries: -1})
+	operations := &collabRedisOperations{}
+	rdb.AddHook(operations)
+	t.Cleanup(func() { _ = rdb.Close() })
+	service.RunCollabAliasParity(t, repository.NewGatewayCache(rdb), repository.NewResilienceStore(rdb), repository.NewSchedTrialLeaseCache(rdb), func() {
+		require.NoError(t, rdb.FlushDB(context.Background()).Err())
+	}, srv.FastForward, func(account int64) []string {
+		members, err := rdb.ZRange(context.Background(), fmt.Sprintf("sched:trial:%d:m", account), 0, -1).Result()
+		require.NoError(t, err)
+		return members
+	}, operations.count.Load)
+}
+
+func TestCollabThreadScopeRedis(t *testing.T) {
+	srv := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: srv.Addr(), MaxRetries: -1})
+	operations := &collabRedisOperations{}
+	rdb.AddHook(operations)
+	t.Cleanup(func() { _ = rdb.Close() })
+	service.RunCollabScopeRegressions(t, repository.NewGatewayCache(rdb), repository.NewResilienceStore(rdb), repository.NewSchedTrialLeaseCache(rdb), func() {
+		require.NoError(t, rdb.FlushDB(context.Background()).Err())
+	}, srv.FastForward, operations.count.Load)
+}
+
+func TestCollabThreadBindingReleaseRedis(t *testing.T) {
+	srv := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: srv.Addr(), MaxRetries: -1})
+	t.Cleanup(func() { _ = rdb.Close() })
+	operations := &collabRedisOperations{}
+	rdb.AddHook(operations)
+	service.RunCollabReleaseParity(t, repository.NewGatewayCache(rdb), repository.NewResilienceStore(rdb), repository.NewSchedTrialLeaseCache(rdb), func() { require.NoError(t, rdb.FlushDB(context.Background()).Err()) }, operations.count.Load)
+	require.Zero(t, operations.threadOperations.Load(), "shipped requests must never access thread keys or scripts")
+}
+
+func TestCollabAffinityMigrationParentRedis(t *testing.T) {
+	srv := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: srv.Addr(), MaxRetries: -1})
+	t.Cleanup(func() { _ = rdb.Close() })
+	operations := &collabRedisOperations{}
+	rdb.AddHook(operations)
+	service.RunCollabMigrationParentLookup(t, repository.NewGatewayCache(rdb), repository.NewResilienceStore(rdb), func() { require.NoError(t, rdb.FlushDB(context.Background()).Err()) }, operations.count.Load)
+	require.Zero(t, operations.threadOperations.Load())
 }

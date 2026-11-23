@@ -9,24 +9,22 @@ import (
 )
 
 // Run the ordinary scripts against a thread's effective binding. Only binding
-// reads inherit; every write targets the thread. The parent and its alias may
-// receive EXPIRE only. The wrapper and the original script are one Redis call.
+// reads inherit; every write targets the thread. The parent may receive
+// EXPIRE only. Legacy keys never participate. The wrapper and the original
+// script are one Redis call.
 const stickyThreadPrelude = `
 local native = redis
-local parent, parentGen, legacy, legacyGen = unpack(KEYS, #KEYS-3)
-for i=1,4 do table.remove(KEYS) end
-local index = tonumber(ARGV[#ARGV-3])
-local fallback = ARGV[#ARGV-2] == '1'
+local parent, parentGen, deleted = unpack(KEYS, #KEYS-2)
+for i=1,3 do table.remove(KEYS) end
+local index = tonumber(ARGV[#ARGV-2])
 local noneTTL = tonumber(ARGV[#ARGV-1])
 local refreshTTL = tonumber(ARGV[#ARGV])
-for i=1,4 do table.remove(ARGV) end
+for i=1,3 do table.remove(ARGV) end
 local key, gen = KEYS[index], KEYS[index+1]
 local own = native.call('GET', key)
+local detached = own == '-1' or native.call('EXISTS', deleted) == 1
 local source, sourceGen = key, gen
-if not own then
-  source, sourceGen = parent, parentGen
-  if not native.call('GET', source) and fallback then source, sourceGen = legacy, legacyGen end
-end
+if not own and not detached then source, sourceGen = parent, parentGen end
 local changed = false
 local redis = {error_reply = native.error_reply}
 redis.call = function(command, ...)
@@ -62,7 +60,7 @@ redis.call = function(command, ...)
     local existed = redis.call('EXISTS', key)
     native.call('SET', key, '-1', 'PX', noneTTL)
     native.call('DEL', gen)
-    own, source, sourceGen = '-1', key, gen
+    own, source, sourceGen, changed = '-1', key, gen, true
     return existed
   end
   return native.call(command, unpack(args))
@@ -77,14 +75,22 @@ if type(result) == 'table' and result.err then return result end
 if changed and refreshTTL > 0 then
   native.call('PEXPIRE', parent, refreshTTL)
   native.call('PEXPIRE', parentGen, refreshTTL)
-  if legacy ~= parent then
-    native.call('PEXPIRE', legacy, math.min(refreshTTL, 600000))
-    native.call('PEXPIRE', legacyGen, math.min(refreshTTL, 600000))
-  end
+end
+-- A binding's expiry must not restore an owner that this thread replaced or
+-- deleted. Keep that boundary separately from the ordinary provisional TTL.
+-- It also covers the parent's remaining lifetime when promotion refreshes it.
+if changed and own then
+  local ttl = math.max(noneTTL, native.call('PTTL', key), native.call('PTTL', parent), native.call('PTTL', deleted))
+  native.call('SET', deleted, '1', 'PX', ttl)
+  detached = true
 end
 local value = native.call('GET', key)
-local pairMissing = value == '-1' or (not value and not native.call('GET', parent) and not native.call('GET', legacy))
-return {result or false, value or false, native.call('PTTL', key), pairMissing and 1 or 0}
+local ttl = native.call('PTTL', key)
+if not value and detached then
+  value, ttl = '-1', native.call('PTTL', deleted)
+end
+local pairMissing = value == '-1' or (not value and not native.call('GET', parent))
+return {result or false, value or false, ttl, pairMissing and 1 or 0}
 `
 
 type stickyBindingScript struct {
@@ -109,11 +115,8 @@ func (c *gatewayCache) runStickyBinding(ctx context.Context, script *stickyBindi
 	// Derive the group-prefixed parent keys from this operation's binding key.
 	prefix := keys[index-1][:len(keys[index-1])-len(b.Key)]
 	genPrefix := keys[index][:len(keys[index])-len(b.Key)]
-	if b.Legacy == "" {
-		b.Legacy = b.Parent
-	}
-	keys = append(keys, prefix+b.Parent, genPrefix+b.Parent, prefix+b.Legacy, genPrefix+b.Legacy)
-	args = append(args, index, b.Fallback, b.TTL.Milliseconds(), b.RefreshTTL.Milliseconds())
+	keys = append(keys, prefix+b.Parent, genPrefix+b.Parent, prefix+b.Key+":deleted")
+	args = append(args, index, b.TTL.Milliseconds(), b.RefreshTTL.Milliseconds())
 	cmd := script.thread.Run(ctx, c.rdb, keys, args...)
 	values, err := cmd.Slice()
 	if err != nil {

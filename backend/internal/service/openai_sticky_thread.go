@@ -8,10 +8,9 @@ import (
 // StickyThreadBinding describes a read-only parent and a writable thread key.
 // Observe is diagnostic/fallback state only; storage never consults it.
 type StickyThreadBinding struct {
-	Key, Parent, Legacy string
-	Fallback            bool
-	TTL, RefreshTTL     time.Duration
-	Observe             func(int64, time.Duration, bool, bool)
+	Key, Parent     string
+	TTL, RefreshTTL time.Duration
+	Observe         func(int64, time.Duration, bool, bool)
 }
 
 type stickyThreadBindingKey struct{}
