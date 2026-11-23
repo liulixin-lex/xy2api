@@ -2,19 +2,25 @@ package service
 
 import (
 	"context"
-	"github.com/gin-gonic/gin"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // CommitCollabResponseIdentity runs only after semantic delivery, through the
 // parent's settlement owner. Prelude continuation names the response the client
-// saw, so ownership and billing must use that same identity.
-func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, account *Account, result *OpenAIForwardResult, deliveredID string) {
+// saw, so ownership and billing must use that same identity. The returned
+// callback starts bounded shared persistence and must run after settlement.
+func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, account *Account, result *OpenAIForwardResult, deliveredID string) (persist func()) {
 	// Alias storage cannot prevent the request owner's settlement after output.
-	defer func() { _ = recover() }()
+	defer func() {
+		if recover() != nil {
+			s.collabAliasFailures.Add(1)
+		}
+	}()
 	if result == nil || c == nil || c.Request == nil || resilience.StateFrom(c.Request.Context()).DeliveredBytes() == 0 {
 		return
 	}
@@ -25,14 +31,39 @@ func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, acco
 			return
 		}
 		alias := CollabContinuationAlias{Account: account.ID, Upstream: result.ResponseID, Expires: time.Now().Add(s.openAIWSResponseStickyTTL())}
-		if store.Put(context.WithoutCancel(c.Request.Context()), collabAliasScope(c), deliveredID, alias) != nil {
-			return
+		scope := collabAliasScope(c)
+		if s.collabLocalAliases.Put(context.Background(), scope, deliveredID, alias) != nil {
+			s.collabAliasFailures.Add(1)
 		}
 		result.ResponseID = deliveredID
+		var once sync.Once
+		persist = func() {
+			once.Do(func() {
+				if s.collabAliasWrites.Add(1) > 4 {
+					s.collabAliasWrites.Add(-1)
+					s.collabAliasFailures.Add(1)
+					return
+				}
+				go func() {
+					defer s.collabAliasWrites.Add(-1)
+					defer func() {
+						if recover() != nil {
+							s.collabAliasFailures.Add(1)
+						}
+					}()
+					ctx, cancel := context.WithTimeout(context.Background(), resilience.CollabRecordTimeout)
+					defer cancel()
+					if store.Put(ctx, scope, deliveredID, alias) != nil {
+						s.collabAliasFailures.Add(1)
+					}
+				}()
+			})
+		}
 	}
 	if result.CompletedForDelivery() {
 		s.bindHTTPResponseAccount(resilience.WithCollabAttempt(c.Request.Context(), resilience.CollabAttempt{}), c, account, result.ResponseID)
 	}
+	return persist
 }
 
 // Selection may update the rejection scope's binding flag. Keep that mutable

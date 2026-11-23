@@ -206,6 +206,8 @@ func (s *replaySlots) GetAccountConcurrencyBatch(ctx context.Context, ids []int6
 	return out, nil
 }
 func (s *replaySlots) GetAccountWaitingCount(_ context.Context, id int64) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if id == s.base+1 && s.firstWaiters {
 		return 1, nil
 	}

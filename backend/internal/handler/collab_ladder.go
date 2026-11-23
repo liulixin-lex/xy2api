@@ -79,11 +79,19 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	entered := time.Now()
 	defer func() { seam.optionalSpent += time.Since(entered) }()
 	var activeObserver atomic.Pointer[service.CollabSendObserver]
+	var retainedWaiters func(context.Context) bool
+	if seam.losslessDuration > 0 {
+		first := rejections[0].AccountID
+		retainedWaiters = func(query context.Context) bool {
+			waiting, err := h.concurrencyHelper.concurrencyService.GetAccountWaitingCount(query, first)
+			return err != nil || waiting > 0
+		}
+	}
 	waiters := func(query context.Context) bool {
 		loads, err := h.concurrencyHelper.concurrencyService.GetUsersLoadBatch(query, []service.UserWithConcurrency{{ID: subject.UserID, MaxConcurrency: subject.Concurrency}})
-		return err != nil || loads[subject.UserID] != nil && loads[subject.UserID].WaitingCount > 0
+		return err != nil || loads[subject.UserID] != nil && loads[subject.UserID].WaitingCount > 0 || retainedWaiters != nil && retainedWaiters(query)
 	}
-	ctx, stopWatch := watchCollabTakeover(parentRequest.Context(), duration, func() bool { return activeObserver.Load().Accepted() }, waiters)
+	ctx, stopWatch := watchCollabTakeover(parentRequest.Context(), duration, func() bool { return activeObserver.Load().Accepted() }, waiters, retainedWaiters)
 	defer stopWatch()
 	if ctx.Err() != nil {
 		return
@@ -172,7 +180,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		if action != resilience.CollabActionReplaceAll {
 			remaining := duration - time.Since(entered)
 			var stop func()
-			ctx, stop = watchCollabTakeover(ctx, remaining/2, observer.Accepted, waiters)
+			ctx, stop = watchCollabTakeover(ctx, remaining/2, observer.Accepted, waiters, retainedWaiters)
 			defer stop()
 		}
 		ctx = resilience.WithCollabAttempt(ctx, resilience.CollabAttempt{Optional: true, Action: action})
@@ -188,7 +196,10 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 				parent.NoteGatewaySend(id)
 				parent.AdoptCollabDelivery(id, child)
 				seam.deliveredAccount = id
-				h.gatewayService.CommitCollabResponseIdentity(c, accounts[id], result, seam.writer.deliveredPrelude().ID)
+				persist := h.gatewayService.CommitCollabResponseIdentity(c, accounts[id], result, seam.writer.deliveredPrelude().ID)
+				if persist != nil {
+					defer persist()
+				}
 				if recovered != nil {
 					err = errors.New("optional delivery interrupted")
 				}

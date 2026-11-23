@@ -531,6 +531,10 @@ type OpenAIGatewayService struct {
 	openaiWSPool                   *openAIWSConnPool
 	openaiWSStateStore             OpenAIWSStateStore
 	collabContinuations            CollabContinuationStore
+	collabLocalAliases             collabMemoryAliases
+	collabAliasReads               atomic.Int32
+	collabAliasWrites              atomic.Int32
+	collabAliasFailures            atomic.Uint64
 	openaiWSPassthroughDialer      openAIWSClientDialer
 	openaiWSSessionPreemptions     openAIWSSessionPreemptRegistry
 	openaiModelTransient           *openAIAccountModelTransientState

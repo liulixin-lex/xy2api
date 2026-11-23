@@ -116,7 +116,11 @@ func (s *OpenAIGatewayService) restoreCollabContinuation(ctx context.Context, c 
 	if id == "" {
 		return body, nil
 	}
-	alias, ok, err := store.Get(ctx, collabAliasScope(c), id)
+	scope := collabAliasScope(c)
+	alias, ok, err := s.collabLocalAliases.Get(ctx, scope, id)
+	if !ok {
+		alias, ok, err = s.readCollabAlias(ctx, store, scope, id)
+	}
 	if err != nil {
 		return body, nil
 	}
@@ -127,4 +131,48 @@ func (s *OpenAIGatewayService) restoreCollabContinuation(ctx context.Context, c 
 		return nil, errors.New("response alias account mismatch")
 	}
 	return sjson.SetBytes(body, "previous_response_id", alias.Upstream)
+}
+
+// At most four shared reads may be outstanding even if an adapter ignores
+// cancellation. A failed or timed out optional read keeps the original pointer.
+func (s *OpenAIGatewayService) readCollabAlias(ctx context.Context, store CollabContinuationStore, scope CollabContinuationScope, id string) (CollabContinuationAlias, bool, error) {
+	if s.collabAliasReads.Add(1) > 4 {
+		s.collabAliasReads.Add(-1)
+		s.collabAliasFailures.Add(1)
+		return CollabContinuationAlias{}, false, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, resilience.CollabRecordTimeout)
+	defer cancel()
+	type result struct {
+		alias CollabContinuationAlias
+		ok    bool
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		defer s.collabAliasReads.Add(-1)
+		var value result
+		defer func() {
+			if recover() != nil {
+				value = result{err: errors.New("response alias read failed")}
+			}
+			done <- value
+		}()
+		value.alias, value.ok, value.err = store.Get(ctx, scope, id)
+	}()
+	select {
+	case value := <-done:
+		if value.err != nil {
+			s.collabAliasFailures.Add(1)
+		}
+		return value.alias, value.ok, value.err
+	case <-ctx.Done():
+		s.collabAliasFailures.Add(1)
+		return CollabContinuationAlias{}, false, ctx.Err()
+	}
+}
+
+// Continuation failures are counters only; they never change delivered output.
+func (s *OpenAIGatewayService) CollabContinuationFailures() uint64 {
+	return s.collabAliasFailures.Load()
 }

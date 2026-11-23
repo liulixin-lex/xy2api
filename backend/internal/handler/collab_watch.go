@@ -8,12 +8,13 @@ import (
 
 // The supervisor owns its timers and joins before request cleanup. Queue reads
 // have a short cancellation bound and occur at most once per second after the
-// initial gate. Acceptance suspends supervision until the next physical send.
-func watchCollabTakeover(parent context.Context, duration time.Duration, accepted func() bool, waiters func(context.Context) bool) (context.Context, func()) {
+// initial gate. Acceptance suspends the deadline and user queue checks; a
+// retained original account still yields to its waiters throughout takeover.
+func watchCollabTakeover(parent context.Context, duration time.Duration, accepted func() bool, waiters func(context.Context) bool, retainedWaiters ...func(context.Context) bool) (context.Context, func()) {
 	started := time.Now()
 	deadline := started.Add(duration)
 	ctx, cancel := context.WithCancel(parent)
-	queued := func() (blocked bool) {
+	queued := func(check func(context.Context) bool) (blocked bool) {
 		defer func() {
 			if recover() != nil {
 				blocked = true
@@ -21,9 +22,9 @@ func watchCollabTakeover(parent context.Context, duration time.Duration, accepte
 		}()
 		query, done := context.WithTimeout(ctx, 250*time.Millisecond)
 		defer done()
-		return waiters(query)
+		return check(query)
 	}
-	if duration <= 0 || queued() {
+	if duration <= 0 || queued(waiters) {
 		cancel()
 		return ctx, func() {}
 	}
@@ -50,9 +51,13 @@ func watchCollabTakeover(parent context.Context, duration time.Duration, accepte
 				}
 			case <-ticker.C:
 				if accepted() {
+					if len(retainedWaiters) > 0 && retainedWaiters[0] != nil && queued(retainedWaiters[0]) {
+						cancel()
+						return
+					}
 					continue
 				}
-				if !time.Now().Before(deadline) || queued() {
+				if !time.Now().Before(deadline) || queued(waiters) {
 					cancel()
 					return
 				}
