@@ -7,7 +7,7 @@ import (
 
 // CollabTreeAffinity returns the one bounded hint/lease store owned by this
 // gateway. It is initialized only by requests with affinity enabled.
-func (s *OpenAIGatewayService) CollabTreeAffinity() *resilience.CollabTreeAffinity {
+func (s *OpenAIGatewayService) CollabTreeAffinity() (store *resilience.CollabTreeAffinity) {
 	if s == nil {
 		return nil
 	}
@@ -16,10 +16,21 @@ func (s *OpenAIGatewayService) CollabTreeAffinity() *resilience.CollabTreeAffini
 	if s.collabRecordsClosed {
 		return nil
 	}
+	defer func() {
+		if recover() != nil {
+			s.collabRecordsClosed = true
+			store = nil
+			resilience.Count("collab_construction_failed", 0, 0, "affinity")
+		}
+	}()
 	if s.collabTreeAffinity == nil {
 		// The existing session binding TTL is global in this gateway; its
 		// group parameter is currently unused. Response-ID expiry is separate.
-		s.collabTreeAffinity = resilience.NewCollabTreeAffinity(resilience.CollabRecordMaxEntries, s.openAIStickyBindingTTL(nil))
+		s.collabTreeAffinity = newCollabAffinityStore(resilience.CollabRecordMaxEntries, s.openAIStickyBindingTTL(nil))
+		if s.collabTreeAffinity == nil {
+			s.collabRecordsClosed = true
+			resilience.Count("collab_construction_failed", 0, 0, "affinity")
+		}
 	}
 	return s.collabTreeAffinity
 }
@@ -41,6 +52,7 @@ func (s *OpenAIGatewayService) PrepareOpenAICollabAffinity(c *gin.Context, apiKe
 		r.scope = affinity.identity.Scope
 		r.state.Tree = r.scope.Tree
 		r.initCipherItems()
+		r.initCollabAuxiliaryItems()
 		r.initObservation(c)
 	}
 	s.PrepareOpenAICollabThreadBinding(ctx, apiKeyID, session, platform, GetOpenAIClientTransport(c), native)

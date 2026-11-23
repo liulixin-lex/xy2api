@@ -677,6 +677,7 @@ func NewOpenAIGatewayService(
 		openAITokenProvider.SetAccountRuntimeBlocker(svc)
 	}
 	svc.logOpenAIWSModeBootstrap()
+	svc.initCollabContinuation()
 	svc.StartOpenAICodexTicketHarvester()
 	return svc
 }
