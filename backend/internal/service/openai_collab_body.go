@@ -47,6 +47,7 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 	original := gjson.GetBytes(p.Original, "input").Array()
 	current := gjson.GetBytes(body, "input").Array()
 	candidates := make([][]int, len(current))
+	duplicates := make([][]int, len(current))
 	for i, item := range current {
 		id := item.Get("id").String()
 		for j, candidate := range original {
@@ -58,6 +59,22 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 			for j, candidate := range original {
 				if candidate.Get("id").String() == "" && collabRepairedItemMatches(candidate, item) {
 					candidates[i] = append(candidates[i], j)
+				}
+			}
+		}
+	}
+	// A known variant can be reached independently by another identical
+	// occurrence. Keep those alternatives for collisions, without displacing
+	// the stronger lineage match while it is still available.
+	for i, options := range candidates {
+		if current[i].Get("id").String() != "" {
+			continue
+		}
+		for j, candidate := range original {
+			for _, known := range options {
+				if candidate.Raw == original[known].Raw {
+					duplicates[i] = append(duplicates[i], j)
+					break
 				}
 			}
 		}
@@ -76,6 +93,13 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 			for _, j := range options {
 				if !used[j] {
 					available = append(available, j)
+				}
+			}
+			if len(available) == 0 {
+				for _, j := range duplicates[i] {
+					if !used[j] {
+						available = append(available, j)
+					}
 				}
 			}
 			candidates[i] = available
