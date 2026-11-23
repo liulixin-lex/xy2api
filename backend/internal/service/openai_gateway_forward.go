@@ -21,6 +21,10 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
+	if request := openAICollabRequestFrom(ctx); request != nil {
+		request.gateway = s
+		defer request.sealSend()
+	}
 	if s.collabAliasStore() != nil {
 		var aliasErr error
 		body, aliasErr = s.restoreCollabContinuation(ctx, c, account, body)
@@ -53,12 +57,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}()
 	// Run the same complete checks on original bytes without applying edits;
 	// requests that cannot obtain a raw plan cannot gain one after normalization.
-	collabRawBlocked, collabRawConflict := true, false
-	if openAICollabSettings(c).CollaborationPlaintextOn() && bytes.Contains(body, []byte(`"collaboration"`)) {
-		_, rawPlan, rawOutcome := planCodexCollaborationPlaintext(body)
-		collabRawBlocked = rawPlan == nil
-		collabRawConflict = rawOutcome == codexCollabConflict
-	}
+	collabRawBlocked, collabRawConflict := planOpenAICollabIngress(c, body)
 	defer func() {
 		s.finishCacheDiagnostic(c, body, result)
 	}()

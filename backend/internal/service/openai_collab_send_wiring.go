@@ -14,6 +14,7 @@ func beginCollabWiredSend(ctx context.Context) {
 	if request == nil {
 		return
 	}
+	request.sealSend()
 	beginOpenAICollabResponse(ctx)
 	if attempt := request.attempt; attempt != nil {
 		request.delivery.mu.Lock()
@@ -23,6 +24,7 @@ func beginCollabWiredSend(ctx context.Context) {
 		attempt.restorer.BeginResponse(event.Generation, event.SendSeq)
 		request.state.Response.Restorer = attempt.restorer
 	}
+	request.beginSendObservation(ctx)
 }
 
 func receiveCollabWiredResponse(ctx context.Context, response *http.Response, err error) {
@@ -38,5 +40,8 @@ func receiveCollabWiredResponse(ctx context.Context, response *http.Response, er
 	request.state.DeliveryHooks.Received(ctx, event, nil)
 	if attempt := request.attempt; attempt != nil && response != nil {
 		attempt.restorer.BeginResponse(event.Generation, event.SendSeq)
+	}
+	if request.send != nil {
+		request.send.receive(response, err)
 	}
 }

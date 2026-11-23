@@ -541,6 +541,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 	service.BeginOpenAICollabRequest(c, body, subject.UserID, collabGroupID)
 	defer service.FinishOpenAICollabDelivery(c)
+	defer service.LogOpenAICollabObservation(c, body)
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
@@ -788,6 +789,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if collabSeam.beforeSettlement(c, res) {
 			return
 		}
+		service.SealOpenAICollabObservation(c)
 		stampOpenAIRequestedReasoningEffort(res, c)
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)

@@ -73,11 +73,20 @@ func armOpenAICollaboration(c *gin.Context, body []byte, model string, eligible 
 		return body, nil
 	}
 	outcome := codexCollabUnsupported
-	var plan *codexCollabPlan
+	var plan *CollabPlan
 	if eligible {
-		body, plan, outcome = applyCodexCollaborationPlaintext(body)
+		value, _ := c.Get(openAICollabDeclarationKey)
+		if declaration, ok := value.(*openAICollabDeclarationPlan); ok && declaration != nil {
+			var result CollabDeclarationResult
+			body, result = ApplyCodexCollaborationNormalizedDeclarations(declaration.original, body, declaration.raw, declaration.options)
+			plan, outcome = result.Plan, codexCollabOutcome(result.Outcome)
+		} else {
+			var legacy *codexCollabPlan
+			body, legacy, outcome = applyCodexCollaborationPlaintext(body)
+			plan = openAICollabLegacyRestorePlan(legacy)
+		}
 	}
-	restorer := NewCollabResponseRestorer(openAICollabLegacyRestorePlan(plan), *openAICollabSettings(c), 0, 0)
+	restorer := NewCollabResponseRestorer(plan, *openAICollabSettings(c), 0, 0)
 	a := &openAICollabAttempt{restorer: restorer, outcome: outcome, model: model, applied: plan != nil}
 	if c != nil && c.Request != nil {
 		if request := openAICollabRequestFrom(c.Request.Context()); request != nil {

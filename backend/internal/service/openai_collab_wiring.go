@@ -13,11 +13,17 @@ type openAICollabRequestKey struct{}
 // The inbound owner survives account retries and optional child contexts.
 // Mutable collaboration data is confined to the request goroutine.
 type openAICollabRequest struct {
-	state    *resilience.CollabRequestState
-	settings *resilience.Settings
-	ingress  resilience.CollabIngressObservation
-	delivery *openAICollabDeliveryWriter
-	attempt  *openAICollabAttempt
+	state        *resilience.CollabRequestState
+	settings     *resilience.Settings
+	ingress      resilience.CollabIngressObservation
+	delivery     *openAICollabDeliveryWriter
+	attempt      *openAICollabAttempt
+	gateway      *OpenAIGatewayService
+	observation  *resilience.CollabObservationAccumulator
+	send         *openAICollabSendObservation
+	client       resilience.CollabClient
+	versionState resilience.CollabVersionState
+	version      string
 }
 
 // BeginOpenAICollabRequest inspects validated ingress before route selection.
@@ -31,6 +37,7 @@ func BeginOpenAICollabRequest(c *gin.Context, body []byte, userID, groupID int64
 		return
 	}
 	ingress := resilience.InspectCollabIngress(body, resilience.CollabIngressValidationPassed)
+	countOpenAICollabIngress(c, body, ingress)
 	if !ingress.Declared && !ingress.EncryptedAgent && !ingress.EncryptedTool {
 		return
 	}
@@ -50,6 +57,7 @@ func BeginOpenAICollabRequest(c *gin.Context, body []byte, userID, groupID int64
 		return
 	}
 	request := &openAICollabRequest{state: state, settings: settings, ingress: ingress}
+	request.initObservation(c)
 	c.Request = c.Request.WithContext(context.WithValue(ctx, openAICollabRequestKey{}, request))
 	request.delivery = &openAICollabDeliveryWriter{ResponseWriter: c.Writer, ctx: c.Request.Context(), hooks: state.DeliveryHooks}
 	c.Writer = request.delivery
