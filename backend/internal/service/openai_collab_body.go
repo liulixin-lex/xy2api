@@ -237,7 +237,7 @@ func ParseCollabBodyWithContext(body []byte, facts CollabBodyContext) CollabBody
 				entry.Family = resilience.CollabFamilyCallArgs
 				out.Items = append(out.Items, entry)
 			}
-			// Validation established that these bytes are not decrypted here.
+			// Treat these bytes as not decrypted upstream and leave them unchanged.
 			continue
 		case "agent_message", "message", "function_call_output":
 			container := "content"
@@ -572,11 +572,12 @@ func (p CollabBody) ProtectedNamedItem(e resilience.CollabEvidence) bool {
 	return e.Named != nil && e.Named.Located && collabProtectedItem(p, e.Named.Identity)
 }
 
-// fullyDisposed requires a recognizable placeholder for every original unreadable
-// item. An unmapped, removed, or immutable item is not proof of final disposal.
+// fullyDisposed requires a recognizable placeholder for every replaceable
+// unreadable item, with at least one such item. Immutable call arguments neither
+// establish nor prevent disposal; unmapped or removed items cannot prove it.
 func (p CollabBody) fullyDisposed(body []byte) bool {
 	physical, ok := p.atBody(body)
-	if !ok || p.Shape.CallArgumentsCiphertext || len(p.Items) == 0 || len(physical.Items) != len(p.Items) {
+	if !ok || len(p.Items) == 0 || len(physical.Items) != len(p.Items) {
 		return false
 	}
 	seen := false

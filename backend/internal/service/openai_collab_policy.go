@@ -72,7 +72,11 @@ func (p CollabBody) LadderPolicy(e resilience.CollabEvidence, stop ...CollabLadd
 	if len(stop) > 0 {
 		reason = stop[0]
 	}
-	policy.LocalEnding = policy.LocalEnding && (reason == CollabLadderFinalDisposal || reason == CollabLadderDeliveryUnavailable)
+	replaceable := false
+	for _, item := range p.Items {
+		replaceable = replaceable || len(item.Paths) > 0
+	}
+	policy.LocalEnding = policy.LocalEnding && replaceable && e.Family != resilience.CollabFamilyCallArgs && (reason == CollabLadderFinalDisposal || reason == CollabLadderDeliveryUnavailable)
 	// An ordinary failure of an optional action returns to the existing
 	// final repair. It supplies no evidence for learning or local ending.
 	if reason == CollabLadderFallback && (e.Grade == resilience.CollabEvidenceGradeUnclaimed || e.Grade == "") && !p.Shape.Ambiguous && !p.Shape.ContinuationPointer {

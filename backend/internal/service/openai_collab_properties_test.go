@@ -169,9 +169,15 @@ func TestCollabPropertyPermissions(t *testing.T) {
 						claimed := grade == resilience.CollabEvidenceGradeClaimed
 						blocked = blocked || claimed && !p.Shape.AgentCiphertext && !p.Shape.ToolOutputCiphertext
 						switchOnly := !claimed && (owner == resilience.CollabOwnershipClassUnknownSuffix || owner != resilience.CollabOwnershipClassNone && !p.Shape.AgentCiphertext)
-						local := !blocked && !claimed && !switchOnly
+						local := !blocked && !claimed && !switchOnly && bi != 3 && e.Family != resilience.CollabFamilyCallArgs
 						label := fmt.Sprintf("body=%d class=%s grade=%s owner=%s name=%s", bi, class, grade, owner, name)
 						require.Equal(t, local, p.LadderPolicy(e, CollabLadderFinalDisposal).LocalEnding, label)
+						for _, stop := range []CollabLadderStop{CollabLadderFinalDisposal, CollabLadderDeliveryUnavailable} {
+							require.Equal(t, local, p.LadderPolicy(e, stop).LocalEnding, label)
+							callEvidence := e
+							callEvidence.Family = resilience.CollabFamilyCallArgs
+							require.False(t, p.LadderPolicy(callEvidence, stop).LocalEnding, label)
+						}
 						for _, action := range []resilience.CollabAction{resilience.CollabActionNamedRepair, resilience.CollabActionProbeReasoning, resilience.CollabActionDropUnprotected, resilience.CollabActionReplaceAll} {
 							family := p.Items[0].Family
 							bodyItem := family == resilience.CollabFamilyAgentMessage || family == resilience.CollabFamilyToolOutput

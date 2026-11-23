@@ -93,6 +93,9 @@ func (l *CollabLadder) Run(ctx context.Context) bool {
 			replacedAny = replacedAny || used
 		}
 		if !final && replacedAny {
+			if evidence.Family == resilience.CollabFamilyCallArgs {
+				return false
+			}
 			l.StopReason = CollabLadderFinalDisposal
 			if evidence.Named != nil && handled[current][evidence.Named.Identity] && !collabProtectedItem(l.Body, evidence.Named.Identity) {
 				l.StopReason = CollabLadderHandledAgain
