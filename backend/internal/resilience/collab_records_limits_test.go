@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCollabRound2EvidenceCannotCrowdOutDispositions(t *testing.T) {
+func TestCollabRecordsEvidenceCannotCrowdOutDispositions(t *testing.T) {
 	ctx := context.Background()
 	s := NewMemoryCollabRecordsStore()
 	key := collabTestKey()
@@ -35,7 +35,7 @@ func TestCollabRound2EvidenceCannotCrowdOutDispositions(t *testing.T) {
 	require.Equal(t, CollabTreeLocalEndingLimit, count)
 	require.Equal(t, 3, s.LookupBatch(ctx, CollabRecordBatch{Scope: key.Scope, Dispositions: true}).LocalEndingCount())
 }
-func TestCollabRound2TenantCapacityRecovers(t *testing.T) {
+func TestCollabRecordsTenantCapacityRecovers(t *testing.T) {
 	s := NewMemoryCollabRecordsStore()
 	ctx := context.Background()
 	key := collabTestKey()
@@ -47,7 +47,7 @@ func TestCollabRound2TenantCapacityRecovers(t *testing.T) {
 	key.Scope.Tenant = "other"
 	require.True(t, s.Terminated(ctx, CollabTerminatedRecord{Key: key, Event: "event", ExpiresAt: time.Now().Add(time.Hour)}))
 }
-func TestCollabRound2ConfirmWaitsForRegistryMutation(t *testing.T) {
+func TestCollabRecordsConfirmWaitsForRegistryMutation(t *testing.T) {
 	s := NewMemoryCollabRecordsStore()
 	ctx := context.Background()
 	key := collabTestKey()
@@ -66,7 +66,7 @@ func TestCollabRound2ConfirmWaitsForRegistryMutation(t *testing.T) {
 	s.mu.Unlock()
 	require.True(t, <-done)
 }
-func TestCollabRound2CounterContentionCannotLookLikeZero(t *testing.T) {
+func TestCollabRecordsCounterContentionCannotLookLikeZero(t *testing.T) {
 	s := NewMemoryCollabRecordsStore()
 	ctx := context.Background()
 	key := collabTestKey()
@@ -80,7 +80,7 @@ func TestCollabRound2CounterContentionCannotLookLikeZero(t *testing.T) {
 	tree.mu.Unlock()
 	require.Equal(t, CollabTreeLocalEndingLimit, result.TreeLocalEndings)
 }
-func TestCollabRound2FreshReadFailureDropsIssuance(t *testing.T) {
+func TestCollabRecordsFreshReadFailureDropsIssuance(t *testing.T) {
 	ctx := context.Background()
 	local := NewMemoryCollabRecordsStore()
 	key := collabTestKey()
@@ -106,7 +106,7 @@ func TestCollabRound2FreshReadFailureDropsIssuance(t *testing.T) {
 		require.NotEqual(t, CollabIssuedStatusConfirmed, r.Status)
 	}
 }
-func TestCollabRound2CopiesKeepPrimary(t *testing.T) {
+func TestCollabRecordsCopiesKeepPrimary(t *testing.T) {
 	s := NewMemoryCollabRecordsStore()
 	key := collabTestKey()
 	copies := make([]CollabDigest, 17)
@@ -118,7 +118,7 @@ func TestCollabRound2CopiesKeepPrimary(t *testing.T) {
 	require.Len(t, s.LookupBatch(context.Background(), CollabRecordBatch{Scope: key.Scope, Queries: []CollabRecordQuery{q}, Dispositions: true}).Dispositions[q].Terminated, 1)
 }
 
-func TestCollabRound2CompletenessPriorityAndDuplicates(t *testing.T) {
+func TestCollabRecordsCompletenessPriorityAndDuplicates(t *testing.T) {
 	local := NewMemoryCollabRecordsStore()
 	safe := NewSafeCollabRecordsStore(local, nil, 8)
 	defer safe.Close()
@@ -155,7 +155,7 @@ func TestCollabRound2CompletenessPriorityAndDuplicates(t *testing.T) {
 	require.False(t, result.DispositionsComplete)
 	require.Equal(t, 3, result.LocalEndingCount())
 }
-func TestCollabRound2ReservationFailuresAndReceiptGate(t *testing.T) {
+func TestCollabRecordsReservationFailuresAndReceiptGate(t *testing.T) {
 	key := collabTestKey()
 	ctx := context.Background()
 	for _, local := range []CollabRecordsStore{nil, collabPanicLocal{}} {
@@ -178,7 +178,7 @@ func TestCollabRound2ReservationFailuresAndReceiptGate(t *testing.T) {
 	require.False(t, CollabTerminationEffective(record, changed, []CollabDigest{"event"}, time.Now()))
 }
 
-func TestCollabRound2DispositionPriorityAfterEvidenceExhaustion(t *testing.T) {
+func TestCollabRecordsDispositionPriorityAfterEvidenceExhaustion(t *testing.T) {
 	s := NewMemoryCollabRecordsStore()
 	ctx := context.Background()
 	key := collabTestKey()
@@ -210,7 +210,7 @@ func TestCollabRound2DispositionPriorityAfterEvidenceExhaustion(t *testing.T) {
 	require.False(t, result.DispositionsComplete)
 	require.Equal(t, 3, result.LocalEndingCount())
 }
-func TestCollabRound2ReservationConcurrentAndFailure(t *testing.T) {
+func TestCollabRecordsReservationConcurrentAndFailure(t *testing.T) {
 	s := NewSafeCollabRecordsStore(NewMemoryCollabRecordsStore(), nil, 8)
 	defer s.Close()
 	key := collabTestKey()
@@ -237,7 +237,7 @@ func TestCollabRound2ReservationConcurrentAndFailure(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, 3, count)
 }
-func TestCollabRound2ReceiptRequiredForTermination(t *testing.T) {
+func TestCollabRecordsReceiptRequiredForTermination(t *testing.T) {
 	key := collabTestKey()
 	record := CollabTerminatedRecord{Key: key, Event: "event", Copies: []CollabDigest{"copy"}, ExpiresAt: time.Now().Add(time.Hour)}
 	require.False(t, CollabTerminationEffective(record, key, nil, time.Now()))
@@ -250,12 +250,12 @@ func TestCollabRound2ReceiptRequiredForTermination(t *testing.T) {
 	require.False(t, CollabTerminationEffective(record, copyKey, []CollabDigest{"event"}, time.Now()))
 }
 
-type collabRound2ReservationStore struct {
+type collabRecordsReservationStore struct {
 	collabSharedTestStore
 	mode string
 }
 
-func (s *collabRound2ReservationStore) ReserveTreeLocalEnding(ctx context.Context, _ CollabRecordScope, _ CollabDigest) (int, bool) {
+func (s *collabRecordsReservationStore) ReserveTreeLocalEnding(ctx context.Context, _ CollabRecordScope, _ CollabDigest) (int, bool) {
 	if s.mode == "panic" {
 		panic("synthetic")
 	}
@@ -264,10 +264,10 @@ func (s *collabRound2ReservationStore) ReserveTreeLocalEnding(ctx context.Contex
 	}
 	return CollabTreeLocalEndingLimit, false
 }
-func TestCollabRound2SharedReservationFailures(t *testing.T) {
+func TestCollabRecordsSharedReservationFailures(t *testing.T) {
 	for _, mode := range []string{"panic", "slow", "failed"} {
 		t.Run(mode, func(t *testing.T) {
-			store := NewSafeCollabRecordsStore(NewMemoryCollabRecordsStore(), &collabRound2ReservationStore{mode: mode}, 1)
+			store := NewSafeCollabRecordsStore(NewMemoryCollabRecordsStore(), &collabRecordsReservationStore{mode: mode}, 1)
 			defer store.Close()
 			started := time.Now()
 			count, ok := store.ReserveTreeLocalEnding(context.Background(), collabTestKey().Scope, "event")
@@ -277,7 +277,7 @@ func TestCollabRound2SharedReservationFailures(t *testing.T) {
 		})
 	}
 }
-func TestCollabRound2LocalTenantDispositionsCannotBeEvicted(t *testing.T) {
+func TestCollabRecordsLocalTenantDispositionsCannotBeEvicted(t *testing.T) {
 	s := NewMemoryCollabRecordsStore()
 	ctx := context.Background()
 	key := collabTestKey()
@@ -303,7 +303,7 @@ func TestCollabRound2LocalTenantDispositionsCannotBeEvicted(t *testing.T) {
 	require.Len(t, s.LookupBatch(ctx, CollabRecordBatch{Scope: existing.Scope, Queries: []CollabRecordQuery{q}, Dispositions: true}).Dispositions[q].Terminated, 1)
 }
 
-func TestCollabRound2TimeoutDropsInitialIssuance(t *testing.T) {
+func TestCollabRecordsTimeoutDropsInitialIssuance(t *testing.T) {
 	ctx := context.Background()
 	local := NewMemoryCollabRecordsStore()
 	key := collabTestKey()

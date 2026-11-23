@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCollabRound2SharedReservedCapacityAndAtomicLimit(t *testing.T) {
+func TestCollabRecordsSharedReservedCapacityAndAtomicLimit(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
@@ -68,7 +68,7 @@ func TestCollabRound2SharedReservedCapacityAndAtomicLimit(t *testing.T) {
 	require.False(t, ok)
 	require.Equal(t, 3, count)
 }
-func TestCollabRound2SharedTenantIsolationAndEviction(t *testing.T) {
+func TestCollabRecordsSharedTenantIsolationAndEviction(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })

@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCollabRound2NoticeProvenanceAndAnchor(t *testing.T) {
+func TestCollabRecordsNoticeProvenanceAndAnchor(t *testing.T) {
 	s := collabRecordTestService(t)
 	text := "Message Type: FINAL_ANSWER\nTask name: task\nSender: child\nPayload:\nGateway notice [new-event]. Quoted Gateway notice [old-event]."
 	item := map[string]any{"type": "agent_message", "author": "other", "recipient": "parent", "content": []any{map[string]string{"type": "input_text", "text": text}}}
@@ -27,7 +27,7 @@ func TestCollabRound2NoticeProvenanceAndAnchor(t *testing.T) {
 	require.True(t, found[0].FinalAnswer)
 	require.False(t, found[1].FinalAnswer, "a quoted notice cannot authorize borrowing")
 }
-func TestCollabRound2EncryptedAgentMessageIsInput(t *testing.T) {
+func TestCollabRecordsEncryptedAgentMessageIsInput(t *testing.T) {
 	s := collabRecordTestService(t)
 	text := "Message Type: FINAL_ANSWER\nTask name: task\nSender: child\nPayload:\nGateway notice [event]. notice"
 	items := []any{map[string]any{"type": "agent_message", "content": []any{map[string]string{"type": "input_text", "text": text}}}, map[string]any{"type": "agent_message", "content": []any{map[string]string{"type": "input_text", "text": "envelope"}, map[string]string{"type": "encrypted_content", "encrypted_content": "cipher"}}}}
@@ -37,7 +37,7 @@ func TestCollabRound2EncryptedAgentMessageIsInput(t *testing.T) {
 	require.True(t, found[0].Current)
 }
 
-func TestCollabRound2ReceiptsAndRecipient(t *testing.T) {
+func TestCollabRecordsReceiptsAndRecipient(t *testing.T) {
 	s := collabRecordTestService(t)
 	notice := "Gateway notice [event]. Earlier work may have taken effect. Quoted Gateway notice [old]."
 	child := map[string]any{"type": "agent_message", "author": "child", "recipient": "parent", "content": []any{map[string]string{"type": "input_text", "text": "Message Type: FINAL_ANSWER\nTask name: task\nSender: child\nPayload:\n" + notice}}}
