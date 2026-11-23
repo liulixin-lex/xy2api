@@ -283,6 +283,9 @@ func resolveOpenAIUpstreamOriginator(c *gin.Context, isOfficialClient bool) stri
 
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *OpenAIGatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return nil
+	}
 	if sessionHash == "" || accountID <= 0 {
 		return nil
 	}

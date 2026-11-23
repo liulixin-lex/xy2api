@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/service"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,12 +20,15 @@ import (
 )
 
 type replaySend struct {
-	Account  string            `json:"account"`
-	Body     string            `json:"body_digest"`
-	Survived []string          `json:"survived"`
-	Learning []string          `json:"learning"`
-	Rule     string            `json:"rule"`
-	Items    map[string]string `json:"item_digests"`
+	Optional     bool                    `json:"optional,omitempty"`
+	Action       resilience.CollabAction `json:"action,omitempty"`
+	RejectedItem string                  `json:"rejected_item,omitempty"`
+	Account      string                  `json:"account"`
+	Body         string                  `json:"body_digest"`
+	Survived     []string                `json:"survived"`
+	Learning     []string                `json:"learning"`
+	Rule         string                  `json:"rule"`
+	Items        map[string]string       `json:"item_digests"`
 }
 
 type replayBinding struct {
@@ -189,6 +194,9 @@ func checkReplayOn(snapshot resilience.Settings, mode string, want, got []replay
 			if mode == "ladder" {
 				continue
 			}
+			if replayReasoningTradeoff(before.Case, old, next) {
+				continue
+			}
 			for _, content := range old.Survived {
 				found := false
 				for _, retained := range next.Survived {
@@ -220,15 +228,40 @@ func checkHandledReplay(got []replayGolden) error {
 		}
 		for _, turn := range c.Turns {
 			first := map[string]replaySend{}
+			renamed := ""
+			replaced := map[string]bool{}
+			protected := target == "amsg_task"
 			for _, send := range turn.Sends {
-				original, ok := first[send.Account]
-				if !ok {
+				if !send.Optional {
+					renamed = ""
+				} // Legacy failover retains its own sequence.
+				if send.Optional && renamed != "" && (!protected || renamed != send.Account || replaced[renamed] || send.Action != resilience.CollabActionReplaceAll) {
+					return fmt.Errorf("%s: send after re-named handled item", c.Case)
+				}
+				original, seen := first[send.Account]
+				if !seen {
 					first[send.Account] = send
 					continue
 				}
-				for id, digest := range original.Items {
-					if id != target && send.Items[id] != digest {
-						return fmt.Errorf("%s: repeated named item changed another item", c.Case)
+				if send.Optional {
+					if send.Action == resilience.CollabActionReplaceAll {
+						if replaced[send.Account] {
+							return fmt.Errorf("%s: second replace-all on account", c.Case)
+						}
+						replaced[send.Account] = true
+					}
+				}
+				// The immutable input digest changes when this send handles
+				// the named item. A refusal naming it again closes its path.
+				namesTarget := send.RejectedItem == target || !send.Optional && send.Rule == "named_always"
+				if namesTarget && original.Items[target] != send.Items[target] {
+					renamed = send.Account
+				}
+				if !send.Optional {
+					for id, digest := range original.Items {
+						if id != target && send.Items[id] != digest {
+							return fmt.Errorf("%s: repeated named item changed another item", c.Case)
+						}
 					}
 				}
 			}
@@ -388,4 +421,148 @@ func TestCollaborationReplayFixtureHygiene(t *testing.T) {
 		require.NoError(t, err)
 		require.Error(t, validateReplayFixture(raw))
 	}
+}
+
+func TestCollaborationReplayReasoningTradeoff(t *testing.T) {
+	name := "task_then_reasoning_elsewhere/pass_false/stream_false/attempts_2"
+	old := replayOutcome{Status: 200, Success: true, Survived: []string{"reasoning", "reasoning_summary", "question"}}
+	next := replayOutcome{Status: 200, Success: true, Survived: []string{"task", "reasoning_summary", "question"}}
+	check := func(before, after replayOutcome) error {
+		return checkReplayOn(resilience.Defaults(), "lossless_first", []replayGolden{{Case: name, Turns: []replayOutcome{before}}}, []replayGolden{{Case: name, Turns: []replayOutcome{after}}})
+	}
+	require.NoError(t, check(old, next))
+	t.Run("no protected gain", func(t *testing.T) {
+		bad := next
+		bad.Survived = []string{"reasoning_summary", "question"}
+		require.Error(t, check(old, bad))
+	})
+	t.Run("protected loss", func(t *testing.T) {
+		before := old
+		before.Survived = append([]string{"task"}, old.Survived...)
+		bad := next
+		bad.Survived = []string{"reasoning_summary", "question"}
+		require.Error(t, check(before, bad))
+	})
+	t.Run("summary loss", func(t *testing.T) {
+		bad := next
+		bad.Survived = []string{"task", "question"}
+		require.Error(t, check(old, bad))
+	})
+	t.Run("new failure", func(t *testing.T) { bad := next; bad.Success = false; require.Error(t, check(old, bad)) })
+	t.Run("ordinary content loss", func(t *testing.T) {
+		before := old
+		before.Survived = append([]string{"ordinary"}, old.Survived...)
+		require.Error(t, check(before, next))
+	})
+	t.Run("unidentified task", func(t *testing.T) { name = "synthetic unknown"; require.Error(t, check(old, next)) })
+}
+
+// The only permitted exchange loses reasoning ciphertext, retains its readable
+// summary and gains protected input that the successful legacy path replaced.
+func replayReasoningTradeoff(name string, old, next replayOutcome) bool {
+	if !old.Success || !next.Success {
+		return false
+	}
+	summaries := map[string]string{"reasoning": "reasoning_summary", "reasoning_second": "reasoning_summary_second", "reasoning_third": "reasoning_summary_third"}
+	lost := false
+	for _, item := range old.Survived {
+		if slices.Contains(next.Survived, item) {
+			continue
+		}
+		summary, ok := summaries[item]
+		if !ok || !slices.Contains(next.Survived, summary) {
+			return false
+		}
+		lost = true
+	}
+	if !lost {
+		return false
+	}
+	for _, fixture := range collaborationReplayCorpus() {
+		if fixture.Name != name {
+			continue
+		}
+		raw, err := json.Marshal(map[string]any{"input": fixture.Items})
+		if err != nil {
+			return false
+		}
+		parsed := service.ParseCollabBody(raw)
+		if parsed.Shape.Ambiguous {
+			return false
+		}
+		for _, item := range parsed.Items {
+			if item.Class != resilience.CollabItemClassProtected || item.Family != resilience.CollabFamilyAgentMessage && item.Family != resilience.CollabFamilyToolOutput {
+				continue
+			}
+			for _, content := range replaySurvived([]byte("{\"input\":[" + string(fixture.Items[item.Index]) + "]}")) {
+				if content == "task" && !slices.Contains(old.Survived, content) && slices.Contains(next.Survived, content) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func replayDisclosedExecutableCase(name string) bool {
+	switch name {
+	case "target_executable_then_failure/pass_false/stream_true/attempts_2",
+		"target_executable_then_failure/pass_false/stream_true/attempts_4",
+		"target_executable_then_failure/pass_false/stream_true/attempts_0":
+		return true
+	}
+	return false
+}
+
+// Match the entire disclosed outcome, including actual output-frame digests.
+// A successful residual, missing executable output, or any other difference
+// requires an explicit revision of this three-case contract.
+func checkReplayExecutableResidual(old, next replayOutcome) error {
+	if !old.Success || len(old.Sends) != 2 || old.Sends[0].Account != "first" || old.Sends[0].Rule != "named" || old.Sends[1].Account != "first" || old.Sends[1].Rule != "success" || len(old.Bindings) == 0 || old.Bindings[0].Account != "first" {
+		return fmt.Errorf("disclosed residual baseline changed")
+	}
+	call := replayFrame("response.output_item.done", `{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_fixture","call_id":"call_fixture","name":"synthetic_action","arguments":"{}"}}`)
+	failure := replayFrame("response.failed", `{"type":"response.failed","response":{"id":"resp_fixture","status":"failed","error":{"type":"server_error","code":"server_error","message":"synthetic failure after call"}}}`)
+	expected := old
+	expected.Success = false
+	expected.Code = "server_error"
+	expected.ErrorType = "server_error"
+	expected.Retryable = true
+	original := old.Sends[0]
+	target := original
+	target.Account = "second"
+	target.Rule = "executable_failure"
+	target.Optional = true
+	target.Action = resilience.CollabActionSwitchOriginal
+	expected.Sends = []replaySend{original, target}
+	expected.SendsPerAccount = map[string]int{"first": 1, "second": 1}
+	expected.Events = []string{replayDigest([]byte(call)), replayDigest([]byte(failure))}
+	expected.Survived = original.Survived
+	// In this fixed corpus the sorted first binding is the ingress session;
+	// the successful legacy response's later response-ID bindings are absent.
+	expected.Bindings = old.Bindings[:1]
+	expected.UsageAccounts = []string{"second"}
+	expected.Learning = []string{}
+	if !reflect.DeepEqual(expected, next) {
+		return fmt.Errorf("disclosed failure after executable output changed")
+	}
+	return nil
+}
+
+func checkReplayDelivery(turn replayOutcome) error {
+	hasOptional := false
+	for _, send := range turn.Sends {
+		hasOptional = hasOptional || send.Optional
+	}
+	if !hasOptional {
+		return nil
+	}
+	delivered := -1
+	if turn.Success || turn.AcceptedMillis >= 0 {
+		delivered = len(turn.Sends) - 1
+	}
+	if !slices.Equal(turn.Survived, replayDeliveredContent(turn.Sends, delivered)) {
+		return fmt.Errorf("surviving content does not belong to the delivered response")
+	}
+	return nil
 }

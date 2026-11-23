@@ -62,6 +62,8 @@ type replayWriter struct {
 	headerAt, terminalAt, acceptedAt int64
 	beforeTerminal                   bool
 	nonterminal                      bool
+	upstream                         *replayUpstream
+	deliveredSend                    int
 }
 
 func (w *replayWriter) WriteHeader(status int) {
@@ -73,6 +75,9 @@ func (w *replayWriter) WriteHeader(status int) {
 func (w *replayWriter) observe(raw string) {
 	terminal := strings.Contains(raw, `"error":`) || strings.Contains(raw, "response.failed") || strings.Contains(raw, "response.completed") || strings.Contains(raw, `"status":"completed"`)
 	accepted := strings.Contains(raw, "response.output_text.delta") || strings.Contains(raw, "response.output_item.done") || strings.Contains(raw, "response.completed") || strings.Contains(raw, `"status":"completed"`)
+	if accepted && w.deliveredSend < 0 && w.upstream != nil {
+		w.deliveredSend = len(w.upstream.sends) - 1
+	}
 	if accepted && w.acceptedAt < 0 {
 		w.acceptedAt = time.Since(w.start).Milliseconds()
 	}
@@ -133,7 +138,12 @@ func (s *replaySlots) GetUserConcurrency(context.Context, int64) (int, error) {
 	}
 	return 0, nil
 }
-func (s *replaySlots) GetUsersLoadBatch(_ context.Context, users []service.UserWithConcurrency) (map[int64]*service.UserLoadInfo, error) {
+func (s *replaySlots) GetUsersLoadBatch(ctx context.Context, users []service.UserWithConcurrency) (map[int64]*service.UserLoadInfo, error) {
+	if collabUserLoadFault != nil {
+		if err := collabUserLoadFault(ctx); err != nil {
+			return nil, err
+		}
+	}
 	out := map[int64]*service.UserLoadInfo{}
 	for _, user := range users {
 		n, waiters := 0, 0

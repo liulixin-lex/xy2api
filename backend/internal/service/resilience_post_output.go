@@ -86,6 +86,9 @@ func noteResilienceClientGoneSkip(ctx context.Context, account *Account, reason 
 }
 
 func noteResiliencePostOutputFailureWithCategory(ctx context.Context, rl *RateLimitService, account *Account, attempt any, kind string, factCategory resilience.Category) bool {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return false
+	}
 	if account == nil || !resilience.Current().FailureOn() {
 		return false
 	}

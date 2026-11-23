@@ -464,6 +464,9 @@ func (s *RequestState) NoteClientOutputBytes(n int) {
 }
 
 func (s *RequestState) ClientOutputBytes() int64 {
+	if s != nil && s.collabParent != nil {
+		return s.collabParent.ClientOutputBytes()
+	}
 	if s == nil {
 		return 0
 	}

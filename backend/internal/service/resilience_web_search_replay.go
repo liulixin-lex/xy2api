@@ -131,6 +131,7 @@ const openAIWebSearchReplayContextKey = "xy_resilience_web_search_replay"
 // openAIWebSearchReplay is the web_search history state of one forwarding
 // attempt on an API-key account.
 type openAIWebSearchReplay struct {
+	optional      bool
 	accountID     int64
 	responsesLite bool
 	passthrough   bool
@@ -160,7 +161,7 @@ func armOpenAIWebSearchReplay(c *gin.Context, account *Account, body []byte, pas
 	if err != nil || !changed {
 		return nil, body
 	}
-	r := &openAIWebSearchReplay{accountID: account.ID, responsesLite: lite, passthrough: passthrough}
+	r := &openAIWebSearchReplay{accountID: account.ID, responsesLite: lite, passthrough: passthrough, optional: resilience.CollabAttemptFrom(c.Request.Context()).Optional}
 	c.Set(openAIWebSearchReplayContextKey, r)
 	if !openAIWebSearchDeclared.needed(account.ID, time.Now()) {
 		return r, body
@@ -179,7 +180,7 @@ func (r *openAIWebSearchReplay) declaredUpFront() bool {
 
 // succeeded remembers the account after its corrected replay went through.
 func (r *openAIWebSearchReplay) succeeded() {
-	if r == nil || !r.replayed {
+	if r == nil || !r.replayed || r.optional {
 		return
 	}
 	openAIWebSearchDeclared.remember(r.accountID, time.Now())

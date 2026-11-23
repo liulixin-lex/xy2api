@@ -387,3 +387,43 @@ func openAIResponseFailureError(ctx context.Context, status int, errType, code, 
 	}
 	return errBody
 }
+
+// SuspendCollabKeepalive pauses the request-owned heartbeat without closing
+// its lifecycle. The caller restores its writer and keys before resuming it.
+func SuspendCollabKeepalive(c *gin.Context) func() {
+	k := keepaliveFrom(c)
+	if k == nil {
+		return func() {}
+	}
+	k.mu.Lock()
+	running, at, interval := !k.stopped, k.resumeAt, k.interval
+	k.markStoppedLocked()
+	k.mu.Unlock()
+	c.Delete(openAICompactSSEKeepaliveKey)
+	return func() {
+		c.Set(openAICompactSSEKeepaliveKey, k)
+		if running {
+			delay := time.Until(at)
+			if delay < 0 {
+				delay = 0
+			}
+			k.resume(delay, interval)
+		}
+	}
+}
+
+// CollabClientIdleDeadline uses the last actual heartbeat, including a
+// suspended one. No heartbeat is emitted while the rescue owns the writer.
+func CollabClientIdleDeadline(c *gin.Context, last time.Time) time.Time {
+	if k := keepaliveFrom(c); k != nil {
+		k.mu.Lock()
+		if k.lastWrite.After(last) {
+			last = k.lastWrite
+		}
+		k.mu.Unlock()
+	}
+	if last.IsZero() {
+		last = time.Now()
+	}
+	return last.Add(90 * time.Second)
+}

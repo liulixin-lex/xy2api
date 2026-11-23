@@ -8,6 +8,7 @@ type CollabEvidenceInput struct {
 	HTTPStatus    int
 	WrappedStatus int
 	Source        CollabEvidenceSource
+	Event         string // raw SSE event, required to validate proxy.upstream_error
 	Shape         CollabRequestShape
 }
 
@@ -28,6 +29,8 @@ type CollabRequestShape struct {
 // Identity is the original input item's identity, never a derived array index.
 // Raw named identifiers remain transient until converted to a keyed digest.
 type CollabNamedItem struct {
+	InputIndex *int
+	Path       string
 	Identity   string
 	Family     CollabFamily
 	Located    bool
@@ -64,12 +67,6 @@ func (NoopCollabEvidenceClassifier) Classify(in CollabEvidenceInput) CollabEvide
 	return CollabEvidence{Grade: CollabEvidenceGradeUnclaimed, Family: CollabFamilyNone, Ownership: CollabOwnershipClassNone, Source: in.Source}
 }
 
-// ClassifyCollabEvidence is deliberately unclaimed until the classifier is
-// implemented. Callers keep their existing error and repair behavior.
-func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
-	return NoopCollabEvidenceClassifier{}.Classify(in)
-}
-
 // The classifier extracts only the raw identifier. The controller resolves it
 // against the immutable original input, before edits or account selection.
 // Even two entries with the same digest are ambiguous; exactly one is required.
@@ -81,9 +78,11 @@ type CollabOriginalItem struct {
 
 func ResolveCollabNamedItem(named CollabNamedItem, original []CollabOriginalItem) CollabNamedItem {
 	named.Located = false
-	named.Ambiguous = false
 	named.MatchCount = 0
 	named.Item = ""
+	if named.Ambiguous {
+		return named
+	}
 	if named.Identity == "" {
 		return named
 	}

@@ -11,10 +11,6 @@ import (
 
 func TestCollabNoopContracts(t *testing.T) {
 	ctx := context.Background()
-	var candidate CollabCandidate = NoopCollabCandidate{}
-	_, adopted := candidate.Plan(CollabCandidateInput{})
-	require.False(t, adopted)
-	candidate.CommitOnAdopt(ctx, 1, CollabCandidatePlan{})
 	var restorer CollabResponseRestorer = NoopCollabResponseRestorer{}
 	body := []byte("synthetic")
 	stream, err := restorer.SSEData("response.completed", body)
@@ -28,16 +24,6 @@ func TestCollabNoopContracts(t *testing.T) {
 	evidence := classifier.Classify(CollabEvidenceInput{Payload: []byte("synthetic"), HTTPStatus: 400, WrappedStatus: 400, Source: CollabEvidenceSourceHttpError, Shape: CollabRequestShape{AgentCiphertext: true}})
 	require.Equal(t, CollabEvidenceGradeUnclaimed, evidence.Grade)
 	require.Nil(t, evidence.Inner)
-	var controller CollabController = NoopCollabController{}
-	require.False(t, controller.Propose(nil))
-	_, ok := controller.ReserveSend(CollabCandidatePlan{Optional: true})
-	require.False(t, ok)
-	require.False(t, controller.ConfirmSend(1))
-	controller.ReleaseSend(1)
-	require.False(t, controller.Settle(CollabSettlement{Seq: 1}))
-	require.False(t, controller.ClaimTerminal(CollabTerminal{Mode: CollabFinalModeLocal}))
-	controller.EnterFloor(CollabReasonBudgetTime)
-	require.Equal(t, CollabNextKindLegacy, controller.NextStep().Kind)
 	var records CollabRecordsStore = NoopCollabRecordsStore{}
 	_, recorded := records.TerminalRejected(ctx, CollabTerminalRejectionRecord{})
 	require.False(t, recorded)

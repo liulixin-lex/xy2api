@@ -155,6 +155,9 @@ func groupBillsOpenAIFastAtStandard(apiKey *APIKey, account *Account, serviceTie
 
 // RecordUsage records usage and deducts balance
 func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) error {
+	if !resilience.CollabAttemptFrom(ctx).CustomerSettlementAllowed() {
+		return nil
+	}
 	if input == nil {
 		return errors.New("openai usage input is nil")
 	}
@@ -163,12 +166,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		return errors.New("openai usage result is nil")
 	}
 	s.observeCacheUsage(result, input.Account, time.Now())
-	if !result.PartialFailure {
+	if !result.PartialFailure && resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		s.resilience.NoteAccountSuccess(ctx, input.Account)
 	}
 	// OpenAI input_tokens already include cache reads and writes.
 	s.resilience.NoteSessionCacheUsage(ctx, result.Usage.CacheReadInputTokens, result.Usage.InputTokens)
-	if !result.PartialFailure && s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
+	if !result.PartialFailure && resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() && s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}
 
@@ -1191,6 +1194,9 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 // (/wham/usage bengalfox 道)更新,不能被全局头口径污染(外审第7轮 P1)。本函数仅持 accountID,
 // 无法在此自检影子,故守卫前置到各调用点。
 func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, accountID int64, snapshot *OpenAICodexUsageSnapshot) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	if snapshot == nil {
 		return
 	}

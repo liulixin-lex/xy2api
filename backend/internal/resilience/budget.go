@@ -95,6 +95,36 @@ func (b *Budget) Started() time.Time {
 	return b.started
 }
 
+// CompensateCollabPreempt restores the legacy budget after an abandoned
+// lossless phase. Its caller reserves idle headroom before preemption.
+func (b *Budget) CompensateCollabPreempt(elapsed time.Duration) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.attempts > 0 {
+		b.attempts--
+	}
+	if !b.deadline.IsZero() {
+		b.deadline = b.deadline.Add(max(time.Duration(0), elapsed))
+	}
+	b.exhausted = ""
+}
+
+// CompensateCollabEligibility restores time spent checking optional admission.
+// No send was preempted, so the existing attempt count stays unchanged.
+func (b *Budget) CompensateCollabEligibility(elapsed time.Duration) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.deadline.IsZero() {
+		b.deadline = b.deadline.Add(max(time.Duration(0), elapsed))
+	}
+}
+
 // Kind returns the request kind.
 func (b *Budget) Kind() RequestKind {
 	if b == nil {

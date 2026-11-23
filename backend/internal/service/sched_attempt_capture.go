@@ -88,6 +88,9 @@ func (s *OpenAIGatewayService) beginSchedAttemptAt(ctx context.Context, account 
 }
 
 func (s *OpenAIGatewayService) newSchedAttemptCapture(ctx context.Context, account *Account, body []byte, stream bool, started time.Time, guard *openAIFirstOutputHeaderGuard) *schedAttemptCapture {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return nil
+	}
 	if account == nil || account.Platform != PlatformOpenAI {
 		return nil
 	}
@@ -438,6 +441,12 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	var preempt *CollabLosslessPreempt
+	if errors.As(err, &preempt) {
+		a.done = true
+		a.state.ClearCurrentAttemptIf(a)
+		return
+	}
 	if a.factsOnly {
 		a.done = true
 		a.state.ClearCurrentAttemptIf(a)
@@ -595,6 +604,9 @@ func markSchedWSOutput(a *schedAttemptCapture, payload []byte) {
 
 // sendSchedHTTP is used only by the enumerated text forwarding paths.
 func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Account, req *http.Request, proxyURL string, body []byte, stream bool, owner **schedAttemptCapture) (*http.Response, error) {
+	if s.collabDuplicateSend(ctx, account, body) {
+		return nil, &CollabDuplicateSendError{}
+	}
 	st := resilience.StateFrom(ctx)
 	*owner = nil
 	if st != nil {
@@ -647,7 +659,9 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 		guard.capture.Store(*owner)
 	}
 	st.NoteUpstreamHTTPStatus(account.ID, 0)
+	beginCollabObservedSend(ctx)
 	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
+	s.observeCollabHTTP(ctx, account, body, stream, resp)
 	if resp != nil {
 		st.NoteUpstreamHTTPStatus(account.ID, resp.StatusCode)
 		if *owner != nil {

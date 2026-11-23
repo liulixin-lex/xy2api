@@ -1,0 +1,64 @@
+package handler
+
+import (
+	"context"
+	"sync"
+	"time"
+)
+
+// The supervisor owns its timers and joins before request cleanup. Queue reads
+// have a short cancellation bound and occur at most once per second after the
+// initial gate. Acceptance suspends supervision until the next physical send.
+func watchCollabTakeover(parent context.Context, duration time.Duration, accepted func() bool, waiters func(context.Context) bool) (context.Context, func()) {
+	started := time.Now()
+	deadline := started.Add(duration)
+	ctx, cancel := context.WithCancel(parent)
+	queued := func() (blocked bool) {
+		defer func() {
+			if recover() != nil {
+				blocked = true
+			}
+		}()
+		query, done := context.WithTimeout(ctx, 250*time.Millisecond)
+		defer done()
+		return waiters(query)
+	}
+	if duration <= 0 || queued() {
+		cancel()
+		return ctx, func() {}
+	}
+	duration -= time.Since(started)
+	if duration <= 0 {
+		cancel()
+		return ctx, func() {}
+	}
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		timer, ticker := time.NewTimer(duration), time.NewTicker(time.Second)
+		defer timer.Stop()
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				if !accepted() {
+					cancel()
+				}
+			case <-ticker.C:
+				if accepted() {
+					continue
+				}
+				if !time.Now().Before(deadline) || queued() {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return ctx, func() { once.Do(func() { cancel(); close(stop); <-stopped }) }
+}

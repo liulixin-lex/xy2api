@@ -3,7 +3,6 @@ package resilience
 import (
 	"net/http"
 	"slices"
-	"sync/atomic"
 	"time"
 )
 
@@ -22,16 +21,17 @@ type CollabTerminalSnapshot struct {
 
 type CollabSavedTerminal struct {
 	// Snapshot is immutable after capture.
-	Snapshot   CollabTerminalSnapshot
-	persistent atomic.Bool
-	outcome    atomic.Pointer[CollabTerminal]
-	delivery   atomic.Bool
+	Snapshot CollabTerminalSnapshot
 }
 
 func NewCollabSavedTerminal(snapshot CollabTerminalSnapshot) *CollabSavedTerminal {
 	snapshot.Headers = snapshot.Headers.Clone()
 	if snapshot.Rejection.Named != nil {
 		named := *snapshot.Rejection.Named
+		if named.InputIndex != nil {
+			index := *named.InputIndex
+			named.InputIndex = &index
+		}
 		snapshot.Rejection.Named = &named
 	}
 	if snapshot.Rejection.Inner != nil {
@@ -40,24 +40,6 @@ func NewCollabSavedTerminal(snapshot CollabTerminalSnapshot) *CollabSavedTermina
 		snapshot.Rejection.Inner = &inner
 	}
 	return &CollabSavedTerminal{Snapshot: snapshot}
-}
-
-// ClaimPersistentEffects is called at the original terminal boundary, including
-// when takeover is skipped. Counts and avoidance run exactly once there, never
-// for optional sends. It does not claim delivery or suppress retry advice.
-func (s *CollabSavedTerminal) ClaimPersistentEffects() bool {
-	return s != nil && s.persistent.CompareAndSwap(false, true)
-}
-
-// ResolveOutcome fixes the final outcome before delivery-only effects run.
-func (s *CollabSavedTerminal) ResolveOutcome(outcome CollabTerminal) bool {
-	return s != nil && s.outcome.CompareAndSwap(nil, &outcome)
-}
-
-// ClaimDeliveryEffects defers terminal ownership and advice suppression until
-// final resolution. Persistent effects have a separate owner and timing.
-func (s *CollabSavedTerminal) ClaimDeliveryEffects() bool {
-	return s != nil && s.outcome.Load() != nil && s.delivery.CompareAndSwap(false, true)
 }
 
 const CollabRetryableAcceptanceTimeout = 15 * time.Second

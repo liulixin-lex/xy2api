@@ -72,6 +72,9 @@ func (s *OpenAIGatewayService) beginOpenAIM3(c *gin.Context, body []byte) *openA
 	return r
 }
 func (s *OpenAIGatewayService) armOpenAIM3(c *gin.Context, account *Account, body []byte, credentialVersion string) *openAIM3Attempt {
+	if !resilience.CollabAttemptFrom(httpEncryptedRepairContext(c)).AccountEffectsAllowed() {
+		return nil
+	}
 	r := s.beginOpenAIM3(c, body)
 	if r == nil || account == nil || account.Platform != PlatformOpenAI {
 		return nil
@@ -204,6 +207,9 @@ func (a *openAIM3Attempt) event(ctx context.Context, name string, count int) {
 	logger.FromContext(ctx).Warn(name, zap.Int64("group_id", a.request.groupID), zap.Int64("account_id", a.account.ID), zap.Int("count", count))
 }
 func (a *openAIM3Attempt) persist(ctx context.Context, slots []openAIBadEncryptedSlot) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	if len(slots) == 0 || a.credentialVersion == "" {
 		return
 	}
@@ -217,6 +223,9 @@ func (a *openAIM3Attempt) persist(ctx context.Context, slots []openAIBadEncrypte
 
 // Apply to the sole outbound buffer immediately before the existing builder.
 func (a *openAIM3Attempt) derive(ctx context.Context, body []byte) ([]byte, error) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return body, nil
+	}
 	if a == nil {
 		return body, nil
 	}
@@ -258,6 +267,9 @@ func openAIM3Trigger(payload []byte, message string, wrappedStatus int) (resilie
 	return family, family == resilience.StateConversationInvalid || family == resilience.StateFunctionOutput || family == resilience.StateAgentMessage
 }
 func (a *openAIM3Attempt) learn(ctx context.Context, body, payload []byte, message string, status, wrappedStatus int) error {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return nil
+	}
 	if a == nil {
 		return nil
 	}
@@ -322,6 +334,9 @@ func (a *openAIM3Attempt) learn(ctx context.Context, body, payload []byte, messa
 	return &openAIRequestRepairSignal{kind: string(OpenAIStateRepairReason), next: next}
 }
 func (a *openAIM3Attempt) succeeded(ctx context.Context) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	if a == nil || !a.state.replayed {
 		return
 	}

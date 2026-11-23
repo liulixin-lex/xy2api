@@ -22,9 +22,7 @@ type CollabRequestState struct {
 	LatestEvidence    *CollabEvidence
 	InitialReason     CollabReason
 	StopReason        CollabReason
-	Controller        CollabController
 	Order             CollabOrder
-	LegacyEndpoint    CollabLegacyEndpoint
 	Quotas            CollabQuotas
 	FirstAccountID    int64
 	CurrentAccountID  int64
