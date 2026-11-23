@@ -12,7 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var readSessionBindingScript = redis.NewScript(`
+var readSessionBindingScript = newStickyBindingScript(`
 local owner = redis.call('GET', KEYS[1])
 if not owner then return nil end
 local generation = redis.call('GET', KEYS[2])
@@ -26,7 +26,7 @@ return {owner, generation}
 `)
 
 func (c *gatewayCache) GetSessionBinding(ctx context.Context, groupID int64, sessionHash string) (service.StickySessionBinding, error) {
-	values, err := readSessionBindingScript.Run(ctx, c.rdb, sessionBindingKeys(groupID, sessionHash), uuid.NewString()).StringSlice()
+	values, err := c.runStickyBinding(ctx, readSessionBindingScript, sessionBindingKeys(groupID, sessionHash), uuid.NewString()).StringSlice()
 	if errors.Is(err, redis.Nil) {
 		return service.StickySessionBinding{}, service.ErrStickySessionNotFound
 	}
@@ -37,7 +37,7 @@ func (c *gatewayCache) GetSessionBinding(ctx context.Context, groupID int64, ses
 	return service.StickySessionBinding{AccountID: owner, Generation: values[1]}, err
 }
 
-var commitSessionBindingScript = redis.NewScript(`
+var commitSessionBindingScript = newStickyBindingScript(`
 local bindingKeys = tonumber(ARGV[7])
 local owner = redis.call('GET', KEYS[1])
 local observed = redis.call('GET', KEYS[2]) or ''
@@ -92,7 +92,7 @@ func (c *gatewayCache) CommitSessionBinding(ctx context.Context, groupID int64, 
 			keys = append(keys, sessionKey(resilienceSessionAvoidPrefix, groupID, scope), sessionKey(resilienceSessionAvoidWrittenPrefix, groupID, scope))
 		}
 	}
-	values, err := commitSessionBindingScript.Run(ctx, c.rdb, keys, expected.AccountID, expected.Generation, target, uuid.NewString(),
+	values, err := c.runStickyBinding(ctx, commitSessionBindingScript, keys, expected.AccountID, expected.Generation, target, uuid.NewString(),
 		ttl.Milliseconds(), min(ttl, 10*time.Minute).Milliseconds(), bindingKeys, options.FailureScope != "", options.RejectScope != "", avoidResetMillis([]time.Time{options.TargetResetAt}), time.Now().UnixMilli()).StringSlice()
 	if err != nil {
 		return service.BindingCommitResult{Status: service.BindingCommitError}, err
@@ -108,11 +108,11 @@ const checkFailureBindingLua = `
 if redis.call('GET', KEYS[2]) ~= ARGV[4] or redis.call('GET', KEYS[3]) ~= ARGV[5] then return 0 end
 `
 
-var recordSessionBindingFailureScript = redis.NewScript(checkFailureBindingLua + resilienceAvoidArgsLua + resilienceAvoidStoreLua)
+var recordSessionBindingFailureScript = newStickyBindingScript(checkFailureBindingLua + resilienceAvoidArgsLua + resilienceAvoidStoreLua)
 
 // Store the reset cutoff alongside this account's first-output metadata. A
 // delayed writer may still carry the reset snapshot from the preceding window.
-var recordFirstOutputAvoidScript = redis.NewScript(checkFailureBindingLua + resilienceAvoidArgsLua + `
+var recordFirstOutputAvoidScript = newStickyBindingScript(checkFailureBindingLua + resilienceAvoidArgsLua + `
  local resetField = 'r:' .. ARGV[1]
  reset = math.max(tonumber(redis.call('HGET', KEYS[#KEYS], resetField) or '0'), reset)
  if stamp < reset then return 0 end
@@ -131,5 +131,5 @@ func (c *gatewayCache) RecordSessionBindingFailure(ctx context.Context, groupID 
 	if strings.HasPrefix(avoidSession, "first_output:") {
 		script = recordFirstOutputAvoidScript
 	}
-	return script.Run(ctx, c.rdb, keys, target, now.Add(ttl).UnixMilli(), now.UnixMilli(), expected.AccountID, expected.Generation, avoidResetMillis(resetAt)).Int64()
+	return c.runStickyBinding(ctx, script, keys, target, now.Add(ttl).UnixMilli(), now.UnixMilli(), expected.AccountID, expected.Generation, avoidResetMillis(resetAt)).Int64()
 }

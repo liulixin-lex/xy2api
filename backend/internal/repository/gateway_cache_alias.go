@@ -103,7 +103,7 @@ func (c *gatewayCache) SyncSessionBindingAlias(ctx context.Context, group int64,
 
 var _ service.OpenAIStickyAliasCache = (*gatewayCache)(nil)
 
-var deleteSessionBindingAliasesScript = redis.NewScript(`
+var deleteSessionBindingAliasesScript = newStickyBindingScript(`
 if ARGV[1] ~= '0' then
   local owner = redis.call('GET', KEYS[1]) or redis.call('GET', KEYS[3])
   if owner ~= ARGV[1] then return 0 end
@@ -113,6 +113,6 @@ return redis.call('DEL', unpack(KEYS))
 
 func (c *gatewayCache) DeleteSessionBindingAliases(ctx context.Context, group int64, primary, legacy string, owner int64) (bool, error) {
 	keys := append(sessionBindingKeys(group, primary), sessionBindingKeys(group, legacy)...)
-	n, err := deleteSessionBindingAliasesScript.Run(ctx, c.rdb, keys, owner).Int64()
+	n, err := c.runStickyBinding(ctx, deleteSessionBindingAliasesScript, keys, owner).Int64()
 	return n > 0, err
 }

@@ -28,6 +28,7 @@ type collabOracleCase struct {
 	guardian, avoid, alias, plain bool
 	mode                          int
 	slots                         map[int64]bool
+	production                    bool
 }
 
 type collabOracleRepo struct {
@@ -49,13 +50,25 @@ type collabOracleLoads struct {
 
 type collabOracleAtomicCache struct{ *selectionRuntimeCache }
 
-func (c collabOracleAtomicCache) ClaimSessionAccountID(_ context.Context, _ int64, key string, account int64, _ time.Duration, _ bool) (int64, error) {
+func (c collabOracleAtomicCache) ClaimSessionAccountID(ctx context.Context, group int64, key string, account int64, ttl time.Duration, _ bool) (int64, error) {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.sessionBindings, nil, "claim", account, ttl)
+		defer finish()
+	}
+
 	if c.sessionBindings[key] == 0 {
 		c.sessionBindings[key] = account
 	}
 	return c.sessionBindings[key], nil
 }
-func (c collabOracleAtomicCache) DeleteSessionAccountIDIfOwner(_ context.Context, _ int64, key string, account int64) error {
+func (c collabOracleAtomicCache) DeleteSessionAccountIDIfOwner(ctx context.Context, group int64, key string, account int64) error {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.sessionBindings, nil, "delete", account, 0)
+		defer finish()
+	}
+
 	if c.sessionBindings[key] == account {
 		delete(c.sessionBindings, key)
 	}
@@ -76,6 +89,13 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 	if c.alias {
 		session = "v2:shared-session"
 	}
+	ctx := withOpenAINoStickyMigration(selectionReviewContext())
+	ctx = context.WithValue(ctx, openAITerminalRejectionScopeKey{}, openAITerminalRejectionScope{session: "child-execution", preserveBinding: true, selectionPreservesBinding: &atomic.Bool{}})
+	legacy := "legacy"
+	if c.production {
+		ctx, session = collabAtomicRequest(t, f, resilience.NewCollabTreeAffinity(32, time.Hour), "child", false, c.guardian)
+		legacy = openAILegacySessionHashFromContext(ctx)
+	}
 	owner := c.bound
 	if on {
 		owner = 1
@@ -83,24 +103,22 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 	if owner > 0 {
 		f.cache.sessionBindings["openai:"+session] = owner
 	}
-	ctx := withOpenAINoStickyMigration(selectionReviewContext())
-	ctx = context.WithValue(ctx, openAITerminalRejectionScopeKey{}, openAITerminalRejectionScope{session: "child-execution", preserveBinding: true, selectionPreservesBinding: &atomic.Bool{}})
-	if c.alias {
-		f.cache.sessionBindings["openai:legacy"] = owner
-		ctx = withOpenAILegacySessionHash(ctx, "legacy")
+	if c.alias && legacy != "" {
+		f.cache.sessionBindings["openai:"+legacy] = owner
+		ctx = withOpenAILegacySessionHash(ctx, legacy)
 	}
 	if c.plain {
 		f.svc.cache = &f.cache.schedulerTestGatewayCache
-	} else if c.alias {
-		f.svc.cache = collabOracleAtomicCache{f.cache}
+	} else if c.alias || c.production {
+		f.svc.cache = &collabOracleAtomicCache{f.cache}
 	}
-	if c.guardian {
+	if c.guardian && !c.production {
 		ctx = context.WithValue(ctx, openAIGuardianParentAffinityContextKey{}, openAIGuardianParentAffinity{currentSessionHash: session})
 	}
 	if c.avoid {
 		scope := session
 		if on {
-			scope = "child-execution"
+			scope = openAIRejectionScope(ctx).session
 		}
 		require.NoError(t, f.svc.resilience.store.AddSessionAvoid(ctx, 7, scope, 1, time.Minute))
 	}
@@ -131,7 +149,7 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 		// A fresh owner slot can coexist with a stale full batch snapshot.
 		f.loads.loadMap = map[int64]*AccountLoadInfo{1: {LoadRate: 100}, 2: {LoadRate: 100}, 3: {LoadRate: 100}}
 	case 11:
-		if c.alias {
+		if c.alias && legacy != "" {
 			delete(f.cache.sessionBindings, "openai:"+session)
 		}
 	}
@@ -141,9 +159,12 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 		ctx = prepareAffinityTest(f, ctx, session)
 		b := openAICollabBindingFrom(ctx)
 		require.NotNil(t, b)
-		require.NoError(t, b.write(ctx, c.bound, time.Hour))
+		if !c.production || c.guardian || c.bound != 1 {
+			require.NoError(t, b.write(ctx, c.bound, time.Hour))
+		}
 	}
 	start := time.Now()
+
 	result, _, err := f.svc.SelectAccountWithSchedulerForCapability(ctx, ptrInt64Selection(7), "", session, "m", nil, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, true)
 	out := fmt.Sprint(err)
 	if result != nil && result.Account != nil {
@@ -167,7 +188,7 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 		}
 	}
 	member := TrialLeaseSessionMember(session)
-	if on {
+	if on && openAICollabBindingFrom(ctx).present() {
 		member = TrialLeaseSessionMember(openAICollabBindingFrom(ctx).key)
 	}
 	requestMember := TrialLeaseRequestMember(resilience.StateFrom(ctx).GatewayRequestID())
@@ -285,10 +306,10 @@ func TestCollabThreadBindingReadBudgetAndScope(t *testing.T) {
 		ctx = collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root")
 		start = time.Now()
 		ctx = prepareAffinityTest(f, ctx, "shared-session")
-		require.Equal(t, collabThreadReadBudget, time.Since(start))
-		require.EqualValues(t, 1, cache.reads.Load())
+		require.Zero(t, time.Since(start))
+		require.Zero(t, cache.reads.Load())
 		f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "shared-session", PlatformOpenAI, OpenAIClientTransportHTTP, true)
-		require.EqualValues(t, 1, cache.reads.Load())
+		require.Zero(t, cache.reads.Load())
 		key := openAICollabBindingFrom(ctx).key
 		require.True(t, strings.HasPrefix(key, "collab-thread-binding-v1:"))
 		require.NotContains(t, key, "child")
@@ -358,8 +379,8 @@ func TestCollabThreadBindingTerminalAndPendingCompletion(t *testing.T) {
 		f.svc.noteOpenAITerminalRejectionForSession(ctx, &account, 7, "shared-session", 400, nil, []byte(`{"error":{"message":"synthetic upstream refusal"}}`), errors.New("synthetic rejection"))
 	}
 	owner, missing, _ := b.effective(ctx)
-	require.Zero(t, owner)
-	require.True(t, missing)
+	require.EqualValues(t, 2, owner)
+	require.False(t, missing)
 	require.EqualValues(t, 1, f.cache.sessionBindings["openai:shared-session"])
 }
 
@@ -405,6 +426,12 @@ type collabBindingExpiryCache struct {
 }
 
 func (c *collabBindingExpiryCache) GetSessionAccountID(ctx context.Context, g int64, key string) (int64, error) {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, g, c.values, c.until, "read", 0, 0)
+		defer finish()
+	}
+
 	if !strings.HasPrefix(key, "collab-thread-binding-v1:") {
 		return c.GatewayCache.GetSessionAccountID(ctx, g, key)
 	}
@@ -414,6 +441,12 @@ func (c *collabBindingExpiryCache) GetSessionAccountID(ctx context.Context, g in
 	return 0, ErrStickySessionNotFound
 }
 func (c *collabBindingExpiryCache) SetSessionAccountID(ctx context.Context, g int64, key string, account int64, ttl time.Duration) error {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, g, c.values, c.until, "set", account, ttl)
+		defer finish()
+	}
+
 	if !strings.HasPrefix(key, "collab-thread-binding-v1:") {
 		return c.GatewayCache.SetSessionAccountID(ctx, g, key, account, ttl)
 	}
@@ -441,7 +474,12 @@ func TestCollabThreadBindingRequestSequence(t *testing.T) {
 			r, _, err := collabAffinitySelect(f, ctx, "m", nil)
 			require.NoError(t, err)
 			require.EqualValues(t, want, r.Account.ID)
-			require.NoError(t, f.svc.BindStickySessionAfterProfitAdmission(ctx, ptrInt64Selection(7), "shared-session", r.Account.ID))
+			bindErr := f.svc.BindStickySessionAfterProfitAdmission(ctx, ptrInt64Selection(7), "shared-session", r.Account.ID)
+			if cache.failWrite {
+				require.Error(t, bindErr)
+			} else {
+				require.NoError(t, bindErr)
+			}
 			r.ReleaseFunc()
 			require.EqualValues(t, 1, f.cache.sessionBindings["openai:shared-session"])
 		}
@@ -454,7 +492,7 @@ func TestCollabThreadBindingRequestSequence(t *testing.T) {
 		bind(ctx, 2)
 		f.svc.AvoidOpenAICollabStateAccount(ctx, 7, "shared-session", 2, true)
 		bind(request(local), 1)
-		// A failed shared write still leaves the local deletion immediately visible.
+		// Failed persistence retains today's error and the shared binding.
 		cache.failWrite = true
 		ctx = request(local)
 		f.svc.AvoidOpenAICollabStateAccount(ctx, 7, "shared-session", 1, true)

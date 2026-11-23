@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,10 +9,6 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
-
-const collabThreadReadBudget = 50 * time.Millisecond
-
-var collabThreadReaders = make(chan struct{}, 4)
 
 // One request's view of a thread binding. Absent follows the tree; present zero
 // is the result of deletion. The service and identity are captured so detached
@@ -28,7 +23,7 @@ type openAICollabThreadBinding struct {
 	account             int64
 	until               time.Time
 	known               bool
-	revision            uint64
+	pairMissing         bool
 }
 
 // PrepareOpenAICollabThreadBinding is called once before native HTTP selection,
@@ -57,65 +52,10 @@ func (s *OpenAIGatewayService) PrepareOpenAICollabThreadBinding(ctx context.Cont
 		return false
 	}
 	b := &openAICollabThreadBinding{affinity: a, service: s, session: session, scope: scope, digest: digest, key: "collab-thread-binding-v1:" + string(digest), legacy: s.openAILegacySessionCacheKey(ctx, session)}
-	b.account, b.until, b.known = a.store.ThreadBinding(digest)
 	if !a.binding.CompareAndSwap(nil, b) {
 		return false
 	}
-	// A tight caller deadline must remain entirely available to normal selection.
-	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= 2*collabThreadReadBudget {
-		return true
-	}
-	b.readShared(ctx)
 	return true
-}
-
-func (b *openAICollabThreadBinding) readShared(ctx context.Context) {
-	if b.service.cache == nil || ctx.Err() != nil {
-		return
-	}
-	select {
-	case collabThreadReaders <- struct{}{}:
-	default:
-		return
-	}
-	readCtx, cancel := context.WithTimeout(ctx, collabThreadReadBudget)
-	defer cancel()
-	type result struct {
-		account int64
-		ttl     time.Duration
-		err     error
-	}
-	done := make(chan result, 1)
-	go func() {
-		defer func() {
-			<-collabThreadReaders
-			if recover() != nil {
-				done <- result{err: errors.New("binding read failed")}
-			}
-		}()
-		var r result
-		if reader, ok := b.service.cache.(gatewaySessionBindingReader); ok {
-			r.account, r.ttl, r.err = reader.GetSessionAccountIDWithTTL(readCtx, b.affinity.groupID, b.key)
-		} else {
-			r.account, r.err = b.service.cache.GetSessionAccountID(readCtx, b.affinity.groupID, b.key)
-			r.ttl = b.service.openAIStickyBindingTTL(&b.affinity.groupID)
-		}
-		done <- r
-	}()
-	select {
-	case r := <-done:
-		if r.err == nil && readCtx.Err() == nil && r.account >= -1 && r.ttl > 0 {
-			if r.account < 0 {
-				r.account = 0
-			}
-			b.mu.Lock()
-			if !b.known {
-				b.account, b.known, b.until = r.account, true, time.Now().Add(r.ttl)
-			}
-			b.mu.Unlock()
-		}
-	case <-readCtx.Done():
-	}
 }
 
 func openAICollabBindingFrom(ctx context.Context) *openAICollabThreadBinding {
@@ -152,144 +92,112 @@ func (b *openAICollabThreadBinding) snapshot() (int64, bool) {
 
 func (b *openAICollabThreadBinding) present() bool { _, ok := b.snapshot(); return ok }
 
-// An absent thread follows the tree through read-only primary/legacy lookup.
-// Alias adoption must not mutate the tree while serving this child.
-func (b *openAICollabThreadBinding) effective(ctx context.Context) (int64, bool, error) {
-	if account, ok := b.snapshot(); ok {
-		if account == 0 {
-			return 0, true, ErrStickySessionNotFound
-		}
-		return account, false, nil
-	}
-	if b.service.cache == nil {
-		return 0, false, nil
-	}
-	account, err := b.service.cache.GetSessionAccountID(ctx, b.affinity.groupID, b.service.openAISessionCacheKey(b.session))
-	missing := stickyLookupMissing(account, err)
+// Only observations are cached locally; storage never consults this request's
+// snapshot to claim, delete, refresh or compare a binding generation.
+func (b *openAICollabThreadBinding) storageContext(ctx context.Context, refresh time.Duration) context.Context {
 	legacy := b.legacy
-	if (err != nil || account <= 0) && b.service.openAISessionHashReadOldFallbackEnabled() && legacy != "" {
-		old, oldErr := b.service.cache.GetSessionAccountID(ctx, b.affinity.groupID, legacy)
-		if oldErr == nil && old > 0 {
-			return old, false, nil
-		}
-		missing = missing && stickyLookupMissing(old, oldErr)
+	if !b.service.openAISessionHashReadOldFallbackEnabled() && !b.service.openAISessionHashDualWriteOldEnabled() {
+		legacy = ""
 	}
-	return account, missing, err
+	return WithStickyThreadBinding(ctx, StickyThreadBinding{
+		Key: b.key, Parent: b.service.openAISessionCacheKey(b.session), Legacy: legacy,
+		Fallback: b.service.openAISessionHashReadOldFallbackEnabled(),
+		TTL:      b.service.openAIStickyBindingTTL(&b.affinity.groupID), RefreshTTL: refresh,
+		Observe: func(account int64, ttl time.Duration, present, pairMissing bool) {
+			if account < 0 {
+				account = 0
+			}
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			b.account, b.known, b.until, b.pairMissing = account, present, time.Now().Add(ttl), pairMissing
+			if present {
+				b.affinity.store.PutThreadBinding(b.digest, account, b.until)
+			}
+		},
+	})
+}
+
+func (b *openAICollabThreadBinding) effective(ctx context.Context) (int64, bool, error) {
+	account, err := b.service.cache.GetSessionAccountID(b.storageContext(ctx, 0), b.affinity.groupID, b.key)
+	return account, stickyLookupMissing(account, err), err
 }
 
 func (b *openAICollabThreadBinding) write(ctx context.Context, account int64, ttl time.Duration) error {
 	if ttl <= 0 {
 		ttl = b.service.openAIStickyBindingTTL(&b.affinity.groupID)
 	}
-	b.mu.Lock()
-	b.account, b.known, b.until = account, true, time.Now().Add(ttl)
-	b.revision++
-	b.affinity.store.PutThreadBinding(b.digest, account, b.until)
-	b.mu.Unlock()
-	if b.service.cache == nil {
-		return nil
+	if account == 0 {
+		account = -1
 	}
-	// -1 distinguishes explicit none from an absent shared key. No tree alias
-	// helper may be used with this dedicated, authenticated digest namespace.
-	stored := account
-	if stored == 0 {
-		stored = -1
-	}
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), collabThreadReadBudget)
-	defer cancel()
-	_ = b.service.cache.SetSessionAccountID(writeCtx, b.affinity.groupID, b.key, stored, ttl)
-	return nil // local-first persistence is authoritative on shared failure
+	return b.service.cache.SetSessionAccountID(b.storageContext(ctx, 0), b.affinity.groupID, b.key, account, ttl)
 }
 
 func (b *openAICollabThreadBinding) set(ctx context.Context, account int64, ttl time.Duration) error {
-	if _, atomicCache := b.service.cache.(OpenAIStickyAtomicCache); atomicCache && openAIAtomicStickySession(b.session) {
-		promote, _ := ctx.Value(openAIStickyPromotionKey{}).(bool)
-		return b.claim(ctx, account, ttl, promote)
-	}
-	err := b.write(ctx, account, ttl)
-	_ = b.refreshTree(ctx, ttl)
-	return err
-}
-
-func (b *openAICollabThreadBinding) claim(ctx context.Context, account int64, ttl time.Duration, promote bool) error {
-	if account <= 0 || ttl <= 0 {
-		return errors.New("invalid sticky binding claim")
-	}
-	owner, _, err := b.effective(ctx)
-	if err != nil && !errors.Is(err, ErrStickySessionNotFound) {
+	refresh := ttl
+	promote, _ := ctx.Value(openAIStickyPromotionKey{}).(bool)
+	if cache, ok := b.service.cache.(OpenAIStickyAtomicCache); ok && openAIAtomicStickySession(b.session) {
+		if !promote {
+			refresh = 0
+		}
+		owner, err := cache.ClaimSessionAccountID(b.storageContext(ctx, refresh), b.affinity.groupID, b.key, account, ttl, promote)
+		if err != nil || owner != account {
+			return err
+		}
+	} else if err := b.service.cache.SetSessionAccountID(b.storageContext(ctx, refresh), b.affinity.groupID, b.key, account, ttl); err != nil {
 		return err
 	}
-	if owner > 0 && (owner != account || !promote) {
-		return nil
+	if b.service.openAISessionHashDualWriteOldEnabled() {
+		return b.refreshLegacy(ctx, ttl)
 	}
-	if !promote {
-		ttl = min(ttl, 30*time.Second)
-	}
-	err = b.write(ctx, account, ttl)
-	if promote {
-		_ = b.refreshTree(ctx, ttl)
-	}
-	return err
-}
-
-func (b *openAICollabThreadBinding) refresh(ctx context.Context, ttl time.Duration, expected ...int64) error {
-	if _, atomicCache := b.service.cache.(OpenAIStickyAtomicCache); atomicCache && openAIAtomicStickySession(b.session) && len(expected) > 0 {
-		return b.claim(ctx, expected[0], ttl, true)
-	} else {
-		owner, _, err := b.effective(ctx)
-		if err == nil && owner > 0 {
-			_ = b.write(ctx, owner, ttl)
-		}
-	}
-	_ = b.refreshTree(ctx, ttl)
 	return nil
 }
 
-// Refresh the existing tree keys only. Alias synchronization and atomic claims
-// can create or adopt a value, so neither is safe for the tree here.
-func (b *openAICollabThreadBinding) refreshTree(ctx context.Context, ttl time.Duration) error {
-	s := b.service
-	err := s.cache.RefreshSessionTTL(ctx, b.affinity.groupID, s.openAISessionCacheKey(b.session), ttl)
-	if s.openAISessionHashReadOldFallbackEnabled() || s.openAISessionHashDualWriteOldEnabled() {
-		if b.legacy != "" {
-			_ = s.cache.RefreshSessionTTL(ctx, b.affinity.groupID, b.legacy, s.openAIStickyLegacyTTL(ttl))
+func (b *openAICollabThreadBinding) refresh(ctx context.Context, ttl time.Duration, expected ...int64) error {
+	storageCtx := b.storageContext(ctx, ttl)
+	var err error
+	if cache, ok := b.service.cache.(OpenAIStickyAtomicCache); ok && openAIAtomicStickySession(b.session) && len(expected) > 0 {
+		owner, claimErr := cache.ClaimSessionAccountID(storageCtx, b.affinity.groupID, b.key, expected[0], ttl, true)
+		if claimErr != nil || owner != expected[0] {
+			return claimErr
 		}
+	} else {
+		err = b.service.cache.RefreshSessionTTL(storageCtx, b.affinity.groupID, b.key, ttl)
+	}
+	if b.service.openAISessionHashReadOldFallbackEnabled() || b.service.openAISessionHashDualWriteOldEnabled() {
+		_ = b.refreshLegacy(ctx, ttl)
 	}
 	return err
+}
+
+func (b *openAICollabThreadBinding) refreshLegacy(ctx context.Context, ttl time.Duration) error {
+	if b.legacy == "" {
+		return nil
+	}
+	return b.service.cache.RefreshSessionTTL(ctx, b.affinity.groupID, b.legacy, b.service.openAIStickyLegacyTTL(ttl))
 }
 
 func (b *openAICollabThreadBinding) deleteOwner(ctx context.Context, expected int64) error {
-	owner, _, err := b.effective(ctx)
-	if err != nil && !errors.Is(err, ErrStickySessionNotFound) {
-		return err
+	s, g := b.service, b.affinity.groupID
+	storageCtx := b.storageContext(ctx, 0)
+	var deleted bool
+	var err error
+	if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok && b.legacy != "" && (s.openAISessionHashReadOldFallbackEnabled() || s.openAISessionHashDualWriteOldEnabled()) {
+		deleted, err = aliases.DeleteSessionBindingAliases(storageCtx, g, b.key, b.key, expected)
+	} else if cache, ok := s.cache.(OpenAIStickyAtomicCache); ok && expected > 0 && openAIAtomicStickySession(b.session) {
+		if reporter, ok := s.cache.(interface {
+			DeleteSessionAccountIDIfOwnerAndReport(context.Context, int64, string, int64) (bool, error)
+		}); ok {
+			deleted, err = reporter.DeleteSessionAccountIDIfOwnerAndReport(storageCtx, g, b.key, expected)
+		} else {
+			err = cache.DeleteSessionAccountIDIfOwner(storageCtx, g, b.key, expected)
+		}
+	} else {
+		deleted, err = s.deleteOpenAIStickyBinding(storageCtx, g, b.key)
 	}
-	if expected > 0 && owner != expected {
-		return nil
-	}
-	err = b.write(ctx, 0, b.service.openAIStickyBindingTTL(&b.affinity.groupID))
-	if err == nil && owner > 0 && b.reportsDeletion(expected) {
+	if err == nil && deleted {
 		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
 	}
 	return err
-}
-
-// Keep the original cache's diagnostics contract. Error-only deletion cannot
-// confirm that a binding changed, even when the local substitute knows it did.
-func (b *openAICollabThreadBinding) reportsDeletion(expected int64) bool {
-	s := b.service
-	if _, ok := s.cache.(OpenAIStickyAliasCache); ok && b.legacy != "" && (s.openAISessionHashReadOldFallbackEnabled() || s.openAISessionHashDualWriteOldEnabled()) {
-		return true
-	}
-	if _, ok := s.cache.(OpenAIStickyAtomicCache); ok && expected > 0 && openAIAtomicStickySession(b.session) {
-		_, reports := s.cache.(interface {
-			DeleteSessionAccountIDIfOwnerAndReport(context.Context, int64, string, int64) (bool, error)
-		})
-		return reports
-	}
-	_, reports := s.cache.(interface {
-		DeleteSessionAccountIDAndReport(context.Context, int64, string) (bool, error)
-	})
-	return reports
 }
 
 func (b *openAICollabThreadBinding) avoid(ctx context.Context, account int64, until time.Time) {
@@ -309,53 +217,42 @@ func (b *openAICollabThreadBinding) avoidScope() resilience.CollabRecordScope {
 	return scope
 }
 
-// Captured in pending changes, so the original cache can never receive their
-// direct writes, including completion on a context without affinity metadata.
+// Capture the storage identity so detached completions use the same scripts.
 type collabThreadVersionedCache struct{ b *openAICollabThreadBinding }
 
 func (c collabThreadVersionedCache) GetSessionBinding(ctx context.Context, _ int64, _ string) (StickySessionBinding, error) {
-	account, missing, err := c.b.effective(ctx)
+	binding, err := c.b.service.cache.(OpenAIStickyVersionedCache).GetSessionBinding(c.b.storageContext(ctx, 0), c.b.affinity.groupID, c.b.key)
 	c.b.mu.Lock()
-	revision := c.b.revision
+	binding.BothKeysMissing = c.b.pairMissing
 	c.b.mu.Unlock()
-	generation := strconv.FormatUint(revision, 10)
-	if missing {
-		generation = ""
-	}
-	return StickySessionBinding{AccountID: account, Generation: generation, BothKeysMissing: missing}, err
+	return binding, err
 }
 func (c collabThreadVersionedCache) ResolveSessionBinding(ctx context.Context, g int64, key, _ string, _ bool) (StickySessionBinding, error) {
 	return c.GetSessionBinding(ctx, g, key)
 }
-func (c collabThreadVersionedCache) SyncSessionBindingAlias(context.Context, int64, string, string, int64, time.Duration, bool) error {
-	return nil
+func (c collabThreadVersionedCache) SyncSessionBindingAlias(ctx context.Context, _ int64, _, _ string, _ int64, ttl time.Duration, _ bool) error {
+	return c.b.refreshLegacy(ctx, ttl)
 }
 func (c collabThreadVersionedCache) DeleteSessionBindingAliases(ctx context.Context, _ int64, _, _ string, owner int64) (bool, error) {
 	return true, c.b.deleteOwner(ctx, owner)
 }
-func (c collabThreadVersionedCache) CommitSessionBinding(ctx context.Context, g int64, key string, expected StickySessionBinding, next int64, ttl time.Duration, _ BindingCommitOptions) (BindingCommitResult, error) {
-	current, err := c.GetSessionBinding(ctx, g, key)
-	if err != nil && !errors.Is(err, ErrStickySessionNotFound) {
-		return BindingCommitResult{Status: BindingCommitError}, err
-	}
-	if current.AccountID != expected.AccountID || current.Generation != expected.Generation {
-		return BindingCommitResult{Status: BindingChanged, ObservedGen: current.Generation}, nil
-	}
-	_ = c.b.write(ctx, next, ttl)
-	_ = c.b.refreshTree(ctx, ttl)
-	c.b.mu.Lock()
-	revision := c.b.revision
-	c.b.mu.Unlock()
-	return BindingCommitResult{Status: BindingCommitted, ObservedGen: current.Generation, NewGen: strconv.FormatUint(revision, 10)}, nil
+func (c collabThreadVersionedCache) CommitSessionBinding(ctx context.Context, g int64, _ string, expected StickySessionBinding, next int64, ttl time.Duration, options BindingCommitOptions) (BindingCommitResult, error) {
+	expected.LegacyKey = ""
+	options.FailureScope = c.b.failureScope(options.FailureScope)
+	options.RejectScope = c.b.failureScope(options.RejectScope)
+	return c.b.service.cache.(OpenAIStickyVersionedCache).CommitSessionBinding(c.b.storageContext(ctx, ttl), g, c.b.key, expected, next, ttl, options)
 }
-func (c collabThreadVersionedCache) RecordSessionBindingFailure(ctx context.Context, g int64, key, _ string, expected StickySessionBinding, account int64, ttl time.Duration, _ ...time.Time) (int64, error) {
-	current, err := c.GetSessionBinding(ctx, g, key)
-	if err != nil || current.AccountID != expected.AccountID || current.Generation != expected.Generation {
-		return 0, err
+func (c collabThreadVersionedCache) RecordSessionBindingFailure(ctx context.Context, g int64, _, scope string, expected StickySessionBinding, account int64, ttl time.Duration, reset ...time.Time) (int64, error) {
+	return c.b.service.cache.(OpenAIStickyVersionedCache).RecordSessionBindingFailure(c.b.storageContext(ctx, 0), g, c.b.key, c.b.failureScope(scope), expected, account, ttl, reset...)
+}
+func (b *openAICollabThreadBinding) failureScope(scope string) string {
+	if scope == "" {
+		return ""
 	}
-	until := time.Now().Add(ttl)
-	c.b.avoid(ctx, account, until)
-	return until.UnixMilli(), nil
+	if strings.HasPrefix(scope, "first_output:") {
+		return firstOutputAvoidSession(b.scope)
+	}
+	return stickyChangeAvoidSession(b.scope)
 }
 
 type collabThreadSessionRecorder struct {

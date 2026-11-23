@@ -27,6 +27,9 @@ func (s *OpenAIGatewayService) stickyChangeAvoid(ctx context.Context, groupID *i
 	if s == nil || s.resilience == nil || s.resilience.store == nil || session == "" {
 		return nil
 	}
+	if b := collabBindingFor(ctx, groupID, session); b != nil {
+		session = b.scope
+	}
 	avoided, err := sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), stickyChangeAvoidSession(session), s.resilience.sessionResetAt)
 	if err != nil {
 		return nil
@@ -234,11 +237,6 @@ func releasePendingOpenAIStickyOwner(ctx context.Context, groupID *int64, sessio
 	}
 	change := pendingOpenAIStickyChange(ctx)
 	change.mu.Lock()
-	// A completed child placement no longer defers later terminal cleanup.
-	if _, thread := change.cache.(collabThreadVersionedCache); thread && change.done {
-		change.mu.Unlock()
-		return false
-	}
 	if owner == change.expected.AccountID {
 		change.ownerReleased = true
 	}

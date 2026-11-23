@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"testing"
 	"testing/synctest"
@@ -50,7 +51,13 @@ type collabEffectsCache struct {
 	until  map[string]time.Time
 }
 
-func (c *collabEffectsCache) GetSessionAccountID(_ context.Context, _ int64, key string) (int64, error) {
+func (c *collabEffectsCache) GetSessionAccountID(ctx context.Context, group int64, key string) (int64, error) {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.values, c.until, "read", 0, 0)
+		defer finish()
+	}
+
 	if time.Now().Before(c.until[key]) {
 		return c.values[key], nil
 	}
@@ -60,17 +67,38 @@ func (c *collabEffectsCache) GetSessionAccountIDWithTTL(ctx context.Context, gro
 	id, err := c.GetSessionAccountID(ctx, group, key)
 	return id, time.Until(c.until[key]), err
 }
-func (c *collabEffectsCache) SetSessionAccountID(_ context.Context, _ int64, key string, id int64, ttl time.Duration) error {
+func (c *collabEffectsCache) SetSessionAccountID(ctx context.Context, group int64, key string, id int64, ttl time.Duration) error {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.values, c.until, "set", id, ttl)
+		defer finish()
+	}
+
 	c.values[key], c.until[key] = id, time.Now().Add(ttl)
 	return nil
 }
 func (c *collabEffectsCache) RefreshSessionTTL(ctx context.Context, group int64, key string, ttl time.Duration) error {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.values, c.until, "refresh", 0, ttl)
+		defer finish()
+	}
+
 	if _, err := c.GetSessionAccountID(ctx, group, key); err == nil {
 		c.until[key] = time.Now().Add(ttl)
 	}
 	return nil
 }
 func (c *collabEffectsCache) ClaimSessionAccountID(ctx context.Context, group int64, key string, id int64, ttl time.Duration, promote bool) (int64, error) {
+	if id <= 0 || ttl <= 0 {
+		return 0, errors.New("invalid sticky binding claim")
+	}
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.values, c.until, "claim", id, ttl)
+		defer finish()
+	}
+
 	owner, err := c.GetSessionAccountID(ctx, group, key)
 	if !promote {
 		ttl = min(ttl, 30*time.Second)
@@ -82,13 +110,25 @@ func (c *collabEffectsCache) ClaimSessionAccountID(ctx context.Context, group in
 	return owner, nil
 }
 func (c *collabEffectsCache) DeleteSessionAccountIDIfOwner(ctx context.Context, group int64, key string, id int64) error {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.values, c.until, "delete", id, 0)
+		defer finish()
+	}
+
 	if owner, _ := c.GetSessionAccountID(ctx, group, key); owner == id {
 		delete(c.values, key)
 		delete(c.until, key)
 	}
 	return nil
 }
-func (c *collabEffectsCache) DeleteSessionAccountID(_ context.Context, _ int64, key string) error {
+func (c *collabEffectsCache) DeleteSessionAccountID(ctx context.Context, group int64, key string) error {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.values, c.until, "delete", 0, 0)
+		defer finish()
+	}
+
 	delete(c.values, key)
 	delete(c.until, key)
 	return nil
@@ -136,8 +176,13 @@ func TestCollabThreadBindingClaimAndRefresh(t *testing.T) {
 					}
 					require.Equal(t, want, id)
 					unchanged := action == "claim" || action == "refresh_other"
-					if initial == "tree" && unchanged {
+					if initial == "tree" {
 						require.False(t, b.present(), "an existing tree claim must stay inherited")
+						ttl := time.Hour
+						if unchanged {
+							ttl = 50 * time.Second
+						}
+						require.Equal(t, ttl, time.Until(cache.until["openai:"+session]))
 					} else {
 						ttl := time.Hour
 						if action == "claim" {

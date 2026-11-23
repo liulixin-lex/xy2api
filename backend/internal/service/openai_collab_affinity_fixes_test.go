@@ -111,12 +111,24 @@ type collabAffinityTTLCache struct {
 	ttl     time.Duration
 }
 
-func (c *collabAffinityTTLCache) SetSessionAccountID(_ context.Context, _ int64, key string, account int64, ttl time.Duration) error {
+func (c *collabAffinityTTLCache) SetSessionAccountID(ctx context.Context, group int64, key string, account int64, ttl time.Duration) error {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.routes, c.expires, "set", account, ttl)
+		defer finish()
+	}
+
 	c.routes[key], c.expires[key], c.ttl = account, time.Now().Add(ttl), ttl
 	return nil
 }
 
-func (c *collabAffinityTTLCache) GetSessionAccountID(_ context.Context, _ int64, key string) (int64, error) {
+func (c *collabAffinityTTLCache) GetSessionAccountID(ctx context.Context, group int64, key string) (int64, error) {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.routes, c.expires, "read", 0, 0)
+		defer finish()
+	}
+
 	if time.Now().Before(c.expires[key]) {
 		return c.routes[key], nil
 	}
