@@ -1,5 +1,10 @@
 package resilience
 
+import (
+	"strconv"
+	"strings"
+)
+
 // CollabEvidenceInput contains transient request/error bytes. It must never be
 // persisted. WrappedStatus is a hint; it is not evidence until Inner.Validated.
 type CollabEvidenceInput struct {
@@ -71,6 +76,8 @@ func (NoopCollabEvidenceClassifier) Classify(in CollabEvidenceInput) CollabEvide
 // against the immutable original input, before edits or account selection.
 // Even two entries with the same digest are ambiguous; exactly one is required.
 type CollabOriginalItem struct {
+	Index    int
+	Paths    []string
 	Identity string
 	Item     CollabDigest
 	Family   CollabFamily
@@ -83,19 +90,44 @@ func ResolveCollabNamedItem(named CollabNamedItem, original []CollabOriginalItem
 	if named.Ambiguous {
 		return named
 	}
-	if named.Identity == "" {
+	if named.Identity == "" && named.InputIndex == nil {
 		return named
 	}
+	var match CollabOriginalItem
 	for _, item := range original {
-		if item.Identity == named.Identity {
-			named.MatchCount++
-			named.Item = item.Item
-			named.Family = item.Family
+		if named.InputIndex != nil && item.Index != *named.InputIndex || named.Identity != "" && item.Identity != named.Identity {
+			continue
 		}
+		if named.Family != "" && named.Family != CollabFamilyNone && named.Family != CollabFamilyOtherEncrypted && named.Family != item.Family {
+			continue
+		}
+		if named.Path != "" {
+			if !collabIndexPattern.MatchString(named.Path) {
+				continue
+			}
+			path := strings.NewReplacer("[", ".", "]", "").Replace(named.Path)
+			base := "input." + strconv.Itoa(item.Index)
+			valid := path == base
+			for _, candidate := range item.Paths {
+				valid = valid || path == candidate || path == candidate+".encrypted_content"
+			}
+			if item.Family == CollabFamilyCallArgs {
+				valid = valid || path == base+".encrypted_function_args" || path == base+".arguments"
+			}
+			if !valid {
+				continue
+			}
+		}
+		named.MatchCount++
+		match = item
+		named.Item = item.Item
+		// Do not change the predicate while counting other candidates.
 	}
 	named.Located = named.MatchCount == 1
 	named.Ambiguous = named.MatchCount > 1
-	if !named.Located {
+	if named.Located {
+		named.Identity, named.Family = match.Identity, match.Family
+	} else {
 		named.Item = ""
 	}
 	return named

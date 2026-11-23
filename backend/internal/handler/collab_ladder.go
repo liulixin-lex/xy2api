@@ -71,7 +71,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	}
 	duration = min(duration, time.Minute-seam.optionalSpent)
 	if duration <= 0 {
-		if seam.localEnding != nil && evidence.Grade == resilience.CollabEvidenceGradeVerified && parentRequest.Context().Err() == nil {
+		if seam.localEnding != nil && parsed.LadderPolicy(evidence).LocalEnding && parentRequest.Context().Err() == nil {
 			seam.localEnding(c, seam, saved, evidence)
 		}
 		return
@@ -138,7 +138,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		}
 	}
 	l.BeforeDisposal = func(_ context.Context, current resilience.CollabEvidence) bool {
-		if seam.localEnding == nil || current.Named != nil && current.Named.Ambiguous || current.Grade != resilience.CollabEvidenceGradeVerified || parentRequest.Context().Err() != nil {
+		if seam.localEnding == nil || !parsed.LadderPolicy(current).LocalEnding || parentRequest.Context().Err() != nil {
 			return false
 		}
 		reset()
@@ -221,6 +221,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 
 		observed := observer.Rejections()
 		for _, rejection := range observed {
+			seam.progress.RememberRejection(rejection)
 			rejected[service.CollabRejectedBody{AccountID: rejection.AccountID, Digest: rejection.BodyDigest}] = true
 		}
 		if len(observed) > 0 {

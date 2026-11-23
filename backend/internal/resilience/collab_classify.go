@@ -8,8 +8,9 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-var collabNamedPattern = regexp.MustCompile("(?i)\\bfor\\s+item\\s+['\"`]?([a-z0-9]+_[a-z0-9_-]+)\\b")
-var collabLocatorPattern = regexp.MustCompile("\\binput(?:[.\\[]|\\s+[.\\[])[^\\s,;:!?\"'`]*")
+var collabNamedPattern = regexp.MustCompile(`(?i)\bfor\s+item\s+`)
+var collabLocatorPattern = regexp.MustCompile(`\binput(?:[.\[]|\s+[.\[])`)
+var collabAtPattern = regexp.MustCompile(`\bat\s+`)
 var collabIndexPattern = regexp.MustCompile(`^input(?:\[([0-9]+)\]|\.([0-9]+))(?:(?:\.[a-zA-Z_0-9]+)|(?:\[[0-9]+\]))*$`)
 
 // Text evidence must assert rejection of the encrypted subject itself. Locator
@@ -75,6 +76,8 @@ func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
 			family = CollabFamilyReasoning
 		case strings.HasPrefix(out.Named.Identity, "cmp_"):
 			family = CollabFamilyCompaction
+		case strings.HasPrefix(out.Named.Identity, "fco_"):
+			family = CollabFamilyToolOutput
 		case strings.HasPrefix(out.Named.Identity, "fc_"):
 			family = CollabFamilyCallArgs
 		}
@@ -199,17 +202,40 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 	add(object.Get("item_id").String())
 	for _, field := range []string{"message", "param"} {
 		value := strings.TrimSpace(object.Get(field).String())
-		for _, match := range collabNamedPattern.FindAllStringSubmatch(value, -1) {
-			add(match[1])
+		for _, match := range collabNamedPattern.FindAllStringIndex(value, -1) {
+			token, valid := collabReferenceToken(value[match[1]:])
+			add(token)
+			if !valid || token == "" {
+				if named == nil {
+					named = &CollabNamedItem{}
+				}
+				named.Ambiguous = true
+			}
 		}
-		locators := collabLocatorPattern.FindAllString(value, -1)
+		var locators []string
 		if field == "param" && value != "" {
 			locators = []string{value}
+		} else if field == "message" {
+			starts := map[int]bool{}
+			for _, match := range collabLocatorPattern.FindAllStringIndex(value, -1) {
+				start := match[0]
+				if start > 0 && strings.ContainsRune("'\"`", rune(value[start-1])) {
+					start--
+				}
+				starts[start] = true
+			}
+			for _, match := range collabAtPattern.FindAllStringIndex(value, -1) {
+				starts[match[1]] = true
+			}
+			for start := range starts {
+				token, valid := collabReferenceToken(value[start:])
+				if !valid {
+					token = "!" + token
+				}
+				locators = append(locators, token)
+			}
 		}
 		for _, locator := range locators {
-			if field == "message" {
-				locator = strings.TrimSuffix(locator, ".")
-			}
 			if named == nil {
 				named = &CollabNamedItem{}
 			}
@@ -234,4 +260,42 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 		}
 	}
 	return named
+}
+
+// Consume a whole reference, including matching quotes. Punctuation inside a
+// quoted ID is part of its identity; it must never turn into a valid prefix.
+func collabReferenceToken(value string) (string, bool) {
+	if value == "" {
+		return "", false
+	}
+	if strings.ContainsRune("'\"`", rune(value[0])) {
+		end := strings.IndexByte(value[1:], value[0])
+		if end < 0 {
+			return value, false
+		}
+		end++
+		tail := value[end+1:]
+		if tail != "" && !strings.ContainsRune(" \t\r\n", rune(tail[0])) {
+			if !strings.ContainsRune(".,;:!?", rune(tail[0])) || len(tail) > 1 && !strings.ContainsRune(" \t\r\n", rune(tail[1])) {
+				return value, false
+			}
+		}
+		return value[1:end], true
+	}
+	end := strings.IndexAny(value, " \t\r\n")
+	if end < 0 {
+		end = len(value)
+	}
+	token := value[:end]
+	if strings.ContainsAny(token, "'\"`") {
+		return token, false
+	}
+	// A single sentence terminator belongs to the surrounding prose.
+	if len(token) > 0 && strings.ContainsRune(".,;:!?", rune(token[len(token)-1])) {
+		if end != len(value) {
+			return token, false
+		}
+		token = token[:len(token)-1]
+	}
+	return token, token != ""
 }

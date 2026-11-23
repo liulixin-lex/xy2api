@@ -167,6 +167,37 @@ func (u *replayUpstream) Do(req *http.Request, _ string, id int64, _ int) (resul
 		var payload string
 		status := http.StatusBadRequest
 		switch rule.Kind {
+		case "regression_permissions":
+			if gjson.Get(rule.Item, "type").String() == "response.failed" {
+				setRule(rule.Kind)
+				return replayResponse(200, "text/event-stream", replayFrame("response.failed", rule.Item)), nil
+			}
+			if u.c.Form == "sse" && gjson.Get(rule.Item, "type").String() == "proxy.upstream_error" {
+				setRule(rule.Kind)
+				return replayResponse(200, "text/event-stream", replayFrame("error", rule.Item)), nil
+			}
+			payload = rule.Item
+			if n := gjson.Get(rule.Item, "synthetic_status").Int(); n > 0 {
+				status = int(n)
+			}
+		case "regression_evidence_state":
+			if strings.Contains(string(body), `"encrypted_content"`) {
+				switch rule.Item {
+				case "quoted_dot":
+					payload = replayError("invalid_request_error", "Encrypted content hydration failed for item 'amsg_task.missing'.", "")
+				case "quoted_slash":
+					payload = replayError("invalid_request_error", "Encrypted content hydration failed for item 'amsg_task/missing'.", "")
+				case "unknown_named":
+					payload = replayError("encrypted_agent_recovery_new_state", "synthetic ownership rejection", "input[0]")
+					status = 409
+				case "unknown_unnamed":
+					payload = replayError("encrypted_agent_recovery_new_state", "synthetic ownership rejection", "")
+					status = 409
+				case "ownership_reasoning":
+					payload = replayError("encrypted_agent_recovery_wire_changed", "synthetic ownership rejection", "input[0]")
+					status = 409
+				}
+			}
 		case "regression_bad_suffix":
 			if strings.Contains(string(body), `"encrypted_content"`) {
 				payload = replayError("invalid_request_error", "Encrypted content hydration failed at input[0][bad].", "")

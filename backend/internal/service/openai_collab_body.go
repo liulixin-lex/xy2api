@@ -43,10 +43,19 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 	current := gjson.GetBytes(body, "input").Array()
 	positions := make(map[int]int, len(current))
 	if len(original) == len(current) {
+		ordered := true
 		for i := range current {
+			id, before := current[i].Get("id").String(), original[i].Get("id").String()
+			if id != "" && before != "" && id != before {
+				ordered = false
+				break
+			}
 			positions[i] = i
 		}
-		return positions, true
+		if ordered {
+			return positions, true
+		}
+		clear(positions)
 	}
 	used := map[int]bool{}
 	for i, item := range current {
@@ -101,37 +110,13 @@ func (p CollabBody) ResolveEvidence(evidence resilience.CollabEvidence) resilien
 	if evidence.Named == nil {
 		return evidence
 	}
-	named := *evidence.Named
+	items := make([]resilience.CollabOriginalItem, 0, len(p.Items))
+	for _, item := range p.Items {
+		items = append(items, resilience.CollabOriginalItem{Identity: item.Identity, Index: item.Index, Paths: item.Paths, Family: item.Family})
+	}
+	named := resilience.ResolveCollabNamedItem(*evidence.Named, items)
+	named.Ambiguous = named.Ambiguous || !named.Located || p.Shape.Ambiguous
 	evidence.Named = &named
-	var located *CollabBodyItem
-	for i := range p.Items {
-		if named.InputIndex != nil && p.Items[i].Index == *named.InputIndex || named.InputIndex == nil && p.Items[i].Identity == named.Identity {
-			located = &p.Items[i]
-			break
-		}
-	}
-	if located == nil || named.Identity != "" && named.Identity != located.Identity {
-		named.Ambiguous = true
-		return evidence
-	}
-	if named.Family != "" && named.Family != resilience.CollabFamilyNone && named.Family != resilience.CollabFamilyOtherEncrypted && named.Family != located.Family {
-		named.Ambiguous = true
-	}
-	if named.Path != "" {
-		path := strings.NewReplacer("[", ".", "]", "").Replace(named.Path)
-		base := "input." + strconv.Itoa(located.Index)
-		valid := path == base
-		for _, candidate := range located.Paths {
-			valid = valid || path == candidate || path == candidate+".encrypted_content"
-		}
-		if located.Family == resilience.CollabFamilyCallArgs {
-			valid = valid || path == base+".encrypted_function_args" || path == base+".arguments"
-		}
-		if !valid {
-			named.Ambiguous = true
-		}
-	}
-	named.Identity = located.Identity
 	return evidence
 }
 

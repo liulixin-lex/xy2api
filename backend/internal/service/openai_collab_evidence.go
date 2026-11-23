@@ -34,6 +34,7 @@ type CollabRejection struct {
 	Derivation   []byte
 	positions    map[int]int
 	namedClasses map[collabNamedClass]bool
+	repairs      collabRequestRepairs
 	unlocatable  bool
 }
 
@@ -217,14 +218,8 @@ func (o *CollabSendObserver) record(rejection CollabRejection, generation uint64
 			}
 		}
 		if evidence.Named != nil {
-			located := false
-			for _, item := range o.body.Items {
-				if item.Identity != "" && item.Identity == evidence.Named.Identity {
-					located = true
-				}
-			}
-			eligible = eligible && located && !evidence.Named.Ambiguous
-			if !located || evidence.Named.Ambiguous {
+			eligible = eligible && evidence.Named.Located && !evidence.Named.Ambiguous
+			if !evidence.Named.Located || evidence.Named.Ambiguous {
 				o.reason("named_unlocatable")
 			}
 		}
@@ -390,6 +385,7 @@ func (b *collabEvidenceBody) record(rejection CollabRejection) {
 		}
 		if ok && !current.Shape.Ambiguous && !bytes.Equal(original.Original, b.requestBody) {
 			rejection.Derivation = bytes.Clone(b.requestBody)
+			rejection.repairs = original.independentRepairs(b.requestBody)
 		}
 	}
 	b.observer.record(rejection, b.generation)
