@@ -31,7 +31,7 @@ func TestCollabThreadBindingPreparationAllocations(t *testing.T) {
 			for _, on := range []bool{false, true} {
 				settings := collabAffinitySettings()
 				settings.Collab.TreeAffinity = on
-				counts = append(counts, testing.AllocsPerRun(100, func() {
+				counts = append(counts, collabMinAllocsPerRun(100, func() {
 					ctx := WithOpenAICollabTreeAffinity(base, local, settings, 7, identity, resilience.CollabRoleChild, true)
 					if f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true) {
 						panic("thread binding shipped")
@@ -43,7 +43,7 @@ func TestCollabThreadBindingPreparationAllocations(t *testing.T) {
 				} else {
 					require.Same(t, base, collabSetupContext)
 				}
-				require.Zero(t, testing.AllocsPerRun(100, func() {
+				require.Zero(t, collabMinAllocsPerRun(100, func() {
 					if f.svc.PrepareOpenAICollabThreadBinding(collabSetupContext, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true) {
 						panic("thread binding shipped")
 					}

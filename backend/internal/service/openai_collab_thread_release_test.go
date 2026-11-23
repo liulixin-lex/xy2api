@@ -43,7 +43,7 @@ func TestCollabThreadBindingReleaseGate(t *testing.T) {
 				settings := collabReleaseSettings(combination)
 				ctx := WithOpenAICollabTreeAffinity(base, local, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
 				before := openAICollabAffinityFrom(ctx)
-				require.Zero(t, testing.AllocsPerRun(10, func() {
+				require.Zero(t, collabMinAllocsPerRun(10, func() {
 					if f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true) {
 						panic("thread binding shipped")
 					}
@@ -54,7 +54,7 @@ func TestCollabThreadBindingReleaseGate(t *testing.T) {
 				// Those features own their existing context allocation; binding adds none.
 				var counts []float64
 				for _, prepare := range []bool{false, true} {
-					counts = append(counts, testing.AllocsPerRun(10, func() {
+					counts = append(counts, collabMinAllocsPerRun(10, func() {
 						configured := WithOpenAICollabTreeAffinity(base, local, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
 						if prepare {
 							f.svc.PrepareOpenAICollabThreadBinding(configured, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true)

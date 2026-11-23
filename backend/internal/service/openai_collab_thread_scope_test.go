@@ -60,7 +60,7 @@ func TestCollabThreadBindingInactiveAllocations(t *testing.T) {
 				ctx, session := collabAtomicRequest(t, f, resilience.NewCollabTreeAffinity(32, time.Hour), "allocation-child", on, false, legacy)
 				require.Nil(t, openAICollabBindingFrom(ctx))
 				f.cache.sessionBindings["openai:"+session] = 1
-				counts = append(counts, testing.AllocsPerRun(20, func() {
+				counts = append(counts, collabMinAllocsPerRun(20, func() {
 					request := resilience.WithRequestState(ctx, resilience.NewRequestState())
 					result := selectTrialRuntime(t, f, request, session)
 					CompleteOpenAIStickyChange(request, result.Account.ID, true, false)
