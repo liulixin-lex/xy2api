@@ -174,6 +174,11 @@ func (s *openAIAccountModelTransientState) isBlocked(accountID int64, model stri
 // readEntry shares the streak TTL with scheduling and retry decisions. Expired
 // failures must disappear before either reader can act on them.
 func (s *openAIAccountModelTransientState) readEntry(accountID int64, model string, now time.Time) (openAIAccountModelTransientEntry, bool) {
+	return s.lookupEntry(accountID, model, now, true)
+}
+
+// Optional selection observes the same expiry without updating eviction order.
+func (s *openAIAccountModelTransientState) lookupEntry(accountID int64, model string, now time.Time, update bool) (openAIAccountModelTransientEntry, bool) {
 	key, ok := openAIAccountModelTransientKey(accountID, model)
 	if s == nil || !ok {
 		return openAIAccountModelTransientEntry{}, false
@@ -189,11 +194,15 @@ func (s *openAIAccountModelTransientState) readEntry(accountID int64, model stri
 		return openAIAccountModelTransientEntry{}, false
 	}
 	if !entry.lastFailure.IsZero() && now.Sub(entry.lastFailure) > openAIModelTransientStreakTTL {
-		delete(s.entries, key)
+		if update {
+			delete(s.entries, key)
+		}
 		return openAIAccountModelTransientEntry{}, false
 	}
-	entry.lastTouched = now
-	s.entries[key] = entry
+	if update {
+		entry.lastTouched = now
+		s.entries[key] = entry
+	}
 	return entry, true
 }
 

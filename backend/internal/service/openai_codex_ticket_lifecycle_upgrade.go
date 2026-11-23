@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"slices"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 func codexCredentialGeneration(a *Account) [32]byte {
@@ -104,7 +106,7 @@ func (s *OpenAIGatewayService) codexEffectiveConcurrency(ctx context.Context, id
 	return min(configured, codexPressureOf(a).Limit)
 }
 func (s *OpenAIGatewayService) observeCodexPressure(req *http.Request, resp *http.Response, a *Account) {
-	if a == nil || req == nil || resp == nil || !s.codexPressureEnabled(a.ID) {
+	if a == nil || req == nil || resp == nil || !resilience.CollabAttemptFrom(req.Context()).AccountEffectsAllowed() || !s.codexPressureEnabled(a.ID) {
 		return
 	}
 	if candidate, _ := req.Context().Value(codexTicketCandidateContextKey{}).(bool); candidate {

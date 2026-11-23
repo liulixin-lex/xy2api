@@ -100,7 +100,7 @@ func (s *OpenAIGatewayService) accountRequestCompatibleWithParent(ctx context.Co
 	// xy2api resilience: last-resort selection treats in-memory runtime
 	// blocks and proxy quarantine as soft restrictions (design §4.3).
 	lastResort := resilienceLastResortGate(ctx)
-	if !lastResort && s != nil && s.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
+	if !lastResort && s != nil && s.isOpenAIAccountRequestRuntimeBlockedWithContext(ctx, account, req.RequestedModel, req.RequireCompact) {
 		return false, "runtime_blocked"
 	}
 	if !lastResort && s != nil && s.isOpenAIProxyStreamQuarantined(ctx, account) {
