@@ -10,7 +10,7 @@ import (
 
 func (r *openAICollabRequest) beginRecords(ctx context.Context) {
 	defer func() { _ = recover() }()
-	if r.gateway == nil || r.send == nil || !r.settings.CollabRecordsOn() || r.scope.Tree == "" {
+	if r.gateway == nil || r.send == nil || r.scope.Tree == "" {
 		return
 	}
 	var account, site resilience.CollabDigest
@@ -34,18 +34,35 @@ func (r *openAICollabRequest) beginRecords(ctx context.Context) {
 		if index >= len(r.itemPaths) {
 			break
 		}
-		value := gjson.GetBytes(r.state.CurrentBody, r.itemPaths[index])
-		if value.IsObject() {
-			value = value.Get("encrypted_content")
-		}
-		if value.Type != gjson.String || r.gateway.CollabDigest(resilience.CollabDigestDomainCiphertext, value.String()) != item.Key.Digest {
-			continue
-		}
 		i := item.Position.InputIndex
 		if i >= len(current) || i >= len(original) || original[i].Get("id").String() != current[i].Get("id").String() {
 			continue
 		}
-		r.send.unchanged = append(r.send.unchanged, item.Key)
+		part := gjson.GetBytes(r.state.CurrentBody, r.itemPaths[index])
+		value := part
+		if value.IsObject() {
+			value = value.Get("encrypted_content")
+		}
+		if value.Type == gjson.String && r.gateway.CollabDigest(resilience.CollabDigestDomainCiphertext, value.String()) == item.Key.Digest {
+			r.send.unchanged = append(r.send.unchanged, item.Key)
+			continue
+		}
+		if part.Get("type").String() != "input_text" {
+			continue
+		}
+		for _, placeholder := range []resilience.CollabPlaceholder{resilience.CollabPlaceholderUnreadTask, resilience.CollabPlaceholderProcessedTask, resilience.CollabPlaceholderMessage, resilience.CollabPlaceholderToolOutput, resilience.CollabPlaceholderLegacy} {
+			if part.Get("text").String() != collabWiringPlaceholder(placeholder) {
+				continue
+			}
+			// Capture the physical send, but count a loss only after acceptance.
+			r.send.replaced = append(r.send.replaced, resilience.CollabDeliveryObservation{
+				Delivery: item.Key.Delivery, Item: item.Key.Item, Digest: item.Key.Digest,
+				Position: item.Position.Position, Form: resilience.CollabFormCiphertext, Kind: item.Kind, Class: item.Class,
+				Outcome: resilience.CollabDeliveryOutcomePlaceholder, Stage: resilience.CollabStageFloor, Scope: resilience.CollabScopeFragment,
+				Bytes: int64(len(gjson.GetBytes(r.state.Original, r.itemPaths[index]).Raw)),
+			})
+			break
+		}
 	}
 }
 
@@ -66,6 +83,17 @@ func (s *openAICollabSendObservation) consumed() {
 	s.request.releaseAcceptedLeases(s.ctx, s.unchanged, resilience.CollabLeaseReleaseConsumed)
 	for _, key := range s.unchanged {
 		s.request.observation.ObserveDelivery(resilience.CollabDeliveryObservation{Delivery: key.Delivery, Item: key.Item, Digest: key.Digest, Position: resilience.CollabPositionMessage, Form: resilience.CollabFormCiphertext, Outcome: resilience.CollabDeliveryOutcomeAcceptedOriginal})
+	}
+	for _, delivery := range s.replaced {
+		s.request.observation.ObserveDelivery(delivery)
+		switch delivery.Kind {
+		case resilience.CollabMessageKindTask:
+			s.replacements.Task++
+		case resilience.CollabMessageKindToolOutput:
+			s.replacements.ToolOutput++
+		default:
+			s.replacements.Message++
+		}
 	}
 }
 

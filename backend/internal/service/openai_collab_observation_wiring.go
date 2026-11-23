@@ -83,6 +83,8 @@ type openAICollabSendObservation struct {
 	readErr         error
 	ctx             context.Context
 	unchanged       []resilience.CollabDeliveryKey
+	replaced        []resilience.CollabDeliveryObservation
+	replacements    resilience.CollabReplacementCounts
 	upstreamCalls   map[string]bool
 	deliveredCalls  map[string]bool
 	calls           int
@@ -341,9 +343,16 @@ func (r *openAICollabRequest) sealSend() {
 		if r.attempt != nil && r.attempt.applied {
 			mode = resilience.CollabFinalModePlaintext
 		}
+		if s.replacements != (resilience.CollabReplacementCounts{}) {
+			if len(s.unchanged) > 0 || mode == resilience.CollabFinalModePlaintext {
+				mode = resilience.CollabFinalModeMixed
+			} else {
+				mode = resilience.CollabFinalModePlaceholder
+			}
+		}
 		r.state.StopReason = resilience.CollabReasonNone
 	}
-	r.observation.Finish(r.state.InitialReason, r.state.StopReason, mode, resilience.CollabReplacementCounts{}, 0, r.state.Execution)
+	r.observation.Finish(r.state.InitialReason, r.state.StopReason, mode, s.replacements, 0, r.state.Execution)
 }
 
 func collabWiringEvidenceReason(e resilience.CollabEvidence) resilience.CollabReason {

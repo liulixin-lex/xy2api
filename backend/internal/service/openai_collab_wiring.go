@@ -49,15 +49,23 @@ func BeginOpenAICollabRequest(c *gin.Context, body []byte, userID, groupID int64
 	}
 	ingress := resilience.InspectCollabIngress(body, resilience.CollabIngressValidationPassed)
 	countOpenAICollabIngress(c, body, ingress)
-	if !ingress.Declared && !ingress.EncryptedAgent && !ingress.EncryptedTool {
-		return
-	}
 	owner := resilience.StateFrom(ctx)
+	settings := owner.CollabSettingsSnapshot()
+	if owner == nil {
+		settings = resilience.Current()
+	}
+	if !ingress.Declared && !ingress.EncryptedAgent && !ingress.EncryptedTool {
+		// Auxiliary ciphertext can reach the ladder without collaboration
+		// declarations. Keep the additional parse behind its behavior gate.
+		if !settings.CollabLadderOn() || len(ParseCollabBody(body).Items) == 0 {
+			return
+		}
+	}
 	if owner == nil {
 		owner = resilience.NewRequestState()
 		ctx = resilience.WithRequestState(ctx, owner)
 	}
-	settings := owner.CollabSettingsSnapshot()
+	settings = owner.CollabSettingsSnapshot()
 	state := &resilience.CollabRequestState{
 		UserID: userID, GroupID: groupID, Original: bytes.Clone(body),
 		Role: resilience.CollabRoleUnknown, Kind: resilience.CollabRequestKindNormal,

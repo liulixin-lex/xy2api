@@ -51,7 +51,7 @@ Of the eight settings under `collab`, only `records` defaults on. `local_ending.
 | Ladder on, record routing off | Untargeted retries; no borrowing readable content for reassignment |
 | Local ending off or group excluded | No new local endings; ladder still reads earlier ended states |
 
-`collab.lossless_first` defaults to false and requires the ladder. It moves the ladder ahead of existing repair to reduce silent loss, but can add errors in rare cases: failure after semantic output, extra attempts consuming shared upstream quota, or concurrency races. Enable only after the owner accepts these risks.
+`collab.lossless_first` defaults to false and requires the ladder. It moves the ladder ahead of existing repair to reduce silent loss, but can add errors in rare cases: failure after semantic output, extra attempts consuming shared upstream quota, or concurrency races. It also gates unread-ciphertext lease suppression of quality migration (with `collab.tree_affinity`) and redispatch borrowing of a convertible account (with `collab.record_routing`). Both require `collab.ladder`; borrowing does not require `collab.tree_affinity`. Enable only after the owner accepts these risks.
 
 `collab.strict_marker_veto` defaults to false. Stricter ciphertext checks can withhold a plaintext marker from messages that currently succeed. It can add errors and is not recommended.
 

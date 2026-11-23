@@ -8,8 +8,8 @@ import (
 )
 
 // ParseCollabSeenNotices extracts event digests for the single record batch.
-// Senders maps envelope names to verified tree members; unknown names cannot
-// authorize borrowing. Only one plaintext fragment with the exact final-answer
+// Senders maps envelope names to thread digests. A live termination must verify
+// their relationship before borrowing. Only one plaintext fragment with the exact final-answer
 // envelope can establish a parent notice. Other appearances remain seen_other.
 func (s *OpenAIGatewayService) ParseCollabSeenNotices(body []byte, senders map[string]resilience.CollabDigest) []resilience.CollabSeenNotice {
 	if len(body) > 4<<20 || !gjson.ValidBytes(body) {

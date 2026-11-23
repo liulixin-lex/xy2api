@@ -133,6 +133,18 @@ describe.each([
 
 describe('collaboration recovery risk copy', () => {
   it.each([
+    ['en', en, 'Try to preserve content first', 'lease', 'Recovery ladder'],
+    ['zh', zh, '优先保留内容', '租约', '恢复阶梯']
+  ])('%s explains borrowing and migration dependencies', (_, messages, lossless, lease, ladder) => {
+    const text = (key: string) => lookup(messages, 'admin.resilience.settings.collab.' + key) as string
+    expect(text('record_routingHint')).toContain(lossless)
+    expect(text('record_routingHint')).toContain(ladder)
+    expect(text('tree_affinityHint')).toContain(lossless)
+    expect(text('tree_affinityHint')).toContain(lease)
+    expect(text('lossless_firstHint')).toContain(lease)
+  })
+
+  it.each([
     ['en', en, 'can add errors', 'not recommended', 'existing repair first'],
     ['zh', zh, '增加报错', '不建议开启', '先原样走完现有修复']
   ])('%s explains the two risky switches and default repair order', (_, messages, risk, recommendation, order) => {

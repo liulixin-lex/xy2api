@@ -37,14 +37,9 @@ func (s *OpenAIGatewayService) SelectOpenAICollabBorrow(ctx context.Context, c *
 	for _, item := range gjson.GetBytes(r.state.Original, "input").Array() {
 		for _, field := range []string{"author", "recipient"} {
 			if raw := item.Get(field).String(); raw != "" {
-				digest := s.CollabDigest(resilience.CollabDigestDomainThread, raw)
-				if digest == r.state.Thread {
-					senders[raw] = digest
-					continue
-				}
-				if member, ok := s.CollabTreeAffinity().LookupThread(ctx, r.scope, digest); ok && member.Parent == r.state.Thread {
-					senders[raw] = digest
-				}
+				// The live termination authenticates both threads below. Affinity
+				// membership is optional and may be absent after a restart.
+				senders[raw] = s.CollabDigest(resilience.CollabDigestDomainThread, raw)
 			}
 		}
 	}

@@ -27,13 +27,14 @@ func protectCollabUnreceiptedFirstSend(ctx context.Context, body []byte) (out []
 		return
 	}
 	receipts := r.gateway.ParseCollabNoticeReceipts(r.state.Original)
+	now := time.Now()
 	for i, item := range r.state.Items {
-		pending := r.lookup.TreeLocalEndings > 0 && item.Class == resilience.CollabItemClassProtected && len(item.Dispositions.Replaced) == 0
+		pending := false
 		effective := false
 		for _, record := range item.Dispositions.Terminated {
-			if record.Key == item.Key && record.ExpiresAt.After(time.Now()) {
+			if record.Key == item.Key && record.ExpiresAt.After(now) {
 				pending = true
-				effective = effective || resilience.CollabTerminationEffective(record, item.Key, receipts, time.Now())
+				effective = effective || resilience.CollabTerminationEffective(record, item.Key, receipts, now)
 			}
 		}
 		if !pending || effective || i >= len(r.itemPaths) {

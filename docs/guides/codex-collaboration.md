@@ -51,7 +51,7 @@
 | `ladder=true, record_routing=false` | 换号不带记录目标，重派不借用内容 |
 | 本地收尾关闭或不覆盖分组 | 不产生新的本地收尾；阶梯仍读取已有已终结状态 |
 
-`collab.lossless_first` 默认 false，依赖阶梯。开启后把阶梯提前到现有修复之前，减少静默丢失；输出后的失败、额外发送消耗共享上游额度及并发竞争仍可能在少数情况下增加报错。负责人知情接受风险后再单独决定是否开启。
+`collab.lossless_first` 默认 false，依赖阶梯。开启后把阶梯提前到现有修复之前，减少静默丢失；输出后的失败、额外发送消耗共享上游额度及并发竞争仍可能在少数情况下增加报错。未读密文租约对质量迁移的抑制（还需 `collab.tree_affinity`）与重派临时借用明文线路（还需 `collab.record_routing`）也仅在 `collab.ladder` 和 `collab.lossless_first` 同时开启时生效；重派借用不依赖 `collab.tree_affinity`。负责人知情接受风险后再单独决定是否开启。
 
 `collab.strict_marker_veto` 默认 false。更严格的密文检查可能使现在能成功的消息失去明文标记，会增加报错，不建议开启。
 
