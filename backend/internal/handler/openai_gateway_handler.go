@@ -535,6 +535,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// 使用 gjson 只读提取字段做校验，避免完整 Unmarshal
+	collabGroupID := int64(0)
+	if apiKey.GroupID != nil {
+		collabGroupID = *apiKey.GroupID
+	}
+	service.BeginOpenAICollabRequest(c, body, subject.UserID, collabGroupID)
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
