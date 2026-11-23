@@ -138,7 +138,12 @@ func (s *replaySlots) GetUserConcurrency(context.Context, int64) (int, error) {
 	}
 	return 0, nil
 }
-func (s *replaySlots) GetUsersLoadBatch(_ context.Context, users []service.UserWithConcurrency) (map[int64]*service.UserLoadInfo, error) {
+func (s *replaySlots) GetUsersLoadBatch(ctx context.Context, users []service.UserWithConcurrency) (map[int64]*service.UserLoadInfo, error) {
+	if collabUserLoadFault != nil {
+		if err := collabUserLoadFault(ctx); err != nil {
+			return nil, err
+		}
+	}
 	out := map[int64]*service.UserLoadInfo{}
 	for _, user := range users {
 		n, waiters := 0, 0

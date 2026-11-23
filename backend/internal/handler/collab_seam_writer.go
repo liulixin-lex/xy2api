@@ -169,7 +169,7 @@ func (w *collabSeamWriter) WriteHeader(code int) {
 
 func (w *collabSeamWriter) Write(data []byte) (int, error) {
 	if w.jsonDelivered.Load() {
-		if len(bytes.TrimSpace(data)) == 0 {
+		if len(bytes.Trim(data, " \t\r\n")) == 0 {
 			return w.ResponseWriter.Write(data)
 		}
 		return 0, http.ErrBodyNotAllowed
@@ -184,7 +184,7 @@ func (w *collabSeamWriter) Write(data []byte) (int, error) {
 
 func (w *collabSeamWriter) WriteString(s string) (int, error) {
 	if w.jsonDelivered.Load() {
-		if strings.TrimSpace(s) == "" {
+		if strings.Trim(s, " \t\r\n") == "" {
 			return w.ResponseWriter.WriteString(s)
 		}
 		return 0, http.ErrBodyNotAllowed
@@ -516,6 +516,10 @@ func (w *collabSeamWriter) observePrelude(data []byte) {
 }
 
 func (w *collabSeamWriter) continuePrelude(data []byte) []byte {
+	return w.continueFrames(data, false)
+}
+
+func (w *collabSeamWriter) continueFrames(data []byte, eof bool) []byte {
 	if len(w.continuation) > 0 {
 		data = append(w.continuation, data...)
 		w.continuation = nil
@@ -523,6 +527,9 @@ func (w *collabSeamWriter) continuePrelude(data []byte) []byte {
 	var out []byte
 	for len(data) > 0 {
 		end := collabSeamFrameEnd(data, 0)
+		if end == 0 && eof {
+			end = len(data)
+		}
 		if end == 0 {
 			if len(data) > collabSeamQuietLimit {
 				w.continuationErr = io.ErrShortBuffer
@@ -788,8 +795,7 @@ func (w *collabSeamWriter) release() {
 	w.forget()
 	w.replay()
 	if len(w.continuation) > 0 {
-		_, _ = w.ResponseWriter.Write(w.continuation)
-		w.continuation = nil
+		_, _ = w.ResponseWriter.Write(w.continueFrames(nil, true))
 	}
 }
 

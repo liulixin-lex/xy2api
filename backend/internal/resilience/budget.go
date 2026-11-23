@@ -112,6 +112,19 @@ func (b *Budget) CompensateCollabPreempt(elapsed time.Duration) {
 	b.exhausted = ""
 }
 
+// CompensateCollabEligibility restores time spent checking optional admission.
+// No send was preempted, so the existing attempt count stays unchanged.
+func (b *Budget) CompensateCollabEligibility(elapsed time.Duration) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.deadline.IsZero() {
+		b.deadline = b.deadline.Add(max(time.Duration(0), elapsed))
+	}
+}
+
 // Kind returns the request kind.
 func (b *Budget) Kind() RequestKind {
 	if b == nil {

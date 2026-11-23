@@ -325,6 +325,9 @@ func runCollaborationReplay(t *testing.T, c replayCase, snapshot resilience.Sett
 			if c.LittleTime {
 				timeout = 50 * time.Millisecond
 			}
+			if collabIngressTimeout > 0 {
+				timeout = collabIngressTimeout
+			}
 			ctx, cancel := context.WithTimeout(logger.IntoContext(context.Background(), zap.NewNop()), timeout)
 			upstream.cancel = cancel
 			gc, _ := gin.CreateTestContext(writer)

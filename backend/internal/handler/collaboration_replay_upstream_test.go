@@ -124,7 +124,10 @@ func (u *replayUpstream) rejection(status int, payload string) *http.Response {
 	return replayResponse(200, "text/event-stream", frames+replayFrame("response.failed", failed))
 }
 
-func (u *replayUpstream) Do(req *http.Request, _ string, id int64, _ int) (*http.Response, error) {
+func (u *replayUpstream) Do(req *http.Request, _ string, id int64, _ int) (resultResp *http.Response, err error) {
+	if collabResponseFault != nil {
+		defer func() { collabResponseFault(req, resultResp) }()
+	}
 	service.RecordOpsUpstreamSendBoundary(req.Context(), id)
 	body, err := io.ReadAll(req.Body)
 	if err != nil {

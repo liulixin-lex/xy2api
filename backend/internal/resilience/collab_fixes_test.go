@@ -377,3 +377,14 @@ func TestCollabRecordsPanicsAndErrorsAreAbsence(t *testing.T) {
 		shared.Close()
 	}
 }
+
+func TestCollabEligibilityPreservesLegacyAllowance(t *testing.T) {
+	settings := Defaults()
+	now := time.Now()
+	budget := NewBudget(context.Background(), &settings, KindText, now)
+	budget.RecordAttemptAt(now)
+	remaining, attempts := budget.Remaining(now), budget.Attempts()
+	budget.CompensateCollabEligibility(time.Second)
+	require.Equal(t, remaining, budget.Remaining(now.Add(time.Second)))
+	require.Equal(t, attempts, budget.Attempts(), "eligibility did not preempt a send")
+}
