@@ -19,10 +19,11 @@ type CollabRecordDeliveryInput struct {
 }
 
 type collabDeliveredCall struct {
-	token     resilience.CollabIssuedToken
-	plaintext resilience.CollabPlaintextRecord
-	sequence  int64
-	written   bool
+	token       resilience.CollabIssuedToken
+	plaintext   resilience.CollabPlaintextRecord
+	sequence    int64
+	frameDigest resilience.CollabDigest
+	written     bool
 }
 
 // One consumer per physical response, registered only when relevant. It retains
@@ -80,7 +81,7 @@ func (c *CollabRecordDelivery) AboutToWrite(ctx context.Context, e resilience.Co
 		if _, exists := c.calls[id]; exists {
 			return
 		}
-		snapshot := collabDeliveredCall{sequence: e.Sequence}
+		snapshot := collabDeliveredCall{sequence: e.Sequence, frameDigest: digest}
 		marker := call.Get("encrypted_function_args")
 		expiry := time.Now().Add(resilience.CollabRecordTTL)
 		if marker.IsArray() && len(marker.Array()) == 0 {
@@ -106,15 +107,12 @@ func (c *CollabRecordDelivery) Written(ctx context.Context, e resilience.CollabD
 		return
 	}
 
-	if e.Sequence != c.frameSequence || c.frameDigest == "" {
-		return
-	}
-	matched := e.WriteError == nil && c.frameDigest == c.service.CollabDigest(resilience.CollabDigestDomainBody, e.Payload)
-	for _, id := range c.frameCalls {
-		v, ok := c.calls[id]
-		if !ok || v.written || v.sequence != e.Sequence {
+	digest := c.service.CollabDigest(resilience.CollabDigestDomainBody, e.Payload)
+	for id, v := range c.calls {
+		if v.written || v.sequence != e.Sequence {
 			continue
 		}
+		matched := e.WriteError == nil && v.frameDigest != "" && v.frameDigest == digest
 		if !matched {
 			if v.token.Token != "" {
 				c.store.VoidIssued(ctx, v.token)
