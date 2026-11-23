@@ -185,6 +185,8 @@ const (
 )
 
 type CollabRecordMutation struct {
+	// WriteOrder preserves evidence eviction order if its index is rebuilt.
+	WriteOrder        int64                         `json:",omitzero"`
 	Reserved          bool                          `json:",omitempty"`
 	TerminalRejection CollabTerminalRejectionRecord `json:",omitzero"`
 	Kind              CollabRecordMutationKind      `json:",omitzero"`

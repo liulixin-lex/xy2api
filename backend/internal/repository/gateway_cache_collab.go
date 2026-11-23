@@ -48,7 +48,14 @@ local function part(k)
  return 1
 end
 local partition=part(kind)
-local function charge(f,v) return string.len(v)+3*string.len(f)+32 end
+local function charge(f,v)
+ local size=string.len(v)+3*string.len(f)+32
+ if string.sub(f,1,2)=='i:' then
+  local row=cjson.decode(v)
+  size=size+9-string.len(row.Issued.Status or 'confirmed')
+ end
+ return size
+end
 local function tenantKey(tree)
  local scope=cjson.decode(string.sub(tree,string.len(ARGV[11])+1))
  return ARGV[11]..'tenant:'..scope.Tenant
@@ -86,19 +93,50 @@ if not redis.call('ZSCORE',KEYS[1],KEYS[2]) then
 end
 return true
 end
+-- Canonical row times are RFC3339, including fractions and explicit offsets.
+-- Reconstruct metadata from the stored row, never a transition's empty deadline.
+local function rowDeadline(row)
+ local names={pending='Issued',void='Issued',local_ending='Issued',plaintext='Plaintext',consumed='Consumed',replaced='Replaced',terminated='Terminated',terminal_rejected='TerminalRejection'}
+ local record=row[names[row.Kind] or '']
+ if not record or type(record.ExpiresAt)~='string' then return nil end
+ local y,m,d,h,minute,second,tail=string.match(record.ExpiresAt,'^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)(.*)$')
+ if not y then return nil end
+ y=tonumber(y);m=tonumber(m);d=tonumber(d);h=tonumber(h);minute=tonumber(minute);second=tonumber(second)
+ if m<1 or m>12 or d<1 or d>31 or h>23 or minute>59 or second>59 then return nil end
+ local fraction=''
+ if string.sub(tail,1,1)=='.' then fraction,tail=string.match(tail,'^%.(%d+)(.*)$');if not fraction then return nil end end
+ local offset=0
+ if tail~='Z' then
+  local sign,oh,om=string.match(tail,'^([+-])(%d%d):(%d%d)$')
+  if not sign or tonumber(oh)>23 or tonumber(om)>59 then return nil end
+  offset=(tonumber(oh)*60+tonumber(om))*60;if sign=='-' then offset=-offset end
+ end
+ -- Gregorian civil date to days since the Unix epoch.
+ if m<=2 then y=y-1 end
+ local era=math.floor(y/400);local year=y-era*400
+ local month=m-3;if m<=2 then month=m+9 end
+ local day=math.floor((153*month+2)/5)+d-1
+ local days=era*146097+year*365+math.floor(year/4)-math.floor(year/100)+day-719468
+ local millis=tonumber(string.sub(fraction..'000',1,3))
+ local floorMillis=((days*24+h)*60+minute)*60000+second*1000+millis-offset*1000
+ local remainder=string.sub(fraction..'000000000',4,9)
+ local ceiling=floorMillis;if string.find(remainder,'[1-9]') then ceiling=ceiling+1 end
+ return ceiling,string.format('%013d',floorMillis)..remainder
+end
 local function repair()
  if redis.call('HLEN',KEYS[2])==0 then return true end
  if not admit() then return false end
  local stored=redis.call('HGETALL',KEYS[2])
- local last=0;local protected=0
+ local last=math.max(tonumber(redis.call('ZSCORE',KEYS[1],KEYS[2]) or '0'),tonumber(redis.call('ZSCORE',KEYS[5],KEYS[2]) or '0'));local protected=0
  for i=1,#stored,2 do
   local row=cjson.decode(stored[i+1]);local f=stored[i]
-  local untilTime=tonumber(redis.call('ZSCORE',KEYS[3],f) or '0')
-  if untilTime<=0 then untilTime=math.max(deadline,now+1);redis.call('ZADD',KEYS[3],untilTime,f) end
+  local canonical=rowDeadline(row);if not canonical then return false end
+  local untilTime=math.max(canonical,tonumber(redis.call('ZSCORE',KEYS[3],f) or '0'))
+  redis.call('ZADD',KEYS[3],untilTime,f)
   last=math.max(last,untilTime)
   if part(row.Kind)~=0 or row.Kind=='void' or (row.Issued and row.Issued.Status=='void') then
    protected=math.max(protected,untilTime);redis.call('ZREM',KEYS[8],f)
-  elseif not redis.call('ZSCORE',KEYS[8],f) then redis.call('ZADD',KEYS[8],now,f) end
+  elseif not redis.call('ZSCORE',KEYS[8],f) then redis.call('ZADD',KEYS[8],row.WriteOrder or now,f) end
  end
  redis.call('ZADD',KEYS[1],last,KEYS[2]);redis.call('ZADD',KEYS[5],last,KEYS[2])
  redis.call('HSET',KEYS[9],KEYS[5],redis.call('ZCARD',KEYS[5]))
@@ -116,6 +154,7 @@ for i,key in ipairs(KEYS) do
  if typ~='none' and typ~=expected[i] then return redis.error_reply('invalid collaboration key type') end
 end
 local function apply()
+if not repair() then return 0 end
 local dead=redis.call('ZRANGEBYSCORE',KEYS[1],'-inf',now)
 for _,victim in ipairs(dead) do dropTree(victim) end
 local expired=redis.call('ZRANGEBYSCORE',KEYS[3],'-inf',now)
@@ -166,6 +205,16 @@ if old and kind~='local_ending' then
  end
  return 1
 end
+if partition==0 and kind~='void' and not old then
+ local row=cjson.decode(value)
+ if kind=='pending' and (redis.call('HEXISTS',KEYS[2],'v:')==1 or redis.call('HEXISTS',KEYS[2],'v:'..row.Token.Token)==1) then row.Issued.Status='void' end
+ if not row.WriteOrder or row.WriteOrder==0 then
+  local order=0
+  for i=1,#rows,2 do order=math.max(order,cjson.decode(rows[i+1]).WriteOrder or 0) end
+  row.WriteOrder=order+1
+ end
+ value=cjson.encode(row)
+end
 if deadline<=now or string.len(value)>maxRowBytes then return 0 end
 local extraCount={0,0,0};local extraSize={0,0,0}
 if not old then extraCount[partition+1]=1;extraSize[partition+1]=charge(field,value) end
@@ -200,17 +249,28 @@ if partition==0 then
  end
 end
 if kind=='void' and (counts[1]+extraCount[1]>maxRows or sizes[1]+extraSize[1]>byteLimits[1]) then
+ local row=cjson.decode(value)
+ local horizon,latest=rowDeadline(row);if not horizon then return 0 end
+ deadline=math.max(deadline,horizon)
+ -- The fallback covers every removed evidence row through its full lifetime.
+ for i=1,#rows,2 do
+  local prior=cjson.decode(rows[i+1])
+  if part(prior.Kind)==0 then
+   local horizon,key=rowDeadline(prior);if not horizon then return 0 end
+   if key>latest then latest=key;deadline=horizon;row.Issued.ExpiresAt=prior.Issued and prior.Issued.ExpiresAt or (prior.Plaintext or prior.Consumed).ExpiresAt end
+  end
+ end
  for i=1,#rows,2 do
   if part(cjson.decode(rows[i+1]).Kind)==0 then redis.call('HDEL',KEYS[2],rows[i]);redis.call('ZREM',KEYS[3],rows[i]);redis.call('ZREM',KEYS[8],rows[i]) end
  end
- local row=cjson.decode(value);row.Token.Token='';row.Token.Call='';row.Token.Generation=0;value=cjson.encode(row);field='v:'
+ row.Token.Token='';row.Token.Call='';row.Token.Generation=0;value=cjson.encode(row);field='v:'
  counts[1]=0;sizes[1]=0;extraCount[1]=1;extraSize[1]=charge(field,value)
 end
 if counts[1]+extraCount[1]>maxRows or sizes[1]+extraSize[1]>byteLimits[1] then return 0 end
 if not admit() then return 0 end
 if not old then
  redis.call('ZADD',KEYS[3],deadline,field);redis.call('HSET',KEYS[2],field,value)
- if partition==0 then redis.call('ZADD',KEYS[8],now,field) end
+ if partition==0 then redis.call('ZADD',KEYS[8],cjson.decode(value).WriteOrder or now,field) end
 end
 for _,item in ipairs(additions) do
  redis.call('ZADD',KEYS[3],deadline,item.field);redis.call('HSET',KEYS[2],item.field,item.value)
@@ -218,8 +278,11 @@ end
 if kind=='void' then
  local token=cjson.decode(value).Token
  for i=1,#rows,2 do
-  local row=cjson.decode(rows[i+1])
-  if row.Kind=='pending' and (token.Token=='' or row.Token.Token==token.Token) then row.Issued.Status='void';redis.call('HSET',KEYS[2],rows[i],cjson.encode(row));redis.call('ZREM',KEYS[8],rows[i]) end
+  local surviving=redis.call('HGET',KEYS[2],rows[i])
+  if surviving then
+   local row=cjson.decode(surviving)
+   if row.Kind=='pending' and (token.Token=='' or row.Token.Token==token.Token) then row.Issued.Status='void';redis.call('HSET',KEYS[2],rows[i],cjson.encode(row));redis.call('ZREM',KEYS[8],rows[i]) end
+  end
  end
 end
 local current=tonumber(redis.call('ZSCORE',KEYS[1],KEYS[2]) or '0')
@@ -244,7 +307,13 @@ if ok and type(result)=='number' and result>0 then
 end
 -- Runtime errors do not roll back Lua writes. Never leave an immortal hash.
 if redis.call('EXISTS',KEYS[2])==1 and redis.call('PTTL',KEYS[2])<0 then
- local expiry=math.max(deadline,now+1)
+ local expiry=deadline
+ for _,raw in ipairs(redis.call('HVALS',KEYS[2])) do
+  local decoded,row=pcall(cjson.decode,raw)
+  local untilTime=decoded and rowDeadline(row)
+  expiry=math.max(expiry,untilTime or now+604800000)
+ end
+ if expiry<=now then expiry=now+604800000 end
  redis.call('PEXPIREAT',KEYS[2],expiry);redis.call('PEXPIREAT',KEYS[3],expiry);redis.call('PEXPIREAT',KEYS[8],expiry)
 end
 if not ok then return redis.error_reply(tostring(result)) end

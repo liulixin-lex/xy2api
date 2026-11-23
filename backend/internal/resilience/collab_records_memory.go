@@ -312,6 +312,15 @@ func (s *MemoryCollabRecordsStore) applyMutation(m CollabRecordMutation) (count 
 		tree.remove(field)
 	}
 
+	if m.Kind == CollabRecordMutationPending || m.Kind == CollabRecordMutationPlaintext || m.Kind == CollabRecordMutationConsumed {
+		if m.WriteOrder == 0 {
+			m.WriteOrder = 1
+			for _, old := range tree.entries {
+				m.WriteOrder = max(m.WriteOrder, old.mutation.WriteOrder+1)
+			}
+		}
+		payload, _ = json.Marshal(m)
+	}
 	charge := collabRecordCharge(field, payload)
 	part := collabRecordPartition(m.Kind)
 	for f, old := range tree.entries {
@@ -345,9 +354,13 @@ func (s *MemoryCollabRecordsStore) applyMutation(m CollabRecordMutation) (count 
 		// Saturated invalidations conservatively suppress all issuance in this tree.
 		for f, e := range tree.entries {
 			if collabRecordPartition(e.mutation.Kind) == 0 {
+				if horizon := collabRecordExpiry(e.mutation); horizon.After(expires) {
+					expires = horizon
+				}
 				tree.remove(f)
 			}
 		}
+		m.Issued.ExpiresAt = expires
 		m.Token.Token = ""
 		m.Token.Call = ""
 		m.Token.Generation = 0
@@ -372,7 +385,11 @@ func (s *MemoryCollabRecordsStore) applyMutation(m CollabRecordMutation) (count 
 			}
 		}
 	}
-	tree.entries[field] = collabMemoryEntry{mutation: m, charge: charge, written: now.UnixNano()}
+	written := now.UnixNano()
+	if m.WriteOrder != 0 {
+		written = m.WriteOrder
+	}
+	tree.entries[field] = collabMemoryEntry{mutation: m, charge: charge, written: written}
 	tree.bytes += charge
 	for _, key := range collabMutationIndexes(m) {
 		if tree.index[key] == nil {

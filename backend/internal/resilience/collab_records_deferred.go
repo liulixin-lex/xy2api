@@ -61,21 +61,29 @@ func (s *SafeCollabRecordsStore) deferInvalidation(m CollabRecordMutation) {
 	}
 	s.deferredMu.Lock()
 	scope := m.Token.Scope
-	rows := s.invalidations[scope]
-	for _, row := range rows {
+	rows, existing := s.invalidations[scope]
+	for i, row := range rows {
 		if row.Token.Token == "" || row.Token == m.Token {
+			if m.Issued.ExpiresAt.After(row.Issued.ExpiresAt) {
+				rows[i].Issued.ExpiresAt = m.Issued.ExpiresAt
+			}
 			s.deferredMu.Unlock()
 			return
 		}
 	}
 	if len(rows) >= 16 {
-		// Overflow is a conservative tree-wide invalidation, never a lost void.
+		// Overflow preserves the latest horizon of every replaced invalidation.
+		for _, row := range rows {
+			if row.Issued.ExpiresAt.After(m.Issued.ExpiresAt) {
+				m.Issued.ExpiresAt = row.Issued.ExpiresAt
+			}
+		}
 		m.Token.Token = ""
 		m.Token.Call = ""
 		m.Token.Generation = 0
 		rows = nil
 	}
-	if len(rows) == 0 && len(s.invalidations) >= CollabRecordMaxTrees {
+	if !existing && len(s.invalidations) >= CollabRecordMaxTrees {
 		s.deferredMu.Unlock()
 		collabSafety.recordDropped.Add(1)
 		return

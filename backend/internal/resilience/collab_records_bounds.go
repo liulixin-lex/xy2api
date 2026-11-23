@@ -1,6 +1,7 @@
 package resilience
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 )
@@ -56,7 +57,9 @@ func NormalizeCollabRecordMutation(m CollabRecordMutation, now time.Time) (Colla
 			return n, nil, false
 		}
 		switch r.Status {
-		case "", CollabIssuedStatusPending, CollabIssuedStatusConfirmed, CollabIssuedStatusVoid:
+		case "":
+			r.Status = CollabIssuedStatusPending
+		case CollabIssuedStatusPending, CollabIssuedStatusConfirmed, CollabIssuedStatusVoid:
 		default:
 			return n, nil, false
 		}
@@ -151,6 +154,10 @@ func NormalizeCollabRecordMutation(m CollabRecordMutation, now time.Time) (Colla
 	case CollabRecordMutationTerminalRejected:
 		n.TerminalRejection.ExpiresAt = clamp(n.TerminalRejection.ExpiresAt)
 	}
+	switch n.Kind {
+	case CollabRecordMutationPending, CollabRecordMutationPlaintext, CollabRecordMutationConsumed:
+		n.WriteOrder = max(0, m.WriteOrder)
+	}
 	payload, err := json.Marshal(n)
 	return n, payload, err == nil && len(payload) <= CollabRecordMaxRowBytes
 }
@@ -199,4 +206,16 @@ func collabPartitionBytes(part int) int {
 
 // Charge the JSON and hash, expiry and write-order field bytes, plus headroom for a
 // status transition. Redis's object metadata is bounded separately by row count.
-func collabRecordCharge(field string, payload []byte) int { return len(payload) + 3*len(field) + 32 }
+func collabRecordCharge(field string, payload []byte) int {
+	charge := len(payload) + 3*len(field) + 32
+	if len(field) > 2 && field[:2] == "i:" {
+		// Status transitions consume the same reserved bytes in both stores.
+		if bytes.Contains(payload, []byte(`"Status":"pending"`)) {
+			charge += 2
+		}
+		if bytes.Contains(payload, []byte(`"Status":"void"`)) {
+			charge += 5
+		}
+	}
+	return charge
+}
