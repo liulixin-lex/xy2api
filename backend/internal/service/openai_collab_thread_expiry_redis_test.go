@@ -21,3 +21,16 @@ func TestCollabThreadExpiryRedis(t *testing.T) {
 	rdb.AddHook(operations)
 	service.RunCollabProvisionalExpiry(t, repository.NewGatewayCache(rdb), repository.NewResilienceStore(rdb), repository.NewSchedTrialLeaseCache(rdb), func() { require.NoError(t, rdb.FlushDB(context.Background()).Err()) }, srv.FastForward, operations.count.Load)
 }
+
+func TestCollabThreadTemporalRedis(t *testing.T) {
+	var stores [2]service.CollabTemporalStore
+	for i := range stores {
+		srv := miniredis.RunT(t)
+		rdb := redis.NewClient(&redis.Options{Addr: srv.Addr(), MaxRetries: -1})
+		t.Cleanup(func() { _ = rdb.Close() })
+		operations := &collabRedisOperations{}
+		rdb.AddHook(operations)
+		stores[i] = service.CollabTemporalStore{Cache: repository.NewGatewayCache(rdb), Store: repository.NewResilienceStore(rdb), Leases: repository.NewSchedTrialLeaseCache(rdb), Reset: func() { require.NoError(t, rdb.FlushDB(context.Background()).Err()) }, Advance: srv.FastForward, Operations: operations.count.Load}
+	}
+	service.RunCollabTemporalOracle(t, stores)
+}
