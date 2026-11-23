@@ -98,6 +98,11 @@ func (h *OpenAIGatewayHandler) tryCollabBorrow(c *gin.Context, account *service.
 			c.Request = parentRequest.WithContext(resilience.WithCollabAttempt(parentRequest.Context(), resilience.CollabAttempt{Optional: true, Delivered: true}))
 			parent.NoteGatewaySend(selection.Account.ID)
 			parent.AdoptCollabDelivery(selection.Account.ID, child)
+			// The borrowed response is the one the client received: its turn-state
+			// origin and response binding are committed as on a ladder delivery.
+			if persist := h.gatewayService.CommitCollabResponseIdentity(c, selection.Account, result, ""); persist != nil {
+				defer persist()
+			}
 			recordOpenAIForwardUsage(c, selection.Account, result)
 			recordForwardRecovery(c, forwardErr, result != nil && result.ClientDisconnect, gatewayOpenAICompleted(result))
 			settle(selection.Account, result)

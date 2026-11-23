@@ -26,10 +26,10 @@ func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, acco
 		return
 	}
 	attempt := resilience.CollabAttemptFrom(c.Request.Context())
-	if attempt.Optional && attempt.CustomerSettlementAllowed() && c.Writer != nil {
-		// Output can precede an interrupted Forward with no result. The
-		// committed header still belongs to the response the client received.
-		s.noteStagedOpenAICodexTurnStateCommitted(c, account, c.Writer.Header())
+	if attempt.Optional && attempt.CustomerSettlementAllowed() {
+		// Output can precede an interrupted Forward with no result. Record
+		// only a turn-state this attempt itself put on the client's response.
+		s.commitPendingOpenAICodexTurnStateOrigin(c)
 	}
 	if result == nil {
 		return
@@ -124,7 +124,8 @@ func IsolateCollabAttempt(c *gin.Context) {
 	for _, key := range []string{openAIM3ContextKey, openAIRequestRepairContextKey,
 		openAICollabResponseKey, codexCollabAttemptContextKey, upstreamResponseModelObserverContextKey,
 		openAIFCOReplayKey, openAIFCOAttemptKey, openAIResponsesRejectedFieldRetryBudgetContextKey,
-		openAIWebSearchReplayContextKey, openAIStateRejectionAttemptKey, openAIStateRejectionBodyKey} {
+		openAIWebSearchReplayContextKey, openAIStateRejectionAttemptKey, openAIStateRejectionBodyKey,
+		openAICodexTurnStatePendingOriginKey} {
 		c.Delete(key)
 	}
 	previous := currentOpsUpstreamEvents(c)
