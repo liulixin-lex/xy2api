@@ -3,10 +3,11 @@
 package service
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -90,36 +91,120 @@ func collabWorkerRecovered(body *ast.BlockStmt) bool {
 	return false
 }
 
-func TestCollabWorkersRecoverFromSource(t *testing.T) {
+// Bindings are conservative over the enclosing function. A reassignment or
+// nonliteral local value cannot borrow recovery from a package declaration.
+func collabWorkerBindings(body *ast.BlockStmt, kind *ast.FuncType, receiver *ast.FieldList, outer map[string]*ast.BlockStmt) map[string]*ast.BlockStmt {
+	locals := map[string]*ast.BlockStmt{}
+	for name, value := range outer {
+		locals[name] = value
+	}
+	bound := map[string]bool{}
+	fields := func(list *ast.FieldList) {
+		if list == nil {
+			return
+		}
+		for _, field := range list.List {
+			for _, name := range field.Names {
+				locals[name.Name] = nil
+				bound[name.Name] = true
+			}
+		}
+	}
+	fields(receiver)
+	fields(kind.Params)
+	fields(kind.Results)
+	bind := func(name *ast.Ident, value ast.Expr) {
+		if name == nil {
+			return
+		}
+		var literal *ast.BlockStmt
+		if f, ok := value.(*ast.FuncLit); ok && !bound[name.Name] {
+			literal = f.Body
+		}
+		locals[name.Name], bound[name.Name] = literal, true
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.AssignStmt:
+			for i, target := range n.Lhs {
+				name, _ := target.(*ast.Ident)
+				var value ast.Expr
+				if len(n.Lhs) == len(n.Rhs) {
+					value = n.Rhs[i]
+				}
+				bind(name, value)
+			}
+		case *ast.ValueSpec:
+			for i, name := range n.Names {
+				var value ast.Expr
+				if len(n.Names) == len(n.Values) {
+					value = n.Values[i]
+				}
+				bind(name, value)
+			}
+		case *ast.RangeStmt:
+			if name, ok := n.Key.(*ast.Ident); ok {
+				bind(name, nil)
+			}
+			if name, ok := n.Value.(*ast.Ident); ok {
+				bind(name, nil)
+			}
+		}
+		return true
+	})
+	return locals
+}
+
+type collabWorkerAudit struct {
+	checked, background, unrelated, files int
+	failures                              []string
+}
+
+func auditCollabWorkers(roots []string, exceptions map[string]string) (collabWorkerAudit, error) {
+	var audit collabWorkerAudit
 	fset := token.NewFileSet()
 	files := map[string]*ast.File{}
-	functions := map[string][]*ast.BlockStmt{}
+	functions, methods := map[string][]*ast.BlockStmt{}, map[string][]*ast.BlockStmt{}
 	// The test working directory is the package directory, including -trimpath.
-	for _, dir := range []string{".", "../handler", "../resilience", "../repository"} {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, entry := range entries {
+	for _, dir := range roots {
+		err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				if entry.Name() == "testdata" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 			name := entry.Name()
 			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-				continue
+				return nil
 			}
-			path := filepath.Join(dir, name)
 			file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 			if err != nil {
-				t.Fatal(err)
+				return err
 			}
 			if ast.IsGenerated(file) {
-				continue
+				return nil
 			}
 			for _, decl := range file.Decls {
 				if f, ok := decl.(*ast.FuncDecl); ok {
-					functions[dir+":"+f.Name.Name] = append(functions[dir+":"+f.Name.Name], f.Body)
-					functions[path+":"+f.Name.Name] = append(functions[path+":"+f.Name.Name], f.Body)
+					targets := functions
+					if f.Recv != nil {
+						targets = methods
+					}
+					key := filepath.Dir(path) + ":" + f.Name.Name
+					targets[key] = append(targets[key], f.Body)
 				}
 			}
 			files[path] = file
+			return nil
+		})
+		if err != nil {
+			return audit, err
 		}
 	}
 	checked, background, unrelated := 0, 0, 0
@@ -130,26 +215,14 @@ func TestCollabWorkersRecoverFromSource(t *testing.T) {
 			if !ok || f.Body == nil {
 				continue
 			}
-			locals := map[string]*ast.BlockStmt{}
-			ast.Inspect(f.Body, func(n ast.Node) bool {
-				if assign, ok := n.(*ast.AssignStmt); ok {
-					for i, value := range assign.Rhs {
-						lit, ok := value.(*ast.FuncLit)
-						if ok && i < len(assign.Lhs) {
-							locals[collabWorkerName(assign.Lhs[i])] = lit.Body
-						}
-					}
-				}
-				return true
-			})
-			check := func(expr ast.Expr, pos token.Pos) {
+			check := func(expr ast.Expr, pos token.Pos, locals map[string]*ast.BlockStmt) {
 				key := filepath.ToSlash(path) + ":" + f.Name.Name
-				if specific := key + "/" + collabWorkerName(expr); collabWorkerExceptions[specific] != "" {
+				if specific := key + "/" + collabWorkerName(expr); exceptions[specific] != "" {
 					key = specific
 				}
-				if reason := collabWorkerExceptions[key]; reason != "" {
+				if reason := exceptions[key]; reason != "" {
 					if strings.Contains(path, "collab") {
-						t.Errorf("collaboration worker cannot be excepted: %s", key)
+						audit.failures = append(audit.failures, fmt.Sprintf("collaboration worker cannot be excepted: %s", key))
 					}
 					usedExceptions[key] = true
 					if strings.HasPrefix(reason, "Outside") {
@@ -161,19 +234,19 @@ func TestCollabWorkersRecoverFromSource(t *testing.T) {
 				}
 				checked++
 				var body *ast.BlockStmt
-				if lit, ok := expr.(*ast.FuncLit); ok {
-					body = lit.Body
-				} else {
-					name := collabWorkerName(expr)
-					body = locals[name]
-					if body == nil {
-						targets := functions[path+":"+name]
-						if len(targets) == 0 {
-							targets = functions[filepath.Dir(path)+":"+name]
-						}
-						if len(targets) == 1 {
-							body = targets[0]
-						}
+				switch target := expr.(type) {
+				case *ast.FuncLit:
+					body = target.Body
+				case *ast.Ident:
+					local, bound := locals[target.Name]
+					if bound {
+						body = local
+					} else if targets := functions[filepath.Dir(path)+":"+target.Name]; len(targets) == 1 {
+						body = targets[0]
+					}
+				case *ast.SelectorExpr:
+					if targets := methods[filepath.Dir(path)+":"+target.Sel.Name]; len(targets) == 1 {
+						body = targets[0]
 					}
 				}
 				if !collabWorkerRecovered(body) {
@@ -181,31 +254,51 @@ func TestCollabWorkersRecoverFromSource(t *testing.T) {
 					if body != nil {
 						target = fset.Position(body.Lbrace).String()
 					}
-					t.Errorf("%s: asynchronous entry in %s needs direct recovery, logging and counting (body %s)", fset.Position(pos), f.Name.Name, target)
+					audit.failures = append(audit.failures, fmt.Sprintf("%s: asynchronous entry at %s needs direct recovery, logging and counting (body %s)", key, fset.Position(pos), target))
 				}
 			}
-			ast.Inspect(f.Body, func(n ast.Node) bool {
-				switch n := n.(type) {
-				case *ast.GoStmt:
-					check(n.Call.Fun, n.Pos())
-				case *ast.CallExpr:
-					if selector, ok := n.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "AfterFunc" {
-						check(n.Args[len(n.Args)-1], n.Pos())
+			var inspect func(*ast.BlockStmt, *ast.FuncType, *ast.FieldList, map[string]*ast.BlockStmt)
+			inspect = func(body *ast.BlockStmt, kind *ast.FuncType, receiver *ast.FieldList, outer map[string]*ast.BlockStmt) {
+				locals := collabWorkerBindings(body, kind, receiver, outer)
+				ast.Inspect(body, func(n ast.Node) bool {
+					switch n := n.(type) {
+					case *ast.FuncLit:
+						inspect(n.Body, n.Type, nil, locals)
+						return false
+					case *ast.GoStmt:
+						check(n.Call.Fun, n.Pos(), locals)
+					case *ast.CallExpr:
+						if selector, ok := n.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "AfterFunc" && len(n.Args) > 0 {
+							check(n.Args[len(n.Args)-1], n.Pos(), locals)
+						}
 					}
-				}
-				return true
-			})
+					return true
+				})
+			}
+			inspect(f.Body, f.Type, f.Recv, nil)
 		}
 	}
-	if checked < 12 {
-		t.Fatalf("worker audit unexpectedly found only %d entries", checked)
-	}
-	for key := range collabWorkerExceptions {
+	for key := range exceptions {
 		if !usedExceptions[key] {
-			t.Errorf("stale exception: %s", key)
+			audit.failures = append(audit.failures, fmt.Sprintf("stale exception: %s", key))
 		}
 	}
-	t.Logf("audited %d collaboration/request entries; %d background entries and %d unrelated entries excepted; %d source files", checked, background, unrelated, len(files))
+	audit.checked, audit.background, audit.unrelated, audit.files = checked, background, unrelated, len(files)
+	return audit, nil
+}
+
+func TestCollabWorkersRecoverFromSource(t *testing.T) {
+	audit, err := auditCollabWorkers([]string{".", "../handler", "../resilience", "../repository"}, collabWorkerExceptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.checked < 12 {
+		t.Fatalf("worker audit unexpectedly found only %d entries", audit.checked)
+	}
+	for _, failure := range audit.failures {
+		t.Error(failure)
+	}
+	t.Logf("audited %d collaboration/request entries; %d background entries and %d unrelated entries excepted; %d source files", audit.checked, audit.background, audit.unrelated, audit.files)
 }
 
 func TestCollabWorkerRecoveryGateRejectsUnsafeCallbacks(t *testing.T) {

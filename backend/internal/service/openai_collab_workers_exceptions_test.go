@@ -4,6 +4,21 @@ package service
 
 // Discovered background entries retain their base behavior; none is a collaboration worker.
 var collabWorkerExceptions = map[string]string{
+	"concurrency_service.go:AcquireOpenAIWSIngressLease":               "Outside the collaboration request path; WebSocket ingress lease refresh belongs to another transport.",
+	"content_moderation.go:NewContentModerationService/worker":         "Boot moderation queue consumers; entry recovery remains in the worker.",
+	"openai_ws_v2/passthrough_relay.go:Relay":                          "Outside the collaboration request path; WS-v2 relay is another transport, while the collaboration seam covers HTTP Responses.",
+	"../handler/admin/grok_import_probe.go:schedule":                   "Outside the collaboration request path; administrative account import probes.",
+	"../handler/admin/account_data.go:importData":                      "Outside the collaboration request path; administrative account import follow-up.",
+	"../handler/admin/account_handler.go:scheduleOpenAIResponsesProbe": "Outside the collaboration request path; administrative account availability probe.",
+	"../handler/admin/account_handler.go:BatchCreate":                  "Outside the collaboration request path; administrative batch account creation.",
+	"../handler/admin/grok_oauth_handler.go:CreateAccountsFromSSO":     "Outside the collaboration request path; administrative account creation follow-up.",
+	"../handler/admin/system_handler.go:RestartService":                "Outside the collaboration request path; administrative service restart.",
+	"../handler/admin/ops_ws_handler.go:scheduleQPSWSIdleStop":         "Outside the collaboration request path; administrative metrics WebSocket idle timer.",
+	"../handler/admin/ops_ws_handler.go:start":                         "Outside the collaboration request path; administrative metrics WebSocket sampler.",
+	"../handler/admin/ops_ws_handler.go:handleQPSWebSocket":            "Outside the collaboration request path; administrative metrics WebSocket reader.",
+	"../handler/admin/proxy_data.go:ImportData":                        "Outside the collaboration request path; administrative proxy import follow-up.",
+
+	"model_protocol_catalog.go:lookup/refresh":                                           "Outside the collaboration request path; model catalog refresh for by-model API-key providers.",
 	"idempotency.go:renewProcessingLease":                                                "Outside the collaboration request path; administrative idempotency lease.",
 	"content_moderation.go:NewContentModerationService/cleanupWorker":                    "Boot moderation-state cleanup loop.",
 	"account_expiry_service.go:Start":                                                    "Boot account-expiry loop.",

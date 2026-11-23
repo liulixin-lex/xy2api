@@ -162,8 +162,6 @@ func (l *OpenAIWSIngressLease) refreshLoop() {
 // refresh confirms the lease is still owned. A missing member is an immediate
 // lease loss; transient Redis errors are tolerated only for one full lease TTL.
 func (l *OpenAIWSIngressLease) refresh(lastConfirmedAt time.Time) (time.Time, bool) {
-	defer resilience.RecoverCollabWorker()
-
 	refreshCtx, refreshCancel := context.WithTimeout(context.Background(), openAIWSIngressLeaseOperationTO)
 	owned, err := l.cache.RefreshOpenAIWSIngressLease(refreshCtx, l.apiKeyID, l.leaseID)
 	refreshCancel()
