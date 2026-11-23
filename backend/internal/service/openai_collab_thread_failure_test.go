@@ -60,3 +60,30 @@ func TestCollabThreadBindingStoreFailureParity(t *testing.T) {
 	}
 	require.Equal(t, outcomes[0], outcomes[1])
 }
+
+func TestCollabThreadBindingSharedNoneSuppressesTreeHint(t *testing.T) {
+	withResilienceSettings(t, nil)
+	for _, plain := range []bool{false, true} {
+		t.Run(fmt.Sprint(plain), func(t *testing.T) {
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+			f.svc.selectionBoard.leases = newSelectionTrialLeaseFake()
+			if plain {
+				f.svc.cache = &f.cache.schedulerTestGatewayCache
+			}
+			local := resilience.NewCollabTreeAffinity(32, time.Hour)
+			NoteOpenAICollabAdmission(collabAffinityContext(local, collabAffinitySettings(), "root", ""), 2, false)
+			first := collabAtomicContext(t, f, local, "child", true)
+			binding := openAICollabBindingFrom(first)
+			require.NoError(t, binding.write(first, 0, time.Hour))
+			returning := collabAtomicContext(t, f, local, "child", true)
+			hint, ok := local.LookupTreeHint(returning, binding.affinity.identity.Scope)
+			require.True(t, ok)
+			require.EqualValues(t, 2, hint.AccountID)
+			result := selectTrialRuntime(t, f, returning, binding.session)
+			defer result.ReleaseFunc()
+			require.EqualValues(t, 1, result.Account.ID, "a shared explicit-none binding suppresses the root preference")
+			require.True(t, openAICollabBindingFrom(returning).present())
+			require.Zero(t, openAICollabHint(returning, 0))
+		})
+	}
+}
