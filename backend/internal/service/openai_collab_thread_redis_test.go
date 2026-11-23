@@ -86,3 +86,18 @@ func TestCollabThreadAtomicRedis(t *testing.T) {
 		}, operations.arm, members)
 	})
 }
+
+func TestCollabThreadAliasRedis(t *testing.T) {
+	srv := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: srv.Addr(), MaxRetries: -1})
+	operations := &collabRedisOperations{}
+	rdb.AddHook(operations)
+	t.Cleanup(func() { _ = rdb.Close() })
+	service.RunCollabAliasParity(t, repository.NewGatewayCache(rdb), repository.NewResilienceStore(rdb), repository.NewSchedTrialLeaseCache(rdb), func() {
+		require.NoError(t, rdb.FlushDB(context.Background()).Err())
+	}, srv.FastForward, func(account int64) []string {
+		members, err := rdb.ZRange(context.Background(), fmt.Sprintf("sched:trial:%d:m", account), 0, -1).Result()
+		require.NoError(t, err)
+		return members
+	}, operations.count.Load)
+}

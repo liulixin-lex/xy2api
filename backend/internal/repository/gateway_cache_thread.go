@@ -15,13 +15,18 @@ const stickyThreadPrelude = `
 local native = redis
 local parent, parentGen, legacy, legacyGen = unpack(KEYS, #KEYS-3)
 for i=1,4 do table.remove(KEYS) end
-local index = tonumber(ARGV[#ARGV-3])
-local fallback = ARGV[#ARGV-2] == '1'
-local noneTTL = tonumber(ARGV[#ARGV-1])
-local refreshTTL = tonumber(ARGV[#ARGV])
-for i=1,4 do table.remove(ARGV) end
+local index = tonumber(ARGV[#ARGV-4])
+local fallback = ARGV[#ARGV-3] == '1'
+local noneTTL = tonumber(ARGV[#ARGV-2])
+local refreshTTL = tonumber(ARGV[#ARGV-1])
+local lookup = ARGV[#ARGV] == '1'
+for i=1,5 do table.remove(ARGV) end
 local key, gen = KEYS[index], KEYS[index+1]
 local own = native.call('GET', key)
+-- Legacy-only inheritance needs ordinary adoption. Exclude it while the same
+-- lookup still owns the atomic view, and execute that lookup on the tree.
+local excluded = lookup and not own and not native.call('GET', parent) and native.call('EXISTS', legacy) == 1
+if excluded then KEYS[index], KEYS[index+1] = parent, parentGen end
 local source, sourceGen = key, gen
 if not own then
   source, sourceGen = parent, parentGen
@@ -32,6 +37,16 @@ local redis = {error_reply = native.error_reply}
 redis.call = function(command, ...)
   local args = {...}
   local k = args[1]
+  if excluded then return native.call(command, unpack(args)) end
+  if k == legacy or k == legacyGen then
+    if lookup and own == '-1' and command == 'GET' then return false end
+    -- Explicit thread deletion also hides inherited aliases. A missing thread
+    -- still sees a late tree alias, including in the ordinary commit fence.
+    if own == '-1' and command == 'EXISTS' then return 0 end
+    -- Alias existence still fences commits, and ordinary alias scripts still
+    -- clamp TTLs. Their SET/DEL operations must never alter the tree's values.
+    if command == 'SET' or command == 'DEL' then return 0 end
+  end
   if k ~= key and k ~= gen then return native.call(command, unpack(args)) end
   if command == 'GET' then
     if own == '-1' then return false end
@@ -84,7 +99,7 @@ if changed and refreshTTL > 0 then
 end
 local value = native.call('GET', key)
 local pairMissing = value == '-1' or (not value and not native.call('GET', parent) and not native.call('GET', legacy))
-return {result or false, value or false, native.call('PTTL', key), pairMissing and 1 or 0}
+return {result or false, value or false, native.call('PTTL', key), pairMissing and 1 or 0, excluded and 1 or 0}
 `
 
 type stickyBindingScript struct {
@@ -113,11 +128,15 @@ func (c *gatewayCache) runStickyBinding(ctx context.Context, script *stickyBindi
 		b.Legacy = b.Parent
 	}
 	keys = append(keys, prefix+b.Parent, genPrefix+b.Parent, prefix+b.Legacy, genPrefix+b.Legacy)
-	args = append(args, index, b.Fallback, b.TTL.Milliseconds(), b.RefreshTTL.Milliseconds())
+	lookup := script == readSessionBindingScript || script == resolveSessionBindingScript
+	args = append(args, index, b.Fallback, b.TTL.Milliseconds(), b.RefreshTTL.Milliseconds(), lookup)
 	cmd := script.thread.Run(ctx, c.rdb, keys, args...)
 	values, err := cmd.Slice()
 	if err != nil {
 		return cmd
+	}
+	if values[4].(int64) == 1 && b.Disable != nil {
+		b.Disable()
 	}
 	if b.Observe != nil {
 		var account int64

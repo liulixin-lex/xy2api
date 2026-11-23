@@ -12,6 +12,7 @@ type StickyThreadBinding struct {
 	Fallback            bool
 	TTL, RefreshTTL     time.Duration
 	Observe             func(int64, time.Duration, bool, bool)
+	Disable             func()
 }
 
 type stickyThreadBindingKey struct{}
