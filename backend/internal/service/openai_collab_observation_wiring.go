@@ -90,6 +90,9 @@ type openAICollabSendObservation struct {
 	calls           int
 	upstreamEmpty   int
 	deliveredEmpty  int
+
+	auxiliary          []openAICollabAuxiliaryObservation
+	auxiliaryUnchanged bool
 }
 
 type openAICollabCallObservation struct {
@@ -344,7 +347,7 @@ func (r *openAICollabRequest) sealSend() {
 			mode = resilience.CollabFinalModePlaintext
 		}
 		if s.replacements != (resilience.CollabReplacementCounts{}) {
-			if len(s.unchanged) > 0 || mode == resilience.CollabFinalModePlaintext {
+			if len(s.unchanged) > 0 || s.auxiliaryUnchanged || mode == resilience.CollabFinalModePlaintext {
 				mode = resilience.CollabFinalModeMixed
 			} else {
 				mode = resilience.CollabFinalModePlaceholder
