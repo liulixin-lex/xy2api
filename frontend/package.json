@@ -19,7 +19,7 @@
   "dependencies": {
     "@airwallex/components-sdk": "^1.36.0",
     "@lobehub/icons": "^4.0.2",
-    "@stripe/stripe-js": "^9.0.1",
+    "@stripe/stripe-js": "^10.3.0",
     "@tanstack/vue-virtual": "^3.13.52",
     "@vue/devtools-api": "^8.2.1",
     "@vueuse/core": "^15.0.0",
