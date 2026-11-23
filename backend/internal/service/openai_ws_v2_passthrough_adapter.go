@@ -466,6 +466,8 @@ func (c *openAIWSPassthroughFirstOutputFrameConn) ReadFrame(ctx context.Context)
 	readCtx, cancelRead := context.WithCancel(ctx)
 	readResultCh := make(chan readResult, 1)
 	go func() {
+		defer resilience.RecoverCollabWorker()
+
 		msgType, payload, err := c.inner.ReadFrame(readCtx)
 		readResultCh <- readResult{msgType: msgType, payload: payload, err: err}
 	}()

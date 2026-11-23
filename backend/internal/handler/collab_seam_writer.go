@@ -95,17 +95,18 @@ type collabSeamWriter struct {
 	// whether or not the existing path had committed the headers.
 	quiet bool
 
-	held            *collabWithheld
-	armHeader       http.Header
-	commitHeader    http.Header
-	prelude         collabDeliveredPrelude
-	takeover        atomic.Bool
-	jsonDelivered   atomic.Bool
-	continuation    []byte
-	continuationErr error
-	preludePending  []byte
-	resumeSequence  int64
-	lastWrite       time.Time
+	held              *collabWithheld
+	armHeader         http.Header
+	commitHeader      http.Header
+	prelude           collabDeliveredPrelude
+	takeover          atomic.Bool
+	jsonDelivered     atomic.Bool
+	continuation      []byte
+	continuationErr   error
+	preludePending    []byte
+	resumeSequence    int64
+	lastWrite         time.Time
+	semanticDelivered chan struct{}
 }
 
 // These facts describe only bytes delivered before a takeover. Local ending
@@ -266,6 +267,10 @@ func (w *collabSeamWriter) pass(kind collabSeamOpKind, data []byte) (int, error)
 	if w.quiet && err != nil && n <= 0 {
 		w.hold(kind, nil)
 		return n, err
+	}
+	if w.quiet && n > 0 && w.semanticDelivered != nil {
+		close(w.semanticDelivered)
+		w.semanticDelivered = nil
 	}
 	// The mode changes only after the write: passing writers skip the lock.
 	w.set(collabSeamPassing)

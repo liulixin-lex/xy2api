@@ -20,22 +20,35 @@ const collabRejectionLimit = 8
 // CollabRejection is transient, request-owned evidence. Never log or persist
 // Payload; BodyDigest covers exactly the bytes handed to the send boundary.
 type CollabRejection struct {
-	AccountID   int64
-	Passthrough bool
-	Status      int
-	BodyDigest  resilience.CollabDigest
-	Payload     []byte
-	Event       string
-	Source      resilience.CollabEvidenceSource
-	Truncated   bool
-	Handled     map[string]bool
+	AccountID    int64
+	Passthrough  bool
+	Status       int
+	BodyDigest   resilience.CollabDigest
+	Payload      []byte
+	Event        string
+	Source       resilience.CollabEvidenceSource
+	Truncated    bool
+	Handled      map[string]bool
+	Derivation   []byte
+	positions    map[int]int
+	resolved     *resilience.CollabNamedItem
+	namedClasses map[collabNamedClass]bool
+	repairs      collabRequestRepairs
+	unlocatable  bool
 }
 
 func (r CollabRejection) Evidence(shape resilience.CollabRequestShape) resilience.CollabEvidence {
 	if r.Truncated {
 		return resilience.CollabEvidence{Grade: resilience.CollabEvidenceGradeUnclaimed, Family: resilience.CollabFamilyNone, Source: r.Source}
 	}
-	return resilience.ClassifyCollabEvidence(resilience.CollabEvidenceInput{Payload: r.Payload, Event: r.Event, Source: r.Source, HTTPStatus: r.Status, Shape: shape})
+	evidence := resilience.ClassifyCollabEvidence(resilience.CollabEvidenceInput{Payload: r.Payload, Event: r.Event, Source: r.Source, HTTPStatus: r.Status, Shape: shape})
+	if r.unlocatable {
+		evidence.Named = &resilience.CollabNamedItem{Ambiguous: true}
+	} else if r.resolved != nil {
+		named := *r.resolved
+		evidence.Named = &named
+	}
+	return evidence
 }
 
 type collabSendObserverKey struct{}
@@ -72,6 +85,9 @@ func (s *OpenAIGatewayService) collabDuplicateSend(ctx context.Context, account 
 type CollabSendObserver struct {
 	mu           sync.Mutex
 	rejections   []CollabRejection
+	repairs      collabRequestRepairs
+	namedClasses map[collabNamedClass]bool
+	handled      map[int64]map[string]bool
 	rejected     map[CollabRejectedBody]bool
 	accepted     atomic.Bool
 	semantic     atomic.Bool
@@ -151,7 +167,9 @@ func (o *CollabSendObserver) Rejections() []CollabRejection {
 	out := append([]CollabRejection(nil), o.rejections...)
 	for i := range out {
 		out[i].Payload = bytes.Clone(out[i].Payload)
-		out[i].Handled = maps.Clone(out[i].Handled)
+		out[i].Handled = maps.Clone(o.handled[out[i].AccountID])
+		out[i].repairs = maps.Clone(o.repairs)
+		out[i].namedClasses = maps.Clone(o.namedClasses)
 	}
 	return out
 }
@@ -194,14 +212,8 @@ func (o *CollabSendObserver) record(rejection CollabRejection, generation uint64
 			}
 		}
 		if evidence.Named != nil {
-			located := false
-			for _, item := range o.body.Items {
-				if item.Identity != "" && item.Identity == evidence.Named.Identity {
-					located = true
-				}
-			}
-			eligible = eligible && located && !evidence.Named.Ambiguous
-			if !located || evidence.Named.Ambiguous {
+			eligible = eligible && evidence.Named.Located && !evidence.Named.Ambiguous
+			if !evidence.Named.Located || evidence.Named.Ambiguous {
 				o.reason("named_unlocatable")
 			}
 		}
@@ -213,6 +225,26 @@ func (o *CollabSendObserver) record(rejection CollabRejection, generation uint64
 		o.rejected = map[CollabRejectedBody]bool{}
 	}
 	o.rejected[CollabRejectedBody{rejection.AccountID, rejection.BodyDigest}] = true
+	o.repairs.merge(rejection.repairs)
+	if o.namedClasses == nil {
+		o.namedClasses = map[collabNamedClass]bool{}
+	}
+	for class, used := range rejection.namedClasses {
+		if used {
+			o.namedClasses[class] = true
+		}
+	}
+	if o.handled == nil {
+		o.handled = map[int64]map[string]bool{}
+	}
+	if o.handled[rejection.AccountID] == nil {
+		o.handled[rejection.AccountID] = map[string]bool{}
+	}
+	for id, handled := range rejection.Handled {
+		if handled {
+			o.handled[rejection.AccountID][id] = true
+		}
+	}
 	if len(o.rejections) == collabRejectionLimit {
 		o.rejections = o.rejections[:collabRejectionLimit-1]
 	}
@@ -340,23 +372,45 @@ func (b *collabEvidenceBody) record(rejection CollabRejection) {
 	if b.requestBody != nil {
 		rejection.BodyDigest = b.service.collabBodyDigest(b.requestBody)
 	}
-	candidate := rejection.Evidence(resilience.CollabRequestShape{AgentCiphertext: true, ToolOutputCiphertext: true})
-	if b.requestBody != nil && (candidate.Grade == resilience.CollabEvidenceGradeVerified || candidate.Grade == resilience.CollabEvidenceGradeClaimed) {
+	if b.requestBody != nil {
 		original := b.observer.Body()
+		positions, ok := original.inputPositions(b.requestBody)
+		rejection.positions, rejection.unlocatable = positions, !ok
+		if ok {
+			physical, _ := original.atBody(b.requestBody)
+			physical.Original = b.requestBody
+			e := physical.ResolveEvidence(rejection.Evidence(original.Shape))
+			if e.Named != nil {
+				named := *e.Named
+				// Resolution has already checked every locator and family.
+				named.InputIndex, named.Path, named.Locators = nil, "", nil
+				rejection.resolved = &named
+			}
+		}
 		current := ParseCollabBody(b.requestBody)
-		remainingItems := make(map[string]bool, len(current.Items))
+		remainingItems := make(map[int]bool, len(current.Items))
 		for _, item := range current.Items {
-			remainingItems[item.Identity] = len(item.Paths) > 0
+			remainingItems[positions[item.Index]] = len(item.Paths) > 0
 		}
 		for _, item := range original.Items {
-			if len(item.Paths) == 0 || current.Shape.Ambiguous {
+			if len(item.Paths) == 0 || current.Shape.Ambiguous || !ok {
 				continue
 			}
-			if !remainingItems[item.Identity] {
+			if !remainingItems[item.Index] {
 				if rejection.Handled == nil {
 					rejection.Handled = map[string]bool{}
 				}
 				rejection.Handled[item.Identity] = true
+				if rejection.namedClasses == nil {
+					rejection.namedClasses = map[collabNamedClass]bool{}
+				}
+				rejection.namedClasses[collabNamedItemClass(item)] = true
+			}
+		}
+		if !current.Shape.Ambiguous && !bytes.Equal(original.Original, b.requestBody) {
+			rejection.repairs = original.independentRepairs(b.requestBody)
+			if ok {
+				rejection.Derivation = bytes.Clone(b.requestBody)
 			}
 		}
 	}

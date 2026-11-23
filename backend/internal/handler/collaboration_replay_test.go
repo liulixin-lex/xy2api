@@ -37,13 +37,14 @@ import (
 type replayMemory struct {
 	ownerFactsStore
 	service.GatewayCache
-	mu          sync.Mutex
-	bindings    map[string]int64
-	avoids      map[string]map[int64]time.Time
-	avoidUntil  map[string]map[int64]time.Time
-	failures    map[string]map[int64]int64
-	accountBase int64
-	effects     []string
+	mu                  sync.Mutex
+	bindings            map[string]int64
+	responseGenerations map[string]string
+	avoids              map[string]map[int64]time.Time
+	avoidUntil          map[string]map[int64]time.Time
+	failures            map[string]map[int64]int64
+	accountBase         int64
+	effects             []string
 }
 
 type replayRandom struct {
@@ -266,13 +267,18 @@ func runCollaborationReplay(t *testing.T, c replayCase, snapshot resilience.Sett
 	defer billing.Stop()
 	rateLimit := service.NewRateLimitService(repo, nil, cfg, nil, nil)
 	usage := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 16), unbilled: make(chan *service.GatewayUnbilledRequest, 16)}
-	gateway := service.NewOpenAIGatewayService(repo, usage, nil, nil, nil, nil, memory, cfg, nil, nil, service.NewBillingService(cfg, nil), rateLimit, billing, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
+	concurrency := &replaySlots{base: accountBase, firstWaiters: c.FirstWaiters, secondFull: c.SecondUnavailable, userWaiters: c.UserWaiters, active: map[int64]int{}}
+	var schedulerConcurrency *service.ConcurrencyService
+	if collabReplaySlotsSetup != nil {
+		collabReplaySlotsSetup(concurrency)
+		schedulerConcurrency = service.NewConcurrencyService(concurrency)
+	}
+	gateway := service.NewOpenAIGatewayService(repo, usage, nil, nil, nil, nil, memory, cfg, nil, schedulerConcurrency, service.NewBillingService(cfg, nil), rateLimit, billing, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
 	gateway.StopOpenAICodexTicketHarvester()
 	upstream.learning = func() []string { return replayLearning(gateway) }
 	previousRuntime := service.Resilience()
 	runtime := service.ProvideResilienceService(nil, memory, nil, nil, repo, nil, rateLimit, &service.GatewayService{}, gateway)
 	defer func() { runtime.Stop(); service.SetResilienceInstance(previousRuntime) }()
-	concurrency := &replaySlots{base: accountBase, firstWaiters: c.FirstWaiters, secondFull: c.SecondUnavailable, userWaiters: c.UserWaiters, active: map[int64]int{}}
 	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(concurrency), billing, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 	if configureReplayHandler != nil {
 		configureReplayHandler(h, usage)
@@ -372,6 +378,11 @@ func runCollaborationReplay(t *testing.T, c replayCase, snapshot resilience.Sett
 				gc = current
 			})
 			router.ServeHTTP(writer, gc.Request)
+			// Observe asynchronous post-settlement persistence before snapshotting.
+			synctest.Wait()
+			if collabReplayFinished != nil {
+				collabReplayFinished()
+			}
 			writer.note()
 			cancel()
 			billed := []string{}

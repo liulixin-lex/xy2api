@@ -59,7 +59,7 @@ func resilienceStallThreshold(legacy time.Duration, outputStarted bool) time.Dur
 // request without reaching a failover loop; the one path that fails over
 // on a stall before output (Grok) does not count the attempt again.
 func noteResilienceStall(ctx context.Context, rl *RateLimitService, account *Account) {
-	if account == nil || !resilience.Current().StallOn() {
+	if account == nil || !resilience.Current().StallOn() || !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		return
 	}
 	failureAt := time.Now()

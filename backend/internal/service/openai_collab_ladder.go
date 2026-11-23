@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"maps"
 	"strconv"
@@ -14,6 +15,8 @@ import (
 // delivery, settlement and restoring that terminal; this loop owns derivations.
 // Select must return immediately and Send must report actual client delivery.
 type CollabLadder struct {
+	StopReason            CollabLadderStop
+	LastEvidence          resilience.CollabEvidence
 	Body                  CollabBody
 	First                 int64
 	Current               int64
@@ -29,10 +32,13 @@ type CollabLadder struct {
 	Sent                  func() bool
 }
 
-func (l CollabLadder) Run(ctx context.Context) bool {
+func (l *CollabLadder) Run(ctx context.Context) bool {
+	l.StopReason = CollabLadderFallback
+	l.LastEvidence = l.Evidence
 	if l.First == 0 || l.Body.Shape.Ambiguous || l.Body.Shape.ContinuationPointer || l.Select == nil || l.Send == nil {
 		return false
 	}
+	l.Evidence = l.Body.ResolveEvidence(l.Evidence)
 	claimed := l.Evidence.Grade == resilience.CollabEvidenceGradeClaimed
 	eligible := l.Evidence.Grade == resilience.CollabEvidenceGradeVerified || claimed && (l.Body.Shape.AgentCiphertext || l.Body.Shape.ToolOutputCiphertext)
 	if !eligible {
@@ -44,12 +50,16 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 	}
 	if progress.derived == nil {
 		progress.derived = map[int64][]byte{}
+	}
+	if progress.probed == nil {
 		progress.probed = map[int64]bool{}
 		progress.replaced = map[int64]bool{}
 		if progress.handled == nil {
 			progress.handled = map[int64]map[string]bool{}
 		}
-		progress.namedFamilies = map[int64]map[resilience.CollabFamily]bool{}
+	}
+	if progress.namedFamilies == nil {
+		progress.namedFamilies = map[collabNamedClass]bool{}
 	}
 	derived, probed, replaced := progress.derived, maps.Clone(progress.probed), progress.replaced
 	switched, dropped := progress.switched, progress.dropped
@@ -59,26 +69,58 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		current = l.First
 	}
 	evidence := l.Evidence
-	latestEvidence := evidence
+	l.LastEvidence = evidence
 	final := false
+	var lastBody []byte
+	lastAccount := int64(0)
+	if last := progress.lastRejection; last != nil && l.Body.LadderPolicy(last.Evidence(l.Body.Shape), CollabLadderFinalDisposal).LocalEnding && !last.unlocatable {
+		lastBody, lastAccount = last.Derivation, last.AccountID
+	}
 
 	for ctx.Err() == nil && (l.Continue == nil || l.Continue()) {
-		if evidence.Ownership == resilience.CollabOwnershipClassCapacity || evidence.Ownership == resilience.CollabOwnershipClassContinuation {
+		reason := CollabLadderSelecting
+		if final {
+			reason = CollabLadderFallback
+		}
+		policy := l.Body.LadderPolicy(evidence, reason)
+		if !policy.eligible {
 			return false
 		}
-		if evidence.Grade != resilience.CollabEvidenceGradeVerified && evidence.Grade != resilience.CollabEvidenceGradeClaimed {
+		// Final disposal is a request endpoint, including after an ordinary
+		// account switch. A rejected replace-all never restarts selection.
+		replacedAny := false
+		for _, used := range replaced {
+			replacedAny = replacedAny || used
+		}
+		if !final && replacedAny {
+			if evidence.Family == resilience.CollabFamilyCallArgs {
+				return false
+			}
+			l.StopReason = CollabLadderFinalDisposal
+			if evidence.Named != nil && handled[current][evidence.Named.Identity] && !collabProtectedItem(l.Body, evidence.Named.Identity) {
+				l.StopReason = CollabLadderHandledAgain
+			}
 			return false
 		}
-		claimed = evidence.Grade == resilience.CollabEvidenceGradeClaimed
+		claimed = policy.conservative
 		var action resilience.CollabAction
 		named := ""
 		prefer := current
 		var exclude map[int64]bool
 		endpoint := false
-		batchReasoning := false
+		disposalReason := CollabLadderFinalDisposal
 		if final {
+			disposalReason = CollabLadderFallback
+		}
+		batchReasoning := false
+		if policy.switchOnly {
+			if switched || l.MaxAttempts == 1 {
+				return false
+			}
+			action = resilience.CollabActionSwitchOriginal
+		} else if final {
 			action = resilience.CollabActionReplaceAll
-		} else if evidence.Named != nil {
+		} else if evidence.Named != nil && !claimed {
 			if evidence.Named.Ambiguous {
 				return false
 			}
@@ -94,15 +136,21 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				return false
 			}
 			if handled[current][named] {
-				if !collabProtectedItem(l.Body, named) || replaced[current] {
+				if !collabProtectedItem(l.Body, named) {
+					l.StopReason = CollabLadderHandledAgain
+					return false
+				}
+				if replaced[current] {
+					l.StopReason = CollabLadderFinalDisposal
 					return false
 				}
 				action = resilience.CollabActionReplaceAll
 				endpoint = true
 				named = ""
 			} else if item.Family == resilience.CollabFamilyReasoning && l.NamedReasoningAllowed != nil && !l.NamedReasoningAllowed(current) {
-				// Exhausted in-place reasoning admission does not consume the
-				// separate final-disposal allowance.
+				// Exhausted in-place reasoning admission falls back to the
+				// separate final repair without authorizing local ending.
+				disposalReason = CollabLadderFallback
 				action = resilience.CollabActionReplaceAll
 				named = ""
 			} else if item.Family != resilience.CollabFamilyReasoning && item.Class != resilience.CollabItemClassReplaceable && !switched && l.MaxAttempts != 1 {
@@ -112,20 +160,15 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				if item.Family != resilience.CollabFamilyReasoning && (item.Family == resilience.CollabFamilyCompaction || item.Class == resilience.CollabItemClassProtected || item.Class == resilience.CollabItemClassUnreadMessage) {
 					prefer = l.First
 				}
-				if namedFamilies[current][item.Family] {
+				if namedFamilies[collabNamedItemClass(*item)] {
 					if item.Family == resilience.CollabFamilyReasoning {
 						batchReasoning = true
 					}
-					if item.Family == resilience.CollabFamilyAgentMessage && item.Class == resilience.CollabItemClassReplaceable {
+					if item.Class == resilience.CollabItemClassReplaceable {
 						action = resilience.CollabActionDropUnprotected
 					}
 				}
 			}
-		} else if evidence.Ownership == resilience.CollabOwnershipClassUnknownSuffix || evidence.Family == resilience.CollabFamilyOwnership && !l.Body.Shape.AgentCiphertext {
-			if switched || l.MaxAttempts == 1 {
-				return false
-			}
-			action = resilience.CollabActionSwitchOriginal
 		} else if !claimed && evidence.Ownership == resilience.CollabOwnershipClassSourceConflict && !dropped {
 			action = resilience.CollabActionDropUnprotected
 		} else if progress.sourceBody != nil && !switched && l.MaxAttempts != 1 {
@@ -139,9 +182,12 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		} else {
 			action = resilience.CollabActionReplaceAll
 		}
-		if collabOptionalAction(action) && progress.optional >= resilience.CollabOptionalSendLimit {
+		if collabOptionalAction(action) && (l.MaxAttempts == 1 || progress.optional >= resilience.CollabOptionalSendLimit) {
 			action = resilience.CollabActionReplaceAll
 			named = ""
+		}
+		if !policy.permits(action) {
+			return false
 		}
 		if action == resilience.CollabActionSwitchOriginal {
 			prefer = 0
@@ -182,6 +228,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 			if action == resilience.CollabActionSwitchOriginal || action == resilience.CollabActionProbeReasoning || action == resilience.CollabActionDropUnprotected {
 				continue
 			}
+			l.StopReason = CollabLadderDeliveryUnavailable
 			return false
 		}
 		if release == nil {
@@ -194,17 +241,10 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				body = progress.sourceBody
 			}
 		}
+		body = progress.repairs.apply(l.Body, body)
 		next, changed := body, action == resilience.CollabActionSwitchOriginal
 		if !changed {
-			derivation := l.Body
-			if action == resilience.CollabActionDropUnprotected && evidence.Ownership == resilience.CollabOwnershipClassSourceConflict {
-				derivation.Items = nil
-				for _, item := range l.Body.Items {
-					if item.Family == resilience.CollabFamilyAgentMessage && item.Class == resilience.CollabItemClassReplaceable {
-						derivation.Items = append(derivation.Items, item)
-					}
-				}
-			}
+			derivation := policy.derivation(l.Body, action)
 			deriveAction := action
 			if batchReasoning {
 				deriveAction = resilience.CollabActionProbeReasoning
@@ -214,18 +254,24 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		if !changed {
 			release()
 			if action == resilience.CollabActionReplaceAll || action == resilience.CollabActionNamedRepair {
+				if disposalReason == CollabLadderFinalDisposal && evidence.Grade == resilience.CollabEvidenceGradeVerified &&
+					current == lastAccount && bytes.Equal(body, lastBody) &&
+					(action == resilience.CollabActionReplaceAll || collabProtectedItem(l.Body, named)) && l.Body.fullyDisposed(body) {
+					l.StopReason = CollabLadderFinalDisposal
+				}
 				return false
 			}
 			continue
 		}
-		if l.BeforeDisposal != nil && (action == resilience.CollabActionReplaceAll || action == resilience.CollabActionNamedRepair && collabProtectedTask(l.Body, named)) {
-			if l.BeforeDisposal(ctx, latestEvidence) {
+		if l.Body.LadderPolicy(l.LastEvidence, disposalReason).LocalEnding && l.BeforeDisposal != nil && (action == resilience.CollabActionReplaceAll || action == resilience.CollabActionNamedRepair && collabProtectedTask(l.Body, named)) {
+			if l.BeforeDisposal(ctx, l.LastEvidence) {
 				release()
 				return true
 			}
 		}
 		nextEvidence, delivered := func() (resilience.CollabEvidence, bool) { defer release(); return l.Send(ctx, account, next, action) }()
 		if l.Sent == nil || l.Sent() {
+			lastBody, lastAccount = next, account
 			if action == resilience.CollabActionSwitchOriginal {
 				progress.switched = true
 			}
@@ -244,19 +290,17 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				handled[account] = map[string]bool{}
 			}
 			if action != resilience.CollabActionSwitchOriginal && action != resilience.CollabActionProbeReasoning {
-				for _, item := range l.Body.Items {
+				physical, _ := l.Body.atBody(body)
+				for _, item := range physical.Items {
 					path := "input." + strconv.Itoa(item.Index)
 					if item.Identity != "" && gjson.GetBytes(body, path).Raw != gjson.GetBytes(next, path).Raw {
 						handled[account][item.Identity] = true
 					}
 				}
 				if named != "" {
-					if namedFamilies[account] == nil {
-						namedFamilies[account] = map[resilience.CollabFamily]bool{}
-					}
 					for _, item := range l.Body.Items {
 						if item.Identity == named {
-							namedFamilies[account][item.Family] = true
+							namedFamilies[collabNamedItemClass(item)] = true
 						}
 					}
 				}
@@ -273,16 +317,19 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		if delivered {
 			return true
 		}
-		latestEvidence = nextEvidence
+		l.LastEvidence = l.Body.ResolveEvidence(nextEvidence)
 		if nextEvidence.Grade != resilience.CollabEvidenceGradeVerified && nextEvidence.Grade != resilience.CollabEvidenceGradeClaimed || nextEvidence.Ownership == resilience.CollabOwnershipClassCapacity {
 			if action == resilience.CollabActionReplaceAll {
 				return false
 			}
 			final = true
-			nextEvidence = evidence
 		}
 
-		current, evidence = account, nextEvidence
+		current, evidence = account, l.Body.ResolveEvidence(nextEvidence)
+	}
+	l.StopReason = CollabLadderDeliveryUnavailable
+	if evidence.Named != nil && handled[current][evidence.Named.Identity] && !collabProtectedItem(l.Body, evidence.Named.Identity) {
+		l.StopReason = CollabLadderHandledAgain
 	}
 	return false
 }
@@ -306,16 +353,32 @@ func CollabTakeoverDuration(now, started time.Time, retryable, committed bool, d
 	return limit
 }
 
+type collabNamedClass struct {
+	family resilience.CollabFamily
+	class  resilience.CollabItemClass
+}
+
+// Reasoning has its own batch rule. Replaceable bodies share one allowance
+// across agent messages and tool outputs; protected and unread items stay apart.
+func collabNamedItemClass(item CollabBodyItem) collabNamedClass {
+	if item.Family == resilience.CollabFamilyReasoning {
+		return collabNamedClass{family: item.Family}
+	}
+	return collabNamedClass{class: item.Class}
+}
+
 // Progress is request-owned and shared by early and terminal entry. Named and
 // account-specific final repairs do not spend the optional switch/probe budget.
 type CollabLadderProgress struct {
 	derived           map[int64][]byte
 	probed, replaced  map[int64]bool
 	handled           map[int64]map[string]bool
-	namedFamilies     map[int64]map[resilience.CollabFamily]bool
+	namedFamilies     map[collabNamedClass]bool
 	switched, dropped bool
 	optional          int
 	sourceBody        []byte
+	repairs           collabRequestRepairs
+	lastRejection     *CollabRejection
 }
 
 func collabOptionalAction(action resilience.CollabAction) bool {
@@ -354,5 +417,27 @@ func (p *CollabLadderProgress) RememberHandled(account int64, items map[string]b
 		if handled {
 			p.handled[account][id] = true
 		}
+	}
+}
+
+// RememberRejection keeps confirmed account-local edits with their handled facts.
+// Re-entering the ladder must never restore bytes that this account rejected.
+func (p *CollabLadderProgress) RememberRejection(rejection CollabRejection) {
+	p.lastRejection = &rejection
+	p.repairs.merge(rejection.repairs)
+	p.RememberHandled(rejection.AccountID, rejection.Handled)
+	if p.namedFamilies == nil {
+		p.namedFamilies = map[collabNamedClass]bool{}
+	}
+	for class, used := range rejection.namedClasses {
+		if used {
+			p.namedFamilies[class] = true
+		}
+	}
+	if len(rejection.Derivation) > 0 {
+		if p.derived == nil {
+			p.derived = map[int64][]byte{}
+		}
+		p.derived[rejection.AccountID] = rejection.Derivation
 	}
 }

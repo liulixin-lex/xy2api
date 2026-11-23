@@ -55,16 +55,20 @@ func (s *SafeCollabRecordsStore) required(ctx context.Context, key collabPublica
 		pending = &collabPublication{done: make(chan struct{}), count: CollabTreeLocalEndingLimit}
 		s.publications[key] = pending
 		go func() {
-			stop := context.AfterFunc(s.stop, cancel)
+			defer collabRecover(&collabSafety.recordPanics)
+			// Waiters are released and the slot is returned on every exit.
+			defer func() {
+				s.publicationMu.Lock()
+				delete(s.publications, key)
+				close(pending.done)
+				s.publicationMu.Unlock()
+			}()
+			stop := context.AfterFunc(s.stop, func() { defer collabRecover(&collabSafety.recordPanics); cancel() })
 			defer stop()
 			func() { defer collabRecover(&collabSafety.recordPanics); pending.count, pending.ok = call(bounded) }()
 			if bounded.Err() != nil {
 				pending.ok = false
 			}
-			s.publicationMu.Lock()
-			delete(s.publications, key)
-			close(pending.done)
-			s.publicationMu.Unlock()
 		}()
 	}
 	s.publicationMu.Unlock()

@@ -57,3 +57,17 @@ func TestCollabWatchInitialQueueReadConsumesDeadline(t *testing.T) {
 		require.Equal(t, time.Second, time.Since(started))
 	})
 }
+
+func TestCollabWatchRetainedAccountAfterAcceptance(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var queued atomic.Bool
+		ctx, stop := watchCollabTakeover(context.Background(), time.Second, func() bool { return true }, func(context.Context) bool { return false }, func(context.Context) bool { return queued.Load() })
+		defer stop()
+		time.Sleep(2 * time.Second)
+		require.NoError(t, ctx.Err(), "acceptance suspends the preparation deadline")
+		queued.Store(true)
+		time.Sleep(time.Second)
+		synctest.Wait()
+		require.ErrorIs(t, ctx.Err(), context.Canceled, "the original account must still yield after upstream acceptance")
+	})
+}

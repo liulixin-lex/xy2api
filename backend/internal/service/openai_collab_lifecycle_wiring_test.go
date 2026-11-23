@@ -56,7 +56,7 @@ func TestCollabWiringContinuationAssembly(t *testing.T) {
 			s := NewOpenAIGatewayService(nil, nil, nil, nil, nil, nil, cache, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			t.Cleanup(s.StopOpenAICodexTicketHarvester)
 			t.Cleanup(s.CloseCollabRecords)
-			require.Equal(t, !fault, s.CanContinueCollabResponse())
+			require.Equal(t, !fault, s.CanContinueCollabResponse(context.Background()))
 			if fault {
 				return
 			}

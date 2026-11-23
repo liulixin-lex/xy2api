@@ -386,6 +386,8 @@ func newOpenAIFirstOutputHeaderGuard(
 		remaining = time.Nanosecond
 	}
 	guard.timer = time.AfterFunc(remaining, func() {
+		defer resilience.RecoverCollabWorker()
+
 		guard.firedAt = time.Now()
 		guard.outcome = freezeOpenAITimeout(ctx, guard.capture.Load())
 		guard.expiring.Store(true)

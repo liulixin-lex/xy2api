@@ -40,7 +40,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		return
 	}
 	evidence := parsed.ResolveEvidence(last.Evidence(parsed.Shape))
-	if evidence.Grade != resilience.CollabEvidenceGradeVerified && evidence.Grade != resilience.CollabEvidenceGradeClaimed {
+	if evidence.Named != nil && evidence.Named.Ambiguous || evidence.Grade != resilience.CollabEvidenceGradeVerified && evidence.Grade != resilience.CollabEvidenceGradeClaimed {
 		return
 	}
 	key, ok := middleware.GetAPIKeyFromContext(c)
@@ -67,11 +67,12 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		retryable = last.Status == 408 || last.Status == 409 || last.Status == 429 || last.Status >= 500 || last.Source == resilience.CollabEvidenceSourceStreamError || last.Source == resilience.CollabEvidenceSourceAggregatedStream
 	}
 	saved.retryable = retryable
-	if seam.writer.deliveredPrelude().Created && !h.gatewayService.CanContinueCollabResponse() {
+	if seam.writer.deliveredPrelude().Created && !h.gatewayService.CanContinueCollabResponse(parentRequest.Context()) {
 		// A local notice reuses the delivered identity without registering a
 		// continuation. Only replacement upstream responses need an alias.
+		// Final disposal row (c): the needed continuation is unavailable.
 		seam.localFinal = true
-		if seam.localEnding != nil && evidence.Grade == resilience.CollabEvidenceGradeVerified {
+		if seam.localEnding != nil && parentRequest.Context().Err() == nil && parsed.LadderPolicy(evidence, collabLadderEndpointReason(parsed, rejections, last, evidence)).LocalEnding {
 			seam.localEnding(c, seam, saved, evidence)
 		}
 		return
@@ -83,7 +84,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	duration = min(duration, time.Minute-seam.optionalSpent)
 	if duration <= 0 {
 		seam.localFinal = true
-		if seam.localEnding != nil && evidence.Grade == resilience.CollabEvidenceGradeVerified && parentRequest.Context().Err() == nil {
+		if seam.localEnding != nil && parsed.LadderPolicy(evidence, collabLadderEndpointReason(parsed, rejections, last, evidence)).LocalEnding && parentRequest.Context().Err() == nil {
 			seam.localEnding(c, seam, saved, evidence)
 		}
 		return
@@ -91,13 +92,31 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	entered := time.Now()
 	defer func() { seam.optionalSpent += time.Since(entered) }()
 	var activeObserver atomic.Pointer[service.CollabSendObserver]
-	waiters := func(query context.Context) bool {
-		loads, err := h.concurrencyHelper.concurrencyService.GetUsersLoadBatch(query, []service.UserWithConcurrency{{ID: subject.UserID, MaxConcurrency: subject.Concurrency}})
-		return err != nil || loads[subject.UserID] != nil && loads[subject.UserID].WaitingCount > 0
+	loadStore := h.concurrencyHelper.concurrencyService
+	userLoad := service.UserWithConcurrency{ID: subject.UserID, MaxConcurrency: subject.Concurrency}
+	var retainedWaiters func(context.Context) bool
+	if seam.losslessDuration > 0 {
+		// Lossless preemption holds the account that produced the latest rejection,
+		// which may differ from the first account after ordinary failover.
+		retained := last.AccountID
+		retainedWaiters = seam.watchRetainedWaiters(func(query context.Context) bool {
+			waiting, err := loadStore.GetAccountWaitingCount(query, retained)
+			return err != nil || waiting > 0
+		})
 	}
-	ctx, stopWatch := watchCollabTakeover(parentRequest.Context(), duration, func() bool { return activeObserver.Load().Accepted() }, waiters)
+	waiters := func(query context.Context) bool {
+		allowed := collabStorageAllowed(query, func(storage context.Context) bool {
+			loads, err := loadStore.GetUsersLoadBatch(storage, []service.UserWithConcurrency{userLoad})
+			return err == nil && (loads[userLoad.ID] == nil || loads[userLoad.ID].WaitingCount == 0)
+		})
+		return !allowed || retainedWaiters != nil && retainedWaiters(query)
+	}
+	ctx, stopWatch := watchCollabTakeover(parentRequest.Context(), duration, func() bool { return activeObserver.Load().Accepted() }, waiters, retainedWaiters)
 	defer stopWatch()
 	if ctx.Err() != nil {
+		return
+	}
+	if seam.writer.deliveredPrelude().Created && !h.gatewayService.CanContinueCollabResponse(ctx) {
 		return
 	}
 	child := resilience.NewCollabChildState(parent)
@@ -115,7 +134,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	}
 	rejected := seam.rejected
 	for _, rejection := range rejections {
-		seam.progress.RememberHandled(rejection.AccountID, rejection.Handled)
+		seam.progress.RememberRejection(rejection)
 		rejected[service.CollabRejectedBody{AccountID: rejection.AccountID, Digest: rejection.BodyDigest}] = true
 	}
 	seamKeys := c.Copy().Keys
@@ -137,7 +156,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		}
 	}
 	l.BeforeDisposal = func(_ context.Context, current resilience.CollabEvidence) bool {
-		if seam.localEnding == nil || current.Grade != resilience.CollabEvidenceGradeVerified || parentRequest.Context().Err() != nil {
+		if seam.localEnding == nil || !parsed.LadderPolicy(current, service.CollabLadderFinalDisposal).LocalEnding || parentRequest.Context().Err() != nil {
 			return false
 		}
 		reset()
@@ -184,7 +203,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		if action != resilience.CollabActionReplaceAll {
 			remaining := duration - time.Since(entered)
 			var stop func()
-			ctx, stop = watchCollabTakeover(ctx, remaining/2, observer.Accepted, waiters)
+			ctx, stop = watchCollabTakeover(ctx, remaining/2, observer.Accepted, waiters, retainedWaiters)
 			defer stop()
 		}
 		ctx = resilience.WithCollabAttempt(ctx, resilience.CollabAttempt{Optional: true, Action: action})
@@ -200,7 +219,10 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 				parent.NoteGatewaySend(id)
 				parent.AdoptCollabDelivery(id, child)
 				seam.deliveredAccount = id
-				h.gatewayService.CommitCollabResponseIdentity(c, accounts[id], result, seam.writer.deliveredPrelude().ID)
+				persist := h.gatewayService.CommitCollabResponseIdentity(c, accounts[id], result, seam.writer.deliveredPrelude().ID)
+				if persist != nil {
+					defer persist()
+				}
 				if recovered != nil {
 					err = errors.New("optional delivery interrupted")
 				}
@@ -217,6 +239,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 
 		observed := observer.Rejections()
 		for _, rejection := range observed {
+			seam.progress.RememberRejection(rejection)
 			rejected[service.CollabRejectedBody{AccountID: rejection.AccountID, Digest: rejection.BodyDigest}] = true
 		}
 		if len(observed) > 0 {
@@ -230,10 +253,24 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		latestEvidence = resilience.CollabEvidence{}
 		return resilience.CollabEvidence{}, false
 	}
-	if !l.Run(ctx) {
+	if !l.Run(ctx) && parsed.LadderPolicy(l.LastEvidence, l.StopReason).LocalEnding {
 		seam.localFinal = true
 		l.BeforeDisposal(parentRequest.Context(), latestEvidence)
 	}
+}
+
+// collabLadderEndpointReason is the stop reason for an endpoint reached without
+// running the controller: delivery unavailable (final disposal row c), unless
+// the latest account already handled a named non-protected item, which falls
+// back.
+func collabLadderEndpointReason(parsed service.CollabBody, rejections []service.CollabRejection, last service.CollabRejection, evidence resilience.CollabEvidence) service.CollabLadderStop {
+	reason := service.CollabLadderDeliveryUnavailable
+	for _, rejection := range rejections {
+		if evidence.Named != nil && rejection.AccountID == last.AccountID && rejection.Handled[evidence.Named.Identity] && !parsed.ProtectedNamedItem(evidence) {
+			reason = service.CollabLadderHandledAgain
+		}
+	}
+	return reason
 }
 
 func collabSavedRetryable(saved *collabWithheld) bool {
@@ -254,12 +291,4 @@ func collabSavedRetryable(saved *collabWithheld) bool {
 		body = append(body, op.data...)
 	}
 	return parseOpsErrorResponse(body).StreamFailure
-}
-
-// deliveredAccountID is available to the request owner's thread-binding adapter.
-func (s *collabSeam) deliveredAccountID() int64 {
-	if s == nil {
-		return 0
-	}
-	return s.deliveredAccount
 }

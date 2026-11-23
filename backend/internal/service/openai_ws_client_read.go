@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"time"
 
 	coderws "github.com/coder/websocket"
@@ -55,6 +56,8 @@ func readOpenAIWSClientMessageWithTimeoutStart(
 
 	readDone := make(chan openAIWSClientReadResult, 1)
 	go func() {
+		defer resilience.RecoverCollabWorker()
+
 		messageType, payload, err := conn.Read(context.Background())
 		readDone <- openAIWSClientReadResult{messageType: messageType, payload: payload, err: err}
 	}()

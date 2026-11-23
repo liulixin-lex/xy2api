@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"io"
 	"net/http"
 	"strings"
@@ -198,9 +199,16 @@ func (b *codexTicketWatchdogBody) init() {
 		b.result = make(chan codexStreamResult, 1)
 		b.completed = make(chan struct{})
 		go func() {
-			model, err := codexTicketResponseModel(reader, b.encoding)
-			_ = reader.Close()
-			b.result <- codexStreamResult{model, err}
+			var result codexStreamResult
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					resilience.NoteCollabWorkerPanic(recovered)
+					result.err = errors.New("response parser interrupted")
+				}
+				_ = reader.Close()
+				b.result <- result
+			}()
+			result.model, result.err = codexTicketResponseModel(reader, b.encoding)
 		}()
 	})
 }
@@ -301,7 +309,7 @@ func (b *codexTicketWatchdogBody) closeWithCancel(cancel context.CancelFunc) err
 			// The read lock preserves the byte order with the converter's scanner.
 			// Completion can also come from that scanner, not only our drain.
 			if !finished {
-				go func() { _, _ = io.Copy(io.Discard, b) }()
+				go func() { defer resilience.RecoverCollabWorker(); _, _ = io.Copy(io.Discard, b) }()
 			}
 			timer := time.NewTimer(250 * time.Millisecond)
 			select {

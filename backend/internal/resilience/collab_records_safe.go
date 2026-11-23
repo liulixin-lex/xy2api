@@ -66,7 +66,11 @@ func (s *SafeCollabRecordsStore) Close() {
 		ctx, cancel := context.WithTimeout(context.Background(), CollabRecordTimeout)
 		defer cancel()
 		done := make(chan struct{})
-		go func() { defer close(done); s.flushInvalidations(ctx) }()
+		go func() {
+			defer collabRecover(&collabSafety.recordPanics)
+			defer close(done)
+			s.flushInvalidations(ctx)
+		}()
 		select {
 		case <-done:
 		case <-ctx.Done():
@@ -97,6 +101,7 @@ func (s *SafeCollabRecordsStore) enqueue(mutation CollabRecordMutation) {
 }
 
 func (s *SafeCollabRecordsStore) runWrites() {
+	defer collabRecover(&collabSafety.recordPanics)
 	for {
 		var first CollabRecordMutation
 		select {
@@ -197,6 +202,7 @@ func (s *SafeCollabRecordsStore) LookupBatch(ctx context.Context, batch CollabRe
 	batch.DispositionQueries = slices.Clone(batch.DispositionQueries)
 	done := make(chan CollabRecordBatchResult, 1)
 	go func() {
+		defer collabRecover(&collabSafety.recordPanics)
 		defer func() { <-s.readers }()
 		done <- s.lookupShared(ctx, batch)
 	}()

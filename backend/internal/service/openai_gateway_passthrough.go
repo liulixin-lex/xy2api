@@ -2672,7 +2672,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// upstream context is detached, so close the body (review P0).
 	stopPreludeCancel := func() bool { return false }
 	if guarded {
-		stopPreludeCancel = context.AfterFunc(reqCtx, func() { _ = resp.Body.Close() })
+		stopPreludeCancel = context.AfterFunc(reqCtx, func() {
+			defer resilience.RecoverCollabWorker()
+			_ = resp.Body.Close()
+		})
 		defer func() {
 			if stopPreludeCancel() && reqCtx.Err() != nil {
 				_ = resp.Body.Close()

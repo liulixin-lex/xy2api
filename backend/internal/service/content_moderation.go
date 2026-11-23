@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"io"
 	"log/slog"
 	"net/http"
@@ -1243,6 +1244,7 @@ func (s *ContentModerationService) enqueueRecord(input ContentModerationCheckInp
 }
 
 func (s *ContentModerationService) worker(id int) {
+	defer resilience.RecoverCollabWorker()
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), maxContentModerationTimeoutMS*time.Millisecond+10*time.Second)
 		runtimeSnapshot, err := s.loadRuntimeSnapshot(ctx)
@@ -1471,6 +1473,7 @@ func (s *ContentModerationService) GetStatus(ctx context.Context) (*ContentModer
 }
 
 func (s *ContentModerationService) cleanupWorker() {
+
 	timer := time.NewTimer(contentModerationCleanupDelay)
 	defer timer.Stop()
 	for {
@@ -1571,6 +1574,8 @@ func (s *ContentModerationService) triggerRuntimeSnapshotRefresh() {
 		return
 	}
 	go func() {
+		defer resilience.RecoverCollabWorker()
+
 		defer s.runtimeRefreshMu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), contentModerationRuntimeRefreshTimeout)
 		defer cancel()

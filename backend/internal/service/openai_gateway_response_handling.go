@@ -1277,6 +1277,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var lastReadAt int64
 	atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())
 	go func(scanBuf *sseScannerBuf64K) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				resilience.NoteCollabWorkerPanic(recovered)
+				logger.L().With(zap.String("component", "openai.responses.sse_reader"), zap.Any("panic", recovered)).Error("gateway.sse_reader_panic")
+			}
+		}()
 		defer putSSEScannerBuf64K(scanBuf)
 		defer close(events)
 		for documentScanner.Scan() {

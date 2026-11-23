@@ -1056,6 +1056,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	var preludeBodyClosed atomic.Bool
 	if stagePrelude {
 		stopPreludeCancel = context.AfterFunc(c.Request.Context(), func() {
+			defer resilience.RecoverCollabWorker()
 			preludeBodyClosed.Store(true)
 			_ = resp.Body.Close()
 		})
@@ -1595,6 +1596,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 	}
 	go func() {
+		defer resilience.RecoverCollabWorker()
 		defer close(events)
 		for scanner.Scan() {
 			atomic.StoreInt64(&lastReadAt, time.Now().UnixNano())

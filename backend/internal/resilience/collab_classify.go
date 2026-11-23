@@ -8,8 +8,9 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-var collabNamedPattern = regexp.MustCompile("(?i)\\bfor\\s+item\\s+['\"`]?([a-z0-9]+_[a-z0-9_-]+)\\b")
-var collabIndexPattern = regexp.MustCompile(`\binput(?:\[([0-9]+)\]|\.([0-9]+))(?:(?:\.[a-zA-Z_0-9]+)|(?:\[[0-9]+\]))*`)
+var collabNamedPattern = regexp.MustCompile(`(?i)\bfor\s+item\s+`)
+var collabLocatorPattern = regexp.MustCompile(`(?i)\binput(?:[.\[]|\s+[.\[])`)
+var collabAtPattern = regexp.MustCompile(`\bat\s+`)
 
 // Text evidence must assert rejection of the encrypted subject itself. Locator
 // quotes are allowed; quoted examples and unrelated later clauses are not.
@@ -59,6 +60,30 @@ func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
 	}
 	code := strings.ToLower(strings.TrimSpace(object.Get("code").String()))
 	message := strings.ToLower(object.Get("message").String())
+	family := CollabFamilyOtherEncrypted
+	out.Named = collabErrorNamed(object)
+	switch {
+	case strings.Contains(message, "encrypted function output"):
+		family = CollabFamilyToolOutput
+	case strings.Contains(message, "encrypted function arguments"), strings.Contains(message, "encrypted_function_args"):
+		family = CollabFamilyCallArgs
+	case out.Named != nil:
+		switch {
+		case strings.HasPrefix(out.Named.Identity, "amsg_"):
+			family = CollabFamilyAgentMessage
+		case strings.HasPrefix(out.Named.Identity, "rs_"):
+			family = CollabFamilyReasoning
+		case strings.HasPrefix(out.Named.Identity, "cmp_"):
+			family = CollabFamilyCompaction
+		case strings.HasPrefix(out.Named.Identity, "fco_"):
+			family = CollabFamilyToolOutput
+		case strings.HasPrefix(out.Named.Identity, "fc_"):
+			family = CollabFamilyCallArgs
+		}
+	}
+	if out.Named != nil {
+		out.Named.Family = family
+	}
 	// This relay state is independent of ciphertext and must stay unclaimed.
 	if code == "client_tool_continuation_unavailable" || strings.Contains(message, "opaque conversation state") || strings.Contains(message, "unrecognized conversation state") {
 		return out
@@ -95,28 +120,7 @@ func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
 		}
 		return out
 	}
-	out.Grade, out.Family = CollabEvidenceGradeVerified, CollabFamilyOtherEncrypted
-	out.Named = collabErrorNamed(object)
-	switch {
-	case strings.Contains(message, "encrypted function output"):
-		out.Family = CollabFamilyToolOutput
-	case strings.Contains(message, "encrypted function arguments"), strings.Contains(message, "encrypted_function_args"):
-		out.Family = CollabFamilyCallArgs
-	case out.Named != nil:
-		switch {
-		case strings.HasPrefix(out.Named.Identity, "amsg_"):
-			out.Family = CollabFamilyAgentMessage
-		case strings.HasPrefix(out.Named.Identity, "rs_"):
-			out.Family = CollabFamilyReasoning
-		case strings.HasPrefix(out.Named.Identity, "cmp_"):
-			out.Family = CollabFamilyCompaction
-		case strings.HasPrefix(out.Named.Identity, "fc_"):
-			out.Family = CollabFamilyCallArgs
-		}
-	}
-	if out.Named != nil {
-		out.Named.Family = out.Family
-	}
+	out.Grade, out.Family = CollabEvidenceGradeVerified, family
 	return out
 }
 
@@ -194,33 +198,127 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 			named.Ambiguous = true
 		}
 	}
-	add(object.Get("item_id").String())
-	for _, field := range []string{"message", "param"} {
-		for _, match := range collabNamedPattern.FindAllStringSubmatch(object.Get(field).String(), -1) {
-			add(match[1])
+	if id := object.Get("item_id"); id.Exists() {
+		if id.Type != gjson.String {
+			named = &CollabNamedItem{Ambiguous: true}
+		} else {
+			add(id.Str)
 		}
-		for _, match := range collabIndexPattern.FindAllStringSubmatch(object.Get(field).String(), -1) {
-			index, err := strconv.Atoi(match[1] + match[2])
+	}
+	for _, field := range []string{"message", "param"} {
+		part := object.Get(field)
+		if part.Exists() && part.Type != gjson.String {
 			if named == nil {
 				named = &CollabNamedItem{}
 			}
-			if err != nil || named.InputIndex != nil && *named.InputIndex != index {
+			named.Ambiguous = true
+			continue
+		}
+		value := part.Str
+		for _, match := range collabNamedPattern.FindAllStringIndex(value, -1) {
+			token, valid := collabReferenceToken(value[match[1]:])
+			add(token)
+			if !valid || token == "" {
+				if named == nil {
+					named = &CollabNamedItem{}
+				}
 				named.Ambiguous = true
-			} else {
-				named.InputIndex = &index
-				location := match[0]
-				if field == "param" {
-					location = strings.TrimSpace(object.Get(field).String())
+			}
+		}
+		var locators []string
+		if field == "param" && value != "" {
+			locators = []string{value}
+		} else if field == "message" {
+			starts := map[int]bool{}
+			for _, match := range collabLocatorPattern.FindAllStringIndex(value, -1) {
+				start := match[0]
+				// Keep the entire token, including qualifiers such as body/.
+				for start > 0 && !strings.ContainsRune(" \t\r\n", rune(value[start-1])) {
+					start--
 				}
-				path := strings.NewReplacer("[", ".", "]", "").Replace(location)
-				if named.Path != "" && named.Path != path && !strings.HasPrefix(path, named.Path+".") && !strings.HasPrefix(named.Path, path+".") {
-					named.Ambiguous = true
+				starts[start] = true
+			}
+			for _, match := range collabAtPattern.FindAllStringIndex(value, -1) {
+				starts[match[1]] = true
+			}
+			for start := range starts {
+				token, valid := collabReferenceToken(value[start:])
+				if !valid {
+					token = "!" + token
 				}
-				if len(path) > len(named.Path) {
-					named.Path = path
-				}
+				locators = append(locators, token)
+			}
+		}
+		if len(locators) > 1 {
+			if named == nil {
+				named = &CollabNamedItem{}
+			}
+			named.Ambiguous = true
+		}
+		for _, locator := range locators {
+			if named == nil {
+				named = &CollabNamedItem{}
+			}
+			named.Locators = append(named.Locators, locator)
+			if named.Path == "" {
+				named.Path = locator
 			}
 		}
 	}
 	return named
+}
+
+// Consume a whole reference, including matching quotes. Punctuation inside a
+// quoted ID is part of its identity; it must never turn into a valid prefix.
+func collabReferenceToken(value string) (string, bool) {
+	if value == "" {
+		return "", false
+	}
+	if strings.ContainsRune("'\"`", rune(value[0])) {
+		end := strings.IndexByte(value[1:], value[0])
+		if end < 0 {
+			return value, false
+		}
+		end++
+		tail := value[end+1:]
+		if len(tail) > 0 && strings.ContainsRune(" \t\r\n", rune(tail[0])) && !collabReferenceTail(tail) {
+			return value, false
+		}
+		if tail != "" && !strings.ContainsRune(" \t\r\n", rune(tail[0])) {
+			if !strings.ContainsRune(".,;:!?", rune(tail[0])) || len(tail) > 1 && !strings.ContainsRune(" \t\r\n", rune(tail[1])) {
+				return value, false
+			}
+		}
+		return value[1:end], true
+	}
+	end := strings.IndexAny(value, " \t\r\n")
+	if end < 0 {
+		end = len(value)
+	}
+	token := value[:end]
+	if end < len(value) && !collabReferenceTail(value[end:]) {
+		return value, false
+	}
+	if strings.ContainsAny(token, "'\"`") {
+		return token, false
+	}
+	// A single sentence terminator belongs to the surrounding prose.
+	if len(token) > 0 && strings.ContainsRune(".,;:!?", rune(token[len(token)-1])) {
+		if end != len(value) {
+			return token, false
+		}
+		token = token[:len(token)-1]
+	}
+	return token, token != ""
+}
+
+// Only the upstream's rejection clause may follow a reference. An arbitrary
+// suffix cannot turn into a shorter valid locator at the first whitespace.
+func collabReferenceTail(tail string) bool {
+	for _, clause := range []string{" could not be decrypted", " could not be decoded", " could not be verified", " hydration failed", " is invalid for this conversation"} {
+		if tail == clause || tail == clause+"." {
+			return true
+		}
+	}
+	return false
 }

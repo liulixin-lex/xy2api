@@ -121,12 +121,13 @@ func (w *replayWriter) Flush() {
 
 type replaySlots struct {
 	concurrencyCacheMock
-	mu           sync.Mutex
-	base         int64
-	firstWaiters bool
-	secondFull   bool
-	userWaiters  bool
-	active       map[int64]int
+	mu            sync.Mutex
+	base          int64
+	firstWaiters  bool
+	secondWaiters bool
+	secondFull    bool
+	userWaiters   bool
+	active        map[int64]int
 }
 
 func (s *replaySlots) AcquireUserSlot(context.Context, int64, int, string) (bool, error) {
@@ -206,7 +207,9 @@ func (s *replaySlots) GetAccountConcurrencyBatch(ctx context.Context, ids []int6
 	return out, nil
 }
 func (s *replaySlots) GetAccountWaitingCount(_ context.Context, id int64) (int, error) {
-	if id == s.base+1 && s.firstWaiters {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == s.base+1 && s.firstWaiters || id == s.base+2 && s.secondWaiters {
 		return 1, nil
 	}
 	return 0, nil

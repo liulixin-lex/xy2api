@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"html"
 	"log/slog"
 	"strconv"
@@ -127,6 +128,8 @@ func (s *BalanceNotifyService) dispatchBalanceLowEmail(ctx context.Context, user
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
+				resilience.NoteCollabWorkerPanic(r)
+
 				slog.Error("panic in balance notification", "recover", r)
 			}
 		}()
@@ -242,6 +245,8 @@ func (s *BalanceNotifyService) asyncSendQuotaAlert(adminEmails []string, account
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
+				resilience.NoteCollabWorkerPanic(r)
+
 				slog.Error("panic in quota notification", "recover", r)
 			}
 		}()

@@ -198,13 +198,14 @@ func newFirstEventGuard(ctx context.Context, timeout time.Duration, plans ...res
 		timeout = timeoutUntilPlanDeadline(timeout, g.plan.Start(), time.Now())
 	}
 	g.timer = time.AfterFunc(timeout, func() {
+		defer resilience.RecoverCollabWorker()
+		defer cancel()
+		defer close(g.published)
 		g.identity = timeoutIdentityAt(ctx, logKnown(g.sendSeq.Load()))
 		if resilience.BudgetTraceEnabledForTest {
 			g.plan.ObserveFiredForTest("first_event_guard")
 		}
 		g.fired.Store(true)
-		close(g.published)
-		cancel()
 	})
 	return context.WithValue(guarded, firstEventGuardKey{}, g), g
 }

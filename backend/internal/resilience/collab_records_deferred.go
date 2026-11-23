@@ -159,6 +159,7 @@ func (s *SafeCollabRecordsStore) flushInvalidations(ctx context.Context) {
 	}
 }
 func (s *SafeCollabRecordsStore) runDeferred() {
+	defer collabRecover(&collabSafety.recordPanics)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {

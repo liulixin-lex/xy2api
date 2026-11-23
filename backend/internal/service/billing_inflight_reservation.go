@@ -152,6 +152,8 @@ func (r *InflightReservation) startRenewal(renewer InflightBalanceReservationRen
 	r.stopRenew = make(chan struct{})
 	r.renewDone = make(chan struct{})
 	go func() {
+		defer resilience.RecoverCollabWorker()
+
 		defer close(r.renewDone)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
