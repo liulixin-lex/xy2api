@@ -193,6 +193,7 @@ func (r *ResilienceService) RecordUndelivered(rec *UndeliveredRequest) {
 		return
 	}
 	go func() {
+		defer resilience.RecoverCollabWorker()
 		defer func() { <-undeliveredSlots }()
 		ctx, cancel := context.WithTimeout(context.Background(), undeliveredWriteBudget)
 		defer cancel()

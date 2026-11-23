@@ -480,6 +480,7 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 				go func() {
 					defer func() {
 						if r := recover(); r != nil {
+							resilience.NoteCollabWorkerPanic(r)
 							logger.LegacyPrintf("service.gateway", "ALERT: panic in user platform quota incr goroutine user=%d platform=%s: %v", userID, platform, r)
 						}
 					}()
@@ -537,6 +538,7 @@ func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingPara
 func notifyBalanceLow(p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {
 	defer func() {
 		if r := recover(); r != nil {
+			resilience.NoteCollabWorkerPanic(r)
 			slog.Error("panic in notifyBalanceLow", "recover", r)
 		}
 	}()
@@ -578,6 +580,7 @@ func resolveOldBalance(p *postUsageBillingParams, result *UsageBillingApplyResul
 func notifyAccountQuota(p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {
 	defer func() {
 		if r := recover(); r != nil {
+			resilience.NoteCollabWorkerPanic(r)
 			slog.Error("panic in notifyAccountQuota", "recover", r)
 		}
 	}()
@@ -1389,6 +1392,12 @@ func collabUpstreamContext(ctx context.Context) (context.Context, context.Cancel
 	base := resilienceUpstreamContext(ctx, context.WithValue(context.WithoutCancel(ctx), codexTicketClientContextKey{}, ctx))
 	upstream, cancel := context.WithCancel(base)
 	context.AfterFunc(ctx, func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				resilience.NoteCollabWorkerPanic(recovered)
+				cancel()
+			}
+		}()
 		state := resilience.StateFrom(ctx)
 		if state == nil || state.DeliveredBytes() == 0 {
 			cancel()

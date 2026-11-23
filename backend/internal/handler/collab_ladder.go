@@ -85,19 +85,24 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	entered := time.Now()
 	defer func() { seam.optionalSpent += time.Since(entered) }()
 	var activeObserver atomic.Pointer[service.CollabSendObserver]
+	loadStore := h.concurrencyHelper.concurrencyService
+	userLoad := service.UserWithConcurrency{ID: subject.UserID, MaxConcurrency: subject.Concurrency}
 	var retainedWaiters func(context.Context) bool
 	if seam.losslessDuration > 0 {
 		// Lossless preemption holds the account that produced the latest rejection,
 		// which may differ from the first account after ordinary failover.
 		retained := last.AccountID
 		retainedWaiters = seam.watchRetainedWaiters(func(query context.Context) bool {
-			waiting, err := h.concurrencyHelper.concurrencyService.GetAccountWaitingCount(query, retained)
+			waiting, err := loadStore.GetAccountWaitingCount(query, retained)
 			return err != nil || waiting > 0
 		})
 	}
 	waiters := func(query context.Context) bool {
-		loads, err := h.concurrencyHelper.concurrencyService.GetUsersLoadBatch(query, []service.UserWithConcurrency{{ID: subject.UserID, MaxConcurrency: subject.Concurrency}})
-		return err != nil || loads[subject.UserID] != nil && loads[subject.UserID].WaitingCount > 0 || retainedWaiters != nil && retainedWaiters(query)
+		allowed := collabStorageAllowed(query, func(storage context.Context) bool {
+			loads, err := loadStore.GetUsersLoadBatch(storage, []service.UserWithConcurrency{userLoad})
+			return err == nil && (loads[userLoad.ID] == nil || loads[userLoad.ID].WaitingCount == 0)
+		})
+		return !allowed || retainedWaiters != nil && retainedWaiters(query)
 	}
 	ctx, stopWatch := watchCollabTakeover(parentRequest.Context(), duration, func() bool { return activeObserver.Load().Accepted() }, waiters, retainedWaiters)
 	defer stopWatch()

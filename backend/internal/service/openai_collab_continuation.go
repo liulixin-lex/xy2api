@@ -107,7 +107,8 @@ func (s *OpenAIGatewayService) CanContinueCollabResponse(ctx context.Context) bo
 		defer s.collabAliasReads.Add(-1)
 		ready := false
 		defer func() {
-			if recover() != nil {
+			if recovered := recover(); recovered != nil {
+				resilience.NoteCollabWorkerPanic(recovered)
 				s.collabAliasFailures.Add(1)
 			}
 			done <- ready
@@ -188,7 +189,8 @@ func (s *OpenAIGatewayService) readCollabAlias(ctx context.Context, store Collab
 		defer s.collabAliasReads.Add(-1)
 		var value result
 		defer func() {
-			if recover() != nil {
+			if recovered := recover(); recovered != nil {
+				resilience.NoteCollabWorkerPanic(recovered)
 				value = result{err: errors.New("response alias read failed")}
 			}
 			done <- value

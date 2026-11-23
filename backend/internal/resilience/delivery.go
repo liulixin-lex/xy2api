@@ -359,6 +359,12 @@ func UpstreamContextOnDisconnect(client, detached context.Context) context.Conte
 	}
 	ctx, cancel := context.WithCancel(detached)
 	context.AfterFunc(client, func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				NoteCollabWorkerPanic(recovered)
+				cancel()
+			}
+		}()
 		disconnected, delivered, abuse := st.ResolveDisconnect()
 		if !disconnected {
 			return
@@ -372,7 +378,7 @@ func UpstreamContextOnDisconnect(client, detached context.Context) context.Conte
 			cancel()
 			return
 		}
-		time.AfterFunc(drain, cancel)
+		time.AfterFunc(drain, func() { defer RecoverCollabWorker(); cancel() })
 	})
 	return ctx
 }

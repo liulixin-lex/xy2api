@@ -4985,6 +4985,12 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		requestCtx = gatewayBillingContext(requestCtx)
 	}
 	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				resilience.NoteCollabWorkerPanic(recovered)
+				logger.L().With(zap.String("component", "openai.policy_recorder"), zap.Any("panic", recovered)).Error("billing.policy_recorder_panic")
+			}
+		}()
 		ctx, cancel := context.WithTimeout(usageRecordContext(requestCtx, resilience.WithRequestState(context.Background(), requestState)), 30*time.Second)
 		defer cancel()
 		if cmSvc != nil {

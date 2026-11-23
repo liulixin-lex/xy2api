@@ -70,7 +70,8 @@ func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, acco
 			go func() {
 				defer s.collabAliasWrites.Add(-1)
 				defer func() {
-					if recover() != nil {
+					if recovered := recover(); recovered != nil {
+						resilience.NoteCollabWorkerPanic(recovered)
 						s.collabAliasFailures.Add(1)
 					}
 				}()

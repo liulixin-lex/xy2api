@@ -136,7 +136,7 @@ func ResolveRetryAdvice(ctx context.Context) RetryAdvice {
 	var result RetryAdvice
 	if queryCtx.Err() == nil {
 		ready := make(chan RetryAdvice, 1)
-		go func() { ready <- provider(queryCtx) }()
+		go func() { defer RecoverCollabWorker(); defer close(ready); ready <- provider(queryCtx) }()
 		select {
 		case result = <-ready:
 		case <-queryCtx.Done():

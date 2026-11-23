@@ -16,16 +16,8 @@ func watchCollabTakeover(parent context.Context, duration time.Duration, accepte
 	started := time.Now()
 	deadline := started.Add(duration)
 	ctx, cancel := context.WithCancel(parent)
-	queued := func(check func(context.Context) bool) (blocked bool) {
-		defer func() {
-			if recover() != nil {
-				resilience.NoteCollabWorkerPanic()
-				blocked = true
-			}
-		}()
-		query, done := context.WithTimeout(ctx, 250*time.Millisecond)
-		defer done()
-		return check(query)
+	queued := func(check func(context.Context) bool) bool {
+		return !collabStorageAllowed(ctx, func(query context.Context) bool { return !check(query) })
 	}
 	if duration <= 0 || queued(waiters) {
 		cancel()

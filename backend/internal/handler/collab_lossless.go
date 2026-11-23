@@ -55,12 +55,17 @@ func (h *OpenAIGatewayHandler) armCollabLossless(c *gin.Context, seam *collabSea
 		if !ok {
 			return false
 		}
-		users, err := h.concurrencyHelper.concurrencyService.GetUsersLoadBatch(ctx, []service.UserWithConcurrency{{ID: subject.UserID, MaxConcurrency: subject.Concurrency}})
-		if err != nil || ctx.Err() != nil || users[subject.UserID] != nil && users[subject.UserID].WaitingCount > 0 {
-			return false
-		}
-		loads, err := h.concurrencyHelper.concurrencyService.GetAccountsLoadBatchFresh(ctx, []service.AccountWithConcurrency{{ID: account.ID, MaxConcurrency: account.Concurrency}})
-		return err == nil && ctx.Err() == nil && loads[account.ID] != nil && loads[account.ID].WaitingCount == 0 && account.Concurrency > 0 && loads[account.ID].CurrentConcurrency < account.Concurrency
+		store := h.concurrencyHelper.concurrencyService
+		user := service.UserWithConcurrency{ID: subject.UserID, MaxConcurrency: subject.Concurrency}
+		target := service.AccountWithConcurrency{ID: account.ID, MaxConcurrency: account.Concurrency}
+		return collabStorageAllowed(ctx, func(query context.Context) bool {
+			users, err := store.GetUsersLoadBatch(query, []service.UserWithConcurrency{user})
+			if err != nil || query.Err() != nil || users[user.ID] != nil && users[user.ID].WaitingCount > 0 {
+				return false
+			}
+			loads, err := store.GetAccountsLoadBatchFresh(query, []service.AccountWithConcurrency{target})
+			return err == nil && query.Err() == nil && loads[target.ID] != nil && loads[target.ID].WaitingCount == 0 && target.MaxConcurrency > 0 && loads[target.ID].CurrentConcurrency < target.MaxConcurrency
+		})
 	}}
 
 	c.Request = c.Request.WithContext(service.WithCollabLosslessGate(c.Request.Context(), gate))
@@ -146,7 +151,7 @@ func (s *collabSeam) watchRetainedWaiters(check func(context.Context) bool) func
 		if s.retainedReleased() {
 			return false
 		}
-		if check(ctx) {
+		if !collabStorageAllowed(ctx, func(query context.Context) bool { return !check(query) }) {
 			s.retained.Release()
 			return true
 		}

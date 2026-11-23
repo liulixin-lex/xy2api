@@ -222,6 +222,7 @@ func wrapReleaseOnDone(ctx context.Context, releaseFunc func()) func() {
 	}
 	var once sync.Once
 	releaseOnce := func() {
+		defer resilience.RecoverCollabWorker()
 		once.Do(releaseFunc)
 	}
 	stop := context.AfterFunc(ctx, releaseOnce)

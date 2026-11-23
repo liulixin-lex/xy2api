@@ -1,6 +1,10 @@
 package resilience
 
-import "sync/atomic"
+import (
+	"log/slog"
+	"runtime/debug"
+	"sync/atomic"
+)
 
 var collabSafety struct {
 	settingsCorrections atomic.Uint64
@@ -26,8 +30,9 @@ func CollabSafetySnapshot() CollabSafetyCounts {
 }
 
 func collabRecover(counter *atomic.Uint64) {
-	if recover() != nil {
+	if recovered := recover(); recovered != nil {
 		counter.Add(1)
+		slog.Error("resilience.worker_panic", "panic", recovered, "stack", string(debug.Stack()))
 	}
 }
 
@@ -55,11 +60,15 @@ func (s SafeCollabObserver) Freeze() (result *CollabObservation) {
 }
 
 // RecoverCollabWorker must be deferred directly by every optional worker.
-// It counts fixed events only; panic values never leave the worker.
+// Panics are operational errors, including when these workers run without
+// collaboration enabled; preserve their diagnostic value and stack.
 func RecoverCollabWorker() {
-	if recover() != nil {
-		collabSafety.consumerPanics.Add(1)
+	if recovered := recover(); recovered != nil {
+		NoteCollabWorkerPanic(recovered)
 	}
 }
 
-func NoteCollabWorkerPanic() { collabSafety.consumerPanics.Add(1) }
+func NoteCollabWorkerPanic(recovered any) {
+	collabSafety.consumerPanics.Add(1)
+	slog.Error("resilience.worker_panic", "panic", recovered, "stack", string(debug.Stack()))
+}
