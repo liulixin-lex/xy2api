@@ -129,7 +129,11 @@ func (c *gatewayCache) runStickyBinding(ctx context.Context, script *stickyBindi
 			value.SetVal(values[1])
 			account, _ = value.Int64()
 		}
-		b.Observe(account, time.Duration(values[2].(int64))*time.Millisecond, values[1] != nil, values[3].(int64) == 1)
+		ttl, ttlOK := values[2].(int64)
+		pairMissing, pairMissingOK := values[3].(int64)
+		if ttlOK && pairMissingOK {
+			b.Observe(account, time.Duration(ttl)*time.Millisecond, values[1] != nil, pairMissing == 1)
+		}
 	}
 	cmd.SetVal(values[0])
 	if values[0] == nil {

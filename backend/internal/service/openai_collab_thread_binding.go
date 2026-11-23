@@ -74,10 +74,7 @@ func (s *OpenAIGatewayService) prepareOpenAICollabThreadBinding(ctx context.Cont
 		return false
 	}
 	b := &openAICollabThreadBinding{affinity: a, service: s, session: session, scope: scope, digest: digest, key: "collab-thread-binding-v1:" + string(digest)}
-	if !a.binding.CompareAndSwap(nil, b) {
-		return false
-	}
-	return true
+	return a.binding.CompareAndSwap(nil, b)
 }
 
 func openAICollabBindingFrom(ctx context.Context) *openAICollabThreadBinding {
@@ -137,16 +134,6 @@ func (b *openAICollabThreadBinding) storageContext(ctx context.Context, refresh 
 func (b *openAICollabThreadBinding) effective(ctx context.Context) (int64, bool, error) {
 	account, err := b.service.cache.GetSessionAccountID(b.storageContext(ctx, 0), b.affinity.groupID, b.key)
 	return account, stickyLookupMissing(account, err), err
-}
-
-func (b *openAICollabThreadBinding) write(ctx context.Context, account int64, ttl time.Duration) error {
-	if ttl <= 0 {
-		ttl = b.service.openAIStickyBindingTTL(&b.affinity.groupID)
-	}
-	if account == 0 {
-		account = -1
-	}
-	return b.service.cache.SetSessionAccountID(b.storageContext(ctx, 0), b.affinity.groupID, b.key, account, ttl)
 }
 
 func (b *openAICollabThreadBinding) set(ctx context.Context, account int64, ttl time.Duration) error {
@@ -223,7 +210,8 @@ func (b *openAICollabThreadBinding) avoidScope() resilience.CollabRecordScope {
 type collabThreadVersionedCache struct{ b *openAICollabThreadBinding }
 
 func (c collabThreadVersionedCache) GetSessionBinding(ctx context.Context, group int64, key string) (StickySessionBinding, error) {
-	binding, err := c.b.service.cache.(OpenAIStickyVersionedCache).GetSessionBinding(c.b.storageContext(ctx, 0), c.b.affinity.groupID, c.b.key)
+	cache := c.b.service.cache.(OpenAIStickyVersionedCache) //nolint:errcheck // prepareOpenAIStickyChange checks this capability before constructing the adapter.
+	binding, err := cache.GetSessionBinding(c.b.storageContext(ctx, 0), c.b.affinity.groupID, c.b.key)
 	c.b.mu.Lock()
 	binding.BothKeysMissing = c.b.pairMissing
 	c.b.mu.Unlock()
@@ -232,10 +220,12 @@ func (c collabThreadVersionedCache) GetSessionBinding(ctx context.Context, group
 func (c collabThreadVersionedCache) CommitSessionBinding(ctx context.Context, g int64, key string, expected StickySessionBinding, next int64, ttl time.Duration, options BindingCommitOptions) (BindingCommitResult, error) {
 	options.FailureScope = c.b.failureScope(options.FailureScope)
 	options.RejectScope = c.b.failureScope(options.RejectScope)
-	return c.b.service.cache.(OpenAIStickyVersionedCache).CommitSessionBinding(c.b.storageContext(ctx, ttl), g, c.b.key, expected, next, ttl, options)
+	cache := c.b.service.cache.(OpenAIStickyVersionedCache) //nolint:errcheck // prepareOpenAIStickyChange checks this capability before constructing the adapter.
+	return cache.CommitSessionBinding(c.b.storageContext(ctx, ttl), g, c.b.key, expected, next, ttl, options)
 }
 func (c collabThreadVersionedCache) RecordSessionBindingFailure(ctx context.Context, g int64, key, scope string, expected StickySessionBinding, account int64, ttl time.Duration, reset ...time.Time) (int64, error) {
-	return c.b.service.cache.(OpenAIStickyVersionedCache).RecordSessionBindingFailure(c.b.storageContext(ctx, 0), g, c.b.key, c.b.failureScope(scope), expected, account, ttl, reset...)
+	cache := c.b.service.cache.(OpenAIStickyVersionedCache) //nolint:errcheck // prepareOpenAIStickyChange checks this capability before constructing the adapter.
+	return cache.RecordSessionBindingFailure(c.b.storageContext(ctx, 0), g, c.b.key, c.b.failureScope(scope), expected, account, ttl, reset...)
 }
 func (b *openAICollabThreadBinding) failureScope(scope string) string {
 	if scope == "" {

@@ -68,7 +68,7 @@ func TestCollabCapacityLocalConcurrency(t *testing.T) {
 						registry[index] = time.Since(begin)
 						begin = time.Now()
 						tree.mu.RLock()
-						tree.mu.RUnlock()
+						tree.mu.RUnlock() //nolint:staticcheck // Measure lock contention without protected work.
 						treeWait[index] = time.Since(begin)
 						time.Sleep(10 * time.Millisecond)
 					}

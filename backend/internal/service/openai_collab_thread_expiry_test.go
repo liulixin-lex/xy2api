@@ -27,18 +27,28 @@ func TestCollabThreadBindingPreparationAllocations(t *testing.T) {
 			local := resilience.NewCollabTreeAffinity(32, time.Hour)
 			base := withOpenAILegacySessionHash(withOpenAINoStickyMigration(selectionReviewContext()), legacy)
 			identity := collabAffinityIdentity("child", "root")
-			var counts []float64
+			var runs []func()
 			for _, on := range []bool{false, true} {
 				settings := collabAffinitySettings()
 				settings.Collab.TreeAffinity = on
-				counts = append(counts, collabMinAllocsPerRun(100, func() {
+				runs = append(runs, func() {
 					ctx := WithOpenAICollabTreeAffinity(base, local, settings, 7, identity, resilience.CollabRoleChild, true)
 					if f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true) {
 						panic("thread binding shipped")
 					}
 					collabSetupContext = ctx
-				}))
-				if on {
+				})
+			}
+			// Warm both paths before measuring either, including shared state.
+			for range 64 {
+				for _, run := range runs {
+					run()
+				}
+			}
+			var counts []float64
+			for i, run := range runs {
+				counts = append(counts, collabMinAllocsPerRun(100, run))
+				if i == 1 {
 					require.NotNil(t, openAICollabAffinityFrom(collabSetupContext))
 				} else {
 					require.Same(t, base, collabSetupContext)

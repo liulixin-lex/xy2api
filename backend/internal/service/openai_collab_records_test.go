@@ -20,6 +20,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func (s *OpenAIGatewayService) initCollabRecords() { s.CollabRecords() }
+
 func collabRecordTestService(t *testing.T) *OpenAIGatewayService {
 	t.Helper()
 	s := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "synthetic-test-secret"}}}
@@ -216,7 +218,7 @@ func TestCollabRecordsDisabledAndConsumedCompletionGate(t *testing.T) {
 	require.Empty(t, s.collabRecords.LookupBatch(context.Background(), resilience.CollabRecordBatch{Scope: in.Scope, Queries: []resilience.CollabRecordQuery{q}, Records: true}).Records[q].Consumed)
 	in.HasTools = false
 	in.AgentCiphertext = false
-	require.Zero(t, testing.AllocsPerRun(100, func() { require.Nil(t, s.NewCollabRecordDelivery(in)) }))
+	require.Zero(t, collabMinAllocsPerRun(100, func() { require.Nil(t, s.NewCollabRecordDelivery(in)) }))
 }
 func TestCollabSeenNoticeNeedsRegisteredParentAndSender(t *testing.T) {
 	s := collabRecordTestService(t)

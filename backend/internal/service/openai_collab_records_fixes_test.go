@@ -33,7 +33,7 @@ func TestCollabFixLinearFrameAndNoIrrelevantParsing(t *testing.T) {
 	runtime.ReadMemStats(&after)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(8<<20), "Written must not parse the frame again")
 	e.EventType = "response.output_text.delta"
-	allocations := testing.AllocsPerRun(2, func() { c.AboutToWrite(context.Background(), e) })
+	allocations := collabMinAllocsPerRun(2, func() { c.AboutToWrite(context.Background(), e) })
 	require.Zero(t, allocations, "metadata rules out calls before any parse")
 }
 

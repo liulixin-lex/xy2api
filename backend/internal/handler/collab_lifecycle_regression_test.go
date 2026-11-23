@@ -148,7 +148,7 @@ func collabRegressionOldUsageRecordContext(parent context.Context, base context.
 	}
 	base = service.WithInflightReservation(base, service.InflightReservationFromContext(parent))
 	// xy2api resilience: billing needs the request's delivery state; a client
-	// already gone is resolved now (design §8.2).
+	// already gone is resolved now.
 	if st := resilience.StateFrom(parent); st != nil {
 		if parent.Err() != nil {
 			st.ResolveDisconnect()

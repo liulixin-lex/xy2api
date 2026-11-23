@@ -161,7 +161,7 @@ type schedulerTestGatewayCache struct {
 func (c *schedulerTestGatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
 	if binding, ok := StickyThreadBindingFrom(ctx); ok {
 		var finish func()
-		ctx, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "read", 0, 0)
+		_, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "read", 0, 0)
 		defer finish()
 	}
 
@@ -174,7 +174,7 @@ func (c *schedulerTestGatewayCache) GetSessionAccountID(ctx context.Context, gro
 func (c *schedulerTestGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	if binding, ok := StickyThreadBindingFrom(ctx); ok {
 		var finish func()
-		ctx, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "set", accountID, ttl)
+		_, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "set", accountID, ttl)
 		defer finish()
 	}
 
@@ -188,7 +188,7 @@ func (c *schedulerTestGatewayCache) SetSessionAccountID(ctx context.Context, gro
 func (c *schedulerTestGatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, sessionHash string, ttl time.Duration) error {
 	if binding, ok := StickyThreadBindingFrom(ctx); ok {
 		var finish func()
-		ctx, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "refresh", 0, ttl)
+		_, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "refresh", 0, ttl)
 		defer finish()
 	}
 
@@ -198,7 +198,7 @@ func (c *schedulerTestGatewayCache) RefreshSessionTTL(ctx context.Context, group
 func (c *schedulerTestGatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error {
 	if binding, ok := StickyThreadBindingFrom(ctx); ok {
 		var finish func()
-		ctx, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "delete", 0, 0)
+		_, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "delete", 0, 0)
 		defer finish()
 	}
 

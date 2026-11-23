@@ -13,7 +13,6 @@ type CollabRecordsCache interface {
 
 // Explicit access is for an enabled records/ladder path; constructor and off
 // paths never call it. The mutex also prevents initialization after shutdown.
-func (s *OpenAIGatewayService) initCollabRecords() { s.CollabRecords() }
 func (s *OpenAIGatewayService) CollabRecords() (store *resilience.SafeCollabRecordsStore) {
 	if s == nil {
 		return nil

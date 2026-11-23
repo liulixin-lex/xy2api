@@ -52,16 +52,23 @@ func TestCollabThreadBindingReleaseGate(t *testing.T) {
 				require.Same(t, before, openAICollabAffinityFrom(ctx), "binding gate must preserve hints, leases and queue recovery")
 				// Compare complete setup against the retained affinity features.
 				// Those features own their existing context allocation; binding adds none.
-				var counts []float64
+				var runs []func()
 				for _, prepare := range []bool{false, true} {
-					counts = append(counts, collabMinAllocsPerRun(10, func() {
+					runs = append(runs, func() {
 						configured := WithOpenAICollabTreeAffinity(base, local, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
 						if prepare {
 							f.svc.PrepareOpenAICollabThreadBinding(configured, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true)
 						}
 						collabSetupContext = configured
-					}))
+					})
 				}
+				// Warm both paths before measuring either, including shared state.
+				for range 64 {
+					for _, run := range runs {
+						run()
+					}
+				}
+				counts := []float64{collabMinAllocsPerRun(10, runs[0]), collabMinAllocsPerRun(10, runs[1])}
 				require.Equal(t, counts[0], counts[1])
 			}
 		}

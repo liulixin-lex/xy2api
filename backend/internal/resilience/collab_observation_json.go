@@ -274,11 +274,6 @@ func collabMatchASCII(raw []byte, index int, want string) (int, bool) {
 	return index, true
 }
 
-func collabStringContains(raw []byte, want string) bool {
-	b := collabIngressBudget{remaining: 1<<63 - 1}
-	return b.contains(raw, want)
-}
-
 func (b *collabIngressBudget) contains(raw []byte, want string) bool {
 	if !collabRawString(raw) {
 		// Result.String returns raw JSON for arrays and objects. Scalars cannot
