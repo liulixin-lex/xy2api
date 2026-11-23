@@ -36,6 +36,67 @@ type CollabBody struct {
 	Shape    resilience.CollabRequestShape
 }
 
+// inputPositions maps a physical array back to the original identities. Legacy
+// repairs can delete items. Without a unique mapping the optional path falls back.
+func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
+	original := gjson.GetBytes(p.Original, "input").Array()
+	current := gjson.GetBytes(body, "input").Array()
+	positions := make(map[int]int, len(current))
+	if len(original) == len(current) {
+		for i := range current {
+			positions[i] = i
+		}
+		return positions, true
+	}
+	used := map[int]bool{}
+	for i, item := range current {
+		match := -1
+		for j, candidate := range original {
+			id := item.Get("id").String()
+			if id != "" && id == candidate.Get("id").String() || id == "" && item.Raw == candidate.Raw {
+				if match != -1 || used[j] {
+					return nil, false
+				}
+				match = j
+			}
+		}
+		if match < 0 {
+			return nil, false
+		}
+		positions[i], used[match] = match, true
+	}
+	return positions, true
+}
+
+func (p CollabBody) atBody(body []byte) (CollabBody, bool) {
+	positions, ok := p.inputPositions(body)
+	if !ok {
+		return CollabBody{}, false
+	}
+	indices := make(map[int]int, len(positions))
+	for current, original := range positions {
+		indices[original] = current
+	}
+	p.Items = append([]CollabBodyItem(nil), p.Items...)
+	items := p.Items[:0]
+	for _, item := range p.Items {
+		index, exists := indices[item.Index]
+		if !exists {
+			continue
+		}
+		oldPrefix := "input." + strconv.Itoa(item.Index)
+		newPrefix := "input." + strconv.Itoa(index)
+		item.Index = index
+		item.Paths = append([]string(nil), item.Paths...)
+		for i, path := range item.Paths {
+			item.Paths[i] = newPrefix + strings.TrimPrefix(path, oldPrefix)
+		}
+		items = append(items, item)
+	}
+	p.Items = items
+	return p, true
+}
+
 func (p CollabBody) ResolveEvidence(evidence resilience.CollabEvidence) resilience.CollabEvidence {
 	if evidence.Named == nil {
 		return evidence
@@ -265,6 +326,11 @@ func collabEnvelopeKind(item gjson.Result) string {
 // claimed error can change only nested agent/tool ciphertext. Call arguments
 // are never rewritten. Compaction is replaced, never removed.
 func (p CollabBody) Derive(current []byte, action resilience.CollabAction, named string, claimed bool) ([]byte, bool) {
+	var ok bool
+	p, ok = p.atBody(current)
+	if !ok {
+		return current, false
+	}
 	if p.Shape.Ambiguous || p.Shape.ContinuationPointer {
 		return current, false
 	}

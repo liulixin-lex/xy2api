@@ -38,7 +38,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		return
 	}
 	evidence := parsed.ResolveEvidence(last.Evidence(parsed.Shape))
-	if evidence.Grade != resilience.CollabEvidenceGradeVerified && evidence.Grade != resilience.CollabEvidenceGradeClaimed {
+	if evidence.Named != nil && evidence.Named.Ambiguous || evidence.Grade != resilience.CollabEvidenceGradeVerified && evidence.Grade != resilience.CollabEvidenceGradeClaimed {
 		return
 	}
 	key, ok := middleware.GetAPIKeyFromContext(c)
@@ -103,7 +103,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	}
 	rejected := seam.rejected
 	for _, rejection := range rejections {
-		seam.progress.RememberHandled(rejection.AccountID, rejection.Handled)
+		seam.progress.RememberRejection(rejection)
 		rejected[service.CollabRejectedBody{AccountID: rejection.AccountID, Digest: rejection.BodyDigest}] = true
 	}
 	seamKeys := c.Copy().Keys
@@ -125,7 +125,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		}
 	}
 	l.BeforeDisposal = func(_ context.Context, current resilience.CollabEvidence) bool {
-		if seam.localEnding == nil || current.Grade != resilience.CollabEvidenceGradeVerified || parentRequest.Context().Err() != nil {
+		if seam.localEnding == nil || current.Named != nil && current.Named.Ambiguous || current.Grade != resilience.CollabEvidenceGradeVerified || parentRequest.Context().Err() != nil {
 			return false
 		}
 		reset()

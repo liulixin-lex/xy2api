@@ -30,11 +30,15 @@ func collabPreemptLossless(ctx context.Context, c *gin.Context, account *Account
 	if gate == nil || gate.used.Load() || resilience.CollabAttemptFrom(ctx).Optional || !resilience.StateFrom(ctx).CollabSettingsSnapshot().CollabLosslessFirstOn() || account == nil || account.IsOpenAIPassthroughEnabled() || c == nil || ProtocolTerminalClaimed(c) || resilience.StateFrom(ctx).ClientOutputBytes() > 0 {
 		return nil
 	}
-	shape := ParseCollabBody(openAIHTTPRepairBody(c)).Shape
+	body := ParseCollabBody(openAIHTTPRepairBody(c))
+	shape := body.Shape
 	if shape.Ambiguous || shape.ContinuationPointer {
 		return nil
 	}
-	evidence := resilience.ClassifyCollabEvidence(resilience.CollabEvidenceInput{Payload: payload, Event: event, HTTPStatus: status, Shape: shape})
+	evidence := body.ResolveEvidence(resilience.ClassifyCollabEvidence(resilience.CollabEvidenceInput{Payload: payload, Event: event, HTTPStatus: status, Shape: shape}))
+	if evidence.Named != nil && evidence.Named.Ambiguous {
+		return nil
+	}
 	if evidence.Grade != resilience.CollabEvidenceGradeVerified && evidence.Grade != resilience.CollabEvidenceGradeClaimed {
 		return nil
 	}

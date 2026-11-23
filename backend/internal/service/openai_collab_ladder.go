@@ -44,12 +44,14 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 	}
 	if progress.derived == nil {
 		progress.derived = map[int64][]byte{}
+	}
+	if progress.probed == nil {
 		progress.probed = map[int64]bool{}
 		progress.replaced = map[int64]bool{}
 		if progress.handled == nil {
 			progress.handled = map[int64]map[string]bool{}
 		}
-		progress.namedFamilies = map[int64]map[resilience.CollabFamily]bool{}
+		progress.namedFamilies = map[int64]map[collabNamedClass]bool{}
 	}
 	derived, probed, replaced := progress.derived, maps.Clone(progress.probed), progress.replaced
 	switched, dropped := progress.switched, progress.dropped
@@ -112,7 +114,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				if item.Family != resilience.CollabFamilyReasoning && (item.Family == resilience.CollabFamilyCompaction || item.Class == resilience.CollabItemClassProtected || item.Class == resilience.CollabItemClassUnreadMessage) {
 					prefer = l.First
 				}
-				if namedFamilies[current][item.Family] {
+				if namedFamilies[current][collabNamedClass{item.Family, item.Class}] {
 					if item.Family == resilience.CollabFamilyReasoning {
 						batchReasoning = true
 					}
@@ -139,7 +141,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		} else {
 			action = resilience.CollabActionReplaceAll
 		}
-		if collabOptionalAction(action) && progress.optional >= resilience.CollabOptionalSendLimit {
+		if collabOptionalAction(action) && (l.MaxAttempts == 1 || progress.optional >= resilience.CollabOptionalSendLimit) {
 			action = resilience.CollabActionReplaceAll
 			named = ""
 		}
@@ -244,7 +246,8 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				handled[account] = map[string]bool{}
 			}
 			if action != resilience.CollabActionSwitchOriginal && action != resilience.CollabActionProbeReasoning {
-				for _, item := range l.Body.Items {
+				physical, _ := l.Body.atBody(body)
+				for _, item := range physical.Items {
 					path := "input." + strconv.Itoa(item.Index)
 					if item.Identity != "" && gjson.GetBytes(body, path).Raw != gjson.GetBytes(next, path).Raw {
 						handled[account][item.Identity] = true
@@ -252,11 +255,11 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				}
 				if named != "" {
 					if namedFamilies[account] == nil {
-						namedFamilies[account] = map[resilience.CollabFamily]bool{}
+						namedFamilies[account] = map[collabNamedClass]bool{}
 					}
 					for _, item := range l.Body.Items {
 						if item.Identity == named {
-							namedFamilies[account][item.Family] = true
+							namedFamilies[account][collabNamedClass{item.Family, item.Class}] = true
 						}
 					}
 				}
@@ -306,13 +309,18 @@ func CollabTakeoverDuration(now, started time.Time, retryable, committed bool, d
 	return limit
 }
 
+type collabNamedClass struct {
+	family resilience.CollabFamily
+	class  resilience.CollabItemClass
+}
+
 // Progress is request-owned and shared by early and terminal entry. Named and
 // account-specific final repairs do not spend the optional switch/probe budget.
 type CollabLadderProgress struct {
 	derived           map[int64][]byte
 	probed, replaced  map[int64]bool
 	handled           map[int64]map[string]bool
-	namedFamilies     map[int64]map[resilience.CollabFamily]bool
+	namedFamilies     map[int64]map[collabNamedClass]bool
 	switched, dropped bool
 	optional          int
 	sourceBody        []byte
@@ -355,4 +363,17 @@ func (p *CollabLadderProgress) RememberHandled(account int64, items map[string]b
 			p.handled[account][id] = true
 		}
 	}
+}
+
+// RememberRejection keeps confirmed account-local edits with their handled facts.
+// Re-entering the ladder must never restore bytes that this account rejected.
+func (p *CollabLadderProgress) RememberRejection(rejection CollabRejection) {
+	if len(rejection.Derivation) == 0 {
+		return
+	}
+	p.RememberHandled(rejection.AccountID, rejection.Handled)
+	if p.derived == nil {
+		p.derived = map[int64][]byte{}
+	}
+	p.derived[rejection.AccountID] = rejection.Derivation
 }

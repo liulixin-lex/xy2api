@@ -9,6 +9,7 @@ import (
 )
 
 var collabNamedPattern = regexp.MustCompile("(?i)\\bfor\\s+item\\s+['\"`]?([a-z0-9]+_[a-z0-9_-]+)\\b")
+var collabLocatorPattern = regexp.MustCompile(`\binput(?:\[[^\s]*|\.[^\s]*)`)
 var collabIndexPattern = regexp.MustCompile(`\binput(?:\[([0-9]+)\]|\.([0-9]+))(?:(?:\.[a-zA-Z_0-9]+)|(?:\[[0-9]+\]))*`)
 
 // Text evidence must assert rejection of the encrypted subject itself. Locator
@@ -199,7 +200,16 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 		for _, match := range collabNamedPattern.FindAllStringSubmatch(object.Get(field).String(), -1) {
 			add(match[1])
 		}
-		for _, match := range collabIndexPattern.FindAllStringSubmatch(object.Get(field).String(), -1) {
+		value := object.Get(field).String()
+		for _, locator := range collabLocatorPattern.FindAllString(value, -1) {
+			if collabIndexPattern.FindString(locator) == "" {
+				if named == nil {
+					named = &CollabNamedItem{}
+				}
+				named.Ambiguous = true
+			}
+		}
+		for _, match := range collabIndexPattern.FindAllStringSubmatch(value, -1) {
 			index, err := strconv.Atoi(match[1] + match[2])
 			if named == nil {
 				named = &CollabNamedItem{}

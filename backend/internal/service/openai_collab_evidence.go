@@ -7,6 +7,8 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -29,13 +31,33 @@ type CollabRejection struct {
 	Source      resilience.CollabEvidenceSource
 	Truncated   bool
 	Handled     map[string]bool
+	Derivation  []byte
+	positions   map[int]int
+	unlocatable bool
 }
 
 func (r CollabRejection) Evidence(shape resilience.CollabRequestShape) resilience.CollabEvidence {
 	if r.Truncated {
 		return resilience.CollabEvidence{Grade: resilience.CollabEvidenceGradeUnclaimed, Family: resilience.CollabFamilyNone, Source: r.Source}
 	}
-	return resilience.ClassifyCollabEvidence(resilience.CollabEvidenceInput{Payload: r.Payload, Event: r.Event, Source: r.Source, HTTPStatus: r.Status, Shape: shape})
+	evidence := resilience.ClassifyCollabEvidence(resilience.CollabEvidenceInput{Payload: r.Payload, Event: r.Event, Source: r.Source, HTTPStatus: r.Status, Shape: shape})
+	if r.unlocatable {
+		evidence.Named = &resilience.CollabNamedItem{Ambiguous: true}
+	} else if evidence.Named != nil && evidence.Named.InputIndex != nil && r.positions != nil {
+		named := evidence.Named
+		physical := *named.InputIndex
+		original, ok := r.positions[physical]
+		if !ok {
+			named.Ambiguous = true
+			return evidence
+		}
+		path := strings.NewReplacer("[", ".", "]", "").Replace(named.Path)
+		if path != "" {
+			named.Path = "input." + strconv.Itoa(original) + strings.TrimPrefix(path, "input."+strconv.Itoa(physical))
+		}
+		named.InputIndex = &original
+	}
+	return evidence
 }
 
 type collabSendObserverKey struct{}
@@ -343,21 +365,26 @@ func (b *collabEvidenceBody) record(rejection CollabRejection) {
 	candidate := rejection.Evidence(resilience.CollabRequestShape{AgentCiphertext: true, ToolOutputCiphertext: true})
 	if b.requestBody != nil && (candidate.Grade == resilience.CollabEvidenceGradeVerified || candidate.Grade == resilience.CollabEvidenceGradeClaimed) {
 		original := b.observer.Body()
+		positions, ok := original.inputPositions(b.requestBody)
+		rejection.positions, rejection.unlocatable = positions, !ok
 		current := ParseCollabBody(b.requestBody)
-		remainingItems := make(map[string]bool, len(current.Items))
+		remainingItems := make(map[int]bool, len(current.Items))
 		for _, item := range current.Items {
-			remainingItems[item.Identity] = len(item.Paths) > 0
+			remainingItems[positions[item.Index]] = len(item.Paths) > 0
 		}
 		for _, item := range original.Items {
-			if len(item.Paths) == 0 || current.Shape.Ambiguous {
+			if len(item.Paths) == 0 || current.Shape.Ambiguous || !ok {
 				continue
 			}
-			if !remainingItems[item.Identity] {
+			if !remainingItems[item.Index] {
 				if rejection.Handled == nil {
 					rejection.Handled = map[string]bool{}
 				}
 				rejection.Handled[item.Identity] = true
 			}
+		}
+		if len(rejection.Handled) > 0 {
+			rejection.Derivation = bytes.Clone(b.requestBody)
 		}
 	}
 	b.observer.record(rejection, b.generation)

@@ -167,6 +167,17 @@ func (u *replayUpstream) Do(req *http.Request, _ string, id int64, _ int) (resul
 		var payload string
 		status := http.StatusBadRequest
 		switch rule.Kind {
+		case "regression_invalid_locator":
+			if strings.Contains(string(body), `"encrypted_content"`) {
+				payload = replayError("invalid_request_error", "Encrypted content hydration failed", rule.Item)
+			}
+		case "regression_inherit":
+			if gjson.GetBytes(body, "input.0.encrypted_content").Exists() {
+				payload = replayError("invalid_encrypted_content", "The encrypted content for item rs_alpha could not be verified.", "")
+			} else if strings.Contains(gjson.GetBytes(body, "input.1.content").Raw, "cipher-task") {
+				payload = replayError("invalid_request_error", "The encrypted content for item amsg_task could not be decoded.", "")
+			}
+
 		case "regression_owner", "regression_decrypt", "regression_locator":
 			if strings.Contains(string(body), `"encrypted_content"`) {
 				code, message, param := "encrypted_agent_recovery_wire_changed", "synthetic ownership rejection", ""
