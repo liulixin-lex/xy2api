@@ -39,7 +39,7 @@ type replayMemory struct {
 	service.GatewayCache
 	mu                  sync.Mutex
 	bindings            map[string]int64
-	responseGenerations map[string]time.Time
+	responseGenerations map[string]string
 	avoids              map[string]map[int64]time.Time
 	avoidUntil          map[string]map[int64]time.Time
 	failures            map[string]map[int64]int64

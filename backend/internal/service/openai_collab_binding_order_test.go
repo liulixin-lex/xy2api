@@ -22,7 +22,7 @@ type collabBindingTraceCache struct {
 	stubGatewayCache
 	values     map[string]collabBindingCacheValue
 	tombstones map[string]time.Time
-	versions   map[string]int64
+	versions   map[string]string
 	calls      []string
 	fail       string
 }
@@ -146,20 +146,20 @@ func TestCollabRegressionAsyncBindingDoesNotResurrectDeletion(t *testing.T) {
 func (s *collabBindingTraceCache) CreateResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) error {
 	mapKey := fmt.Sprint(group, ":", key)
 	publication := CollabBindingPublicationFrom(ctx)
-	if !time.Now().Before(publication.Expires) || publication.Generation <= s.versions[mapKey] {
+	if !time.Now().Before(publication.Expires) || publication.Token == "" || publication.Token != s.versions[mapKey] {
 		return nil
 	}
 	if s.versions == nil {
-		s.versions = map[string]int64{}
+		s.versions = map[string]string{}
 	}
-	s.versions[mapKey] = publication.Generation
+	s.versions[mapKey] = "published:" + publication.Token
 	return s.SetSessionAccountID(ctx, group, key, id, ttl)
 }
 func (s *collabBindingTraceCache) DeleteResponseBinding(ctx context.Context, group int64, key string) error {
 	if s.versions == nil {
-		s.versions = map[string]int64{}
+		s.versions = map[string]string{}
 	}
-	s.versions[fmt.Sprint(group, ":", key)] = NewCollabBindingPublication().Generation
+	s.versions[fmt.Sprint(group, ":", key)] = NewCollabBindingPublication().Token
 	if s.tombstones == nil {
 		s.tombstones = map[string]time.Time{}
 	}
@@ -209,9 +209,9 @@ func TestCollabRegressionDeferredBindingGeneration(t *testing.T) {
 
 func (s *collabBindingTraceCache) SetResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) error {
 	if s.versions == nil {
-		s.versions = map[string]int64{}
+		s.versions = map[string]string{}
 	}
-	s.versions[fmt.Sprint(group, ":", key)] = NewCollabBindingPublication().Generation
+	s.versions[fmt.Sprint(group, ":", key)] = NewCollabBindingPublication().Token
 	if s.tombstones == nil {
 		s.tombstones = map[string]time.Time{}
 	}
@@ -224,4 +224,14 @@ func collabBindingFenceTTL(ttl time.Duration) time.Duration {
 		return CollabBindingPublicationLifetime
 	}
 	return ttl
+}
+
+func (s *collabBindingTraceCache) ReserveResponseBindings(ctx context.Context, group int64, keys []string, token string) error {
+	if s.versions == nil {
+		s.versions = map[string]string{}
+	}
+	for _, key := range keys {
+		s.versions[fmt.Sprint(group, ":", key)] = token
+	}
+	return ctx.Err()
 }

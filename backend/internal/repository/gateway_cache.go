@@ -88,6 +88,8 @@ return tonumber(current)
 
 var deleteOpenAIStickyAccountScript = redis.NewScript(`
 local current = redis.call('GET', KEYS[1])
+local metadata = redis.call('GET', KEYS[2])
+if metadata and string.sub(metadata, 1, 8) == 'pending:' then redis.call('DEL', KEYS[2]) end
 if current == ARGV[1] then
   redis.call('DEL', KEYS[1], KEYS[2])
   return 1

@@ -14,14 +14,14 @@ func (m *replayMemory) CreateResponseBinding(ctx context.Context, _ int64, key s
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	publication := service.CollabBindingPublicationFrom(ctx)
-	if !time.Now().Before(publication.Expires) || publication.Generation <= m.responseGenerations[key].UnixMicro() {
+	if !time.Now().Before(publication.Expires) || publication.Token == "" || publication.Token != m.responseGenerations[key] {
 		return nil
 	}
 	if m.responseGenerations == nil {
-		m.responseGenerations = map[string]time.Time{}
+		m.responseGenerations = map[string]string{}
 	}
 	m.bindings[key] = id
-	m.responseGenerations[key] = time.UnixMicro(publication.Generation)
+	m.responseGenerations[key] = "published:" + publication.Token
 	return nil
 }
 func (m *replayMemory) DeleteResponseBinding(_ context.Context, _ int64, key string) error {
@@ -29,18 +29,30 @@ func (m *replayMemory) DeleteResponseBinding(_ context.Context, _ int64, key str
 	defer m.mu.Unlock()
 	delete(m.bindings, key)
 	if m.responseGenerations == nil {
-		m.responseGenerations = map[string]time.Time{}
+		m.responseGenerations = map[string]string{}
 	}
-	m.responseGenerations[key] = time.UnixMicro(service.NewCollabBindingPublication().Generation)
+	m.responseGenerations[key] = service.NewCollabBindingPublication().Token
 	m.effects = append(m.effects, "unbind:"+replayDigest([]byte(key)))
 	return nil
 }
 func (m *replayMemory) SetResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) error {
 	m.mu.Lock()
 	if m.responseGenerations == nil {
-		m.responseGenerations = map[string]time.Time{}
+		m.responseGenerations = map[string]string{}
 	}
-	m.responseGenerations[key] = time.UnixMicro(service.NewCollabBindingPublication().Generation)
+	m.responseGenerations[key] = service.NewCollabBindingPublication().Token
 	m.mu.Unlock()
 	return m.SetSessionAccountID(ctx, group, key, id, ttl)
+}
+
+func (m *replayMemory) ReserveResponseBindings(ctx context.Context, _ int64, keys []string, token string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.responseGenerations == nil {
+		m.responseGenerations = map[string]string{}
+	}
+	for _, key := range keys {
+		m.responseGenerations[key] = token
+	}
+	return ctx.Err()
 }
