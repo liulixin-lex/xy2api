@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // openAICodexTurnStateHeader 是 Codex 的回合状态头。上游在响应头中铸造该
@@ -101,6 +102,14 @@ func extractOpenAICodexTurnState(upstream http.Header) string {
 
 // noteOpenAICodexTurnStateProvenance 记录（下游会话 → 铸造账号）。
 func (s *OpenAIGatewayService) noteOpenAICodexTurnStateProvenance(c *gin.Context, account *Account) {
+	if c != nil && c.Request != nil {
+		attempt := resilience.CollabAttemptFrom(c.Request.Context())
+		// An optional response may still be withheld. Its delivery owner
+		// records provenance once the response actually reaches the client.
+		if !attempt.AccountEffectsAllowed() && !attempt.CustomerSettlementAllowed() {
+			return
+		}
+	}
 	if s == nil || account == nil || account.ID <= 0 {
 		return
 	}

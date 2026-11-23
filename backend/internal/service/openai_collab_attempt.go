@@ -22,7 +22,16 @@ func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, acco
 			s.collabAliasFailures.Add(1)
 		}
 	}()
-	if result == nil || c == nil || c.Request == nil || resilience.StateFrom(c.Request.Context()).DeliveredBytes() == 0 {
+	if c == nil || c.Request == nil || resilience.StateFrom(c.Request.Context()).DeliveredBytes() == 0 {
+		return
+	}
+	attempt := resilience.CollabAttemptFrom(c.Request.Context())
+	if attempt.Optional && attempt.CustomerSettlementAllowed() && c.Writer != nil {
+		// Output can precede an interrupted Forward with no result. The
+		// committed header still belongs to the response the client received.
+		s.noteStagedOpenAICodexTurnStateCommitted(c, account, c.Writer.Header())
+	}
+	if result == nil {
 		return
 	}
 	var writes []func(context.Context) error
