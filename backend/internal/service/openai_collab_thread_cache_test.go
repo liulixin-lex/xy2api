@@ -27,9 +27,6 @@ func collabFakeThreadOperation(ctx context.Context, b StickyThreadBinding, cache
 	owner := prior
 	if !present {
 		owner, _ = cache.GetSessionAccountID(ctx, group, b.Parent)
-		if owner <= 0 && b.Fallback && b.Legacy != "" {
-			owner, _ = cache.GetSessionAccountID(ctx, group, b.Legacy)
-		}
 	}
 	if owner > 0 {
 		values[b.Key] = owner
@@ -68,9 +65,6 @@ func collabFakeThreadOperation(ctx context.Context, b StickyThreadBinding, cache
 		}
 		if changed && b.RefreshTTL > 0 {
 			_ = cache.RefreshSessionTTL(ctx, group, b.Parent, b.RefreshTTL)
-			if b.Legacy != "" {
-				_ = cache.RefreshSessionTTL(ctx, group, b.Legacy, min(b.RefreshTTL, 10*time.Minute))
-			}
 		}
 		account, known := values[b.Key]
 		remaining := ttl
@@ -81,9 +75,8 @@ func collabFakeThreadOperation(ctx context.Context, b StickyThreadBinding, cache
 			remaining = b.TTL
 		}
 		parent, _ := cache.GetSessionAccountID(ctx, group, b.Parent)
-		legacy, _ := cache.GetSessionAccountID(ctx, group, b.Legacy)
 		if b.Observe != nil {
-			b.Observe(account, remaining, known, account == -1 || !known && parent <= 0 && legacy <= 0)
+			b.Observe(account, remaining, known, account == -1 || !known && parent <= 0)
 		}
 	}
 }

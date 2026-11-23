@@ -16,7 +16,7 @@ import (
 )
 
 func TestCollabThreadBindingProductionActivation(t *testing.T) {
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 	f.svc.cfg.JWT.Secret = "synthetic-affinity-secret"
 	engine := NewSchedQualityEngineService(nil, nil, nil, nil, nil)
 	engine.SetTrialLeases(newSelectionTrialLeaseFake())
@@ -139,7 +139,7 @@ func TestCollabThreadBindingClaimAndRefresh(t *testing.T) {
 		for _, action := range []string{"claim", "promote", "refresh", "refresh_other"} {
 			t.Run(initial+"/"+action, func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
-					f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+					f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 					cache := &collabEffectsCache{GatewayCache: f.svc.cache, values: map[string]int64{}, until: map[string]time.Time{}}
 					f.svc.cache = cache
 					session := "v2:shared-session"
@@ -200,7 +200,7 @@ func TestCollabThreadBindingClaimAndRefresh(t *testing.T) {
 }
 
 func TestCollabThreadBindingInvalidExpectedOwner(t *testing.T) {
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 	cache := &collabEffectsCache{GatewayCache: f.svc.cache, values: map[string]int64{}, until: map[string]time.Time{}}
 	f.svc.cache = cache
 	ctx := prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "v2:shared-session")
@@ -213,11 +213,16 @@ func TestCollabThreadBindingInvalidExpectedOwner(t *testing.T) {
 }
 
 func TestCollabThreadBindingTreeTTLOnly(t *testing.T) {
+	t.Run("legacy_inactive", testCollabLegacyRefresh)
+	t.Run("no_alias", testCollabTreeTTLOnly)
+}
+
+func testCollabTreeTTLOnly(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+		f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 		cache := &collabEffectsCache{GatewayCache: f.svc.cache, values: map[string]int64{}, until: map[string]time.Time{}}
 		f.svc.cache = cache
-		ctx := prepareAffinityTest(f, withOpenAILegacySessionHash(collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "legacy"), "v2:shared-session")
+		ctx := prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "v2:shared-session")
 		b := openAICollabBindingFrom(ctx)
 		require.NoError(t, b.write(ctx, 2, time.Hour))
 		for _, key := range []string{"openai:v2:shared-session", "openai:legacy"} {
@@ -228,7 +233,7 @@ func TestCollabThreadBindingTreeTTLOnly(t *testing.T) {
 		require.EqualValues(t, 1, cache.values["openai:v2:shared-session"])
 		require.EqualValues(t, 1, cache.values["openai:legacy"])
 		require.Equal(t, time.Hour, time.Until(cache.until["openai:v2:shared-session"]))
-		require.Equal(t, 10*time.Minute, time.Until(cache.until["openai:legacy"]))
+		require.Equal(t, 30*time.Second, time.Until(cache.until["openai:legacy"]), "unreferenced legacy keys are untouched")
 		delete(cache.until, "openai:v2:shared-session")
 		delete(cache.until, "openai:legacy")
 		require.NoError(t, f.svc.refreshStickySessionTTL(ctx, ptrInt64Selection(7), b.session, time.Hour, 2))
@@ -242,7 +247,7 @@ func TestCollabThreadBindingDeleteEffects(t *testing.T) {
 	for _, operation := range []string{"delete", "owner", "avoid", "ciphertext", "recorder"} {
 		for _, pending := range []bool{false, true} {
 			t.Run(operation+"/pending="+map[bool]string{false: "no", true: "yes"}[pending], func(t *testing.T) {
-				f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+				f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 				f.cache.sessionBindings["openai:shared-session"] = 1
 				ctx := prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "shared-session")
 				b := openAICollabBindingFrom(ctx)

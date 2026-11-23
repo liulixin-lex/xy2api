@@ -13,7 +13,7 @@ import (
 
 // Read/adopt the primary and reconcile an existing alias in one operation.
 // Adoption preserves the remaining lifetime, so reading is not an idle reset.
-var resolveSessionBindingScript = newStickyBindingScript(`
+var resolveSessionBindingScript = redis.NewScript(`
 local owner = redis.call('GET', KEYS[1])
 local legacy = redis.call('GET', KEYS[3])
 if not owner then
@@ -54,7 +54,7 @@ func (c *gatewayCache) ResolveSessionBinding(ctx context.Context, group int64, p
 		flag = 1
 	}
 	keys := append(sessionBindingKeys(group, primary), sessionBindingKeys(group, legacy)...)
-	values, err := c.runStickyBinding(ctx, resolveSessionBindingScript, keys, uuid.NewString(), flag).StringSlice()
+	values, err := resolveSessionBindingScript.Run(ctx, c.rdb, keys, uuid.NewString(), flag).StringSlice()
 	if errors.Is(err, redis.Nil) {
 		return service.StickySessionBinding{BothKeysMissing: true}, service.ErrStickySessionNotFound
 	}
@@ -72,7 +72,7 @@ func (c *gatewayCache) ResolveSessionBinding(ctx context.Context, group int64, p
 
 // The two service writes may straddle a newer successful CAS. Copy only the
 // current primary and its generation; an old writer cannot restore its owner.
-var syncSessionBindingAliasScript = newStickyBindingScript(`
+var syncSessionBindingAliasScript = redis.NewScript(`
 local owner = redis.call('GET', KEYS[1])
 if not owner or (ARGV[1] ~= '0' and owner ~= ARGV[1]) then return 0 end
 if ARGV[3] ~= '1' and redis.call('EXISTS', KEYS[3]) == 0 then return 0 end
@@ -98,12 +98,12 @@ func (c *gatewayCache) SyncSessionBindingAlias(ctx context.Context, group int64,
 		flag = 1
 	}
 	keys := append(sessionBindingKeys(group, primary), sessionBindingKeys(group, legacy)...)
-	return c.runStickyBinding(ctx, syncSessionBindingAliasScript, keys, owner, ttl.Milliseconds(), flag, uuid.NewString()).Err()
+	return syncSessionBindingAliasScript.Run(ctx, c.rdb, keys, owner, ttl.Milliseconds(), flag, uuid.NewString()).Err()
 }
 
 var _ service.OpenAIStickyAliasCache = (*gatewayCache)(nil)
 
-var deleteSessionBindingAliasesScript = newStickyBindingScript(`
+var deleteSessionBindingAliasesScript = redis.NewScript(`
 if ARGV[1] ~= '0' then
   local owner = redis.call('GET', KEYS[1]) or redis.call('GET', KEYS[3])
   if owner ~= ARGV[1] then return 0 end
@@ -113,6 +113,6 @@ return redis.call('DEL', unpack(KEYS))
 
 func (c *gatewayCache) DeleteSessionBindingAliases(ctx context.Context, group int64, primary, legacy string, owner int64) (bool, error) {
 	keys := append(sessionBindingKeys(group, primary), sessionBindingKeys(group, legacy)...)
-	n, err := c.runStickyBinding(ctx, deleteSessionBindingAliasesScript, keys, owner).Int64()
+	n, err := deleteSessionBindingAliasesScript.Run(ctx, c.rdb, keys, owner).Int64()
 	return n > 0, err
 }

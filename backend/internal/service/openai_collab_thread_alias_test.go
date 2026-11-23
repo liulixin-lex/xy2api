@@ -28,7 +28,7 @@ func RunCollabAliasParity(t *testing.T, cache GatewayCache, store ResilienceStor
 			var counts []int64
 			for _, on := range []bool{false, true} {
 				reset()
-				f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+				f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 				f.svc.cache, f.svc.resilience.store = cache, store
 				if scenario == "late_alias" {
 					selectionSetTrial(f, 1, newSelectionTrialLeaseFake())
@@ -37,6 +37,7 @@ func RunCollabAliasParity(t *testing.T, cache GatewayCache, store ResilienceStor
 				f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = scenario != "late_alias"
 				f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = true
 				ctx, session := collabAtomicRequest(t, f, resilience.NewCollabTreeAffinity(32, time.Hour), "alias-child", on, false, "alias-parent")
+				require.Nil(t, openAICollabBindingFrom(ctx), "migration is excluded before storage")
 				primary, legacy := "openai:"+session, "openai:alias-parent"
 				var remaining time.Duration
 				switch scenario {
@@ -57,7 +58,7 @@ func RunCollabAliasParity(t *testing.T, cache GatewayCache, store ResilienceStor
 					require.EqualValues(t, 2, owner)
 					require.NoError(t, f.svc.refreshStickySessionTTL(ctx, ptrInt64Selection(7), session, time.Hour, 2))
 					counts = append(counts, operations()-before)
-					require.Nil(t, openAICollabBindingFrom(ctx), "legacy-only lookup excludes the rest of this request")
+					require.Nil(t, openAICollabBindingFrom(ctx), "legacy requests remain excluded")
 					_, remaining, _ = cache.(gatewaySessionBindingReader).GetSessionAccountIDWithTTL(ctx, 7, primary)
 					advance(11 * time.Minute)
 				case "late_alias":
@@ -110,7 +111,7 @@ func RunCollabAliasParity(t *testing.T, cache GatewayCache, store ResilienceStor
 				var counts []int64
 				for _, on := range []bool{false, true} {
 					reset()
-					f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, priorities[0]), selectionFixtureAccount(2, priorities[1]), selectionFixtureAccount(3, priorities[2]))
+					f := newCollabThreadFixture(t, selectionFixtureAccount(1, priorities[0]), selectionFixtureAccount(2, priorities[1]), selectionFixtureAccount(3, priorities[2]))
 					f.svc.cache, f.svc.resilience.store = cache, store
 					for id := int64(1); id <= 3; id++ {
 						selectionSetTrial(f, id, newSelectionTrialLeaseFake())

@@ -83,7 +83,7 @@ func TestCollabThreadAtomicRedis(t *testing.T) {
 	t.Run("selection_interleavings", func(t *testing.T) {
 		service.RunCollabInterleavedSelection(t, repository.NewGatewayCache(rdb), repository.NewSchedTrialLeaseCache(rdb), func() {
 			require.NoError(t, rdb.FlushDB(context.Background()).Err())
-		}, operations.arm, members)
+		}, operations.arm, members, operations.count.Load)
 	})
 }
 
@@ -100,4 +100,15 @@ func TestCollabThreadAliasRedis(t *testing.T) {
 		require.NoError(t, err)
 		return members
 	}, operations.count.Load)
+}
+
+func TestCollabThreadScopeRedis(t *testing.T) {
+	srv := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: srv.Addr(), MaxRetries: -1})
+	operations := &collabRedisOperations{}
+	rdb.AddHook(operations)
+	t.Cleanup(func() { _ = rdb.Close() })
+	service.RunCollabScopeRegressions(t, repository.NewGatewayCache(rdb), repository.NewResilienceStore(rdb), repository.NewSchedTrialLeaseCache(rdb), func() {
+		require.NoError(t, rdb.FlushDB(context.Background()).Err())
+	}, srv.FastForward, operations.count.Load)
 }

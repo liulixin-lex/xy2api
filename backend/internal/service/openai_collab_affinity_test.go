@@ -18,6 +18,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func newCollabThreadFixture(t *testing.T, accounts ...Account) *selectionRuntimeFixture {
+	t.Helper()
+	f := newSelectionRuntimeFixture(t, accounts...)
+	f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = false
+	f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = false
+	return f
+}
+
 func collabAffinityIdentity(thread, parent string) resilience.CollabTreeHint {
 	return resilience.CollabTreeHint{Scope: resilience.CollabRecordScope{Tenant: "tenant-digest", Group: "group-digest", Tree: "tree-digest"}, Thread: resilience.CollabDigest(thread), Parent: resilience.CollabDigest(parent)}
 }
@@ -56,7 +64,7 @@ func TestCollabAffinityAloneNeverAddsSlotWait(t *testing.T) {
 		for _, mode := range []string{"free", "busy", "unsupported-model", "excluded", "wrong-group", "cooldown", "unavailable", "constraint", "missing", "admission-veto", "privacy", "profit"} {
 			t.Run(fmt.Sprintf("on=%t/%s", on, mode), func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
-					f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 2), selectionFixtureAccount(2, 1))
+					f := newCollabThreadFixture(t, selectionFixtureAccount(1, 2), selectionFixtureAccount(2, 1))
 					f.loads.acquireResults = map[int64]bool{1: mode != "busy", 2: true}
 					s := resilience.NewCollabTreeAffinity(32, time.Hour)
 					settings := collabAffinitySettings()
@@ -143,7 +151,7 @@ func TestCollabAffinityDoesNotCrossEffectiveGroups(t *testing.T) {
 
 func TestCollabAffinityCrossModelGrandchildAndParentPrecedence(t *testing.T) {
 	withResilienceSettings(t, nil)
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 3), selectionFixtureAccount(2, 1), selectionFixtureAccount(3, 2))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 3), selectionFixtureAccount(2, 1), selectionFixtureAccount(3, 2))
 	s := resilience.NewCollabTreeAffinity(32, time.Hour)
 	settings := collabAffinitySettings()
 	root := collabAffinityContext(s, settings, "root", "")
@@ -172,7 +180,7 @@ func TestCollabAffinityCrossModelGrandchildAndParentPrecedence(t *testing.T) {
 
 func TestCollabAffinityChildRetryMovesBeforeFinalOutcome(t *testing.T) {
 	withResilienceSettings(t, nil)
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 3))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 3))
 	f.cache.sessionBindings["openai:shared-session"] = 1
 	s := resilience.NewCollabTreeAffinity(32, time.Hour)
 	settings := collabAffinitySettings()
@@ -307,7 +315,7 @@ func TestCollabAffinityRejectionWrapperKeepsExistingTiming(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, on := range []bool{false, true} {
 		t.Run(fmt.Sprint(on), func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+			f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 			f.cache.sessionBindings["openai:shared-session"] = 1
 			s := resilience.NewCollabTreeAffinity(32, time.Hour)
 			settings := collabAffinitySettings()
@@ -335,7 +343,7 @@ func TestCollabAffinityRejectionWrapperKeepsExistingTiming(t *testing.T) {
 
 func TestCollabAffinityAvoidanceFallbackRetainsTenant(t *testing.T) {
 	withResilienceSettings(t, nil)
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 	s := resilience.NewCollabTreeAffinity(32, time.Hour)
 	settings := collabAffinitySettings()
 	first := collabAffinityIdentity("child", "root")
@@ -361,7 +369,7 @@ func TestCollabAffinityLeaseSuppressesPendingQualityMigration(t *testing.T) {
 	withResilienceSettings(t, nil)
 	for _, hard := range []bool{false, true} {
 		t.Run(fmt.Sprint(hard), func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+			f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 			c, _, session := qualityTestContext(f.svc, 1, 7, "gpt-6-astra", "")
 			q := qualityRequest(c.Request.Context())
 			q.loaded = true
@@ -394,7 +402,7 @@ func TestCollabAffinityLeasePreservesQualityOwnerButNotHardExclusions(t *testing
 	withResilienceSettings(t, nil)
 	for _, blocked := range []bool{false, true} {
 		t.Run(fmt.Sprint(blocked), func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 2), selectionFixtureAccount(2, 1))
+			f := newCollabThreadFixture(t, selectionFixtureAccount(1, 2), selectionFixtureAccount(2, 1))
 			f.cache.sessionBindings["openai:shared-session"] = 1
 			f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
 			before := maps.Clone(f.cache.sessionBindings)

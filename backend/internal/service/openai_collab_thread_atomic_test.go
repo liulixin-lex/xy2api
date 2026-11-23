@@ -44,7 +44,8 @@ func collabAtomicRequest(t *testing.T, f *selectionRuntimeFixture, local *resili
 	cfg := collabAffinitySettings()
 	cfg.Collab.TreeAffinity = on
 	ctx = WithOpenAICollabTreeAffinity(ctx, local, cfg, 7, collabAffinityIdentity(thread, "root"), resilience.CollabRoleChild, true)
-	require.Equal(t, on, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
+	active := on && !f.svc.openAISessionHashReadOldFallbackEnabled() && !f.svc.openAISessionHashDualWriteOldEnabled() && f.svc.openAILegacySessionCacheKey(ctx, session) == ""
+	require.Equal(t, active, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
 	return ctx, session
 }
 
@@ -53,7 +54,7 @@ func collabAtomicRequest(t *testing.T, f *selectionRuntimeFixture, local *resili
 func RunCollabAtomicStorage(t *testing.T, cache GatewayCache, store ResilienceStore, leases SchedTrialLeases, advance func(time.Duration), members func(int64) []string, operations func() int64) {
 	withResilienceSettings(t, nil)
 	fixture := func(t *testing.T, name string) (*selectionRuntimeFixture, context.Context, context.Context) {
-		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 3))
+		f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 3))
 		f.svc.cache = cache
 		f.svc.resilience.store = store
 		f.svc.selectionBoard.leases = leases
@@ -78,7 +79,7 @@ func RunCollabAtomicStorage(t *testing.T, cache GatewayCache, store ResilienceSt
 		require.ErrorIs(t, err, ErrStickySessionNotFound, "unpromoted claim must expire")
 	})
 	t.Run("inherited_refresh_ttl", func(t *testing.T) {
-		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+		f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 		f.svc.cache = cache
 		f.svc.selectionBoard.leases = leases
 		ctx := collabAtomicContext(t, f, resilience.NewCollabTreeAffinity(32, time.Hour), t.Name(), true)
@@ -138,34 +139,34 @@ func RunCollabAtomicStorage(t *testing.T, cache GatewayCache, store ResilienceSt
 			for _, action := range []string{"lookup", "claim", "refresh", "delete", "plan"} {
 				var counts []int64
 				for _, on := range []bool{false, true} {
-					f, a, _ := fixture(t, fmt.Sprintf("%s/%t/%s/%t", t.Name(), alias, action, on))
-					binding := openAICollabBindingFrom(a)
+					f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
+					f.svc.cache, f.svc.selectionBoard.leases = cache, leases
 					f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = alias
 					f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = alias
+					legacy := ""
 					if alias {
-						a, _ = collabAtomicRequest(t, f, binding.affinity.store, "operation-alias", true, false, "synthetic-legacy")
-						binding = openAICollabBindingFrom(a)
-						require.NoError(t, cache.SetSessionAccountID(a, 7, binding.legacy, 1, time.Hour))
+						legacy = "synthetic-legacy"
 					}
-					require.NoError(t, binding.write(a, 1, time.Hour))
-					if !on {
-						a = collabAtomicContext(t, f, resilience.NewCollabTreeAffinity(32, time.Hour), "ordinary", false)
-						if alias {
-							a = withOpenAILegacySessionHash(a, "synthetic-legacy")
-						}
+					a, session := collabAtomicRequest(t, f, resilience.NewCollabTreeAffinity(32, time.Hour), fmt.Sprintf("operation-%s-%t-%t", action, alias, on), on, false, legacy)
+					require.NoError(t, cache.SetSessionAccountID(a, 7, "openai:"+session, 1, time.Hour))
+					if alias {
+						require.NoError(t, cache.SetSessionAccountID(a, 7, "openai:"+legacy, 1, time.Hour))
+					}
+					if binding := openAICollabBindingFrom(a); binding != nil {
+						require.NoError(t, binding.write(a, 1, time.Hour))
 					}
 					before := operations()
 					switch action {
 					case "lookup":
-						_, _, _ = f.svc.lookupStickySessionAccount(a, ptrInt64Selection(7), binding.session)
+						_, _, _ = f.svc.lookupStickySessionAccount(a, ptrInt64Selection(7), session)
 					case "claim":
-						require.NoError(t, f.svc.setStickySessionAccountID(a, ptrInt64Selection(7), binding.session, 1, time.Hour))
+						require.NoError(t, f.svc.setStickySessionAccountID(a, ptrInt64Selection(7), session, 1, time.Hour))
 					case "refresh":
-						require.NoError(t, f.svc.refreshStickySessionTTL(a, ptrInt64Selection(7), binding.session, time.Hour, 1))
+						require.NoError(t, f.svc.refreshStickySessionTTL(a, ptrInt64Selection(7), session, time.Hour, 1))
 					case "delete":
-						require.NoError(t, f.svc.deleteStickySessionAccountIDIfOwner(a, ptrInt64Selection(7), binding.session, 1))
+						require.NoError(t, f.svc.deleteStickySessionAccountIDIfOwner(a, ptrInt64Selection(7), session, 1))
 					case "plan":
-						f.svc.prepareOpenAIStickyChange(a, ptrInt64Selection(7), binding.session)
+						f.svc.prepareOpenAIStickyChange(a, ptrInt64Selection(7), session)
 					}
 					counts = append(counts, operations()-before)
 				}
@@ -236,7 +237,7 @@ func RunCollabAtomicStorage(t *testing.T, cache GatewayCache, store ResilienceSt
 		require.ElementsMatch(t, []BindingCommitStatus{BindingCommitted, BindingChanged}, []BindingCommitStatus{results[0].Status, results[1].Status})
 	})
 	t.Run("inherited_trial", func(t *testing.T) {
-		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+		f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 		f.svc.cache = cache
 		selectionSetTrial(f, 1, newSelectionTrialLeaseFake())
 		f.svc.selectionBoard.leases = leases

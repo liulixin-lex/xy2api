@@ -29,6 +29,7 @@ type collabOracleCase struct {
 	mode                          int
 	slots                         map[int64]bool
 	production                    bool
+	migration                     int
 }
 
 type collabOracleRepo struct {
@@ -83,8 +84,10 @@ func (c collabOracleLoads) AcquireAccountSlot(ctx context.Context, id int64, lim
 }
 
 func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
-	f := newSelectionRuntimeFixture(t, c.accounts...)
+	f := newCollabThreadFixture(t, c.accounts...)
 	f.loads.acquireResults = c.slots
+	f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = c.migration&1 != 0
+	f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = c.migration&2 != 0
 	session := "shared-session"
 	if c.alias {
 		session = "v2:shared-session"
@@ -96,6 +99,8 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 		ctx, session = collabAtomicRequest(t, f, resilience.NewCollabTreeAffinity(32, time.Hour), "child", false, c.guardian)
 		legacy = openAILegacySessionHashFromContext(ctx)
 	}
+	requested := on
+	on = on && c.migration == 0 && (!c.alias || legacy == "")
 	owner := c.bound
 	if on {
 		owner = 1
@@ -154,12 +159,12 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 		}
 	}
 	before := maps.Clone(f.cache.sessionBindings)
-	if on {
+	if requested {
 		ctx = WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
 		ctx = prepareAffinityTest(f, ctx, session)
 		b := openAICollabBindingFrom(ctx)
-		require.NotNil(t, b)
-		if !c.production || c.guardian || c.bound != 1 {
+		require.Equal(t, on, b != nil)
+		if on && (!c.production || c.guardian || c.bound != 1) {
 			require.NoError(t, b.write(ctx, c.bound, time.Hour))
 		}
 	}
@@ -237,39 +242,46 @@ func TestCollabThreadBindingGeneratedOracle(t *testing.T) {
 }
 
 func TestCollabThreadBindingDirectWriters(t *testing.T) {
+	t.Run("legacy_inactive", testCollabLegacyDirectWriters)
+	t.Run("no_alias", testCollabDirectWriters)
+}
+
+func testCollabDirectWriters(t *testing.T) {
 	withResilienceSettings(t, nil)
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
-	f.cache.sessionBindings["openai:shared-session"] = 1
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+	f.svc.cache = collabOracleAtomicCache{f.cache}
+	f.cache.sessionBindings["openai:v2:shared-session"] = 1
 	f.cache.sessionBindings["openai:legacy"] = 1
-	ctx := prepareAffinityTest(f, withOpenAILegacySessionHash(collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "legacy"), "shared-session")
+	ctx := prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "v2:shared-session")
 	b := openAICollabBindingFrom(ctx)
 	require.NoError(t, b.write(ctx, 2, time.Hour))
-	require.NoError(t, f.svc.deleteStickySessionAccountIDIfOwner(ctx, ptrInt64Selection(7), "shared-session", 1))
+	require.NoError(t, f.svc.deleteStickySessionAccountIDIfOwner(ctx, ptrInt64Selection(7), "v2:shared-session", 1))
 	owner, _, _ := b.effective(ctx)
 	require.EqualValues(t, 2, owner)
-	require.NoError(t, f.svc.deleteStickySessionAccountIDIfOwner(ctx, ptrInt64Selection(7), "shared-session", 2))
+	require.NoError(t, f.svc.deleteStickySessionAccountIDIfOwner(ctx, ptrInt64Selection(7), "v2:shared-session", 2))
 	owner, missing, _ := b.effective(ctx)
 	require.Zero(t, owner)
 	require.True(t, missing)
-	require.NoError(t, f.svc.setStickySessionAccountID(ctx, ptrInt64Selection(7), "shared-session", 2, time.Hour))
-	require.NoError(t, f.svc.refreshStickySessionTTL(ctx, ptrInt64Selection(7), "shared-session", time.Hour, 2))
+	require.NoError(t, f.svc.setStickySessionAccountID(ctx, ptrInt64Selection(7), "v2:shared-session", 2, time.Hour))
+	require.NoError(t, f.svc.refreshStickySessionTTL(ctx, ptrInt64Selection(7), "v2:shared-session", time.Hour, 2))
 	cache := collabThreadVersionedCache{b}
-	expected, err := cache.GetSessionBinding(ctx, 7, "openai:shared-session")
+	expected, err := cache.GetSessionBinding(ctx, 7, "openai:v2:shared-session")
 	require.NoError(t, err)
-	_, err = cache.RecordSessionBindingFailure(context.Background(), 7, "openai:shared-session", "ignored", expected, 1, time.Minute)
+	_, err = cache.RecordSessionBindingFailure(context.Background(), 7, "openai:v2:shared-session", "ignored", expected, 1, time.Minute)
 	require.NoError(t, err)
-	commit, err := cache.CommitSessionBinding(context.Background(), 7, "openai:shared-session", expected, 2, time.Hour, BindingCommitOptions{})
+	commit, err := cache.CommitSessionBinding(context.Background(), 7, "openai:v2:shared-session", expected, 2, time.Hour, BindingCommitOptions{})
 	require.NoError(t, err)
 	require.Equal(t, BindingCommitted, commit.Status)
-	require.NoError(t, cache.SyncSessionBindingAlias(context.Background(), 7, "openai:shared-session", "openai:legacy", 2, time.Hour, true))
+	_, aliases := any(cache).(OpenAIStickyAliasCache)
+	require.False(t, aliases, "active thread cache cannot expose legacy operations")
 	rec := f.svc.collabSessionRecorder(ctx)
 	for i := 0; i < resilience.Current().Session.StreakThreshold; i++ {
-		rec.Failure(context.Background(), 7, "shared-session", 2, resilience.CategoryTransient)
+		rec.Failure(context.Background(), 7, "v2:shared-session", 2, resilience.CategoryTransient)
 	}
 	owner, missing, _ = b.effective(ctx)
 	require.Zero(t, owner)
 	require.True(t, missing)
-	require.EqualValues(t, 1, f.cache.sessionBindings["openai:shared-session"])
+	require.EqualValues(t, 1, f.cache.sessionBindings["openai:v2:shared-session"])
 	require.EqualValues(t, 1, f.cache.sessionBindings["openai:legacy"])
 }
 
@@ -292,7 +304,7 @@ func (c *collabSlowBindingCache) GetSessionAccountID(ctx context.Context, g int6
 
 func TestCollabThreadBindingReadBudgetAndScope(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+		f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 		cache := &collabSlowBindingCache{GatewayCache: f.svc.cache}
 		f.svc.cache = cache
 		ctx := collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root")
@@ -331,7 +343,7 @@ func (s *collabAvoidOutage) SessionAvoidWrittenAt(ctx context.Context, g int64, 
 
 func TestCollabThreadBindingLocalAvoidanceAndNamespaces(t *testing.T) {
 	withResilienceSettings(t, nil)
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 	f.cache.sessionBindings["openai:shared-session"] = 1
 	local := resilience.NewCollabTreeAffinity(32, time.Hour)
 	ctx := prepareAffinityTest(f, collabAffinityContext(local, collabAffinitySettings(), "child", "root"), "shared-session")
@@ -356,7 +368,7 @@ func TestCollabThreadBindingLocalAvoidanceAndNamespaces(t *testing.T) {
 
 func TestCollabThreadBindingTerminalAndPendingCompletion(t *testing.T) {
 	withResilienceSettings(t, nil)
-	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
 	f.cache.sessionBindings["openai:shared-session"] = 1
 	ctx := prepareAffinityTest(f, collabAffinityContext(resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), "child", "root"), "shared-session")
 	b := openAICollabBindingFrom(ctx)
@@ -387,7 +399,7 @@ func TestCollabThreadBindingTerminalAndPendingCompletion(t *testing.T) {
 func TestCollabThreadBindingExcludedDimensions(t *testing.T) {
 	for _, mode := range []string{"off", "plain", "platform", "websocket", "passthrough", "optional", "quality", "trials"} {
 		t.Run(mode, func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+			f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 			f.svc.cfg.JWT.Secret = "synthetic-affinity-secret"
 			settings := collabAffinitySettings()
 			settings.Collab.TreeAffinity = mode != "off"
@@ -460,7 +472,7 @@ func (c *collabBindingExpiryCache) SetSessionAccountID(ctx context.Context, g in
 func TestCollabThreadBindingRequestSequence(t *testing.T) {
 	withResilienceSettings(t, nil)
 	synctest.Test(t, func(t *testing.T) {
-		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 3))
+		f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 3))
 		f.cache.sessionBindings["openai:shared-session"] = 1
 		cache := &collabBindingExpiryCache{GatewayCache: f.svc.cache, values: map[string]int64{}, until: map[string]time.Time{}}
 		f.svc.cache = cache

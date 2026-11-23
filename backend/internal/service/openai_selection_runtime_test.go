@@ -49,8 +49,6 @@ func (c *selectionRuntimeCache) GetSessionAccountIDWithTTL(ctx context.Context, 
 	return id, c.remaining, err
 }
 func (c *selectionRuntimeCache) CommitSessionBinding(ctx context.Context, group int64, key string, expected StickySessionBinding, next int64, ttl time.Duration, _ BindingCommitOptions) (BindingCommitResult, error) {
-	_, thread := StickyThreadBindingFrom(ctx)
-	threadNone := thread && c.sessionBindings[key] == -1
 	if binding, ok := StickyThreadBindingFrom(ctx); ok {
 		var finish func()
 		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.sessionBindings, nil, "commit", next, ttl)
@@ -58,23 +56,17 @@ func (c *selectionRuntimeCache) CommitSessionBinding(ctx context.Context, group 
 	}
 
 	c.casKeys = append(c.casKeys, key)
-	if c.sessionBindings[key] != expected.AccountID || !threadNone && expected.AccountID == 0 && expected.LegacyKey != "" && c.sessionBindings[expected.LegacyKey] != 0 {
+	if c.sessionBindings[key] != expected.AccountID || expected.AccountID == 0 && expected.LegacyKey != "" && c.sessionBindings[expected.LegacyKey] != 0 {
 		return BindingCommitResult{Status: BindingChanged, ObservedGen: expected.Generation}, nil
 	}
 	c.sessionBindings[key] = next
-	if !thread && expected.LegacyKey != "" && c.sessionBindings[expected.LegacyKey] != 0 {
+	if expected.LegacyKey != "" && c.sessionBindings[expected.LegacyKey] != 0 {
 		c.sessionBindings[expected.LegacyKey] = next
 	}
 	return BindingCommitResult{Status: BindingCommitted, ObservedGen: expected.Generation, NewGen: expected.Generation + "-next"}, nil
 }
 
 func (c *selectionRuntimeCache) ResolveSessionBinding(ctx context.Context, group int64, primary, legacy string, fallback bool) (StickySessionBinding, error) {
-	if _, ok := StickyThreadBindingFrom(ctx); ok {
-		binding, err := c.GetSessionBinding(ctx, group, primary)
-		binding.BothKeysMissing = err == ErrStickySessionNotFound && (c.sessionBindings[primary] == -1 || c.sessionBindings[legacy] == 0)
-		binding.LegacyKey = legacy
-		return binding, err
-	}
 	if c.sessionBindings[primary] == 0 && fallback {
 		c.sessionBindings[primary] = c.sessionBindings[legacy]
 	}
@@ -88,9 +80,6 @@ func (c *selectionRuntimeCache) ResolveSessionBinding(ctx context.Context, group
 }
 
 func (c *selectionRuntimeCache) SyncSessionBindingAlias(ctx context.Context, _ int64, primary, legacy string, owner int64, _ time.Duration, create bool) error {
-	if _, ok := StickyThreadBindingFrom(ctx); ok {
-		return nil // This scalar fake has no TTL; thread sync cannot change alias values.
-	}
 	current := c.sessionBindings[primary]
 	if current > 0 && (owner == 0 || current == owner) && (create || c.sessionBindings[legacy] != 0) {
 		c.sessionBindings[legacy] = current
