@@ -776,6 +776,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	defer service.FinishOpenAICollabDelivery(c)
 	collabSeam := h.armCollabSeam(c, forwardBody, previousResponseID, requestPlatform, legacyCompact)
 	wireCollabDeliveryRescue(collabSeam)
+	h.wireCollabLocalEnding(collabSeam)
 	if collabSeam != nil {
 		collabSeam.started = requestStart
 	}

@@ -92,6 +92,22 @@ func (s *OpenAIGatewayService) applyCollabDispositions(ctx context.Context, acco
 		}
 		path := r.itemPaths[i]
 		part := gjson.GetBytes(out, path)
+		if item.Family == resilience.CollabFamilyReasoning || item.Family == resilience.CollabFamilyCompaction {
+			value := part
+			if part.IsObject() {
+				value = part.Get("encrypted_content")
+			}
+			if value.Type == gjson.String && s.CollabDigest(resilience.CollabDigestDomainCiphertext, value.String()) == item.Key.Digest {
+				parsed := ParseCollabBody(out)
+				for _, original := range parsed.Items {
+					if original.Index == item.Position.InputIndex {
+						out, _ = parsed.Derive(out, resilience.CollabActionNamedRepair, original.Identity, false)
+						break
+					}
+				}
+			}
+			continue
+		}
 		if !part.IsObject() || s.CollabDigest(resilience.CollabDigestDomainCiphertext, part.Get("encrypted_content").String()) != item.Key.Digest {
 			continue
 		}

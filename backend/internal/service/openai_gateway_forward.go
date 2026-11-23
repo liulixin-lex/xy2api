@@ -1170,6 +1170,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if deriveErr != nil {
 			return nil, deriveErr
 		}
+		derivedBody = protectCollabUnreceiptedFirstSend(ctx, derivedBody)
 		body, requestView, reqBody = derivedBody, newOpenAIRequestView(derivedBody), nil
 		requestRepair.setBody(body)
 		attemptStart := resetOpenAIRepairAttempt(ctx, account, upstreamModel, reqStream, body, replayAttempt)

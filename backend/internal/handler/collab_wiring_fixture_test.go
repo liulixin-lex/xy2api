@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,12 +19,15 @@ import (
 )
 
 type collabWiringUpstream struct {
+	mu      sync.Mutex
 	respond func(*http.Request, int64) (*http.Response, error)
 	sends   int
 }
 
 func (u *collabWiringUpstream) Do(req *http.Request, _ string, account int64, _ int) (*http.Response, error) {
+	u.mu.Lock()
 	u.sends++
+	u.mu.Unlock()
 	service.RecordOpsUpstreamSendBoundary(req.Context(), account)
 	return u.respond(req, account)
 }
@@ -39,7 +43,7 @@ type collabWiringFixture struct {
 	repo     *openAIWSFailoverHandlerAccountRepoStub
 }
 
-func newCollabWiringFixture(t *testing.T, settings resilience.Settings, respond func(*http.Request, int64) (*http.Response, error)) *collabWiringFixture {
+func newCollabWiringFixture(t *testing.T, settings resilience.Settings, respond func(*http.Request, int64) (*http.Response, error), caches ...service.GatewayCache) *collabWiringFixture {
 	t.Helper()
 	old := resilience.Current().Clone()
 	settings.Keepalive.Enabled = false
@@ -48,6 +52,10 @@ func newCollabWiringFixture(t *testing.T, settings resilience.Settings, respond 
 	accounts := []service.Account{{ID: 71, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 2, Credentials: map[string]any{"api_key": "synthetic-key", "base_url": "https://fixture.invalid"}, Extra: map[string]any{"openai_collaboration_plaintext": true}}}
 	repo := &openAIWSFailoverHandlerAccountRepoStub{accounts: accounts, groupLookup: true}
 	memory := &replayMemory{bindings: map[string]int64{}, avoids: map[string]map[int64]time.Time{}, avoidUntil: map[string]map[int64]time.Time{}, failures: map[string]map[int64]int64{}}
+	var cache service.GatewayCache = memory
+	if len(caches) > 0 {
+		cache = caches[0]
+	}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.JWT.Secret = "synthetic-wiring-key"
 	cfg.Default.RateMultiplier = 1
@@ -56,7 +64,7 @@ func newCollabWiringFixture(t *testing.T, settings resilience.Settings, respond 
 	t.Cleanup(billing.Stop)
 	rateLimit := service.NewRateLimitService(repo, nil, cfg, nil, nil)
 	usage := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 16), unbilled: make(chan *service.GatewayUnbilledRequest, 16)}
-	gateway := service.NewOpenAIGatewayService(repo, usage, nil, nil, nil, nil, memory, cfg, nil, nil, service.NewBillingService(cfg, nil), rateLimit, billing, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
+	gateway := service.NewOpenAIGatewayService(repo, usage, nil, nil, nil, nil, cache, cfg, nil, nil, service.NewBillingService(cfg, nil), rateLimit, billing, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
 	gateway.StopOpenAICodexTicketHarvester()
 	t.Cleanup(gateway.CloseCollabRecords)
 	previousRuntime := service.Resilience()

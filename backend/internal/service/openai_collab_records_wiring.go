@@ -28,6 +28,9 @@ func (r *openAICollabRequest) beginRecords(ctx context.Context) {
 	current := gjson.GetBytes(r.state.CurrentBody, "input").Array()
 	original := gjson.GetBytes(r.state.Original, "input").Array()
 	for index, item := range r.state.Items {
+		if item.Family != resilience.CollabFamilyAgentMessage && item.Family != resilience.CollabFamilyToolOutput {
+			continue
+		}
 		if index >= len(r.itemPaths) {
 			break
 		}

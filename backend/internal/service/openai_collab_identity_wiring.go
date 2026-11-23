@@ -71,6 +71,7 @@ func (s *OpenAIGatewayService) PrepareOpenAICollabIdentity(c *gin.Context) {
 	// Identity is known before any send/observation can be sealed.
 	r.initObservation(c)
 	r.initCipherItems()
+	r.initCollabAuxiliaryItems()
 }
 
 func (r *openAICollabRequest) initCipherItems() {
