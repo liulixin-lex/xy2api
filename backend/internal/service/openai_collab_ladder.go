@@ -51,6 +51,8 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 		if progress.handled == nil {
 			progress.handled = map[int64]map[string]bool{}
 		}
+	}
+	if progress.namedFamilies == nil {
 		progress.namedFamilies = map[int64]map[collabNamedClass]bool{}
 	}
 	derived, probed, replaced := progress.derived, maps.Clone(progress.probed), progress.replaced
@@ -114,11 +116,11 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 				if item.Family != resilience.CollabFamilyReasoning && (item.Family == resilience.CollabFamilyCompaction || item.Class == resilience.CollabItemClassProtected || item.Class == resilience.CollabItemClassUnreadMessage) {
 					prefer = l.First
 				}
-				if namedFamilies[current][collabNamedClass{item.Family, item.Class}] {
+				if namedFamilies[current][collabNamedItemClass(*item)] {
 					if item.Family == resilience.CollabFamilyReasoning {
 						batchReasoning = true
 					}
-					if item.Family == resilience.CollabFamilyAgentMessage && item.Class == resilience.CollabItemClassReplaceable {
+					if item.Class == resilience.CollabItemClassReplaceable {
 						action = resilience.CollabActionDropUnprotected
 					}
 				}
@@ -259,7 +261,7 @@ func (l CollabLadder) Run(ctx context.Context) bool {
 					}
 					for _, item := range l.Body.Items {
 						if item.Identity == named {
-							namedFamilies[account][collabNamedClass{item.Family, item.Class}] = true
+							namedFamilies[account][collabNamedItemClass(item)] = true
 						}
 					}
 				}
@@ -312,6 +314,15 @@ func CollabTakeoverDuration(now, started time.Time, retryable, committed bool, d
 type collabNamedClass struct {
 	family resilience.CollabFamily
 	class  resilience.CollabItemClass
+}
+
+// Reasoning has its own batch rule. Replaceable bodies share one allowance
+// across agent messages and tool outputs; protected and unread items stay apart.
+func collabNamedItemClass(item CollabBodyItem) collabNamedClass {
+	if item.Family == resilience.CollabFamilyReasoning {
+		return collabNamedClass{family: item.Family}
+	}
+	return collabNamedClass{class: item.Class}
 }
 
 // Progress is request-owned and shared by early and terminal entry. Named and
@@ -376,4 +387,15 @@ func (p *CollabLadderProgress) RememberRejection(rejection CollabRejection) {
 		p.derived = map[int64][]byte{}
 	}
 	p.derived[rejection.AccountID] = rejection.Derivation
+	if p.namedFamilies == nil {
+		p.namedFamilies = map[int64]map[collabNamedClass]bool{}
+	}
+	if p.namedFamilies[rejection.AccountID] == nil {
+		p.namedFamilies[rejection.AccountID] = map[collabNamedClass]bool{}
+	}
+	for class, used := range rejection.namedClasses {
+		if used {
+			p.namedFamilies[rejection.AccountID][class] = true
+		}
+	}
 }

@@ -167,6 +167,16 @@ func (u *replayUpstream) Do(req *http.Request, _ string, id int64, _ int) (resul
 		var payload string
 		status := http.StatusBadRequest
 		switch rule.Kind {
+		case "regression_bad_suffix":
+			if strings.Contains(string(body), `"encrypted_content"`) {
+				payload = replayError("invalid_request_error", "Encrypted content hydration failed at input[0][bad].", "")
+			}
+		case "regression_ownership_locator":
+			if strings.Contains(string(body), `"encrypted_content"`) {
+				payload = replayError("encrypted_agent_recovery_wire_changed", "synthetic ownership rejection", "input[0].arguments")
+				status = 409
+			}
+
 		case "regression_invalid_locator":
 			if strings.Contains(string(body), `"encrypted_content"`) {
 				payload = replayError("invalid_request_error", "Encrypted content hydration failed", rule.Item)

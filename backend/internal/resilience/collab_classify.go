@@ -9,8 +9,8 @@ import (
 )
 
 var collabNamedPattern = regexp.MustCompile("(?i)\\bfor\\s+item\\s+['\"`]?([a-z0-9]+_[a-z0-9_-]+)\\b")
-var collabLocatorPattern = regexp.MustCompile(`\binput(?:\[[^\s]*|\.[^\s]*)`)
-var collabIndexPattern = regexp.MustCompile(`\binput(?:\[([0-9]+)\]|\.([0-9]+))(?:(?:\.[a-zA-Z_0-9]+)|(?:\[[0-9]+\]))*`)
+var collabLocatorPattern = regexp.MustCompile("\\binput(?:[.\\[]|\\s+[.\\[])[^\\s,;:!?\"'`]*")
+var collabIndexPattern = regexp.MustCompile(`^input(?:\[([0-9]+)\]|\.([0-9]+))(?:(?:\.[a-zA-Z_0-9]+)|(?:\[[0-9]+\]))*$`)
 
 // Text evidence must assert rejection of the encrypted subject itself. Locator
 // quotes are allowed; quoted examples and unrelated later clauses are not.
@@ -60,6 +60,28 @@ func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
 	}
 	code := strings.ToLower(strings.TrimSpace(object.Get("code").String()))
 	message := strings.ToLower(object.Get("message").String())
+	family := CollabFamilyOtherEncrypted
+	out.Named = collabErrorNamed(object)
+	switch {
+	case strings.Contains(message, "encrypted function output"):
+		family = CollabFamilyToolOutput
+	case strings.Contains(message, "encrypted function arguments"), strings.Contains(message, "encrypted_function_args"):
+		family = CollabFamilyCallArgs
+	case out.Named != nil:
+		switch {
+		case strings.HasPrefix(out.Named.Identity, "amsg_"):
+			family = CollabFamilyAgentMessage
+		case strings.HasPrefix(out.Named.Identity, "rs_"):
+			family = CollabFamilyReasoning
+		case strings.HasPrefix(out.Named.Identity, "cmp_"):
+			family = CollabFamilyCompaction
+		case strings.HasPrefix(out.Named.Identity, "fc_"):
+			family = CollabFamilyCallArgs
+		}
+	}
+	if out.Named != nil {
+		out.Named.Family = family
+	}
 	// This relay state is independent of ciphertext and must stay unclaimed.
 	if code == "client_tool_continuation_unavailable" || strings.Contains(message, "opaque conversation state") || strings.Contains(message, "unrecognized conversation state") {
 		return out
@@ -96,28 +118,7 @@ func ClassifyCollabEvidence(in CollabEvidenceInput) CollabEvidence {
 		}
 		return out
 	}
-	out.Grade, out.Family = CollabEvidenceGradeVerified, CollabFamilyOtherEncrypted
-	out.Named = collabErrorNamed(object)
-	switch {
-	case strings.Contains(message, "encrypted function output"):
-		out.Family = CollabFamilyToolOutput
-	case strings.Contains(message, "encrypted function arguments"), strings.Contains(message, "encrypted_function_args"):
-		out.Family = CollabFamilyCallArgs
-	case out.Named != nil:
-		switch {
-		case strings.HasPrefix(out.Named.Identity, "amsg_"):
-			out.Family = CollabFamilyAgentMessage
-		case strings.HasPrefix(out.Named.Identity, "rs_"):
-			out.Family = CollabFamilyReasoning
-		case strings.HasPrefix(out.Named.Identity, "cmp_"):
-			out.Family = CollabFamilyCompaction
-		case strings.HasPrefix(out.Named.Identity, "fc_"):
-			out.Family = CollabFamilyCallArgs
-		}
-	}
-	if out.Named != nil {
-		out.Named.Family = out.Family
-	}
+	out.Grade, out.Family = CollabEvidenceGradeVerified, family
 	return out
 }
 
@@ -197,38 +198,38 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 	}
 	add(object.Get("item_id").String())
 	for _, field := range []string{"message", "param"} {
-		for _, match := range collabNamedPattern.FindAllStringSubmatch(object.Get(field).String(), -1) {
+		value := strings.TrimSpace(object.Get(field).String())
+		for _, match := range collabNamedPattern.FindAllStringSubmatch(value, -1) {
 			add(match[1])
 		}
-		value := object.Get(field).String()
-		for _, locator := range collabLocatorPattern.FindAllString(value, -1) {
-			if collabIndexPattern.FindString(locator) == "" {
-				if named == nil {
-					named = &CollabNamedItem{}
-				}
-				named.Ambiguous = true
-			}
+		locators := collabLocatorPattern.FindAllString(value, -1)
+		if field == "param" && value != "" {
+			locators = []string{value}
 		}
-		for _, match := range collabIndexPattern.FindAllStringSubmatch(value, -1) {
-			index, err := strconv.Atoi(match[1] + match[2])
+		for _, locator := range locators {
+			if field == "message" {
+				locator = strings.TrimSuffix(locator, ".")
+			}
 			if named == nil {
 				named = &CollabNamedItem{}
 			}
+			match := collabIndexPattern.FindStringSubmatch(locator)
+			if match == nil {
+				named.Ambiguous = true
+				continue
+			}
+			index, err := strconv.Atoi(match[1] + match[2])
 			if err != nil || named.InputIndex != nil && *named.InputIndex != index {
 				named.Ambiguous = true
-			} else {
-				named.InputIndex = &index
-				location := match[0]
-				if field == "param" {
-					location = strings.TrimSpace(object.Get(field).String())
-				}
-				path := strings.NewReplacer("[", ".", "]", "").Replace(location)
-				if named.Path != "" && named.Path != path && !strings.HasPrefix(path, named.Path+".") && !strings.HasPrefix(named.Path, path+".") {
-					named.Ambiguous = true
-				}
-				if len(path) > len(named.Path) {
-					named.Path = path
-				}
+				continue
+			}
+			named.InputIndex = &index
+			path := strings.NewReplacer("[", ".", "]", "").Replace(locator)
+			if named.Path != "" && named.Path != path && !strings.HasPrefix(path, named.Path+".") && !strings.HasPrefix(named.Path, path+".") {
+				named.Ambiguous = true
+			}
+			if len(path) > len(named.Path) {
+				named.Path = path
 			}
 		}
 	}

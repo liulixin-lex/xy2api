@@ -22,18 +22,19 @@ const collabRejectionLimit = 8
 // CollabRejection is transient, request-owned evidence. Never log or persist
 // Payload; BodyDigest covers exactly the bytes handed to the send boundary.
 type CollabRejection struct {
-	AccountID   int64
-	Passthrough bool
-	Status      int
-	BodyDigest  resilience.CollabDigest
-	Payload     []byte
-	Event       string
-	Source      resilience.CollabEvidenceSource
-	Truncated   bool
-	Handled     map[string]bool
-	Derivation  []byte
-	positions   map[int]int
-	unlocatable bool
+	AccountID    int64
+	Passthrough  bool
+	Status       int
+	BodyDigest   resilience.CollabDigest
+	Payload      []byte
+	Event        string
+	Source       resilience.CollabEvidenceSource
+	Truncated    bool
+	Handled      map[string]bool
+	Derivation   []byte
+	positions    map[int]int
+	namedClasses map[collabNamedClass]bool
+	unlocatable  bool
 }
 
 func (r CollabRejection) Evidence(shape resilience.CollabRequestShape) resilience.CollabEvidence {
@@ -381,9 +382,13 @@ func (b *collabEvidenceBody) record(rejection CollabRejection) {
 					rejection.Handled = map[string]bool{}
 				}
 				rejection.Handled[item.Identity] = true
+				if rejection.namedClasses == nil {
+					rejection.namedClasses = map[collabNamedClass]bool{}
+				}
+				rejection.namedClasses[collabNamedItemClass(item)] = true
 			}
 		}
-		if len(rejection.Handled) > 0 {
+		if ok && !current.Shape.Ambiguous && !bytes.Equal(original.Original, b.requestBody) {
 			rejection.Derivation = bytes.Clone(b.requestBody)
 		}
 	}
