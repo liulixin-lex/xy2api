@@ -13,7 +13,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// This original oracle exercises the unfinished binding via the test-only hook.
 func TestCollabThreadBindingProductionOracle(t *testing.T) {
+	runCollabProductionOracle(t, false)
+}
+
+func TestCollabThreadBindingReleaseProductionOracle(t *testing.T) {
+	runCollabProductionOracle(t, true)
+}
+
+func runCollabProductionOracle(t *testing.T, shipped bool) {
 	withResilienceSettings(t, nil)
 	old := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -22,7 +31,7 @@ func TestCollabThreadBindingProductionOracle(t *testing.T) {
 		for _, seed := range []int64{31, 709, 3019} {
 			r := rand.New(rand.NewSource(seed))
 			for i := range 1000 {
-				c := collabOracleCase{production: true, migration: migration, bound: int64(r.Intn(4)), guardian: r.Intn(2) == 0, avoid: r.Intn(2) == 0, alias: r.Intn(2) == 0, plain: r.Intn(2) == 0, mode: i % 12, slots: map[int64]bool{}}
+				c := collabOracleCase{production: true, shipped: shipped, switches: i % 384, migration: migration, bound: int64(r.Intn(4)), guardian: r.Intn(2) == 0, avoid: r.Intn(2) == 0, alias: r.Intn(2) == 0, plain: r.Intn(2) == 0, mode: i % 12, slots: map[int64]bool{}}
 				for id := int64(1); id <= 3; id++ {
 					a := selectionFixtureAccount(id, r.Intn(3))
 					a.Schedulable = r.Intn(8) != 0

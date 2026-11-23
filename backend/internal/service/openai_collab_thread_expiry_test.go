@@ -2,6 +2,9 @@
 
 package service
 
+// Binding scenarios here exercise unfinished code through the test-only hook.
+// They do not establish equivalence or enable thread bindings in this release.
+
 import (
 	"context"
 	"fmt"
@@ -125,7 +128,7 @@ func RunCollabProvisionalExpiry(t *testing.T, cache GatewayCache, store Resilien
 		require.NoError(t, f.svc.deleteStickySessionAccountIDIfOwner(ctx, ptrInt64Selection(7), session, 1))
 		f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = true
 		f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = true
-		require.True(t, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
+		require.True(t, f.svc.enableUnshippedCollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
 		result := selectTrialRuntime(t, f, ctx, session)
 		CompleteOpenAIStickyChange(ctx, result.Account.ID, true, false)
 		result.ReleaseFunc()

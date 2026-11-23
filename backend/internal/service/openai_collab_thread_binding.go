@@ -10,6 +10,15 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
+// Thread bindings do not ship until their equivalence to ordinary tree binding
+// is established. A sibling can renew the parent beyond a child's deletion
+// marker, reviving a deleted owner and adding a capacity deadline error. The
+// temporal oracle lacks those renewals and marker-cleanup observations: both
+// permanent and too-short marker mutants pass it. The retained implementation
+// is exercised only through an explicit hook in a _test.go file. Tree hints,
+// delivery leases and queue recovery are independent of this gate.
+const openAICollabThreadBindingEnabled = false
+
 // One request's view of a thread binding. Absent follows the tree; present zero
 // is the result of deletion. The service and identity are captured so detached
 // completion and failure recorders never fall back to the tree's writers.
@@ -25,13 +34,18 @@ type openAICollabThreadBinding struct {
 	pairMissing         bool
 }
 
-// PrepareOpenAICollabThreadBinding is called once before native HTTP selection,
-// with the authenticated API key ID, original session and resolved platform.
-// The frozen gateway configuration must have both hash-migration options off.
-// A supplied legacy key is also excluded: ordinary pending placement can still
-// fence its commit on that key even when migration is off. Eligibility is fixed
-// here, before storage; unsupported requests retain the ordinary tree effects.
+// PrepareOpenAICollabThreadBinding is a no-op in this release. It neither
+// allocates thread state nor disables the other affinity features on the context.
 func (s *OpenAIGatewayService) PrepareOpenAICollabThreadBinding(ctx context.Context, apiKeyID int64, session, platform string, transport OpenAIClientTransport, native bool) bool {
+	if !openAICollabThreadBindingEnabled {
+		return false
+	}
+	return s.prepareOpenAICollabThreadBinding(ctx, apiKeyID, session, platform, transport, native)
+}
+
+// Retained implementation: frozen migration options must be off and no legacy
+// key may be supplied (ordinary pending creation still fences on that alias).
+func (s *OpenAIGatewayService) prepareOpenAICollabThreadBinding(ctx context.Context, apiKeyID int64, session, platform string, transport OpenAIClientTransport, native bool) bool {
 	a := openAICollabAffinityFrom(ctx)
 	if a != nil {
 		if old := a.binding.Load(); old != nil {

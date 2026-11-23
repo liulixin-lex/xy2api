@@ -2,6 +2,9 @@
 
 package service
 
+// Binding scenarios here exercise unfinished code through the test-only hook.
+// They do not establish equivalence or enable thread bindings in this release.
+
 import (
 	"context"
 	"errors"
@@ -30,6 +33,8 @@ type collabOracleCase struct {
 	slots                         map[int64]bool
 	production                    bool
 	migration                     int
+	shipped                       bool
+	switches                      int
 }
 
 type collabOracleRepo struct {
@@ -100,7 +105,7 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 		legacy = openAILegacySessionHashFromContext(ctx)
 	}
 	requested := on
-	on = on && c.migration == 0 && (!c.alias || legacy == "")
+	on = on && !c.shipped && c.migration == 0 && (!c.alias || legacy == "")
 	owner := c.bound
 	if on {
 		owner = 1
@@ -160,8 +165,16 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 	}
 	before := maps.Clone(f.cache.sessionBindings)
 	if requested {
-		ctx = WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true, f.svc.cfg)
-		ctx = prepareAffinityTest(f, ctx, session)
+		settings := collabAffinitySettings()
+		if c.shipped {
+			settings = collabReleaseSettings(c.switches)
+		}
+		ctx = WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(32, time.Hour), settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true, f.svc.cfg)
+		if c.shipped {
+			require.False(t, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
+		} else {
+			ctx = prepareAffinityTest(f, ctx, session)
+		}
 		b := openAICollabBindingFrom(ctx)
 		require.Equal(t, on, b != nil)
 		if on && (!c.production || c.guardian || c.bound != 1) {
@@ -320,7 +333,7 @@ func TestCollabThreadBindingReadBudgetAndScope(t *testing.T) {
 		ctx = prepareAffinityTest(f, ctx, "shared-session")
 		require.Zero(t, time.Since(start))
 		require.Zero(t, cache.reads.Load())
-		f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "shared-session", PlatformOpenAI, OpenAIClientTransportHTTP, true)
+		f.svc.enableUnshippedCollabThreadBinding(ctx, 1, "shared-session", PlatformOpenAI, OpenAIClientTransportHTTP, true)
 		require.Zero(t, cache.reads.Load())
 		key := openAICollabBindingFrom(ctx).key
 		require.True(t, strings.HasPrefix(key, "collab-thread-binding-v1:"))
@@ -361,7 +374,7 @@ func TestCollabThreadBindingLocalAvoidanceAndNamespaces(t *testing.T) {
 	require.Empty(t, f.svc.collabThreadAvoidances(retry))
 	other := withOpenAINoStickyMigration(collabAffinityContext(local, collabAffinitySettings(), "child", "root"))
 	other = context.WithValue(other, openAITerminalRejectionScopeKey{}, openAIRejectionScope(ctx))
-	require.True(t, f.svc.PrepareOpenAICollabThreadBinding(other, 2, "shared-session", PlatformOpenAI, OpenAIClientTransportHTTP, true))
+	require.True(t, f.svc.enableUnshippedCollabThreadBinding(other, 2, "shared-session", PlatformOpenAI, OpenAIClientTransportHTTP, true))
 	require.NotEqual(t, first.key, openAICollabBindingFrom(other).key)
 	require.EqualValues(t, 1, f.cache.sessionBindings["openai:shared-session"])
 }
@@ -423,7 +436,7 @@ func TestCollabThreadBindingExcludedDimensions(t *testing.T) {
 			case "trials":
 				f.svc.selectionBoard.leases = newSelectionTrialLeaseFake()
 			}
-			active := f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "shared-session", platform, transport, native)
+			active := f.svc.enableUnshippedCollabThreadBinding(ctx, 1, "shared-session", platform, transport, native)
 			require.Equal(t, mode == "trials", active)
 			require.Equal(t, active, openAICollabBindingFrom(ctx) != nil)
 		})

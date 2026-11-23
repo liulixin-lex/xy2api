@@ -2,6 +2,9 @@
 
 package service
 
+// Binding scenarios here exercise unfinished code through the test-only hook.
+// They do not establish equivalence or enable thread bindings in this release.
+
 import (
 	"context"
 	"fmt"
@@ -36,7 +39,7 @@ func TestCollabThreadBindingMigrationScope(t *testing.T) {
 				// repeated preparation cannot change this request's scope.
 				f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = !active
 				f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = active
-				require.Equal(t, active, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true))
+				require.Equal(t, active, f.svc.enableUnshippedCollabThreadBinding(ctx, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true))
 			})
 		}
 	}

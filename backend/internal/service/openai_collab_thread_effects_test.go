@@ -2,6 +2,9 @@
 
 package service
 
+// Binding scenarios here exercise unfinished code through the test-only hook.
+// They do not establish equivalence or enable thread bindings in this release.
+
 import (
 	"context"
 	"errors"
@@ -40,7 +43,7 @@ func TestCollabThreadBindingProductionActivation(t *testing.T) {
 		Thread: f.svc.CollabDigest(resilience.CollabDigestDomainThread, "child"), Parent: f.svc.CollabDigest(resilience.CollabDigestDomainThread, "root"),
 	}
 	ctx = WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), 7, identity, resilience.CollabRoleChild, openAIRequestHasEncryptedState(body), f.svc.cfg)
-	require.True(t, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
+	require.True(t, f.svc.enableUnshippedCollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
 	require.NotNil(t, openAICollabBindingFrom(ctx))
 }
 

@@ -44,13 +44,14 @@ func collabAffinityContext(store *resilience.CollabTreeAffinity, settings *resil
 	return WithOpenAICollabTreeAffinity(selectionReviewContext(), store, settings, 7, collabAffinityIdentity(thread, parent), role, true, &config.Config{})
 }
 
+// prepareAffinityTest exercises the unshipped binding through its test-only hook.
 func prepareAffinityTest(f *selectionRuntimeFixture, ctx context.Context, session string) context.Context {
 	f.svc.cfg.JWT = config.JWTConfig{Secret: "synthetic-affinity-secret"}
 	if openAIRejectionScope(ctx).session == "" {
 		ctx = context.WithValue(ctx, openAITerminalRejectionScopeKey{}, openAITerminalRejectionScope{session: "child-execution", preserveBinding: true, selectionPreservesBinding: &atomic.Bool{}})
 	}
 	ctx = withOpenAINoStickyMigration(ctx)
-	f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true)
+	f.svc.enableUnshippedCollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true)
 	return ctx
 }
 

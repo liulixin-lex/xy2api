@@ -2,6 +2,9 @@
 
 package service
 
+// Binding scenarios here exercise unfinished code through the test-only hook.
+// They do not establish equivalence or enable thread bindings in this release.
+
 import (
 	"context"
 	"fmt"
@@ -20,7 +23,13 @@ func collabAtomicContext(t *testing.T, f *selectionRuntimeFixture, local *resili
 	return ctx
 }
 
+// collabAtomicRequest explicitly enables the unshipped binding implementation.
 func collabAtomicRequest(t *testing.T, f *selectionRuntimeFixture, local *resilience.CollabTreeAffinity, thread string, on, guardian bool, legacy ...string) (context.Context, string) {
+	t.Helper()
+	return collabRequest(t, f, local, thread, on, guardian, true, legacy...)
+}
+
+func collabRequest(t *testing.T, f *selectionRuntimeFixture, local *resilience.CollabTreeAffinity, thread string, on, guardian, unshipped bool, legacy ...string) (context.Context, string) {
 	t.Helper()
 	f.svc.cfg.JWT.Secret = "synthetic-affinity-secret"
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -44,8 +53,13 @@ func collabAtomicRequest(t *testing.T, f *selectionRuntimeFixture, local *resili
 	cfg := collabAffinitySettings()
 	cfg.Collab.TreeAffinity = on
 	ctx = WithOpenAICollabTreeAffinity(ctx, local, cfg, 7, collabAffinityIdentity(thread, "root"), resilience.CollabRoleChild, true, f.svc.cfg)
-	active := on && !f.svc.openAISessionHashReadOldFallbackEnabled() && !f.svc.openAISessionHashDualWriteOldEnabled() && f.svc.openAILegacySessionCacheKey(ctx, session) == ""
-	require.Equal(t, active, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
+	active := unshipped && on && !f.svc.openAISessionHashReadOldFallbackEnabled() && !f.svc.openAISessionHashDualWriteOldEnabled() && f.svc.openAILegacySessionCacheKey(ctx, session) == ""
+	if unshipped {
+		require.Equal(t, active, f.svc.enableUnshippedCollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
+	} else {
+		require.False(t, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
+		require.Nil(t, openAICollabBindingFrom(ctx))
+	}
 	return ctx, session
 }
 
