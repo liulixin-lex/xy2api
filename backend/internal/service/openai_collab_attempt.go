@@ -24,10 +24,13 @@ func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, acco
 	if result == nil || c == nil || c.Request == nil || resilience.StateFrom(c.Request.Context()).DeliveredBytes() == 0 {
 		return
 	}
+	var writes []func(context.Context) error
 	if deliveredID != "" && deliveredID != result.ResponseID {
 		result.UpstreamResponseID = result.ResponseID
 		store := s.collabAliasStore()
-		if store == nil || !store.Ready() {
+		// Readiness was checked before takeover. Never call the adapter again
+		// on the delivered request's settlement path.
+		if store == nil {
 			return
 		}
 		alias := CollabContinuationAlias{Account: account.ID, Upstream: result.ResponseID, Expires: time.Now().Add(s.openAIWSResponseStickyTTL())}
@@ -36,32 +39,62 @@ func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, acco
 			s.collabAliasFailures.Add(1)
 		}
 		result.ResponseID = deliveredID
-		var once sync.Once
-		persist = func() {
-			once.Do(func() {
-				if s.collabAliasWrites.Add(1) > 4 {
-					s.collabAliasWrites.Add(-1)
-					s.collabAliasFailures.Add(1)
-					return
+		writes = append(writes, func(ctx context.Context) error { return store.Put(ctx, scope, deliveredID, alias) })
+	}
+	if result.CompletedForDelivery() && account != nil && account.ID > 0 {
+		store := s.getOpenAIWSStateStore()
+		group, id, accountID, ttl := getOpenAIGroupIDFromContext(c), normalizeOpenAIWSResponseID(result.ResponseID), account.ID, normalizeOpenAIWSTTL(s.openAIWSResponseStickyTTL())
+		local, isLocal := store.(*defaultOpenAIWSStateStore)
+		if isLocal && id != "" {
+			local.bindResponseAccountLocal(group, id, accountID, ttl)
+		}
+		bindings := []func(context.Context) error{func(ctx context.Context) error { return store.BindResponseAccount(ctx, group, id, accountID, ttl) }}
+		if raw, ok := c.Get(openAIHTTPResponseOwnerContextKey); ok {
+			if owner, ok := raw.(openAIHTTPResponseOwner); ok && owner.userID > 0 && owner.apiKeyID > 0 {
+				if isLocal && id != "" {
+					local.bindHTTPResponseOwnerLocal(group, id, owner.userID, owner.apiKeyID, ttl)
 				}
-				go func() {
-					defer s.collabAliasWrites.Add(-1)
-					defer func() {
-						if recover() != nil {
-							s.collabAliasFailures.Add(1)
-						}
-					}()
-					ctx, cancel := context.WithTimeout(context.Background(), resilience.CollabRecordTimeout)
-					defer cancel()
-					if store.Put(ctx, scope, deliveredID, alias) != nil {
+				bindings = append(bindings, func(ctx context.Context) error {
+					return store.BindHTTPResponseOwner(ctx, group, id, owner.userID, owner.apiKeyID, ttl)
+				})
+			}
+		}
+		// Local identity is visible immediately. Shared/custom bindings run only
+		// after settlement and capture immutable values rather than gin state.
+		if store != nil && (!isLocal || local.cache != nil) {
+			writes = append(writes, bindings...)
+		}
+	}
+	if len(writes) == 0 {
+		return
+	}
+	var once sync.Once
+	persist = func() {
+		once.Do(func() {
+			if s.collabAliasWrites.Add(1) > 4 {
+				s.collabAliasWrites.Add(-1)
+				s.collabAliasFailures.Add(1)
+				return
+			}
+			go func() {
+				defer s.collabAliasWrites.Add(-1)
+				defer func() {
+					if recover() != nil {
 						s.collabAliasFailures.Add(1)
 					}
 				}()
-			})
-		}
-	}
-	if result.CompletedForDelivery() {
-		s.bindHTTPResponseAccount(resilience.WithCollabAttempt(c.Request.Context(), resilience.CollabAttempt{}), c, account, result.ResponseID)
+				ctx, cancel := context.WithTimeout(context.Background(), resilience.CollabRecordTimeout)
+				defer cancel()
+				for _, write := range writes {
+					if ctx.Err() != nil {
+						break
+					}
+					if write(ctx) != nil {
+						s.collabAliasFailures.Add(1)
+					}
+				}
+			}()
+		})
 	}
 	return persist
 }

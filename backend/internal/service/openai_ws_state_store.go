@@ -144,13 +144,7 @@ func (s *defaultOpenAIWSStateStore) BindHTTPResponseOwner(ctx context.Context, g
 	ttl = normalizeOpenAIWSTTL(ttl)
 	s.maybeCleanup()
 
-	mapKey := openAIWSResponseAccountMapKey(groupID, id)
-	s.responseOwnerMu.Lock()
-	ensureBindingCapacity(s.responseOwners, mapKey, openAIWSStateStoreMaxEntriesPerMap)
-	s.responseOwners[mapKey] = openAIHTTPResponseOwnerBinding{
-		userID: userID, apiKeyID: apiKeyID, expiresAt: time.Now().Add(ttl),
-	}
-	s.responseOwnerMu.Unlock()
+	s.bindHTTPResponseOwnerLocal(groupID, id, userID, apiKeyID, ttl)
 
 	if s.cache == nil {
 		return nil
@@ -210,12 +204,7 @@ func (s *defaultOpenAIWSStateStore) BindResponseAccount(ctx context.Context, gro
 	ttl = normalizeOpenAIWSTTL(ttl)
 	s.maybeCleanup()
 
-	expiresAt := time.Now().Add(ttl)
-	mapKey := openAIWSResponseAccountMapKey(groupID, id)
-	s.responseToAccountMu.Lock()
-	ensureBindingCapacity(s.responseToAccount, mapKey, openAIWSStateStoreMaxEntriesPerMap)
-	s.responseToAccount[mapKey] = openAIWSAccountBinding{accountID: accountID, expiresAt: expiresAt}
-	s.responseToAccountMu.Unlock()
+	s.bindResponseAccountLocal(groupID, id, accountID, ttl)
 
 	if s.cache == nil {
 		return nil
@@ -671,4 +660,23 @@ func withOpenAIWSStateStoreRedisTimeout(ctx context.Context) (context.Context, c
 		ctx = context.Background()
 	}
 	return context.WithTimeout(ctx, openAIWSStateStoreRedisTimeout)
+}
+
+func (s *defaultOpenAIWSStateStore) bindHTTPResponseOwnerLocal(groupID int64, id string, userID, apiKeyID int64, ttl time.Duration) {
+	mapKey := openAIWSResponseAccountMapKey(groupID, id)
+	s.responseOwnerMu.Lock()
+	ensureBindingCapacity(s.responseOwners, mapKey, openAIWSStateStoreMaxEntriesPerMap)
+	s.responseOwners[mapKey] = openAIHTTPResponseOwnerBinding{
+		userID: userID, apiKeyID: apiKeyID, expiresAt: time.Now().Add(ttl),
+	}
+	s.responseOwnerMu.Unlock()
+}
+
+func (s *defaultOpenAIWSStateStore) bindResponseAccountLocal(groupID int64, id string, accountID int64, ttl time.Duration) {
+	expiresAt := time.Now().Add(ttl)
+	mapKey := openAIWSResponseAccountMapKey(groupID, id)
+	s.responseToAccountMu.Lock()
+	ensureBindingCapacity(s.responseToAccount, mapKey, openAIWSStateStoreMaxEntriesPerMap)
+	s.responseToAccount[mapKey] = openAIWSAccountBinding{accountID: accountID, expiresAt: expiresAt}
+	s.responseToAccountMu.Unlock()
 }

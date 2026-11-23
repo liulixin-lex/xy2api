@@ -83,9 +83,44 @@ func (s *OpenAIGatewayService) collabAliasStore() CollabContinuationStore {
 	}
 	return nil
 }
-func (s *OpenAIGatewayService) CanContinueCollabResponse() bool {
+func (s *OpenAIGatewayService) CanContinueCollabResponse(ctx context.Context) bool {
 	store := s.collabAliasStore()
-	return store != nil && store.Ready()
+	if store == nil {
+		return false
+	}
+	// The concrete process-local store has no external readiness dependency.
+	if _, local := store.(*collabMemoryAliases); local {
+		return true
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	if s.collabAliasReads.Add(1) > 4 {
+		s.collabAliasReads.Add(-1)
+		s.collabAliasFailures.Add(1)
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, resilience.CollabRecordTimeout)
+	defer cancel()
+	done := make(chan bool, 1)
+	go func() {
+		defer s.collabAliasReads.Add(-1)
+		ready := false
+		defer func() {
+			if recover() != nil {
+				s.collabAliasFailures.Add(1)
+			}
+			done <- ready
+		}()
+		ready = store.Ready()
+	}()
+	select {
+	case ready := <-done:
+		return ready
+	case <-ctx.Done():
+		s.collabAliasFailures.Add(1)
+		return false
+	}
 }
 func collabAliasScope(c *gin.Context) CollabContinuationScope {
 	scope := CollabContinuationScope{Group: getOpenAIGroupIDFromContext(c), Key: getAPIKeyIDFromContext(c)}

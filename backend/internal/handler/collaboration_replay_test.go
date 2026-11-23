@@ -376,6 +376,8 @@ func runCollaborationReplay(t *testing.T, c replayCase, snapshot resilience.Sett
 				gc = current
 			})
 			router.ServeHTTP(writer, gc.Request)
+			// Observe asynchronous post-settlement persistence before snapshotting.
+			synctest.Wait()
 			if collabReplayFinished != nil {
 				collabReplayFinished()
 			}

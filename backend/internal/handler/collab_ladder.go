@@ -22,7 +22,7 @@ func collabCanRescue(seam *collabSeam) *atomic.Bool {
 }
 
 func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, saved *collabWithheld) {
-	if seam.observer == nil || seam.settle == nil || seam.writer.deliveredPrelude().Created && !h.gatewayService.CanContinueCollabResponse() {
+	if seam.observer == nil || seam.settle == nil {
 		return
 	}
 	rejections := seam.observer.Rejections()
@@ -81,9 +81,11 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	var activeObserver atomic.Pointer[service.CollabSendObserver]
 	var retainedWaiters func(context.Context) bool
 	if seam.losslessDuration > 0 {
-		first := rejections[0].AccountID
+		// Lossless preemption holds the account that produced the latest rejection,
+		// which may differ from the first account after ordinary failover.
+		retained := last.AccountID
 		retainedWaiters = func(query context.Context) bool {
-			waiting, err := h.concurrencyHelper.concurrencyService.GetAccountWaitingCount(query, first)
+			waiting, err := h.concurrencyHelper.concurrencyService.GetAccountWaitingCount(query, retained)
 			return err != nil || waiting > 0
 		}
 	}
@@ -94,6 +96,9 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	ctx, stopWatch := watchCollabTakeover(parentRequest.Context(), duration, func() bool { return activeObserver.Load().Accepted() }, waiters, retainedWaiters)
 	defer stopWatch()
 	if ctx.Err() != nil {
+		return
+	}
+	if seam.writer.deliveredPrelude().Created && !h.gatewayService.CanContinueCollabResponse(ctx) {
 		return
 	}
 	child := resilience.NewCollabChildState(parent)
