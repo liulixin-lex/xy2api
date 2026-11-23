@@ -64,6 +64,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}()
 	if c != nil {
 		// Reset before any early return so failover attempts never inherit a plan.
+		if request := openAICollabRequestFrom(ctx); request != nil {
+			request.attempt = nil
+		}
 		c.Set(openAICollabResponseKey, nil)
 		c.Set(codexCollabAttemptContextKey, nil)
 		c.Set("openai_cache_diagnostic", nil)
@@ -1216,8 +1219,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
-		beginOpenAICollabResponse(ctx)
-		beginOpenAICollabRestoration(c, false)
+		if openAICollabRequestFrom(ctx) == nil {
+			beginOpenAICollabRestoration(c, false)
+		}
 		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
 		beginOpenAICollabRestoration(c, true)
 		fcoCompat.dispatched(ctx, account, resp)

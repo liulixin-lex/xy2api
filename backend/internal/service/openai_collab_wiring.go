@@ -17,6 +17,7 @@ type openAICollabRequest struct {
 	settings *resilience.Settings
 	ingress  resilience.CollabIngressObservation
 	delivery *openAICollabDeliveryWriter
+	attempt  *openAICollabAttempt
 }
 
 // BeginOpenAICollabRequest inspects validated ingress before route selection.

@@ -660,7 +660,9 @@ func (s *OpenAIGatewayService) sendSchedHTTP(ctx context.Context, account *Accou
 	}
 	st.NoteUpstreamHTTPStatus(account.ID, 0)
 	beginCollabObservedSend(ctx)
+	beginCollabWiredSend(ctx)
 	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
+	receiveCollabWiredResponse(ctx, resp, err)
 	s.observeCollabHTTP(ctx, account, body, stream, resp)
 	if resp != nil {
 		st.NoteUpstreamHTTPStatus(account.ID, resp.StatusCode)

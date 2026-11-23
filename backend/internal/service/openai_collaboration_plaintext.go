@@ -81,6 +81,7 @@ func armOpenAICollaboration(c *gin.Context, body []byte, model string, eligible 
 	a := &openAICollabAttempt{restorer: restorer, outcome: outcome, model: model, applied: plan != nil}
 	if c != nil && c.Request != nil {
 		if request := openAICollabRequestFrom(c.Request.Context()); request != nil {
+			request.attempt = a
 			request.state.DeliveryHooks.Register(restorer)
 		}
 	}
