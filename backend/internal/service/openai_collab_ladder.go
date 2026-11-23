@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"maps"
 	"strconv"
@@ -70,6 +71,11 @@ func (l *CollabLadder) Run(ctx context.Context) bool {
 	evidence := l.Evidence
 	l.LastEvidence = evidence
 	final := false
+	var lastBody []byte
+	lastAccount := int64(0)
+	if last := progress.lastRejection; last != nil && l.Body.LadderPolicy(last.Evidence(l.Body.Shape), CollabLadderFinalDisposal).LocalEnding && !last.unlocatable {
+		lastBody, lastAccount = last.Derivation, last.AccountID
+	}
 
 	for ctx.Err() == nil && (l.Continue == nil || l.Continue()) {
 		reason := CollabLadderSelecting
@@ -245,6 +251,11 @@ func (l *CollabLadder) Run(ctx context.Context) bool {
 		if !changed {
 			release()
 			if action == resilience.CollabActionReplaceAll || action == resilience.CollabActionNamedRepair {
+				if disposalReason == CollabLadderFinalDisposal && evidence.Grade == resilience.CollabEvidenceGradeVerified &&
+					current == lastAccount && bytes.Equal(body, lastBody) &&
+					(action == resilience.CollabActionReplaceAll || collabProtectedItem(l.Body, named)) && l.Body.fullyDisposed(body) {
+					l.StopReason = CollabLadderFinalDisposal
+				}
 				return false
 			}
 			continue
@@ -257,6 +268,7 @@ func (l *CollabLadder) Run(ctx context.Context) bool {
 		}
 		nextEvidence, delivered := func() (resilience.CollabEvidence, bool) { defer release(); return l.Send(ctx, account, next, action) }()
 		if l.Sent == nil || l.Sent() {
+			lastBody, lastAccount = next, account
 			if action == resilience.CollabActionSwitchOriginal {
 				progress.switched = true
 			}
@@ -363,6 +375,7 @@ type CollabLadderProgress struct {
 	optional          int
 	sourceBody        []byte
 	repairs           collabRequestRepairs
+	lastRejection     *CollabRejection
 }
 
 func collabOptionalAction(action resilience.CollabAction) bool {
@@ -407,6 +420,7 @@ func (p *CollabLadderProgress) RememberHandled(account int64, items map[string]b
 // RememberRejection keeps confirmed account-local edits with their handled facts.
 // Re-entering the ladder must never restore bytes that this account rejected.
 func (p *CollabLadderProgress) RememberRejection(rejection CollabRejection) {
+	p.lastRejection = &rejection
 	p.repairs.merge(rejection.repairs)
 	p.RememberHandled(rejection.AccountID, rejection.Handled)
 	if p.namedFamilies == nil {

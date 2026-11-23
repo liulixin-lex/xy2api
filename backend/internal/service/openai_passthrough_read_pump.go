@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -60,6 +61,8 @@ func runOpenAIPassthroughReadPump(resp *http.Response, scanner *openAISSEJSONDoc
 	var lastReadAt atomic.Int64
 	lastReadAt.Store(time.Now().UnixNano())
 	go func() {
+		defer resilience.RecoverCollabWorker()
+
 		defer putSSEScannerBuf64K(scanBuf)
 		defer close(events)
 		for scanner.Scan() {

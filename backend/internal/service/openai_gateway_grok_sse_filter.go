@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"io"
 	"strings"
 	"sync"
@@ -62,6 +63,8 @@ func filterGrokResponsesBillingPings(
 	closeSource func() error,
 	maxLineSize int,
 ) {
+	defer resilience.RecoverCollabWorker()
+
 	defer func() { _ = closeSource() }()
 	if maxLineSize <= 0 {
 		maxLineSize = defaultMaxLineSize

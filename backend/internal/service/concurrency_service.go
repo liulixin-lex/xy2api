@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"os"
 	"strconv"
 	"sync"
@@ -129,6 +130,7 @@ func (l *OpenAIWSIngressLease) Release() {
 }
 
 func (l *OpenAIWSIngressLease) refreshLoop() {
+	defer resilience.RecoverCollabWorker()
 	defer func() {
 		if l != nil && l.refreshDone != nil {
 			close(l.refreshDone)
@@ -160,6 +162,8 @@ func (l *OpenAIWSIngressLease) refreshLoop() {
 // refresh confirms the lease is still owned. A missing member is an immediate
 // lease loss; transient Redis errors are tolerated only for one full lease TTL.
 func (l *OpenAIWSIngressLease) refresh(lastConfirmedAt time.Time) (time.Time, bool) {
+	defer resilience.RecoverCollabWorker()
+
 	refreshCtx, refreshCancel := context.WithTimeout(context.Background(), openAIWSIngressLeaseOperationTO)
 	owned, err := l.cache.RefreshOpenAIWSIngressLease(refreshCtx, l.apiKeyID, l.leaseID)
 	refreshCancel()

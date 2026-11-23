@@ -46,46 +46,55 @@ type CollabBody struct {
 func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 	original := gjson.GetBytes(p.Original, "input").Array()
 	current := gjson.GetBytes(body, "input").Array()
+	candidates := make([][]int, len(current))
+	for i, item := range current {
+		id := item.Get("id").String()
+		for j, candidate := range original {
+			if id != "" && id == candidate.Get("id").String() || id == "" && (item.Raw == candidate.Raw || p.lineage.matches(item.Raw, j)) {
+				candidates[i] = append(candidates[i], j)
+			}
+		}
+		if len(candidates[i]) == 0 && id == "" {
+			for j, candidate := range original {
+				if candidate.Get("id").String() == "" && collabRemovedFieldsOnly(candidate, item) {
+					candidates[i] = append(candidates[i], j)
+				}
+			}
+		}
+	}
 	positions := make(map[int]int, len(current))
 	used := map[int]bool{}
-	for i, item := range current {
-		match := -1
-		for j, candidate := range original {
-			if used[j] {
+	// Resolve constrained lineage first, before indistinguishable originals can
+	// consume its occurrence. Equal remaining digests retain occurrence order.
+	for len(positions) < len(current) {
+		selected := -1
+		for i, options := range candidates {
+			if _, done := positions[i]; done {
 				continue
 			}
-			id := item.Get("id").String()
-			if id != "" && id == candidate.Get("id").String() || id == "" && item.Raw == candidate.Raw {
-				match = j
-				break // equal anonymous digests use their occurrence order
-			}
-		}
-		if match < 0 && item.Get("id").String() == "" {
-			for j, candidate := range original {
-				if used[j] {
-					continue
-				}
-				known := p.lineage.matches(item.Raw, j)
-				if candidate.Get("id").String() != "" && !known {
-					continue
-				}
-				// Confirmed field removals retain a unique original identity.
-				if known || collabRemovedFieldsOnly(candidate, item) {
-					if match >= 0 {
-						if original[match].Raw != candidate.Raw {
-							return nil, false
-						}
-						continue // equal original digests retain occurrence order
-					}
-					match = j
+			available := options[:0]
+			for _, j := range options {
+				if !used[j] {
+					available = append(available, j)
 				}
 			}
+			candidates[i] = available
+			if len(available) == 0 {
+				return nil, false
+			}
+			if selected < 0 || len(available) < len(candidates[selected]) {
+				selected = i
+			}
 		}
-		if match < 0 {
-			return nil, false
+		options := candidates[selected]
+		for _, j := range options[1:] {
+			if original[j].Raw != original[options[0]].Raw {
+				return nil, false
+			}
 		}
-		positions[i], used[match] = match, true
+		positions[selected], used[options[0]] = options[0], true
 	}
+
 	return positions, true
 }
 
@@ -198,6 +207,12 @@ func ParseCollabBodyWithContext(body []byte, facts CollabBodyContext) CollabBody
 		if id == "" && item.Get("content").Exists() && item.Get("content").Type == gjson.Null {
 			single := []byte(`{"input":[` + item.Raw + `]}`)
 			if repaired, _, changed, err := normalizeOpenAIResponsesRejectedNullContentAtIndex(single, 0); err == nil && changed {
+				out.lineage.remember(gjson.GetBytes(repaired, "input.0").Raw, i)
+			}
+		}
+		if id == "" && item.Get("type").String() == "tool_search_call" {
+			single := []byte(`{"input":[` + item.Raw + `]}`)
+			if repaired, _, changed, err := convertOpenAIResponsesToolSearchCallArguments(single, 0); err == nil && changed {
 				out.lineage.remember(gjson.GetBytes(repaired, "input.0").Raw, i)
 			}
 		}
@@ -516,7 +531,12 @@ func collabNestedRemovalsOnly(before, after gjson.Result) bool {
 		valid := true
 		after.ForEach(func(key, value gjson.Result) bool {
 			prior, exists := previous[key.Str]
-			valid = exists && collabNestedRemovalsOnly(prior, value)
+			kind := before.Get("type").String()
+			if exists && (kind == "agent_message" && key.Str == "content" || kind == "function_call_output" && key.Str == "output") && prior.IsArray() && value.IsArray() {
+				valid = collabLegacyPartsMatch(prior.Array(), value.Array())
+			} else {
+				valid = exists && collabNestedRemovalsOnly(prior, value)
+			}
 			return valid
 		})
 		return valid
@@ -543,4 +563,61 @@ func collabNestedRemovalsOnly(before, after gjson.Result) bool {
 func (p CollabBody) ProtectedNamedItem(e resilience.CollabEvidence) bool {
 	e = p.ResolveEvidence(e)
 	return e.Named != nil && e.Named.Located && collabProtectedItem(p, e.Named.Identity)
+}
+
+// fullyDisposed requires a recognizable placeholder for every original unreadable
+// item. An unmapped, removed, or immutable item is not proof of final disposal.
+func (p CollabBody) fullyDisposed(body []byte) bool {
+	physical, ok := p.atBody(body)
+	if !ok || p.Shape.CallArgumentsCiphertext || len(p.Items) == 0 || len(physical.Items) != len(p.Items) {
+		return false
+	}
+	seen := false
+	for _, item := range physical.Items {
+		for _, path := range item.Paths {
+			seen = true
+			value := gjson.GetBytes(body, path)
+			switch item.Family {
+			case resilience.CollabFamilyReasoning:
+				if value.Exists() {
+					return false
+				}
+			case resilience.CollabFamilyCompaction:
+				if value.Get("type").String() != "message" || value.Get("content.0.text").String() != item.Placeholder {
+					return false
+				}
+			case resilience.CollabFamilyAgentMessage, resilience.CollabFamilyToolOutput:
+				text := value.Get("text").String()
+				if value.Get("type").String() != "input_text" || (text != item.Placeholder && text != "[encrypted content omitted]") {
+					return false
+				}
+			default:
+				return false
+			}
+		}
+	}
+	return seen
+}
+
+// Legacy ciphertext repair changes only these protocol parts. Match its exact
+// placeholder while retaining all other scalar fields and relative part order.
+func collabLegacyPartsMatch(before, after []gjson.Result) bool {
+	at := 0
+	for _, part := range after {
+		matched := false
+		for at < len(before) {
+			prior := before[at]
+			at++
+			replacement := prior.Get("type").String() == "encrypted_content" && prior.Get("encrypted_content").Type == gjson.String &&
+				part.Get("type").String() == "input_text" && part.Get("text").String() == "[encrypted content omitted]" && len(part.Map()) == 2
+			if replacement || collabNestedRemovalsOnly(prior, part) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }

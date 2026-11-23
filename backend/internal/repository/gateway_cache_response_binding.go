@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -11,18 +12,28 @@ import (
 // The reservation uses the same metadata key that every ordinary set replaces
 // and every delete removes. Expiry, deletion and replacement all invalidate it.
 var reserveResponseBindingsScript = redis.NewScript(`
-for _, key in ipairs(KEYS) do
- redis.call('SET', key, ARGV[1], 'PX', ARGV[2])
+for i = 1, #KEYS, 2 do
+ local metadata = redis.call('GET', KEYS[i+1])
+ if metadata then
+  local owner = string.match(metadata, '^pending:([^:]+):') or string.match(metadata, '^published:([^:]+):')
+  if owner ~= ARGV[3] then return 0 end
+ elseif redis.call('EXISTS', KEYS[i]) == 1 then
+  return 0
+ end
+end
+for i = 2, #KEYS, 2 do
+ redis.call('SET', KEYS[i], ARGV[1], 'PX', ARGV[2])
 end
 return 1
 `)
 
 func (c *gatewayCache) ReserveResponseBindings(ctx context.Context, group int64, keys []string, token string) error {
-	metadata := make([]string, len(keys))
-	for i, key := range keys {
-		metadata[i] = buildSessionGenerationKey(group, key)
+	metadata := make([]string, 0, 2*len(keys))
+	for _, key := range keys {
+		metadata = append(metadata, sessionBindingKeys(group, key)...)
 	}
-	return reserveResponseBindingsScript.Run(ctx, c.rdb, metadata, "pending:"+token, service.CollabBindingPublicationLifetime.Milliseconds()).Err()
+	publisher, _, _ := strings.Cut(token, ":")
+	return reserveResponseBindingsScript.Run(ctx, c.rdb, metadata, "pending:"+token, service.CollabBindingPublicationLifetime.Milliseconds(), publisher).Err()
 }
 
 var createResponseBindingScript = redis.NewScript(`

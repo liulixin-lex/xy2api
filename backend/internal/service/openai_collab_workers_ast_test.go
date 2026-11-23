@@ -12,24 +12,6 @@ import (
 	"testing"
 )
 
-// These are the request-path callees of the collaboration workers: delivery
-// cancellation, slot cleanup, forwarding timers/readers, and settlement. Service
-// startup daemons and other endpoints are outside this request's lifecycle.
-var collabWorkerCallees = map[string]bool{
-	"openai_gateway_anthropic_native_pump.go": true,
-	"gateway_convert_stream.go":               true,
-	"openai_gateway_chat_completions.go":      true,
-	"gateway_usage_billing.go":                true,
-	"openai_gateway_usage.go":                 true,
-	"resilience_first_output.go":              true,
-	"resilience_undelivered.go":               true,
-	"delivery.go":                             true,
-	"retry_advice.go":                         true,
-	"gateway_helper.go":                       true,
-	"openai_gateway_response_handling.go":     true,
-	"openai_gateway_handler.go":               true,
-}
-
 func collabWorkerName(expr ast.Expr) string {
 	switch n := expr.(type) {
 	case *ast.Ident:
@@ -47,6 +29,22 @@ func collabWorkerRecovered(body *ast.BlockStmt) bool {
 	for _, statement := range body.List {
 		d, ok := statement.(*ast.DeferStmt)
 		if !ok {
+			// Only declarations without calls can precede installation of recovery.
+			safe := false
+			switch statement.(type) {
+			case *ast.AssignStmt, *ast.DeclStmt:
+				safe = true
+			}
+			ast.Inspect(statement, func(n ast.Node) bool {
+				switch n.(type) {
+				case *ast.CallExpr, *ast.IndexExpr, *ast.SelectorExpr, *ast.StarExpr:
+					safe = false
+				}
+				return true
+			})
+			if !safe {
+				return false
+			}
 			continue
 		}
 		switch collabWorkerName(d.Call.Fun) {
@@ -57,31 +55,47 @@ func collabWorkerRecovered(body *ast.BlockStmt) bool {
 		if !ok {
 			continue
 		}
-		recoverCall, count := false, false
-		ast.Inspect(f.Body, func(n ast.Node) bool {
-			if call, ok := n.(*ast.CallExpr); ok {
-				switch collabWorkerName(call.Fun) {
-				case "recover":
-					recoverCall = true
-				case "NoteCollabWorkerPanic", "Add":
-					count = true
+		// recover must execute directly in this deferred function. Nested functions
+		// and conditionally unreachable recovery do not protect this entry.
+		for _, stmt := range f.Body.List {
+			guard, ok := stmt.(*ast.IfStmt)
+			if !ok {
+				continue
+			}
+			assign, ok := guard.Init.(*ast.AssignStmt)
+			if !ok || len(assign.Rhs) != 1 {
+				continue
+			}
+			call, ok := assign.Rhs[0].(*ast.CallExpr)
+			if !ok || collabWorkerName(call.Fun) != "recover" {
+				continue
+			}
+			condition, ok := guard.Cond.(*ast.BinaryExpr)
+			if !ok || condition.Op != token.NEQ || collabWorkerName(condition.X) != collabWorkerName(assign.Lhs[0]) || collabWorkerName(condition.Y) != "nil" {
+				return false
+			}
+			counted := false
+			if len(guard.Body.List) > 0 {
+				if expr, ok := guard.Body.List[0].(*ast.ExprStmt); ok {
+					if note, ok := expr.X.(*ast.CallExpr); ok && collabWorkerName(note.Fun) == "NoteCollabWorkerPanic" && len(note.Args) == 1 && collabWorkerName(note.Args[0]) == collabWorkerName(assign.Lhs[0]) {
+						counted = true
+					}
 				}
 			}
-			return true
-		})
-		if recoverCall && count {
-			return true
+
+			return counted
 		}
 	}
+
 	return false
 }
 
 func TestCollabWorkersRecoverFromSource(t *testing.T) {
 	fset := token.NewFileSet()
 	files := map[string]*ast.File{}
-	functions := map[string]*ast.BlockStmt{}
+	functions := map[string][]*ast.BlockStmt{}
 	// The test working directory is the package directory, including -trimpath.
-	for _, dir := range []string{".", "../handler", "../resilience"} {
+	for _, dir := range []string{".", "../handler", "../resilience", "../repository"} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			t.Fatal(err)
@@ -92,21 +106,24 @@ func TestCollabWorkersRecoverFromSource(t *testing.T) {
 				continue
 			}
 			path := filepath.Join(dir, name)
-			file, err := parser.ParseFile(fset, path, nil, 0)
+			file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 			if err != nil {
 				t.Fatal(err)
 			}
+			if ast.IsGenerated(file) {
+				continue
+			}
 			for _, decl := range file.Decls {
 				if f, ok := decl.(*ast.FuncDecl); ok {
-					functions[dir+":"+f.Name.Name] = f.Body
+					functions[dir+":"+f.Name.Name] = append(functions[dir+":"+f.Name.Name], f.Body)
+					functions[path+":"+f.Name.Name] = append(functions[path+":"+f.Name.Name], f.Body)
 				}
 			}
-			if strings.Contains(name, "collab") || collabWorkerCallees[name] {
-				files[path] = file
-			}
+			files[path] = file
 		}
 	}
-	checked := 0
+	checked, background, unrelated := 0, 0, 0
+	usedExceptions := map[string]bool{}
 	for path, file := range files {
 		for _, decl := range file.Decls {
 			f, ok := decl.(*ast.FuncDecl)
@@ -126,6 +143,22 @@ func TestCollabWorkersRecoverFromSource(t *testing.T) {
 				return true
 			})
 			check := func(expr ast.Expr, pos token.Pos) {
+				key := filepath.ToSlash(path) + ":" + f.Name.Name
+				if specific := key + "/" + collabWorkerName(expr); collabWorkerExceptions[specific] != "" {
+					key = specific
+				}
+				if reason := collabWorkerExceptions[key]; reason != "" {
+					if strings.Contains(path, "collab") {
+						t.Errorf("collaboration worker cannot be excepted: %s", key)
+					}
+					usedExceptions[key] = true
+					if strings.HasPrefix(reason, "Outside") {
+						unrelated++
+					} else {
+						background++
+					}
+					return
+				}
 				checked++
 				var body *ast.BlockStmt
 				if lit, ok := expr.(*ast.FuncLit); ok {
@@ -134,11 +167,21 @@ func TestCollabWorkersRecoverFromSource(t *testing.T) {
 					name := collabWorkerName(expr)
 					body = locals[name]
 					if body == nil {
-						body = functions[filepath.Dir(path)+":"+name]
+						targets := functions[path+":"+name]
+						if len(targets) == 0 {
+							targets = functions[filepath.Dir(path)+":"+name]
+						}
+						if len(targets) == 1 {
+							body = targets[0]
+						}
 					}
 				}
 				if !collabWorkerRecovered(body) {
-					t.Errorf("%s: asynchronous entry in %s needs direct recovery and a fixed panic counter", fset.Position(pos), f.Name.Name)
+					target := "unresolved"
+					if body != nil {
+						target = fset.Position(body.Lbrace).String()
+					}
+					t.Errorf("%s: asynchronous entry in %s needs direct recovery, logging and counting (body %s)", fset.Position(pos), f.Name.Name, target)
 				}
 			}
 			ast.Inspect(f.Body, func(n ast.Node) bool {
@@ -157,7 +200,12 @@ func TestCollabWorkersRecoverFromSource(t *testing.T) {
 	if checked < 12 {
 		t.Fatalf("worker audit unexpectedly found only %d entries", checked)
 	}
-	t.Logf("audited %d asynchronous entries", checked)
+	for key := range collabWorkerExceptions {
+		if !usedExceptions[key] {
+			t.Errorf("stale exception: %s", key)
+		}
+	}
+	t.Logf("audited %d collaboration/request entries; %d background entries and %d unrelated entries excepted; %d source files", checked, background, unrelated, len(files))
 }
 
 func TestCollabWorkerRecoveryGateRejectsUnsafeCallbacks(t *testing.T) {

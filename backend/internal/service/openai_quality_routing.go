@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"io"
 	"log/slog"
 	"net/http"
@@ -473,6 +474,8 @@ func (s *OpenAIGatewayService) qualityUpdate(scope string, change OpenAIQualityC
 		select {
 		case openAIQualitySyncSlots <- struct{}{}:
 			go func() {
+				defer resilience.RecoverCollabWorker()
+
 				defer func() { <-openAIQualitySyncSlots }()
 				st, updateErr := store.UpdateOpenAIQualityRouting(ctx, scope, change, ttl)
 				result <- syncResult{st, updateErr}

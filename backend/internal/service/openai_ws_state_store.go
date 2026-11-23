@@ -23,12 +23,14 @@ const (
 
 type openAIWSAccountBinding struct {
 	generation uint64
+	publisher  string
 	accountID  int64
 	expiresAt  time.Time
 }
 
 type openAIHTTPResponseOwnerBinding struct {
 	generation uint64
+	publisher  string
 	userID     int64
 	apiKeyID   int64
 	expiresAt  time.Time
@@ -668,25 +670,43 @@ func withOpenAIWSStateStoreRedisTimeout(ctx context.Context) (context.Context, c
 	return context.WithTimeout(ctx, openAIWSStateStoreRedisTimeout)
 }
 
-func (s *defaultOpenAIWSStateStore) bindHTTPResponseOwnerLocal(groupID int64, id string, userID, apiKeyID int64, ttl time.Duration) uint64 {
+func (s *defaultOpenAIWSStateStore) bindHTTPResponseOwnerLocal(groupID int64, id string, userID, apiKeyID int64, ttl time.Duration, publisher ...string) uint64 {
 	mapKey := openAIWSResponseAccountMapKey(groupID, id)
 	s.responseOwnerMu.Lock()
+	owner := ""
+	if len(publisher) > 0 {
+		owner = publisher[0]
+		current := s.responseOwners[mapKey]
+		if time.Now().Before(current.expiresAt) && current.publisher != owner {
+			s.responseOwnerMu.Unlock()
+			return 0
+		}
+	}
 	generation := s.bindingGeneration.Add(1)
 	ensureBindingCapacity(s.responseOwners, mapKey, openAIWSStateStoreMaxEntriesPerMap)
 	s.responseOwners[mapKey] = openAIHTTPResponseOwnerBinding{
-		generation: generation, userID: userID, apiKeyID: apiKeyID, expiresAt: time.Now().Add(ttl),
+		publisher: owner, generation: generation, userID: userID, apiKeyID: apiKeyID, expiresAt: time.Now().Add(ttl),
 	}
 	s.responseOwnerMu.Unlock()
 	return generation
 }
 
-func (s *defaultOpenAIWSStateStore) bindResponseAccountLocal(groupID int64, id string, accountID int64, ttl time.Duration) uint64 {
+func (s *defaultOpenAIWSStateStore) bindResponseAccountLocal(groupID int64, id string, accountID int64, ttl time.Duration, publisher ...string) uint64 {
 	expiresAt := time.Now().Add(ttl)
 	mapKey := openAIWSResponseAccountMapKey(groupID, id)
 	s.responseToAccountMu.Lock()
+	owner := ""
+	if len(publisher) > 0 {
+		owner = publisher[0]
+		current := s.responseToAccount[mapKey]
+		if time.Now().Before(current.expiresAt) && current.publisher != owner {
+			s.responseToAccountMu.Unlock()
+			return 0
+		}
+	}
 	generation := s.bindingGeneration.Add(1)
 	ensureBindingCapacity(s.responseToAccount, mapKey, openAIWSStateStoreMaxEntriesPerMap)
-	s.responseToAccount[mapKey] = openAIWSAccountBinding{generation: generation, accountID: accountID, expiresAt: expiresAt}
+	s.responseToAccount[mapKey] = openAIWSAccountBinding{publisher: owner, generation: generation, accountID: accountID, expiresAt: expiresAt}
 	s.responseToAccountMu.Unlock()
 	return generation
 }

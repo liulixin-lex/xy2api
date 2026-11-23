@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -446,6 +447,8 @@ func (r *usageLogRepository) ensureBestEffortBatcher() {
 }
 
 func (r *usageLogRepository) runCreateBatcher(db *sql.DB) {
+	defer resilience.RecoverCollabWorker()
+
 	for {
 		first, ok := <-r.createBatchCh
 		if !ok {
@@ -480,6 +483,8 @@ func (r *usageLogRepository) runCreateBatcher(db *sql.DB) {
 }
 
 func (r *usageLogRepository) runBestEffortBatcher(db *sql.DB) {
+	defer resilience.RecoverCollabWorker()
+
 	for {
 		first, ok := <-r.bestEffortBatchCh
 		if !ok {

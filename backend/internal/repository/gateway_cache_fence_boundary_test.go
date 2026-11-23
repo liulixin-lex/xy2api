@@ -107,5 +107,9 @@ func TestCollabProductionDeferredBindingVisibility(t *testing.T) {
 	require.NoError(t, newer(ctx))
 	require.NoError(t, older(ctx))
 	remote, _ = service.NewOpenAIWSStateStore(cache).GetResponseAccount(ctx, 0, "resp_visible")
+	// Separate preparations without a request publisher cannot replace a live owner.
+	require.EqualValues(t, 7, remote)
+	require.NoError(t, first.BindResponseAccount(ctx, 0, "resp_visible", 9, time.Hour))
+	remote, _ = service.NewOpenAIWSStateStore(cache).GetResponseAccount(ctx, 0, "resp_visible")
 	require.EqualValues(t, 9, remote)
 }

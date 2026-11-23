@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +17,7 @@ const CollabBindingPublicationLifetime = time.Minute
 
 // Redis orders preparation against every later set/delete on the same key.
 // A create requires the exact unconsumed reservation and never compares clocks.
+// A publisher may replace only its own pending or published request identity.
 type CollabResponseBindingCache interface {
 	ReserveResponseBindings(context.Context, int64, []string, string) error
 	SetResponseBinding(context.Context, int64, string, int64, time.Duration) error
@@ -27,13 +30,17 @@ type CollabResponseBindingCache interface {
 // local binding and suppresses shared publication.
 // Adapters without this contract cannot safely defer an unconditional Bind.
 type CollabResponseIdentityStore interface {
-	PrepareCollabResponseAccount(int64, string, int64, time.Duration) func(context.Context) error
-	PrepareCollabHTTPResponseOwner(int64, string, int64, int64, time.Duration) func(context.Context) error
+	PrepareCollabResponseAccount(int64, string, int64, time.Duration, ...string) func(context.Context) error
+	PrepareCollabHTTPResponseOwner(int64, string, int64, int64, time.Duration, ...string) func(context.Context) error
 }
 
-func (s *defaultOpenAIWSStateStore) PrepareCollabResponseAccount(group int64, id string, account int64, ttl time.Duration) func(context.Context) error {
-	generation := s.bindResponseAccountLocal(group, id, account, ttl)
-	publication := s.reserveCollabBinding(group, []string{openAIWSResponseAccountCacheKey(id)})
+func (s *defaultOpenAIWSStateStore) PrepareCollabResponseAccount(group int64, id string, account int64, ttl time.Duration, publisher ...string) func(context.Context) error {
+	publication := NewCollabBindingPublication(publisher...)
+	generation := s.bindResponseAccountLocal(group, id, account, ttl, publication.Token[:64])
+	if generation == 0 {
+		return func(context.Context) error { return nil }
+	}
+	publication = s.reserveCollabBinding(group, []string{openAIWSResponseAccountCacheKey(id)}, publication)
 	return func(ctx context.Context) error {
 		s.responseToAccountMu.RLock()
 		current := s.responseToAccount[openAIWSResponseAccountMapKey(group, id)]
@@ -51,9 +58,13 @@ func (s *defaultOpenAIWSStateStore) PrepareCollabResponseAccount(group int64, id
 		return cache.CreateResponseBinding(context.WithValue(ctx, collabBindingPublicationKey{}, publication), group, openAIWSResponseAccountCacheKey(id), account, ttl)
 	}
 }
-func (s *defaultOpenAIWSStateStore) PrepareCollabHTTPResponseOwner(group int64, id string, user, key int64, ttl time.Duration) func(context.Context) error {
-	generation := s.bindHTTPResponseOwnerLocal(group, id, user, key, ttl)
-	publication := s.reserveCollabBinding(group, []string{openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerUserPrefix, id), openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerKeyPrefix, id)})
+func (s *defaultOpenAIWSStateStore) PrepareCollabHTTPResponseOwner(group int64, id string, user, key int64, ttl time.Duration, publisher ...string) func(context.Context) error {
+	publication := NewCollabBindingPublication(publisher...)
+	generation := s.bindHTTPResponseOwnerLocal(group, id, user, key, ttl, publication.Token[:64])
+	if generation == 0 {
+		return func(context.Context) error { return nil }
+	}
+	publication = s.reserveCollabBinding(group, []string{openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerUserPrefix, id), openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerKeyPrefix, id)}, publication)
 	return func(ctx context.Context) error {
 		s.responseOwnerMu.RLock()
 		current := s.responseOwners[openAIWSResponseAccountMapKey(group, id)]
@@ -91,8 +102,15 @@ type CollabBindingPublication struct {
 }
 type collabBindingPublicationKey struct{}
 
-func NewCollabBindingPublication() CollabBindingPublication {
-	return CollabBindingPublication{Token: uuid.NewString(), Expires: time.Now().Add(CollabBindingPublicationLifetime)}
+func NewCollabBindingPublication(publisher ...string) CollabBindingPublication {
+	owner := ""
+	if len(publisher) > 0 {
+		owner = publisher[0]
+	}
+	if owner == "" {
+		owner = uuid.NewString()
+	}
+	return CollabBindingPublication{Token: fmt.Sprintf("%x:%s", sha256.Sum256([]byte(owner)), uuid.NewString()), Expires: time.Now().Add(CollabBindingPublicationLifetime)}
 }
 func CollabBindingPublicationFrom(ctx context.Context) CollabBindingPublication {
 	publication, _ := ctx.Value(collabBindingPublicationKey{}).(CollabBindingPublication)
@@ -101,8 +119,7 @@ func CollabBindingPublicationFrom(ctx context.Context) CollabBindingPublication 
 
 var collabBindingReservations atomic.Int32
 
-func (s *defaultOpenAIWSStateStore) reserveCollabBinding(group int64, keys []string) CollabBindingPublication {
-	publication := NewCollabBindingPublication()
+func (s *defaultOpenAIWSStateStore) reserveCollabBinding(group int64, keys []string, publication CollabBindingPublication) CollabBindingPublication {
 	if s.cache == nil {
 		return publication
 	}

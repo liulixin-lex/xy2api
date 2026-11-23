@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -230,8 +231,49 @@ func (s *collabBindingTraceCache) ReserveResponseBindings(ctx context.Context, g
 	if s.versions == nil {
 		s.versions = map[string]string{}
 	}
+	publisher, _, _ := strings.Cut(token, ":")
+	for _, key := range keys {
+		mapKey := fmt.Sprint(group, ":", key)
+		metadata := s.versions[mapKey]
+		if metadata != "" {
+			owner, _, _ := strings.Cut(strings.TrimPrefix(metadata, "published:"), ":")
+			if owner != publisher {
+				return ctx.Err()
+			}
+		} else if s.values[mapKey].id != 0 {
+			return ctx.Err()
+		}
+	}
 	for _, key := range keys {
 		s.versions[fmt.Sprint(group, ":", key)] = token
 	}
 	return ctx.Err()
+}
+
+func TestCollabBindingPublisherFollowsInboundRequest(t *testing.T) {
+	store := NewOpenAIWSStateStore(nil)
+	svc := &OpenAIGatewayService{openaiWSStateStore: store}
+	first := collabDeliveredContext()
+	second := collabDeliveredContext()
+	for _, step := range []struct {
+		ctx           *gin.Context
+		account, want int64
+	}{{first, 7, 7}, {first, 9, 9}, {second, 11, 9}} {
+		SetOpenAIHTTPResponseOwner(step.ctx, step.account, step.account*10)
+		persist := svc.CommitCollabResponseIdentity(step.ctx, &Account{ID: step.account}, &OpenAIForwardResult{ResponseID: "resp_request_owner"}, "")
+		require.NotNil(t, persist)
+		account, err := store.GetResponseAccount(context.Background(), 0, "resp_request_owner")
+		require.NoError(t, err)
+		require.Equal(t, step.want, account)
+		user, key, found, err := store.GetHTTPResponseOwner(context.Background(), 0, "resp_request_owner")
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, step.want, user)
+		require.Equal(t, step.want*10, key)
+	}
+	a, _ := first.Get("collab_binding_publisher")
+	b, _ := second.Get("collab_binding_publisher")
+	require.NotEmpty(t, a)
+	require.NotEmpty(t, b)
+	require.NotEqual(t, a, b)
 }

@@ -4,6 +4,7 @@ package handler
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/service"
@@ -50,6 +51,18 @@ func (m *replayMemory) ReserveResponseBindings(ctx context.Context, _ int64, key
 	defer m.mu.Unlock()
 	if m.responseGenerations == nil {
 		m.responseGenerations = map[string]string{}
+	}
+	publisher, _, _ := strings.Cut(token, ":")
+	for _, key := range keys {
+		metadata := m.responseGenerations[key]
+		if metadata != "" {
+			owner, _, _ := strings.Cut(strings.TrimPrefix(metadata, "published:"), ":")
+			if owner != publisher {
+				return ctx.Err()
+			}
+		} else if m.bindings[key] != 0 {
+			return ctx.Err()
+		}
 	}
 	for _, key := range keys {
 		m.responseGenerations[key] = token

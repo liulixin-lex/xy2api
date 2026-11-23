@@ -27,6 +27,7 @@ func collabPropertyRuns() int {
 }
 
 func TestCollabPropertyReferences(t *testing.T) {
+	t.Run("identity_dimensions", collabPropertyIdentityChannels)
 	t.Run("all_channels", collabPropertyReferenceChannels)
 	t.Run("exact_table", collabPropertyExactReferences)
 	raw := strings.TrimSuffix(collabBatchBody, "]}") + `,{"type":"compaction","id":"cmp_a","encrypted_content":"c"},{"type":"function_call_output","id":"fco_a","call_id":"call_a","output":[{"type":"encrypted_content","encrypted_content":"o"}]},{"type":"function_call","id":"fc_a","encrypted_function_args":["a"],"arguments":"{}"}]}`
@@ -134,6 +135,7 @@ func TestCollabPropertyReferences(t *testing.T) {
 }
 
 func TestCollabPropertyPermissions(t *testing.T) {
+	t.Run("identity_dimensions", collabPropertyDisposedEndpoints)
 	t.Run("controller_endpoints", collabPropertyControllerEndpoints)
 	t.Run("changing_evidence", collabPropertyChangingPermissions)
 	t.Run("named_endpoints", collabPropertyNamedEndpoints)
@@ -225,6 +227,7 @@ func TestCollabPropertyPermissions(t *testing.T) {
 }
 
 func TestCollabPropertyRequestState(t *testing.T) {
+	t.Run("identity_dimensions", collabPropertyRepairIdentityDimensions)
 	t.Run("original_repair_model", collabPropertyOriginalRepairModel)
 	t.Run("anonymous_protocol_setter", TestCollabAnonymousProtocolSetter)
 	t.Run("anonymous_occurrences", TestCollabAnonymousOccurrenceRepairs)

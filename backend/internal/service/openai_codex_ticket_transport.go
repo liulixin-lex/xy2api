@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"github.com/liulixin-lex/xy2api/internal/pkg/proxyurl"
 	"github.com/liulixin-lex/xy2api/internal/pkg/proxyutil"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"golang.org/x/net/proxy"
 	"net"
 	"net/http"
@@ -100,7 +101,10 @@ func (d *codexTicketHTTPConnectDialer) DialContext(ctx context.Context, network,
 		}
 	}()
 	rawConn := conn
-	stopClose := context.AfterFunc(connectCtx, func() { _ = rawConn.Close() })
+	stopClose := context.AfterFunc(connectCtx, func() {
+		defer resilience.RecoverCollabWorker()
+		_ = rawConn.Close()
+	})
 	defer stopClose()
 	if deadline, ok := connectCtx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
@@ -45,10 +46,16 @@ func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, acco
 		store := s.getOpenAIWSStateStore()
 		group, id, accountID, ttl := getOpenAIGroupIDFromContext(c), normalizeOpenAIWSResponseID(result.ResponseID), account.ID, normalizeOpenAIWSTTL(s.openAIWSResponseStickyTTL())
 		if publisher, ok := store.(CollabResponseIdentityStore); ok && id != "" {
-			writes = append(writes, publisher.PrepareCollabResponseAccount(group, id, accountID, ttl))
+			requestPublisher, _ := c.Get("collab_binding_publisher")
+			publisherID, _ := requestPublisher.(string)
+			if publisherID == "" {
+				publisherID = uuid.NewString()
+				c.Set("collab_binding_publisher", publisherID)
+			}
+			writes = append(writes, publisher.PrepareCollabResponseAccount(group, id, accountID, ttl, publisherID))
 			if raw, ok := c.Get(openAIHTTPResponseOwnerContextKey); ok {
 				if owner, ok := raw.(openAIHTTPResponseOwner); ok && owner.userID > 0 && owner.apiKeyID > 0 {
-					writes = append(writes, publisher.PrepareCollabHTTPResponseOwner(group, id, owner.userID, owner.apiKeyID, ttl))
+					writes = append(writes, publisher.PrepareCollabHTTPResponseOwner(group, id, owner.userID, owner.apiKeyID, ttl, publisherID))
 				}
 			}
 		} else {

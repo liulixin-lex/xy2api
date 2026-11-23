@@ -49,9 +49,9 @@ func TestCollabFenceNewerDeferredBindingWins(t *testing.T) {
 	cache := &collabBindingTraceCache{}
 	store := NewOpenAIWSStateStore(cache)
 	publisher := store.(CollabResponseIdentityStore)
-	older := publisher.PrepareCollabResponseAccount(0, "resp_two", 7, time.Hour)
+	older := publisher.PrepareCollabResponseAccount(0, "resp_two", 7, time.Hour, "same_request")
 	require.NoError(t, older(context.Background()))
-	newer := publisher.PrepareCollabResponseAccount(0, "resp_two", 9, time.Hour)
+	newer := publisher.PrepareCollabResponseAccount(0, "resp_two", 9, time.Hour, "same_request")
 	require.NoError(t, newer(context.Background()))
 	local, _ := store.GetResponseAccount(context.Background(), 0, "resp_two")
 	peer, _ := NewOpenAIWSStateStore(cache).GetResponseAccount(context.Background(), 0, "resp_two")

@@ -166,6 +166,8 @@ func (k *openAICompactSSEKeepalive) resume(firstDelay, interval time.Duration) {
 		reqDone = k.ctx.Done()
 	}
 	go func() {
+		defer resilience.RecoverCollabWorker()
+
 		defer close(done)
 		timer := time.NewTimer(firstDelay)
 		defer timer.Stop()

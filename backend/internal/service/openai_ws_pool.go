@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"math"
 	"net/http"
 	"sort"
@@ -332,6 +333,8 @@ func newOpenAIWSConn(id string, _ int64, ws openAIWSClientConn, handshakeHeaders
 }
 
 func (c *openAIWSConn) runReaderLoop() {
+	defer resilience.RecoverCollabWorker()
+
 	defer close(c.readerLoopResults)
 	for {
 		payload, err := c.ws.ReadMessage(context.Background())
@@ -1925,6 +1928,8 @@ func (p *openAIWSConnPool) targetConnCountLocked(ap *openAIWSAccountPool, maxCon
 }
 
 func (p *openAIWSConnPool) prewarmConns(accountID int64, req openAIWSAcquireRequest, total int, generations ...uint64) {
+	defer resilience.RecoverCollabWorker()
+
 	generation := uint64(0)
 	if len(generations) > 0 {
 		generation = generations[0]
