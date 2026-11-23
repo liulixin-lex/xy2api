@@ -70,6 +70,24 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 			}
 		}
 	}
+	// Normalization must not erase the distinction between different originals.
+	// Check exact normalized forms before assignment; structural repair
+	// candidates may still be disambiguated by an unchanged sibling.
+	for i, item := range current {
+		if item.Get("id").String() != "" {
+			continue
+		}
+		matched := -1
+		for _, j := range candidates[i] {
+			if !slices.Contains(comparable[j], item.Raw) {
+				continue
+			}
+			if matched >= 0 && original[j].Raw != original[matched].Raw {
+				return nil, false
+			}
+			matched = j
+		}
+	}
 	// A known variant can be reached independently by another identical
 	// occurrence. Keep those alternatives for collisions, without displacing
 	// the stronger lineage match while it is still available.
@@ -79,7 +97,7 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 		}
 		for j := range original {
 			for _, known := range options {
-				if collabInputFormsOverlap(comparable[j], comparable[known]) {
+				if original[j].Raw == original[known].Raw {
 					duplicates[i] = append(duplicates[i], j)
 					break
 				}
@@ -119,7 +137,7 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 		}
 		options := candidates[selected]
 		for _, j := range options[1:] {
-			if !collabInputFormsOverlap(comparable[j], comparable[options[0]]) {
+			if original[j].Raw != original[options[0]].Raw {
 				return nil, false
 			}
 		}
@@ -145,15 +163,6 @@ func collabComparableInputForms(item gjson.Result) []string {
 		}
 	}
 	return forms
-}
-
-func collabInputFormsOverlap(a, b []string) bool {
-	for _, form := range a {
-		if slices.Contains(b, form) {
-			return true
-		}
-	}
-	return false
 }
 
 func (p CollabBody) atBody(body []byte) (CollabBody, bool) {

@@ -50,7 +50,7 @@ func TestCollabSanitizedCallIdentityRemainsRescuable(t *testing.T) {
 	}
 }
 
-func TestCollabSanitizedDuplicateOccurrenceIdentity(t *testing.T) {
+func TestCollabSanitizedDistinctOccurrencesAreAmbiguous(t *testing.T) {
 	for _, identifiedFirst := range []bool{false, true} {
 		anonymous, err := sjson.Delete(collabCallArgsDispatchCopy, "id")
 		require.NoError(t, err)
@@ -66,12 +66,11 @@ func TestCollabSanitizedDuplicateOccurrenceIdentity(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, changed)
 		p := ParseCollabBody(raw)
-		positions, ok := p.inputPositions(sent)
-		require.True(t, ok)
-		require.Equal(t, map[int]int{0: 0, 1: 1, 2: 2}, positions)
+		_, ok := p.inputPositions(sent)
+		require.False(t, ok)
 		r := collabObserveDerivedRejection(p, sent, collabTaskRejection)
-		require.False(t, r.unlocatable)
-		require.Equal(t, "amsg_task", p.ResolveEvidence(r.Evidence(p.Shape)).Named.Identity)
+		require.True(t, r.unlocatable)
+		require.False(t, p.ResolveEvidence(r.Evidence(p.Shape)).Named.Located)
 	}
 }
 
@@ -94,7 +93,7 @@ func TestCollabSanitizedIdentityDoesNotAliasOtherChanges(t *testing.T) {
 	}
 }
 
-func TestCollabSanitizedNamespaceDuplicateIdentity(t *testing.T) {
+func TestCollabSanitizedNamespaceDistinctOccurrencesAreAmbiguous(t *testing.T) {
 	plain, err := sjson.Delete(collabCallArgsDispatchCopy, "id")
 	require.NoError(t, err)
 	plain, err = sjson.Delete(plain, "namespace")
@@ -114,8 +113,7 @@ func TestCollabSanitizedNamespaceDuplicateIdentity(t *testing.T) {
 		require.NoError(t, err)
 		sent, err = stripOpenAIResponsesInputNamespaces(sent, false)
 		require.NoError(t, err)
-		positions, ok := ParseCollabBody(raw).inputPositions(sent)
-		require.True(t, ok)
-		require.Equal(t, map[int]int{0: 0, 1: 1, 2: 2}, positions)
+		_, ok := ParseCollabBody(raw).inputPositions(sent)
+		require.False(t, ok)
 	}
 }
