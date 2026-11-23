@@ -24,6 +24,7 @@ type collabDeliveredCall struct {
 	sequence    int64
 	frameDigest resilience.CollabDigest
 	written     bool
+	confirmed   bool
 }
 
 // One consumer per physical response, registered only when relevant. It retains
@@ -121,7 +122,7 @@ func (c *CollabRecordDelivery) Written(ctx context.Context, e resilience.CollabD
 			continue
 		}
 		if v.token.Token != "" {
-			c.store.ConfirmIssued(ctx, v.token)
+			v.confirmed = c.store.ConfirmIssued(ctx, v.token)
 		}
 		if v.plaintext.Call != "" {
 			c.store.PlaintextDelivered(ctx, v.plaintext)
