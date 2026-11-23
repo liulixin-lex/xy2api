@@ -63,6 +63,7 @@ type collabSeam struct {
 	rejected         map[service.CollabRejectedBody]bool
 	deliveredAccount int64
 	terminalRecorded bool
+	localFinal       bool
 }
 
 // armCollabSeam installs the seam for requests the ladder covers: native

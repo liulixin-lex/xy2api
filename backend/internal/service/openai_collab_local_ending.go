@@ -188,7 +188,13 @@ func writeCollabLocalBytes(ctx context.Context, w gin.ResponseWriter, data []byt
 	if n != len(data) {
 		return io.ErrShortWrite
 	}
-	w.Flush()
+	if flush, ok := w.(interface{ FlushError() error }); ok {
+		if err := flush.FlushError(); err != nil {
+			return err
+		}
+	} else {
+		w.Flush()
+	}
 	return context.Cause(ctx)
 }
 

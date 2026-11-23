@@ -72,6 +72,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	}
 	duration = min(duration, time.Minute-seam.optionalSpent)
 	if duration <= 0 {
+		seam.localFinal = true
 		if seam.localEnding != nil && evidence.Grade == resilience.CollabEvidenceGradeVerified && parentRequest.Context().Err() == nil {
 			seam.localEnding(c, seam, saved, evidence)
 		}
@@ -220,6 +221,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		return resilience.CollabEvidence{}, false
 	}
 	if !l.Run(ctx) {
+		seam.localFinal = true
 		l.BeforeDisposal(parentRequest.Context(), latestEvidence)
 	}
 }
