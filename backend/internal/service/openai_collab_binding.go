@@ -19,15 +19,16 @@ const CollabBindingPublicationLifetime = time.Minute
 // A create requires the exact unconsumed reservation and never compares clocks.
 // A publisher may replace only its own pending or published request identity.
 type CollabResponseBindingCache interface {
-	ReserveResponseBindings(context.Context, int64, []string, string) error
+	ReserveResponseBindings(context.Context, int64, []string, string) (accepted bool, err error)
 	SetResponseBinding(context.Context, int64, string, int64, time.Duration) error
-	CreateResponseBinding(context.Context, int64, string, int64, time.Duration) error
+	CreateResponseBinding(context.Context, int64, string, int64, time.Duration) (accepted bool, err error)
 	DeleteResponseBinding(context.Context, int64, string) error
 }
 
 // Adapters publish locally, reserve shared metadata within a short optional
 // budget, and return a conditional shared write. Reservation failure keeps the
-// local binding and suppresses shared publication.
+// local binding and suppresses shared publication. An explicit refusal evicts
+// only that publication's local generation so the next lookup reads shared state.
 // Adapters without this contract cannot safely defer an unconditional Bind.
 type CollabResponseIdentityStore interface {
 	PrepareCollabResponseAccount(int64, string, int64, time.Duration, ...string) func(context.Context) error
@@ -40,7 +41,15 @@ func (s *defaultOpenAIWSStateStore) PrepareCollabResponseAccount(group int64, id
 	if generation == 0 {
 		return func(context.Context) error { return nil }
 	}
-	publication = s.reserveCollabBinding(group, []string{openAIWSResponseAccountCacheKey(id)}, publication)
+	discard := func() {
+		s.responseToAccountMu.Lock()
+		defer s.responseToAccountMu.Unlock()
+		mapKey := openAIWSResponseAccountMapKey(group, id)
+		if s.responseToAccount[mapKey].generation == generation {
+			delete(s.responseToAccount, mapKey)
+		}
+	}
+	publication = s.reserveCollabBinding(group, []string{openAIWSResponseAccountCacheKey(id)}, publication, discard)
 	return func(ctx context.Context) error {
 		s.responseToAccountMu.RLock()
 		current := s.responseToAccount[openAIWSResponseAccountMapKey(group, id)]
@@ -55,7 +64,11 @@ func (s *defaultOpenAIWSStateStore) PrepareCollabResponseAccount(group int64, id
 		if !ok {
 			return errors.New("conditional response binding unavailable")
 		}
-		return cache.CreateResponseBinding(context.WithValue(ctx, collabBindingPublicationKey{}, publication), group, openAIWSResponseAccountCacheKey(id), account, ttl)
+		accepted, err := cache.CreateResponseBinding(context.WithValue(ctx, collabBindingPublicationKey{}, publication), group, openAIWSResponseAccountCacheKey(id), account, ttl)
+		if !accepted && err == nil {
+			discard()
+		}
+		return err
 	}
 }
 func (s *defaultOpenAIWSStateStore) PrepareCollabHTTPResponseOwner(group int64, id string, user, key int64, ttl time.Duration, publisher ...string) func(context.Context) error {
@@ -64,7 +77,15 @@ func (s *defaultOpenAIWSStateStore) PrepareCollabHTTPResponseOwner(group int64, 
 	if generation == 0 {
 		return func(context.Context) error { return nil }
 	}
-	publication = s.reserveCollabBinding(group, []string{openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerUserPrefix, id), openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerKeyPrefix, id)}, publication)
+	discard := func() {
+		s.responseOwnerMu.Lock()
+		defer s.responseOwnerMu.Unlock()
+		mapKey := openAIWSResponseAccountMapKey(group, id)
+		if s.responseOwners[mapKey].generation == generation {
+			delete(s.responseOwners, mapKey)
+		}
+	}
+	publication = s.reserveCollabBinding(group, []string{openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerUserPrefix, id), openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerKeyPrefix, id)}, publication, discard)
 	return func(ctx context.Context) error {
 		s.responseOwnerMu.RLock()
 		current := s.responseOwners[openAIWSResponseAccountMapKey(group, id)]
@@ -80,10 +101,20 @@ func (s *defaultOpenAIWSStateStore) PrepareCollabHTTPResponseOwner(group int64, 
 			return errors.New("conditional response binding unavailable")
 		}
 		ctx = context.WithValue(ctx, collabBindingPublicationKey{}, publication)
-		if err := cache.CreateResponseBinding(ctx, group, openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerUserPrefix, id), user, ttl); err != nil {
-			return err
+		for _, binding := range []struct {
+			prefix string
+			value  int64
+		}{{openAIHTTPResponseOwnerUserPrefix, user}, {openAIHTTPResponseOwnerKeyPrefix, key}} {
+			accepted, err := cache.CreateResponseBinding(ctx, group, openAIHTTPResponseOwnerCacheKey(binding.prefix, id), binding.value, ttl)
+			if err != nil {
+				return err
+			}
+			if !accepted {
+				discard()
+				return nil
+			}
 		}
-		return cache.CreateResponseBinding(ctx, group, openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerKeyPrefix, id), key, ttl)
+		return nil
 	}
 }
 
@@ -119,7 +150,7 @@ func CollabBindingPublicationFrom(ctx context.Context) CollabBindingPublication 
 
 var collabBindingReservations atomic.Int32
 
-func (s *defaultOpenAIWSStateStore) reserveCollabBinding(group int64, keys []string, publication CollabBindingPublication) CollabBindingPublication {
+func (s *defaultOpenAIWSStateStore) reserveCollabBinding(group int64, keys []string, publication CollabBindingPublication, discard func()) CollabBindingPublication {
 	if s.cache == nil {
 		return publication
 	}
@@ -131,21 +162,27 @@ func (s *defaultOpenAIWSStateStore) reserveCollabBinding(group int64, keys []str
 		collabBindingReservations.Add(-1)
 		return CollabBindingPublication{}
 	}
-	// No request values, local-map locks, or concurrency slots reach this worker.
+	// No request values or concurrency slots reach this worker. Local-map locks
+	// are acquired only after the shared operation, never held while it runs.
 	ctx, cancel := context.WithTimeout(context.Background(), resilience.CollabRecordTimeout)
 	defer cancel()
-	done := make(chan error, 1)
+	done := make(chan bool, 1)
 	go func() {
 		defer resilience.RecoverCollabWorker()
 		defer collabBindingReservations.Add(-1)
 		defer close(done)
-		done <- cache.ReserveResponseBindings(ctx, group, keys, publication.Token)
+		accepted, err := cache.ReserveResponseBindings(ctx, group, keys, publication.Token)
+		if !accepted && err == nil {
+			// A late refusal must also evict after the optional wait has ended.
+			discard()
+		}
+		done <- accepted && err == nil
 	}()
 	select {
 	case <-ctx.Done():
 		return CollabBindingPublication{}
-	case err, completed := <-done:
-		if !completed || err != nil || ctx.Err() != nil {
+	case accepted := <-done:
+		if !accepted || ctx.Err() != nil {
 			return CollabBindingPublication{}
 		}
 		return publication

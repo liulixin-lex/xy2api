@@ -47,7 +47,11 @@ func TestCollabBoundaryClockSkewDeferredCreate(t *testing.T) {
 			key := "resp_skew_" + action
 			// Fast instance prepared first, but its publication has not reached Redis.
 			old := collabBoundaryContext("request:earlier", now.Add(65*time.Second))
-			require.NoError(t, c.ReserveResponseBindings(ctx, group, []string{key}, "request:earlier"))
+			{
+				reserved, err := c.ReserveResponseBindings(ctx, group, []string{key}, "request:earlier")
+				require.NoError(t, err)
+				require.Equal(t, true, reserved)
+			}
 			want := int64(9)
 			switch action {
 			case "delete":
@@ -56,10 +60,22 @@ func TestCollabBoundaryClockSkewDeferredCreate(t *testing.T) {
 			case "set":
 				require.NoError(t, c.SetResponseBinding(ctx, group, key, 9, time.Hour))
 			case "create":
-				require.NoError(t, c.ReserveResponseBindings(ctx, group, []string{key}, "request:later"))
-				require.NoError(t, c.CreateResponseBinding(collabBoundaryContext("request:later", now.Add(time.Minute)), group, key, 9, time.Hour))
+				{
+					reserved, err := c.ReserveResponseBindings(ctx, group, []string{key}, "request:later")
+					require.NoError(t, err)
+					require.Equal(t, true, reserved)
+				}
+				{
+					created, err := c.CreateResponseBinding(collabBoundaryContext("request:later", now.Add(time.Minute)), group, key, 9, time.Hour)
+					require.NoError(t, err)
+					require.Equal(t, true, created)
+				}
 			}
-			require.NoError(t, c.CreateResponseBinding(old, group, key, 7, time.Hour))
+			{
+				created, err := c.CreateResponseBinding(old, group, key, 7, time.Hour)
+				require.NoError(t, err)
+				require.Equal(t, false, created)
+			}
 			got, err := c.GetSessionAccountID(ctx, group, key)
 			if want > 0 {
 				require.NoError(t, err)
@@ -77,14 +93,22 @@ func TestCollabBoundaryGenericDeleteErasesFence(t *testing.T) {
 			key := "resp_mixed_" + action
 			now := time.Now()
 			old := collabBoundaryContext("request:earlier", now.Add(time.Minute))
-			require.NoError(t, c.ReserveResponseBindings(ctx, 3, []string{key}, "request:earlier"))
+			{
+				reserved, err := c.ReserveResponseBindings(ctx, 3, []string{key}, "request:earlier")
+				require.NoError(t, err)
+				require.Equal(t, true, reserved)
+			}
 			require.NoError(t, c.SetResponseBinding(ctx, 3, key, 9, time.Hour))
 			if action == "delete" {
 				require.NoError(t, c.DeleteSessionAccountID(ctx, 3, key))
 			} else {
 				require.NoError(t, c.DeleteSessionAccountIDIfOwner(ctx, 3, key, 9))
 			}
-			require.NoError(t, c.CreateResponseBinding(old, 3, key, 7, time.Hour))
+			{
+				created, err := c.CreateResponseBinding(old, 3, key, 7, time.Hour)
+				require.NoError(t, err)
+				require.Equal(t, false, created)
+			}
 			got, _ := c.GetSessionAccountID(ctx, 3, key)
 			t.Logf("later_api=%s got=%d", action, got)
 			require.Zero(t, got, "a generic cache deletion must retain the deferred-write fence")
@@ -101,7 +125,11 @@ func TestCollabBoundaryGenericDeletePendingReservation(t *testing.T) {
 			if action != "missing" {
 				require.NoError(t, cache.SetSessionAccountID(ctx, 0, key, 9, time.Hour))
 			}
-			require.NoError(t, cache.ReserveResponseBindings(ctx, 0, []string{key}, "reserved"))
+			{
+				reserved, err := cache.ReserveResponseBindings(ctx, 0, []string{key}, "reserved")
+				require.NoError(t, err)
+				require.Equal(t, action == "missing", reserved)
+			}
 			expected := int64(0)
 			switch action {
 			case "delete":
@@ -112,7 +140,11 @@ func TestCollabBoundaryGenericDeletePendingReservation(t *testing.T) {
 			default:
 				require.NoError(t, cache.DeleteSessionAccountIDIfOwner(ctx, 0, key, 9))
 			}
-			require.NoError(t, cache.CreateResponseBinding(collabBoundaryContext("reserved", time.Now().Add(time.Hour)), 0, key, 7, time.Hour))
+			{
+				created, err := cache.CreateResponseBinding(collabBoundaryContext("reserved", time.Now().Add(time.Hour)), 0, key, 7, time.Hour)
+				require.NoError(t, err)
+				require.Equal(t, false, created)
+			}
 			actual, _ := cache.GetSessionAccountID(ctx, 0, key)
 			require.Equal(t, expected, actual)
 		})

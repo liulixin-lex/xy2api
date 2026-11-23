@@ -27,13 +27,14 @@ end
 return 1
 `)
 
-func (c *gatewayCache) ReserveResponseBindings(ctx context.Context, group int64, keys []string, token string) error {
+func (c *gatewayCache) ReserveResponseBindings(ctx context.Context, group int64, keys []string, token string) (bool, error) {
 	metadata := make([]string, 0, 2*len(keys))
 	for _, key := range keys {
 		metadata = append(metadata, sessionBindingKeys(group, key)...)
 	}
 	publisher, _, _ := strings.Cut(token, ":")
-	return reserveResponseBindingsScript.Run(ctx, c.rdb, metadata, "pending:"+token, service.CollabBindingPublicationLifetime.Milliseconds(), publisher).Err()
+	accepted, err := reserveResponseBindingsScript.Run(ctx, c.rdb, metadata, "pending:"+token, service.CollabBindingPublicationLifetime.Milliseconds(), publisher).Int()
+	return accepted == 1, err
 }
 
 var createResponseBindingScript = redis.NewScript(`
@@ -43,12 +44,13 @@ redis.call('SET', KEYS[2], ARGV[4], 'PX', ARGV[3])
 return 1
 `)
 
-func (c *gatewayCache) CreateResponseBinding(ctx context.Context, group int64, key string, account int64, ttl time.Duration) error {
+func (c *gatewayCache) CreateResponseBinding(ctx context.Context, group int64, key string, account int64, ttl time.Duration) (bool, error) {
 	publication := service.CollabBindingPublicationFrom(ctx)
 	if publication.Token == "" {
-		return nil
+		return false, nil
 	}
-	return createResponseBindingScript.Run(ctx, c.rdb, sessionBindingKeys(group, key), account, "pending:"+publication.Token, ttl.Milliseconds(), "published:"+publication.Token).Err()
+	accepted, err := createResponseBindingScript.Run(ctx, c.rdb, sessionBindingKeys(group, key), account, "pending:"+publication.Token, ttl.Milliseconds(), "published:"+publication.Token).Int()
+	return accepted == 1, err
 }
 func (c *gatewayCache) DeleteResponseBinding(ctx context.Context, group int64, key string) error {
 	return c.DeleteSessionAccountID(ctx, group, key)

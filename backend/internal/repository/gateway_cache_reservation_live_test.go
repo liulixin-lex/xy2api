@@ -16,7 +16,7 @@ type collabDelayedReserve struct {
 	started, proceed chan struct{}
 }
 
-func (c *collabDelayedReserve) ReserveResponseBindings(ctx context.Context, group int64, keys []string, token string) error {
+func (c *collabDelayedReserve) ReserveResponseBindings(ctx context.Context, group int64, keys []string, token string) (bool, error) {
 	close(c.started)
 	<-c.proceed
 	return c.gatewayCache.ReserveResponseBindings(ctx, group, keys, token)
@@ -76,14 +76,30 @@ func TestCollabReservationExistingAndExpired(t *testing.T) {
 			case "response_set":
 				require.NoError(t, c.SetResponseBinding(ctx, 0, key, 9, time.Hour))
 			case "published":
-				require.NoError(t, c.ReserveResponseBindings(ctx, 0, []string{key}, "newer"))
-				require.NoError(t, c.CreateResponseBinding(collabBoundaryContext("newer", time.Now().Add(time.Minute)), 0, key, 9, time.Hour))
+				{
+					reserved, err := c.ReserveResponseBindings(ctx, 0, []string{key}, "newer")
+					require.NoError(t, err)
+					require.Equal(t, true, reserved)
+				}
+				{
+					created, err := c.CreateResponseBinding(collabBoundaryContext("newer", time.Now().Add(time.Minute)), 0, key, 9, time.Hour)
+					require.NoError(t, err)
+					require.Equal(t, true, created)
+				}
 			}
-			require.NoError(t, c.ReserveResponseBindings(ctx, 0, []string{key}, "late"))
+			{
+				reserved, err := c.ReserveResponseBindings(ctx, 0, []string{key}, "late")
+				require.NoError(t, err)
+				require.Equal(t, existing == "expired" || existing == "missing", reserved)
+			}
 			if existing == "expired" {
 				f.FastForward(61 * time.Second)
 			}
-			require.NoError(t, c.CreateResponseBinding(collabBoundaryContext("late", time.Now().Add(10*time.Hour)), 0, key, 7, time.Hour))
+			{
+				created, err := c.CreateResponseBinding(collabBoundaryContext("late", time.Now().Add(10*time.Hour)), 0, key, 7, time.Hour)
+				require.NoError(t, err)
+				require.Equal(t, existing == "missing", created)
+			}
 			actual, _ := c.GetSessionAccountID(ctx, 0, key)
 			expected := int64(9)
 			if existing == "expired" {
@@ -149,12 +165,20 @@ func TestCollabReservationMixedConditionalDeleteBound(t *testing.T) {
 			cache, fixture := collabBoundaryRedis(t)
 			ctx := context.Background()
 			key := "resp_mixed"
-			require.NoError(t, cache.ReserveResponseBindings(ctx, 0, []string{key}, "request:pending"))
+			{
+				reserved, err := cache.ReserveResponseBindings(ctx, 0, []string{key}, "request:pending")
+				require.NoError(t, err)
+				require.Equal(t, true, reserved)
+			}
 			require.NoError(t, cache.rdb.Eval(ctx, oldDelete, sessionBindingKeys(0, key), 8).Err())
 			if expired {
 				fixture.FastForward(service.CollabBindingPublicationLifetime)
 			}
-			require.NoError(t, cache.CreateResponseBinding(collabBoundaryContext("request:pending", time.Now().Add(time.Hour)), 0, key, 7, time.Hour))
+			{
+				created, err := cache.CreateResponseBinding(collabBoundaryContext("request:pending", time.Now().Add(time.Hour)), 0, key, 7, time.Hour)
+				require.NoError(t, err)
+				require.Equal(t, !expired, created)
+			}
 			got, _ := cache.GetSessionAccountID(ctx, 0, key)
 			want := int64(7)
 			if expired {
@@ -171,15 +195,31 @@ func TestCollabReservationOrdinaryMutationWins(t *testing.T) {
 			cache, _ := collabBoundaryRedis(t)
 			ctx := context.Background()
 			key := "resp_authority"
-			require.NoError(t, cache.ReserveResponseBindings(ctx, 0, []string{key}, "request:first"))
-			require.NoError(t, cache.CreateResponseBinding(collabBoundaryContext("request:first", time.Now().Add(time.Minute)), 0, key, 7, time.Hour))
-			require.NoError(t, cache.ReserveResponseBindings(ctx, 0, []string{key}, "request:second"))
+			{
+				reserved, err := cache.ReserveResponseBindings(ctx, 0, []string{key}, "request:first")
+				require.NoError(t, err)
+				require.Equal(t, true, reserved)
+			}
+			{
+				created, err := cache.CreateResponseBinding(collabBoundaryContext("request:first", time.Now().Add(time.Minute)), 0, key, 7, time.Hour)
+				require.NoError(t, err)
+				require.Equal(t, true, created)
+			}
+			{
+				reserved, err := cache.ReserveResponseBindings(ctx, 0, []string{key}, "request:second")
+				require.NoError(t, err)
+				require.Equal(t, true, reserved)
+			}
 			if mutation == "set" {
 				require.NoError(t, cache.SetSessionAccountID(ctx, 0, key, 9, time.Hour))
 			} else {
 				require.NoError(t, cache.DeleteSessionAccountID(ctx, 0, key))
 			}
-			require.NoError(t, cache.CreateResponseBinding(collabBoundaryContext("request:second", time.Now().Add(time.Minute)), 0, key, 11, time.Hour))
+			{
+				created, err := cache.CreateResponseBinding(collabBoundaryContext("request:second", time.Now().Add(time.Minute)), 0, key, 11, time.Hour)
+				require.NoError(t, err)
+				require.Equal(t, false, created)
+			}
 			got, _ := cache.GetSessionAccountID(ctx, 0, key)
 			want := int64(9)
 			if mutation == "delete" {

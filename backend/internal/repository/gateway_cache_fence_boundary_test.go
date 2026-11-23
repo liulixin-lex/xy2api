@@ -18,10 +18,10 @@ type collabFenceDelayedRedisBinding struct {
 	fixture *miniredis.Miniredis
 }
 
-func (c *collabFenceDelayedRedisBinding) CreateResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) error {
+func (c *collabFenceDelayedRedisBinding) CreateResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) (bool, error) {
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return false, ctx.Err()
 	case <-time.After(200 * time.Millisecond):
 	}
 	// miniredis TTLs use explicit time advancement; align them with elapsed wall time.
@@ -57,7 +57,7 @@ type collabExpiredRedisWrite struct {
 	fixture *miniredis.Miniredis
 }
 
-func (c *collabExpiredRedisWrite) CreateResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) error {
+func (c *collabExpiredRedisWrite) CreateResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) (bool, error) {
 	c.fixture.FastForward(2 * time.Hour)
 	c.fixture.SetTime(time.Now().Add(2 * time.Hour))
 	return c.gatewayCache.CreateResponseBinding(ctx, group, key, id, ttl)

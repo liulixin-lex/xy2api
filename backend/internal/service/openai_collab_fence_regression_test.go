@@ -16,10 +16,10 @@ type collabFenceLateBindingCache struct {
 	delay time.Duration
 }
 
-func (c *collabFenceLateBindingCache) CreateResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) error {
+func (c *collabFenceLateBindingCache) CreateResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) (bool, error) {
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return false, ctx.Err()
 	case <-time.After(c.delay):
 	}
 	return c.collabBindingTraceCache.CreateResponseBinding(ctx, group, key, id, ttl)

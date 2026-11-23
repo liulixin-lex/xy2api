@@ -144,17 +144,18 @@ func TestCollabRegressionAsyncBindingDoesNotResurrectDeletion(t *testing.T) {
 	})
 }
 
-func (s *collabBindingTraceCache) CreateResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) error {
+func (s *collabBindingTraceCache) CreateResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) (bool, error) {
 	mapKey := fmt.Sprint(group, ":", key)
 	publication := CollabBindingPublicationFrom(ctx)
 	if !time.Now().Before(publication.Expires) || publication.Token == "" || publication.Token != s.versions[mapKey] {
-		return nil
+		return false, nil
 	}
 	if s.versions == nil {
 		s.versions = map[string]string{}
 	}
 	s.versions[mapKey] = "published:" + publication.Token
-	return s.SetSessionAccountID(ctx, group, key, id, ttl)
+	err := s.SetSessionAccountID(ctx, group, key, id, ttl)
+	return err == nil, err
 }
 func (s *collabBindingTraceCache) DeleteResponseBinding(ctx context.Context, group int64, key string) error {
 	if s.versions == nil {
@@ -227,7 +228,7 @@ func collabBindingFenceTTL(ttl time.Duration) time.Duration {
 	return ttl
 }
 
-func (s *collabBindingTraceCache) ReserveResponseBindings(ctx context.Context, group int64, keys []string, token string) error {
+func (s *collabBindingTraceCache) ReserveResponseBindings(ctx context.Context, group int64, keys []string, token string) (bool, error) {
 	if s.versions == nil {
 		s.versions = map[string]string{}
 	}
@@ -238,16 +239,16 @@ func (s *collabBindingTraceCache) ReserveResponseBindings(ctx context.Context, g
 		if metadata != "" {
 			owner, _, _ := strings.Cut(strings.TrimPrefix(metadata, "published:"), ":")
 			if owner != publisher {
-				return ctx.Err()
+				return false, ctx.Err()
 			}
 		} else if s.values[mapKey].id != 0 {
-			return ctx.Err()
+			return false, ctx.Err()
 		}
 	}
 	for _, key := range keys {
 		s.versions[fmt.Sprint(group, ":", key)] = token
 	}
-	return ctx.Err()
+	return ctx.Err() == nil, ctx.Err()
 }
 
 func TestCollabBindingPublisherFollowsInboundRequest(t *testing.T) {

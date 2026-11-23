@@ -11,19 +11,19 @@ import (
 )
 
 // Match the production cache's conditional response publication contract.
-func (m *replayMemory) CreateResponseBinding(ctx context.Context, _ int64, key string, id int64, ttl time.Duration) error {
+func (m *replayMemory) CreateResponseBinding(ctx context.Context, _ int64, key string, id int64, ttl time.Duration) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	publication := service.CollabBindingPublicationFrom(ctx)
 	if !time.Now().Before(publication.Expires) || publication.Token == "" || publication.Token != m.responseGenerations[key] {
-		return nil
+		return false, nil
 	}
 	if m.responseGenerations == nil {
 		m.responseGenerations = map[string]string{}
 	}
 	m.bindings[key] = id
 	m.responseGenerations[key] = "published:" + publication.Token
-	return nil
+	return true, nil
 }
 func (m *replayMemory) DeleteResponseBinding(_ context.Context, _ int64, key string) error {
 	m.mu.Lock()
@@ -46,7 +46,7 @@ func (m *replayMemory) SetResponseBinding(ctx context.Context, group int64, key 
 	return m.SetSessionAccountID(ctx, group, key, id, ttl)
 }
 
-func (m *replayMemory) ReserveResponseBindings(ctx context.Context, _ int64, keys []string, token string) error {
+func (m *replayMemory) ReserveResponseBindings(ctx context.Context, _ int64, keys []string, token string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.responseGenerations == nil {
@@ -58,14 +58,14 @@ func (m *replayMemory) ReserveResponseBindings(ctx context.Context, _ int64, key
 		if metadata != "" {
 			owner, _, _ := strings.Cut(strings.TrimPrefix(metadata, "published:"), ":")
 			if owner != publisher {
-				return ctx.Err()
+				return false, ctx.Err()
 			}
 		} else if m.bindings[key] != 0 {
-			return ctx.Err()
+			return false, ctx.Err()
 		}
 	}
 	for _, key := range keys {
 		m.responseGenerations[key] = token
 	}
-	return ctx.Err()
+	return ctx.Err() == nil, ctx.Err()
 }
