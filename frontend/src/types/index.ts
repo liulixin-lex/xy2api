@@ -1933,8 +1933,8 @@ export interface AdminUsageLog extends UsageLog {
   // 后端 0.6.5 的请求层：管理端列表里也有没有账单的请求（多为失败或取消）。这些行没有费用、账号，Token 数也可能为空。
   /** usage = 一条 usage 日志；unbilled = 没有账单的请求。两者 id 各自成序列。 */
   source?: 'usage' | 'unbilled'
-  /** 请求结果：1 成功，2 已救回，3 失败，4 已取消；升级前写入的行为 null。 */
-  result?: 1 | 2 | 3 | 4 | null
+  /** 请求结果：1 成功，2 已救回，3 失败，4 已取消，5 本地收尾，6 本地收尾未送达；升级前写入的行为 null。 */
+  result?: 1 | 2 | 3 | 4 | 5 | 6 | null
   /** 本次请求换号的次数（0 = 没换过）；升级前写入的行为 null。 */
   switches?: number | null
   /** 网关请求 id：同一请求的多次账号尝试共用。 */

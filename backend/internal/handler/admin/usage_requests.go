@@ -26,8 +26,8 @@ func (h *UsageHandler) parseRequestFilters(c *gin.Context) (pagination.Paginatio
 	}
 	if raw := strings.TrimSpace(c.Query("result")); raw != "" {
 		n, err := strconv.ParseInt(raw, 10, 16)
-		if err != nil || n < 1 || n > 4 {
-			response.BadRequest(c, "Invalid result, use 1, 2, 3 or 4")
+		if err != nil || n < 1 || n > 6 {
+			response.BadRequest(c, "Invalid result, use 1 to 6")
 			return params, filters, false
 		}
 		v := int16(n)

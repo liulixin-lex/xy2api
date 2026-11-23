@@ -377,13 +377,15 @@ const billingTypeOptions = ref<SelectOption[]>([
   { value: 1, label: t('admin.usage.billingTypeSubscription') }
 ])
 
-// 请求结果（后端 0.6.5 请求层）：1 成功，2 已救回，3 失败，4 已取消
+// 请求结果（后端请求层）：1 成功，2 已救回，3 失败，4 已取消，5 本地收尾，6 本地收尾未送达
 const resultOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allResults') },
   { value: 1, label: t('admin.usage.resultSuccess') },
   { value: 2, label: t('admin.usage.resultRescued') },
   { value: 3, label: t('admin.usage.resultFailed') },
-  { value: 4, label: t('admin.usage.resultCanceled') }
+  { value: 4, label: t('admin.usage.resultCanceled') },
+  { value: 5, label: t('admin.usage.resultLocalEnded') },
+  { value: 6, label: t('admin.usage.resultLocalUndeliverable') }
 ])
 
 // 错误类型对应后端 phase 参数(与错误表"类型"徽章同语义)

@@ -29,10 +29,12 @@ export function formatLatency(ms: number | null | undefined): string {
 /** A request without a bill (admin list only, mostly failed or canceled): no cost, often no token counts. */
 export const isUnbilled = (row: AdminUsageLog) => row.source === 'unbilled'
 
-/** The result word of a request without a bill: failed or canceled, else none. */
+/** The result word of a request without a bill: failed, canceled or ended locally, else none. */
 export function unbilledWord(row: AdminUsageLog, t: Translate): string {
   if (row.result === 3) return t('admin.usage.resultFailed')
   if (row.result === 4) return t('admin.usage.resultCanceled')
+  if (row.result === 5) return t('admin.usage.resultLocalEnded')
+  if (row.result === 6) return t('admin.usage.resultLocalUndeliverable')
   return ''
 }
 

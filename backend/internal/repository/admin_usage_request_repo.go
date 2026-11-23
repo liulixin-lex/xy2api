@@ -46,7 +46,7 @@ func adminRequestWhere(filters usagestats.UsageLogFilters) (string, []any, error
 	}
 	where, args := usageExportWhere(filters)
 	if filters.Result != nil {
-		if *filters.Result < 1 || *filters.Result > 4 {
+		if *filters.Result < 1 || *filters.Result > 6 {
 			return "", nil, fmt.Errorf("invalid request result")
 		}
 		args = append(args, *filters.Result)
