@@ -78,6 +78,7 @@ func (s *collabSeam) tryLossless(c *gin.Context, release ...func()) bool {
 		s.writer.mu.Unlock()
 		stop, stopped := make(chan struct{}), make(chan struct{})
 		go func() {
+			defer resilience.RecoverCollabWorker()
 			defer close(stopped)
 			select {
 			case <-semantic:
@@ -133,7 +134,7 @@ type collabRetainedSlot struct {
 
 func (s *collabRetainedSlot) Release() {
 	if s != nil {
-		s.once.Do(func() { s.released.Store(true); s.release() })
+		s.once.Do(func() { defer resilience.RecoverCollabWorker(); s.released.Store(true); s.release() })
 	}
 }
 func (s *collabSeam) retainedReleased() bool {

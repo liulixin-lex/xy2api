@@ -63,6 +63,7 @@ func (s *SafeCollabRecordsStore) enqueue(mutation CollabRecordMutation) {
 	}
 }
 func (s *SafeCollabRecordsStore) runWrites() {
+	defer collabRecover(&collabSafety.recordPanics)
 	for {
 		select {
 		case <-s.stop.Done():
@@ -112,6 +113,7 @@ func (s *SafeCollabRecordsStore) LookupBatch(ctx context.Context, batch CollabRe
 	batch.Queries = slices.Clone(batch.Queries)
 	done := make(chan CollabRecordBatchResult, 1)
 	go func() {
+		defer collabRecover(&collabSafety.recordPanics)
 		defer func() { <-s.readers }()
 		done <- s.lookupShared(ctx, batch)
 	}()

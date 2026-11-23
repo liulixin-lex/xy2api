@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // The supervisor owns its timers and joins before request cleanup. Queue reads
@@ -17,6 +19,7 @@ func watchCollabTakeover(parent context.Context, duration time.Duration, accepte
 	queued := func(check func(context.Context) bool) (blocked bool) {
 		defer func() {
 			if recover() != nil {
+				resilience.NoteCollabWorkerPanic()
 				blocked = true
 			}
 		}()
@@ -35,6 +38,8 @@ func watchCollabTakeover(parent context.Context, duration time.Duration, accepte
 	}
 	stop, stopped := make(chan struct{}), make(chan struct{})
 	go func() {
+		defer resilience.RecoverCollabWorker()
+		defer cancel()
 		defer close(stopped)
 		timer, ticker := time.NewTimer(duration), time.NewTicker(time.Second)
 		defer timer.Stop()

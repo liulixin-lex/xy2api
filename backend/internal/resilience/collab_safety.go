@@ -53,3 +53,13 @@ func (s SafeCollabObserver) Freeze() (result *CollabObservation) {
 	}
 	return nil
 }
+
+// RecoverCollabWorker must be deferred directly by every optional worker.
+// It counts fixed events only; panic values never leave the worker.
+func RecoverCollabWorker() {
+	if recover() != nil {
+		collabSafety.consumerPanics.Add(1)
+	}
+}
+
+func NoteCollabWorkerPanic() { collabSafety.consumerPanics.Add(1) }
