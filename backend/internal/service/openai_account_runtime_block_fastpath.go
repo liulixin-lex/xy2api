@@ -583,7 +583,11 @@ func (s *OpenAIGatewayService) clearOpenAIAccountRuntimeBlockIfUnchanged(account
 // IsOpenAIResponsesCompactPath）：门票门控按真正出站的模型名判定，否则 compact
 // 请求会被按客户端原始模型误拦（见 openAICodexTicketOutboundModel）。
 func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlocked(account *Account, requestedModel string, requireCompact bool) bool {
-	if s == nil {
+	return s.isOpenAIAccountRequestRuntimeBlockedWithContext(context.Background(), account, requestedModel, requireCompact)
+}
+
+func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlockedWithContext(ctx context.Context, account *Account, requestedModel string, requireCompact bool) bool {
+	if s == nil || account == nil {
 		return false
 	}
 	outboundModel := s.openAICodexTicketOutboundModel(account, requestedModel, requireCompact)
@@ -595,6 +599,17 @@ func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlocked(account *Acc
 	}
 	if s.resilience != nil && s.resilience.sameSiteHold.held(account, time.Now()) {
 		return true
+	}
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		if until, ok := s.openaiAccountRuntimeBlockUntil.Load(account.ID); ok {
+			if until, ok := until.(time.Time); ok && time.Now().Before(until) && accountPersistedSchedulingCooldownActive(account) {
+				return true
+			}
+		}
+		now := time.Now()
+		model := openAIAccountModelTransientModel(canonicalOpenAIAccountSchedulingModel(account, requestedModel))
+		entry, _ := s.getOpenAIAccountModelTransientState().lookupEntry(account.ID, model, now, false)
+		return !entry.blockUntil.IsZero() && now.Before(entry.blockUntil)
 	}
 	snapshot := s.peekOpenAIAccountRuntimeBlock(account)
 	if snapshot.blocked {

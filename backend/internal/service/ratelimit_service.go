@@ -172,6 +172,9 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 	now := time.Now().UTC()
 	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
 	decision := EvaluateAccountSchedulingThreshold(account, thresholds, now)
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return decision.ShouldPause && decision.Until != nil && decision.Until.After(now)
+	}
 	if !decision.ShouldPause || decision.Until == nil || !decision.Until.After(now) {
 		s.applyAnthropicFableSchedulingThreshold(ctx, account, thresholds, now)
 		return false

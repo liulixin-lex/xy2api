@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 const (
@@ -851,7 +852,10 @@ var openAIAutoResetSchedulerNotifiedAt sync.Map // accountID(int64) -> time.Time
 
 // notifyOpenAIAutoResetFromScheduler 供调度候选过滤使用。候选过滤按请求逐账号执行，
 // 每条通知都会让后台读一次账号，不做冷却时无卡或待用卡的账号会持续占满后台协程。
-func notifyOpenAIAutoResetFromScheduler(accountID int64) {
+func notifyOpenAIAutoResetFromScheduler(ctx context.Context, accountID int64) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	notifyOpenAIAutoResetFromSchedulerAt(accountID, time.Now())
 }
 
