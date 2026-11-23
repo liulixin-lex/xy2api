@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -64,9 +66,32 @@ func (h *OpenAIGatewayHandler) armCollabLossless(c *gin.Context, seam *collabSea
 	c.Request = c.Request.WithContext(service.WithCollabLosslessGate(c.Request.Context(), gate))
 }
 
-func (s *collabSeam) tryLossless(c *gin.Context) bool {
+func (s *collabSeam) tryLossless(c *gin.Context, release ...func()) bool {
 	if s == nil || s.losslessDuration <= 0 {
 		return false
+	}
+	if len(release) > 0 && release[0] != nil {
+		s.retained = &collabRetainedSlot{release: release[0]}
+		semantic := make(chan struct{})
+		s.writer.mu.Lock()
+		s.writer.semanticDelivered = semantic
+		s.writer.mu.Unlock()
+		stop, stopped := make(chan struct{}), make(chan struct{})
+		go func() {
+			defer close(stopped)
+			select {
+			case <-semantic:
+				s.retained.Release()
+			case <-stop:
+			}
+		}()
+		defer func() {
+			close(stop)
+			<-stopped
+			s.writer.mu.Lock()
+			s.writer.semanticDelivered = nil
+			s.writer.mu.Unlock()
+		}()
 	}
 	started := time.Now()
 	writer, keys := c.Writer, c.Copy().Keys
@@ -96,4 +121,34 @@ func (s *collabSeam) tryLossless(c *gin.Context) bool {
 	s.losslessDuration = 0
 	s.idleDeadline = time.Time{}
 	return delivered
+}
+
+// Release is separate from stopping an optional upstream: accepted streams can
+// legitimately continue until completion after their request context is canceled.
+type collabRetainedSlot struct {
+	once     sync.Once
+	release  func()
+	released atomic.Bool
+}
+
+func (s *collabRetainedSlot) Release() {
+	if s != nil {
+		s.once.Do(func() { s.released.Store(true); s.release() })
+	}
+}
+func (s *collabSeam) retainedReleased() bool {
+	return s != nil && s.retained != nil && s.retained.released.Load()
+}
+
+func (s *collabSeam) watchRetainedWaiters(check func(context.Context) bool) func(context.Context) bool {
+	return func(ctx context.Context) bool {
+		if s.retainedReleased() {
+			return false
+		}
+		if check(ctx) {
+			s.retained.Release()
+			return true
+		}
+		return false
+	}
 }

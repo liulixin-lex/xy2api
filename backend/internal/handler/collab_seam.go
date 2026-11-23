@@ -62,6 +62,7 @@ type collabSeam struct {
 	optionalSpent    time.Duration
 	rejected         map[service.CollabRejectedBody]bool
 	deliveredAccount int64
+	retained         *collabRetainedSlot
 	terminalRecorded bool
 }
 

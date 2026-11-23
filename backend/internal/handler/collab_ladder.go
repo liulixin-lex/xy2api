@@ -84,10 +84,10 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		// Lossless preemption holds the account that produced the latest rejection,
 		// which may differ from the first account after ordinary failover.
 		retained := last.AccountID
-		retainedWaiters = func(query context.Context) bool {
+		retainedWaiters = seam.watchRetainedWaiters(func(query context.Context) bool {
 			waiting, err := h.concurrencyHelper.concurrencyService.GetAccountWaitingCount(query, retained)
 			return err != nil || waiting > 0
-		}
+		})
 	}
 	waiters := func(query context.Context) bool {
 		loads, err := h.concurrencyHelper.concurrencyService.GetUsersLoadBatch(query, []service.UserWithConcurrency{{ID: subject.UserID, MaxConcurrency: subject.Concurrency}})
