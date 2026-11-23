@@ -71,8 +71,8 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		// A local notice reuses the delivered identity without registering a
 		// continuation. Only replacement upstream responses need an alias.
 		// Final disposal row (c): the needed continuation is unavailable.
-		seam.localFinal = true
 		if seam.localEnding != nil && parentRequest.Context().Err() == nil && parsed.LadderPolicy(evidence, collabLadderEndpointReason(parsed, rejections, last, evidence)).LocalEnding {
+			seam.localFinal = true
 			seam.localEnding(c, seam, saved, evidence)
 		}
 		return
@@ -83,8 +83,8 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	}
 	duration = min(duration, time.Minute-seam.optionalSpent)
 	if duration <= 0 {
-		seam.localFinal = true
 		if seam.localEnding != nil && parsed.LadderPolicy(evidence, collabLadderEndpointReason(parsed, rejections, last, evidence)).LocalEnding && parentRequest.Context().Err() == nil {
+			seam.localFinal = true
 			seam.localEnding(c, seam, saved, evidence)
 		}
 		return
