@@ -76,6 +76,31 @@ func TestCollabObservationPostgresRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
 
+	t.Run("local_outcomes", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, "ALTER TABLE gateway_unbilled_requests ADD CONSTRAINT gateway_unbilled_requests_result_check CHECK (result BETWEEN 1 AND 4)")
+		require.NoError(t, err)
+		migration, err := migrations.FS.ReadFile("325_collab_local_outcomes.sql")
+		require.NoError(t, err)
+		tx, err := db.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		_, err = tx.ExecContext(ctx, string(migration))
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit())
+		var validated bool
+		require.NoError(t, db.QueryRowContext(ctx, "SELECT convalidated FROM pg_constraint WHERE conname='gateway_unbilled_requests_result_check'").Scan(&validated))
+		require.False(t, validated, "widening must not scan existing rows")
+		repo := newUsageLogRepositoryWithSQL(nil, db)
+		for _, result := range []int16{resilience.RequestLocalEnded, resilience.RequestLocalUndeliverable} {
+			id := fmt.Sprintf("local-result-%d", result)
+			require.NoError(t, repo.CreateUnbilledRequest(ctx, &service.GatewayUnbilledRequest{RequestID: id, CreatedAt: time.Now(), APIKeyID: 2, Result: result}))
+			var got int16
+			require.NoError(t, db.QueryRowContext(ctx, "SELECT result FROM gateway_unbilled_requests WHERE request_id=$1", id).Scan(&got))
+			require.Equal(t, result, got)
+		}
+		_, err = db.ExecContext(ctx, "INSERT INTO gateway_unbilled_requests (request_id,result) VALUES ('invalid-local-result',7)")
+		require.Error(t, err, "NOT VALID still checks new rows")
+	})
+
 	// The database text is spaced JSONB, not the compact document bound by INSERT.
 	v := resilience.CollabObservation{}
 	digest := resilience.CollabDigest(strings.Repeat("a", 64))

@@ -12,10 +12,12 @@ import (
 )
 
 const (
-	RequestSuccess  int16 = 1
-	RequestRescued  int16 = 2
-	RequestFailed   int16 = 3
-	RequestCanceled int16 = 4
+	RequestSuccess            int16 = 1
+	RequestRescued            int16 = 2
+	RequestFailed             int16 = 3
+	RequestCanceled           int16 = 4
+	RequestLocalEnded         int16 = 5
+	RequestLocalUndeliverable int16 = 6
 )
 
 // GatewayRequestMetadata is frozen before arranging billing. It must survive a
@@ -284,6 +286,8 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 	if r.final == nil {
 		result := RequestFailed
 		switch {
+		case s.collab != nil && s.collab.LocalOutcome != 0:
+			result = s.collab.LocalOutcome
 		case r.canceled || !r.complete && canceled:
 			result = RequestCanceled
 		case r.complete && r.sends >= 2 && r.failedBeforeSend:

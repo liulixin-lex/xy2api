@@ -13,7 +13,7 @@ import (
 var _ service.GatewayRequestRepository = (*usageLogRepository)(nil)
 
 func (r *usageLogRepository) CreateUnbilledRequest(ctx context.Context, row *service.GatewayUnbilledRequest) error {
-	if row == nil || row.RequestID == "" || row.CreatedAt.IsZero() || row.Result < 1 || row.Result > 4 {
+	if row == nil || row.RequestID == "" || row.CreatedAt.IsZero() || row.Result < 1 || row.Result > 6 {
 		return fmt.Errorf("invalid unbilled request")
 	}
 	_, err := r.sql.ExecContext(ctx, `INSERT INTO gateway_unbilled_requests

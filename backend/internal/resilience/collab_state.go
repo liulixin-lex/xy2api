@@ -39,6 +39,7 @@ type CollabRequestState struct {
 	Execution         CollabExecution
 	Observer          CollabObserver
 	Frozen            bool
+	LocalOutcome      int16
 }
 
 type CollabInputPosition struct {
