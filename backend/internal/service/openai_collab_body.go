@@ -72,7 +72,10 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 				// Confirmed field removals retain a unique original identity.
 				if known || collabRemovedFieldsOnly(candidate, item) {
 					if match >= 0 {
-						return nil, false
+						if original[match].Raw != candidate.Raw {
+							return nil, false
+						}
+						continue // equal original digests retain occurrence order
 					}
 					match = j
 				}
@@ -189,6 +192,12 @@ func ParseCollabBodyWithContext(body []byte, facts CollabBodyContext) CollabBody
 			single := []byte(`{"input":[` + item.Raw + `]}`)
 			rules := DefaultOpenAIFCORules([]string{item.Get("name").String()})
 			if repaired, summary, err := normalizeOpenAIFCOBody(single, rules); err == nil && summary.Matched == 1 {
+				out.lineage.remember(gjson.GetBytes(repaired, "input.0").Raw, i)
+			}
+		}
+		if id == "" && item.Get("content").Exists() && item.Get("content").Type == gjson.Null {
+			single := []byte(`{"input":[` + item.Raw + `]}`)
+			if repaired, _, changed, err := normalizeOpenAIResponsesRejectedNullContentAtIndex(single, 0); err == nil && changed {
 				out.lineage.remember(gjson.GetBytes(repaired, "input.0").Raw, i)
 			}
 		}
@@ -449,8 +458,9 @@ func collabInputIdentities(body []byte) []string {
 }
 
 type collabInputLineage struct {
-	mu    sync.Mutex
-	items map[[32]byte]map[int]bool
+	mu       sync.Mutex
+	items    map[[32]byte]map[int]bool
+	variants map[int][]string
 }
 
 func (l *collabInputLineage) matches(raw string, index int) bool {
@@ -459,7 +469,15 @@ func (l *collabInputLineage) matches(raw string, index int) bool {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.items[sha256.Sum256([]byte(raw))][index]
+	if l.items[sha256.Sum256([]byte(raw))][index] {
+		return true
+	}
+	for _, prior := range l.variants[index] {
+		if collabRemovedFieldsOnly(gjson.Parse(prior), gjson.Parse(raw)) {
+			return true
+		}
+	}
+	return false
 }
 func (l *collabInputLineage) remember(raw string, index int) {
 	l.mu.Lock()
@@ -467,6 +485,12 @@ func (l *collabInputLineage) remember(raw string, index int) {
 	digest := sha256.Sum256([]byte(raw))
 	if l.items[digest] == nil {
 		l.items[digest] = map[int]bool{}
+	}
+	if !l.items[digest][index] {
+		if l.variants == nil {
+			l.variants = map[int][]string{}
+		}
+		l.variants[index] = append(l.variants[index], raw)
 	}
 	l.items[digest][index] = true
 }
@@ -477,12 +501,41 @@ func collabRemovedFieldsOnly(before, after gjson.Result) bool {
 	if !before.IsObject() || !after.IsObject() || after.Get("type").String() == "" || before.Get("type").String() != after.Get("type").String() {
 		return false
 	}
-	valid := true
-	after.ForEach(func(key, value gjson.Result) bool {
-		valid = before.Get(key.Str).Raw == value.Raw
+	return collabNestedRemovalsOnly(before, after)
+}
+
+// Compare structure recursively, retaining the original item's identity even
+// when a protocol repair removes a field inside content or an array element.
+// Ambiguous matches between different originals are rejected by inputPositions.
+func collabNestedRemovalsOnly(before, after gjson.Result) bool {
+	if before.Raw == after.Raw {
+		return true
+	}
+	if before.IsObject() && after.IsObject() {
+		previous := before.Map()
+		valid := true
+		after.ForEach(func(key, value gjson.Result) bool {
+			prior, exists := previous[key.Str]
+			valid = exists && collabNestedRemovalsOnly(prior, value)
+			return valid
+		})
 		return valid
-	})
-	return valid
+	}
+	if before.IsArray() && after.IsArray() {
+		previous, next := before.Array(), after.Array()
+		at := 0
+		for _, item := range next {
+			for at < len(previous) && !collabNestedRemovalsOnly(previous[at], item) {
+				at++
+			}
+			if at == len(previous) {
+				return false
+			}
+			at++
+		}
+		return true
+	}
+	return false
 }
 
 // ProtectedNamedItem identifies the protected handled-item endpoint for callers that

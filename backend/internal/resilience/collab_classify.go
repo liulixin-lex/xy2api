@@ -198,9 +198,23 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 			named.Ambiguous = true
 		}
 	}
-	add(object.Get("item_id").String())
+	if id := object.Get("item_id"); id.Exists() {
+		if id.Type != gjson.String || id.Str == "" {
+			named = &CollabNamedItem{Ambiguous: true}
+		} else {
+			add(id.Str)
+		}
+	}
 	for _, field := range []string{"message", "param"} {
-		value := object.Get(field).String()
+		part := object.Get(field)
+		if part.Exists() && part.Type != gjson.String {
+			if named == nil {
+				named = &CollabNamedItem{}
+			}
+			named.Ambiguous = true
+			continue
+		}
+		value := part.Str
 		for _, match := range collabNamedPattern.FindAllStringIndex(value, -1) {
 			token, valid := collabReferenceToken(value[match[1]:])
 			add(token)

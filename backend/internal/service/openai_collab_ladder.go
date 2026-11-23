@@ -80,6 +80,19 @@ func (l *CollabLadder) Run(ctx context.Context) bool {
 		if !policy.eligible {
 			return false
 		}
+		// Final disposal is a request endpoint, including after an ordinary
+		// account switch. A rejected replace-all never restarts selection.
+		replacedAny := false
+		for _, used := range replaced {
+			replacedAny = replacedAny || used
+		}
+		if !final && replacedAny {
+			l.StopReason = CollabLadderFinalDisposal
+			if evidence.Named != nil && handled[current][evidence.Named.Identity] && !collabProtectedItem(l.Body, evidence.Named.Identity) {
+				l.StopReason = CollabLadderHandledAgain
+			}
+			return false
+		}
 		claimed = policy.conservative
 		var action resilience.CollabAction
 		named := ""
