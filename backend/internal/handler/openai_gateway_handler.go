@@ -982,7 +982,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				BodyBytes: len(attemptBody),
 			})
 		}
-		losslessDelivered := false
+		losslessDelivered, losslessYielded := false, false
+		if accountReleaseFunc != nil && collabSeam != nil && collabSeam.lossless {
+			accountReleaseFunc = sync.OnceFunc(accountReleaseFunc)
+		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
@@ -992,8 +995,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			result, err := h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 			var preempt *service.CollabLosslessPreempt
 			if errors.As(err, &preempt) {
-				if collabSeam.tryLossless(c) {
+				if collabSeam.tryLossless(c, accountReleaseFunc) {
 					losslessDelivered = true
+					return nil, nil
+				}
+				if collabSeam.retainedReleased() {
+					// A waiter took the retained reservation. Re-enter ordinary
+					// selection/admission before sending any legacy repair.
+					losslessYielded = true
 					return nil, nil
 				}
 				return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
@@ -1002,6 +1011,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}()
 		if losslessDelivered {
 			return
+		}
+		if losslessYielded {
+			continue
 		}
 		recordOpenAIForwardUsage(c, account, result)
 		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, gatewayOpenAICompleted(result))
