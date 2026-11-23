@@ -169,7 +169,7 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 		if c.shipped {
 			settings = collabReleaseSettings(c.switches)
 		}
-		ctx = WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(32, time.Hour), settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true, f.svc.cfg)
+		ctx = WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(32, time.Hour), settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
 		if c.shipped {
 			require.False(t, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
 		} else {

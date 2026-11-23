@@ -18,11 +18,9 @@ import (
 var collabSetupContext context.Context
 
 func TestCollabThreadBindingPreparationAllocations(t *testing.T) {
+	var baseline []float64
 	for migration := range 4 {
 		for _, legacy := range []string{"", "legacy"} {
-			if migration == 0 && legacy == "" {
-				continue
-			}
 			f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1))
 			f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = migration&1 != 0
 			f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = migration&2 != 0
@@ -34,16 +32,29 @@ func TestCollabThreadBindingPreparationAllocations(t *testing.T) {
 				settings := collabAffinitySettings()
 				settings.Collab.TreeAffinity = on
 				counts = append(counts, testing.AllocsPerRun(100, func() {
-					ctx := WithOpenAICollabTreeAffinity(base, local, settings, 7, identity, resilience.CollabRoleChild, true, f.svc.cfg)
-					if ctx != base || f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true) {
-						panic("unexpected active binding or allocated context")
+					ctx := WithOpenAICollabTreeAffinity(base, local, settings, 7, identity, resilience.CollabRoleChild, true)
+					if f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true) {
+						panic("thread binding shipped")
 					}
 					collabSetupContext = ctx
 				}))
+				if on {
+					require.NotNil(t, openAICollabAffinityFrom(collabSetupContext))
+				} else {
+					require.Same(t, base, collabSetupContext)
+				}
+				require.Zero(t, testing.AllocsPerRun(100, func() {
+					if f.svc.PrepareOpenAICollabThreadBinding(collabSetupContext, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true) {
+						panic("thread binding shipped")
+					}
+				}))
 			}
-			t.Logf("migration=%d legacy=%s preparation allocations off/on=%v", migration, legacy, counts)
-			require.Equal(t, counts[0], counts[1])
-			require.Zero(t, counts[1])
+			t.Logf("migration=%d legacy=%s setup allocations off/on=%v; thread preparation=0", migration, legacy, counts)
+			if baseline == nil {
+				baseline = counts
+			}
+			require.Equal(t, baseline, counts, "migration and legacy identity cannot change setup allocations")
+			require.Zero(t, counts[0])
 		}
 	}
 }

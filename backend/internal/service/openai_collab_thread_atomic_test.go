@@ -52,7 +52,7 @@ func collabRequest(t *testing.T, f *selectionRuntimeFixture, local *resilience.C
 	}
 	cfg := collabAffinitySettings()
 	cfg.Collab.TreeAffinity = on
-	ctx = WithOpenAICollabTreeAffinity(ctx, local, cfg, 7, collabAffinityIdentity(thread, "root"), resilience.CollabRoleChild, true, f.svc.cfg)
+	ctx = WithOpenAICollabTreeAffinity(ctx, local, cfg, 7, collabAffinityIdentity(thread, "root"), resilience.CollabRoleChild, true)
 	active := unshipped && on && !f.svc.openAISessionHashReadOldFallbackEnabled() && !f.svc.openAISessionHashDualWriteOldEnabled() && f.svc.openAILegacySessionCacheKey(ctx, session) == ""
 	if unshipped {
 		require.Equal(t, active, f.svc.enableUnshippedCollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))

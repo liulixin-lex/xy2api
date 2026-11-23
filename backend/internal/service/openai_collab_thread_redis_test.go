@@ -130,3 +130,13 @@ func TestCollabThreadBindingReleaseRedis(t *testing.T) {
 	service.RunCollabReleaseParity(t, repository.NewGatewayCache(rdb), repository.NewResilienceStore(rdb), repository.NewSchedTrialLeaseCache(rdb), func() { require.NoError(t, rdb.FlushDB(context.Background()).Err()) }, operations.count.Load)
 	require.Zero(t, operations.threadOperations.Load(), "shipped requests must never access thread keys or scripts")
 }
+
+func TestCollabAffinityMigrationParentRedis(t *testing.T) {
+	srv := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: srv.Addr(), MaxRetries: -1})
+	t.Cleanup(func() { _ = rdb.Close() })
+	operations := &collabRedisOperations{}
+	rdb.AddHook(operations)
+	service.RunCollabMigrationParentLookup(t, repository.NewGatewayCache(rdb), repository.NewResilienceStore(rdb), func() { require.NoError(t, rdb.FlushDB(context.Background()).Err()) }, operations.count.Load)
+	require.Zero(t, operations.threadOperations.Load())
+}

@@ -41,7 +41,7 @@ func collabAffinityContext(store *resilience.CollabTreeAffinity, settings *resil
 	if parent != "" {
 		role = resilience.CollabRoleChild
 	}
-	return WithOpenAICollabTreeAffinity(selectionReviewContext(), store, settings, 7, collabAffinityIdentity(thread, parent), role, true, &config.Config{})
+	return WithOpenAICollabTreeAffinity(selectionReviewContext(), store, settings, 7, collabAffinityIdentity(thread, parent), role, true)
 }
 
 // prepareAffinityTest exercises the unshipped binding through its test-only hook.
@@ -106,7 +106,7 @@ func TestCollabAffinityAloneNeverAddsSlotWait(t *testing.T) {
 					if mode == "profit" {
 						base = context.WithValue(base, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: 7, platform: PlatformOpenAI, threshold: 0.5, ceilingOn: true, pricingAt: time.Now()})
 					}
-					ctx := WithOpenAICollabTreeAffinity(base, s, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true, &config.Config{})
+					ctx := WithOpenAICollabTreeAffinity(base, s, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
 					if !on {
 						require.Equal(t, base, ctx, "rollback with live hints does no work")
 					}
@@ -165,7 +165,7 @@ func TestCollabAffinityCrossModelGrandchildAndParentPrecedence(t *testing.T) {
 	NoteOpenAICollabAdmission(child, 1, false)
 	grandchildIdentity := collabAffinityIdentity("grandchild", "child")
 	grandchildIdentity.Scope.Tree = ""
-	grandchild := WithOpenAICollabTreeAffinity(selectionReviewContext(), s, settings, 7, grandchildIdentity, resilience.CollabRoleChild, true, &config.Config{})
+	grandchild := WithOpenAICollabTreeAffinity(selectionReviewContext(), s, settings, 7, grandchildIdentity, resilience.CollabRoleChild, true)
 	selected, _, err = collabAffinitySelect(f, grandchild, "grandchild-model", nil)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, selected.Account.ID)
@@ -286,29 +286,35 @@ func TestCollabAffinityLeaseGatesAndDelivery(t *testing.T) {
 }
 
 func TestCollabAffinityLeaseSuppressesQualityEvidenceOnlyWhenOptedIn(t *testing.T) {
-	for _, lossless := range []bool{false, true} {
-		t.Run(fmt.Sprint(lossless), func(t *testing.T) {
-			svc := &OpenAIGatewayService{}
-			c, _, _ := qualityTestContext(svc, 1, 0, "gpt-6-astra", "")
-			s := resilience.NewCollabTreeAffinity(32, time.Hour)
-			settings := collabAffinitySettings()
-			settings.Collab.Ladder, settings.Collab.LosslessFirst = lossless, lossless
-			identity := collabAffinityIdentity("root", "")
-			ctx := WithOpenAICollabTreeAffinity(c.Request.Context(), s, settings, 0, identity, resilience.CollabRoleRoot, false, &config.Config{})
-			require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: identity.Scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: identity.Scope, Token: "token"}, AccountID: 1}))
-			account := selectionFixtureAccount(1, 1)
-			svc.qualityObserver(ctx, &account, "gpt-6-astra").ObserveOpenAI([]byte(`{"model":"gpt-5.6-luna"}`), "")
-			entry, exists := svc.openaiQualityStates.Load(qualityRequest(ctx).scope)
-			local, _ := entry.(*openAIQualityLocal)
-			if lossless {
-				if exists {
-					require.Zero(t, local.state.Generation)
-				}
-			} else {
-				require.True(t, exists)
-				require.Positive(t, local.state.Generation)
+	for migration := range 4 {
+		for _, legacy := range []string{"", "legacy"} {
+			for _, lossless := range []bool{false, true} {
+				t.Run(fmt.Sprint(lossless), func(t *testing.T) {
+					svc := &OpenAIGatewayService{cfg: &config.Config{}}
+					svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = migration&1 != 0
+					svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = migration&2 != 0
+					c, _, _ := qualityTestContext(svc, 1, 0, "gpt-6-astra", "")
+					s := resilience.NewCollabTreeAffinity(32, time.Hour)
+					settings := collabAffinitySettings()
+					settings.Collab.Ladder, settings.Collab.LosslessFirst = lossless, lossless
+					identity := collabAffinityIdentity("root", "")
+					ctx := WithOpenAICollabTreeAffinity(withOpenAILegacySessionHash(c.Request.Context(), legacy), s, settings, 0, identity, resilience.CollabRoleRoot, false)
+					require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: identity.Scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: identity.Scope, Token: "token"}, AccountID: 1}))
+					account := selectionFixtureAccount(1, 1)
+					svc.qualityObserver(ctx, &account, "gpt-6-astra").ObserveOpenAI([]byte(`{"model":"gpt-5.6-luna"}`), "")
+					entry, exists := svc.openaiQualityStates.Load(qualityRequest(ctx).scope)
+					local, _ := entry.(*openAIQualityLocal)
+					if lossless {
+						if exists {
+							require.Zero(t, local.state.Generation)
+						}
+					} else {
+						require.True(t, exists)
+						require.Positive(t, local.state.Generation)
+					}
+				})
 			}
-		})
+		}
 	}
 }
 
@@ -351,7 +357,7 @@ func TestCollabAffinityAvoidanceFallbackRetainsTenant(t *testing.T) {
 	second := first
 	second.Scope.Tenant = "another-tenant"
 	for _, identity := range []resilience.CollabTreeHint{first, second} {
-		ctx := WithOpenAICollabTreeAffinity(selectionReviewContext(), s, settings, 7, identity, resilience.CollabRoleChild, true, &config.Config{})
+		ctx := WithOpenAICollabTreeAffinity(selectionReviewContext(), s, settings, 7, identity, resilience.CollabRoleChild, true)
 		ctx = context.WithValue(ctx, openAITerminalRejectionScopeKey{}, openAITerminalRejectionScope{session: string(identity.Scope.Tenant) + ":execution", preserveBinding: true, selectionPreservesBinding: &atomic.Bool{}})
 		ctx = prepareAffinityTest(f, ctx, "shared-session")
 		f.svc.AvoidOpenAICollabStateAccount(ctx, 7, "shared-session", 1, true)
@@ -368,64 +374,76 @@ func TestCollabAffinityAvoidanceFallbackRetainsTenant(t *testing.T) {
 
 func TestCollabAffinityLeaseSuppressesPendingQualityMigration(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, hard := range []bool{false, true} {
-		t.Run(fmt.Sprint(hard), func(t *testing.T) {
-			f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
-			c, _, session := qualityTestContext(f.svc, 1, 7, "gpt-6-astra", "")
-			q := qualityRequest(c.Request.Context())
-			q.loaded = true
-			q.state = OpenAIQualityState{Generation: 1, Owner: 1, Rotation: "rotation", Expires: time.Now().Add(time.Hour).UnixMilli(), Avoid: map[string]OpenAIQualityAvoid{"1": {Provider: "provider", Until: time.Now().Add(time.Hour).UnixMilli()}}}
-			s := resilience.NewCollabTreeAffinity(32, time.Hour)
-			settings := collabAffinitySettings()
-			settings.Collab.Ladder, settings.Collab.LosslessFirst = true, true
-			identity := collabAffinityIdentity("root", "")
-			ctx := WithOpenAICollabTreeAffinity(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()), s, settings, 7, identity, resilience.CollabRoleRoot, false, &config.Config{})
-			require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: identity.Scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: identity.Scope, Token: "token"}, AccountID: 1}))
-			var excluded map[int64]struct{}
-			if hard {
-				excluded = map[int64]struct{}{1: {}}
+	for migration := range 4 {
+		for _, legacy := range []string{"", "legacy"} {
+			for _, hard := range []bool{false, true} {
+				t.Run(fmt.Sprint(hard), func(t *testing.T) {
+					f := newCollabThreadFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+					f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = migration&1 != 0
+					f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = migration&2 != 0
+					c, _, session := qualityTestContext(f.svc, 1, 7, "gpt-6-astra", "")
+					q := qualityRequest(c.Request.Context())
+					q.loaded = true
+					q.state = OpenAIQualityState{Generation: 1, Owner: 1, Rotation: "rotation", Expires: time.Now().Add(time.Hour).UnixMilli(), Avoid: map[string]OpenAIQualityAvoid{"1": {Provider: "provider", Until: time.Now().Add(time.Hour).UnixMilli()}}}
+					s := resilience.NewCollabTreeAffinity(32, time.Hour)
+					settings := collabAffinitySettings()
+					settings.Collab.Ladder, settings.Collab.LosslessFirst = true, true
+					identity := collabAffinityIdentity("root", "")
+					ctx := WithOpenAICollabTreeAffinity(resilience.WithRequestState(withOpenAILegacySessionHash(c.Request.Context(), legacy), resilience.NewRequestState()), s, settings, 7, identity, resilience.CollabRoleRoot, false)
+					require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: identity.Scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: identity.Scope, Token: "token"}, AccountID: 1}))
+					var excluded map[int64]struct{}
+					if hard {
+						excluded = map[int64]struct{}{1: {}}
+					}
+					selection, _, err := f.svc.SelectAccountWithScheduler(ctx, ptrInt64Selection(7), "", session, "gpt-6-astra", excluded, OpenAIUpstreamTransportHTTPSSE, false)
+					require.NoError(t, err)
+					require.NotNil(t, selection)
+					defer selection.ReleaseFunc()
+					if hard {
+						require.EqualValues(t, 2, selection.Account.ID)
+					} else {
+						require.EqualValues(t, 1, selection.Account.ID)
+					}
+					require.EqualValues(t, 1, q.state.Generation, "suppression does not rewrite quality state")
+				})
 			}
-			selection, _, err := f.svc.SelectAccountWithScheduler(ctx, ptrInt64Selection(7), "", session, "gpt-6-astra", excluded, OpenAIUpstreamTransportHTTPSSE, false)
-			require.NoError(t, err)
-			require.NotNil(t, selection)
-			defer selection.ReleaseFunc()
-			if hard {
-				require.EqualValues(t, 2, selection.Account.ID)
-			} else {
-				require.EqualValues(t, 1, selection.Account.ID)
-			}
-			require.EqualValues(t, 1, q.state.Generation, "suppression does not rewrite quality state")
-		})
+		}
 	}
 }
 
 func TestCollabAffinityLeasePreservesQualityOwnerButNotHardExclusions(t *testing.T) {
 	withResilienceSettings(t, nil)
-	for _, blocked := range []bool{false, true} {
-		t.Run(fmt.Sprint(blocked), func(t *testing.T) {
-			f := newCollabThreadFixture(t, selectionFixtureAccount(1, 2), selectionFixtureAccount(2, 1))
-			f.cache.sessionBindings["openai:shared-session"] = 1
-			f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
-			before := maps.Clone(f.cache.sessionBindings)
-			s := resilience.NewCollabTreeAffinity(32, time.Hour)
-			settings := collabAffinitySettings()
-			settings.Collab.Ladder, settings.Collab.LosslessFirst = true, true
-			ctx := collabAffinityContext(s, settings, "root", "")
-			scope := collabAffinityIdentity("root", "").Scope
-			require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: scope, Token: "token"}, AccountID: 1}))
-			var excluded map[int64]struct{}
-			if blocked {
-				excluded = map[int64]struct{}{1: {}}
+	for migration := range 4 {
+		for _, legacy := range []string{"", "legacy"} {
+			for _, blocked := range []bool{false, true} {
+				t.Run(fmt.Sprint(blocked), func(t *testing.T) {
+					f := newCollabThreadFixture(t, selectionFixtureAccount(1, 2), selectionFixtureAccount(2, 1))
+					f.svc.cfg.Gateway.OpenAIWS.SessionHashReadOldFallback = migration&1 != 0
+					f.svc.cfg.Gateway.OpenAIWS.SessionHashDualWriteOld = migration&2 != 0
+					f.cache.sessionBindings["openai:shared-session"] = 1
+					f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Error: schedquality.LineView{Identity: schedquality.IdentityRear}}
+					before := maps.Clone(f.cache.sessionBindings)
+					s := resilience.NewCollabTreeAffinity(32, time.Hour)
+					settings := collabAffinitySettings()
+					settings.Collab.Ladder, settings.Collab.LosslessFirst = true, true
+					ctx := WithOpenAICollabTreeAffinity(withOpenAILegacySessionHash(selectionReviewContext(), legacy), s, settings, 7, collabAffinityIdentity("root", ""), resilience.CollabRoleRoot, true)
+					scope := collabAffinityIdentity("root", "").Scope
+					require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: scope, Token: "token"}, AccountID: 1}))
+					var excluded map[int64]struct{}
+					if blocked {
+						excluded = map[int64]struct{}{1: {}}
+					}
+					selected, _, err := collabAffinitySelect(f, ctx, "m", excluded)
+					require.NoError(t, err)
+					defer selected.ReleaseFunc()
+					if blocked {
+						require.EqualValues(t, 2, selected.Account.ID)
+					} else {
+						require.EqualValues(t, 1, selected.Account.ID)
+						require.Equal(t, before, f.cache.sessionBindings)
+					}
+				})
 			}
-			selected, _, err := collabAffinitySelect(f, ctx, "m", excluded)
-			require.NoError(t, err)
-			defer selected.ReleaseFunc()
-			if blocked {
-				require.EqualValues(t, 2, selected.Account.ID)
-			} else {
-				require.EqualValues(t, 1, selected.Account.ID)
-				require.Equal(t, before, f.cache.sessionBindings)
-			}
-		})
+		}
 	}
 }

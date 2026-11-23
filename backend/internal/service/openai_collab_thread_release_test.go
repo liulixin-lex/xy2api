@@ -41,7 +41,7 @@ func TestCollabThreadBindingReleaseGate(t *testing.T) {
 			base := withOpenAILegacySessionHash(withOpenAINoStickyMigration(selectionReviewContext()), legacy)
 			for combination := range 384 {
 				settings := collabReleaseSettings(combination)
-				ctx := WithOpenAICollabTreeAffinity(base, local, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true, f.svc.cfg)
+				ctx := WithOpenAICollabTreeAffinity(base, local, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
 				before := openAICollabAffinityFrom(ctx)
 				require.Zero(t, testing.AllocsPerRun(10, func() {
 					if f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true) {
@@ -55,7 +55,7 @@ func TestCollabThreadBindingReleaseGate(t *testing.T) {
 				var counts []float64
 				for _, prepare := range []bool{false, true} {
 					counts = append(counts, testing.AllocsPerRun(10, func() {
-						configured := WithOpenAICollabTreeAffinity(base, local, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true, f.svc.cfg)
+						configured := WithOpenAICollabTreeAffinity(base, local, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
 						if prepare {
 							f.svc.PrepareOpenAICollabThreadBinding(configured, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true)
 						}
@@ -75,11 +75,11 @@ func TestCollabThreadBindingReleaseKeepsAffinity(t *testing.T) {
 	f := newCollabThreadFixture(t, selectionFixtureAccount(1, 2), selectionFixtureAccount(2, 1))
 	local := resilience.NewCollabTreeAffinity(32, time.Hour)
 	settings := collabReleaseSettings(383)
-	root := WithOpenAICollabTreeAffinity(selectionReviewContext(), local, settings, 7, collabAffinityIdentity("root", ""), resilience.CollabRoleRoot, true, f.svc.cfg)
+	root := WithOpenAICollabTreeAffinity(selectionReviewContext(), local, settings, 7, collabAffinityIdentity("root", ""), resilience.CollabRoleRoot, true)
 	require.False(t, f.svc.PrepareOpenAICollabThreadBinding(root, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true))
 	NoteOpenAICollabAdmission(root, 1, false)
 	NoteOpenAICollabSuccess(root, 1, false)
-	child := WithOpenAICollabTreeAffinity(withOpenAINoStickyMigration(selectionReviewContext()), local, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true, f.svc.cfg)
+	child := WithOpenAICollabTreeAffinity(withOpenAINoStickyMigration(selectionReviewContext()), local, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
 	require.False(t, f.svc.PrepareOpenAICollabThreadBinding(child, 1, "v2:tree", PlatformOpenAI, OpenAIClientTransportHTTP, true))
 	require.EqualValues(t, 1, openAICollabHint(child, 0))
 	require.True(t, OpenAIQueueReselectionAllowed(child))
@@ -116,7 +116,7 @@ func RunCollabReleaseParity(t *testing.T, cache GatewayCache, store ResilienceSt
 				ctx, session := collabRequest(t, f, resilience.NewCollabTreeAffinity(32, time.Hour), "release-child", false, false, false, legacy)
 				local := resilience.NewCollabTreeAffinity(32, time.Hour)
 				if path == 1 {
-					ctx = WithOpenAICollabTreeAffinity(ctx, local, collabReleaseSettings(combination), 7, collabAffinityIdentity("release-child", "root"), resilience.CollabRoleChild, true, f.svc.cfg)
+					ctx = WithOpenAICollabTreeAffinity(ctx, local, collabReleaseSettings(combination), 7, collabAffinityIdentity("release-child", "root"), resilience.CollabRoleChild, true)
 				}
 				before := operations()
 				require.False(t, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
