@@ -195,7 +195,15 @@ if kind=='confirm' then
 end
 local pending={}
 if ARGV[12]~='' then pending=cjson.decode(ARGV[12]) end
-if old and kind~='local_ending' then
+if old and kind=='void' then
+ local row=cjson.decode(old);local incoming=cjson.decode(value)
+ local previous,previousKey=rowDeadline(row);local horizon,key=rowDeadline(incoming)
+ if not previous or not horizon then return 0 end
+ if previousKey>key then incoming.Issued.ExpiresAt=row.Issued.ExpiresAt end
+ deadline=math.max(deadline,previous,horizon,tonumber(redis.call('ZSCORE',KEYS[3],field) or '0'))
+ value=cjson.encode(incoming)
+end
+if old and kind~='local_ending' and kind~='void' then
  local row=cjson.decode(old)
  if kind=='terminated' then
   local incoming=cjson.decode(value)
@@ -218,6 +226,7 @@ end
 if deadline<=now or string.len(value)>maxRowBytes then return 0 end
 local extraCount={0,0,0};local extraSize={0,0,0}
 if not old then extraCount[partition+1]=1;extraSize[partition+1]=charge(field,value) end
+if old and kind=='void' then extraSize[1]=charge(field,value)-charge(field,old) end
 local additions={}
 for _,item in ipairs(pending) do
  local existing=redis.call('HGET',KEYS[2],item.field)
@@ -268,7 +277,7 @@ if kind=='void' and (counts[1]+extraCount[1]>maxRows or sizes[1]+extraSize[1]>by
 end
 if counts[1]+extraCount[1]>maxRows or sizes[1]+extraSize[1]>byteLimits[1] then return 0 end
 if not admit() then return 0 end
-if not old then
+if not old or kind=='void' then
  redis.call('ZADD',KEYS[3],deadline,field);redis.call('HSET',KEYS[2],field,value)
  if partition==0 then redis.call('ZADD',KEYS[8],cjson.decode(value).WriteOrder or now,field) end
 end
@@ -305,9 +314,10 @@ if ok and type(result)=='number' and result>0 then
  if repaired and complete then return result end
  ok=false;result='collaboration metadata repair failed'
 end
--- Runtime errors do not roll back Lua writes. Never leave an immortal hash.
-if redis.call('EXISTS',KEYS[2])==1 and redis.call('PTTL',KEYS[2])<0 then
- local expiry=deadline
+-- Runtime errors do not roll back Lua writes. Cover every surviving row even
+-- when the hash already had a shorter TTL before the failed write.
+if redis.call('EXISTS',KEYS[2])==1 then
+ local expiry=math.max(deadline,now+math.max(0,redis.call('PTTL',KEYS[2])))
  for _,raw in ipairs(redis.call('HVALS',KEYS[2])) do
   local decoded,row=pcall(cjson.decode,raw)
   local untilTime=decoded and rowDeadline(row)

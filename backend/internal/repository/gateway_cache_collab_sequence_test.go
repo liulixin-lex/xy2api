@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,11 +31,12 @@ type collabSequence struct {
 	deadlines  map[r.CollabRecordScope]map[string]float64
 	voided     map[r.CollabIssuedToken]time.Time
 	operations map[string]int
+	ledger     *coverageLedger
 }
 
 func newCollabSequence(t *testing.T) *collabSequence {
 	server, client, shared := capacityCache(t)
-	return &collabSequence{t: t, ctx: context.Background(), memory: r.NewMemoryCollabRecordsStore(), shared: shared, server: server, client: client, prior: make(map[r.CollabRecordScope]map[string]r.CollabRecordMutation), deadlines: make(map[r.CollabRecordScope]map[string]float64), voided: make(map[r.CollabIssuedToken]time.Time), operations: make(map[string]int)}
+	return &collabSequence{t: t, ctx: context.Background(), memory: r.NewMemoryCollabRecordsStore(), shared: shared, server: server, client: client, prior: make(map[r.CollabRecordScope]map[string]r.CollabRecordMutation), deadlines: make(map[r.CollabRecordScope]map[string]float64), voided: make(map[r.CollabIssuedToken]time.Time), operations: make(map[string]int), ledger: newCoverageLedger()}
 }
 func (s *collabSequence) apply(m r.CollabRecordMutation) {
 	s.t.Helper()
@@ -46,6 +46,9 @@ func (s *collabSequence) apply(m r.CollabRecordMutation) {
 	require.Equal(s.t, local, remote, "admission kind=%s err=%v scope=%s operations=%v", m.Kind, remoteErr, m.Token.Scope.Tree, s.operations)
 	if local && m.Kind == r.CollabRecordMutationVoid {
 		s.voided[m.Token] = m.Issued.ExpiresAt
+	}
+	if local {
+		s.ledger.accept(m)
 	}
 	s.operations[string(m.Kind)]++
 }
@@ -111,27 +114,10 @@ func (s *collabSequence) check(key r.CollabDeliveryKey) {
 		s.deadlines[scope][f] = score
 	}
 	s.prior[scope] = rows
-	// Inspect stored local charges without adding a test-only production API.
-	// All concurrent calls have joined before this observation.
-	trees := reflect.ValueOf(s.memory).Elem().FieldByName("trees").MapRange()
-	for trees.Next() {
-		entries := trees.Value().Elem().FieldByName("entries").MapRange()
-		counts := [3]int{}
-		bytes := [3]int{}
-		for entries.Next() {
-			e := entries.Value()
-			part := invariantPartition(r.CollabRecordMutationKind(e.FieldByName("mutation").FieldByName("Kind").String()))
-			counts[part]++
-			bytes[part] += int(e.FieldByName("charge").Int())
-		}
-		for part, limit := range []int{r.CollabRecordEvidenceBytes, r.CollabRecordDispositionBytes, r.CollabRecordCounterBytes} {
-			require.LessOrEqual(s.t, bytes[part], limit)
-			n := 64
-			if part == 2 {
-				n = 3
-			}
-			require.LessOrEqual(s.t, counts[part], n)
-		}
+	// Re-encode actual rows; never trust the implementation's cached charges.
+	localRows := coverageMemoryRows(s.memory, scope)
+	for _, checkedScope := range coverageMemoryScopes(s.memory) {
+		coverageBounds(s.t, coverageMemoryRows(s.memory, checkedScope))
 	}
 	b := r.CollabRecordBatch{Scope: scope, Queries: sequenceQueries(key), Records: true, Dispositions: true}
 	a := s.memory.LookupBatch(s.ctx, b)
@@ -154,6 +140,7 @@ func (s *collabSequence) check(key r.CollabDeliveryKey) {
 			s.t.Fatalf("complete replicas disagree: memory=%d shared=%d operations=%v", len(left), len(right), s.operations)
 		}
 	}
+	s.ledger.check(s, key, localRows, rows)
 	if !a.RecordsComplete || !a.DispositionsComplete || !z.RecordsComplete || !z.DispositionsComplete {
 		s.operations["incomplete_comparisons"]++
 	}
@@ -191,6 +178,7 @@ func (s *collabSequence) ending(key r.CollabDeliveryKey, event r.CollabDigest, e
 	require.Equal(s.t, want, b)
 	s.operations["reservation"]++
 	if a && b {
+		s.ledger.reserve([]r.CollabTerminatedRecord{record})
 		s.check(key)
 		s.apply(r.CollabRecordMutation{Kind: r.CollabRecordMutationTerminated, Terminated: record})
 		s.operations["reserved_publication"]++
@@ -292,12 +280,19 @@ func TestCollabGeneratedStoreSequence(t *testing.T) {
 					s.operations["restart"]++
 				case 14:
 					expiryKey := capacityKey(200000 + step)
-					expires := time.Now().Add(8 * time.Millisecond)
+					// Leave time for the complete row audit and both store reads
+					// before expiry; then explicitly cross the same deadline.
+					expires := time.Now().Add(150 * time.Millisecond)
 					m := r.CollabRecordMutation{Kind: r.CollabRecordMutationPlaintext, Plaintext: r.CollabPlaintextRecord{Scope: expiryKey.Scope, Call: capacityDigest(100), Arguments: capacityDigest(8), ExpiresAt: expires}}
 					s.apply(m)
 					s.check(expiryKey)
-					s.server.FastForward(10 * time.Millisecond)
-					time.Sleep(10 * time.Millisecond)
+					wait := time.Until(expires) + 10*time.Millisecond
+					if wait > 0 {
+						time.Sleep(wait)
+					}
+					// Miniredis TTLs do not tick while the live snapshot is read.
+					// Advance its full lifetime, including that observation time.
+					s.server.FastForward(160 * time.Millisecond)
 					s.check(expiryKey)
 					s.operations["fast_forward"]++
 				case 15:
