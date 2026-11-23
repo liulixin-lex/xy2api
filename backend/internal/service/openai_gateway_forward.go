@@ -25,6 +25,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		request.gateway = s
 		defer request.sealSend()
 	}
+	body = s.applyCollabDispositions(ctx, account, body)
 	if s.collabAliasStore() != nil {
 		var aliasErr error
 		body, aliasErr = s.restoreCollabContinuation(ctx, c, account, body)

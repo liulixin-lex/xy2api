@@ -11,6 +11,7 @@ func wireCollabDeliveryRescue(seam *collabSeam) {
 	}
 	rescue := seam.rescue
 	seam.rescue = func(c *gin.Context, seam *collabSeam, saved *collabWithheld) {
+		service.PrepareOpenAICollabRecovery(c.Request.Context())
 		mark := service.MarkOpenAICollabDelivery(c.Request.Context())
 		defer func() {
 			if seam.writer.current() != collabSeamPassing {

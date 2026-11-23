@@ -1002,6 +1002,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			if h.tryCollabBorrow(c, account, attemptBody, forwardModel, submitResponsesUsage) {
+				losslessDelivered = true
+				return nil, nil
+			}
 			result, err := h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 			var preempt *service.CollabLosslessPreempt
 			if errors.As(err, &preempt) {

@@ -36,6 +36,7 @@ type collabWiringFixture struct {
 	gateway  *service.OpenAIGatewayService
 	usage    *openAIWSUsageHandlerUsageLogRepoStub
 	upstream *collabWiringUpstream
+	repo     *openAIWSFailoverHandlerAccountRepoStub
 }
 
 func newCollabWiringFixture(t *testing.T, settings resilience.Settings, respond func(*http.Request, int64) (*http.Response, error)) *collabWiringFixture {
@@ -63,7 +64,7 @@ func newCollabWiringFixture(t *testing.T, settings resilience.Settings, respond 
 	t.Cleanup(func() { runtime.Stop(); service.SetResilienceInstance(previousRuntime) })
 	slots := &replaySlots{active: map[int64]int{}}
 	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(slots), billing, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
-	return &collabWiringFixture{handler: h, gateway: gateway, usage: usage, upstream: upstream}
+	return &collabWiringFixture{handler: h, gateway: gateway, usage: usage, upstream: upstream, repo: repo}
 }
 
 func (f *collabWiringFixture) request(body []byte) (*httptest.ResponseRecorder, *resilience.RequestState) {
