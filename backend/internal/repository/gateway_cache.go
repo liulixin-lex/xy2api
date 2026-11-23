@@ -44,6 +44,10 @@ func buildOpenAIResponsesSessionWindowKey(groupID int64, sessionHash string) str
 }
 
 func (c *gatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
+	if _, ok := service.StickyThreadBindingFrom(ctx); ok {
+		binding, err := c.GetSessionBinding(ctx, groupID, sessionHash)
+		return binding.AccountID, err
+	}
 	key := buildSessionKey(groupID, sessionHash)
 	accountID, err := c.rdb.Get(ctx, key).Int64()
 	if err != nil {
@@ -57,7 +61,7 @@ func (c *gatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, s
 
 // The account ID remains a scalar so rollback instances can still read it.
 // Each creation/replacement gets a fresh token, including after expiry or DEL.
-var setSessionBindingScript = redis.NewScript(`
+var setSessionBindingScript = newStickyBindingScript(`
 if ARGV[4] == '1' and redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
 redis.call('SET', KEYS[1], ARGV[1])
 redis.call('SET', KEYS[2], ARGV[2])
@@ -69,10 +73,10 @@ return 1
 `)
 
 func (c *gatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
-	return setSessionBindingScript.Run(ctx, c.rdb, sessionBindingKeys(groupID, sessionHash), accountID, uuid.NewString(), ttl.Milliseconds(), 0).Err()
+	return c.runStickyBinding(ctx, setSessionBindingScript, sessionBindingKeys(groupID, sessionHash), accountID, uuid.NewString(), ttl.Milliseconds(), 0).Err()
 }
 
-var claimOpenAIStickyAccountScript = redis.NewScript(`
+var claimOpenAIStickyAccountScript = newStickyBindingScript(`
 local current = redis.call('GET', KEYS[1])
 if current == false then
   redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2], 'NX')
@@ -86,8 +90,10 @@ end
 return tonumber(current)
 `)
 
-var deleteOpenAIStickyAccountScript = redis.NewScript(`
+var deleteOpenAIStickyAccountScript = newStickyBindingScript(`
 local current = redis.call('GET', KEYS[1])
+local metadata = redis.call('GET', KEYS[2])
+if metadata and string.sub(metadata, 1, 8) == 'pending:' then redis.call('DEL', KEYS[2]) end
 if current == ARGV[1] then
   redis.call('DEL', KEYS[1], KEYS[2])
   return 1
@@ -105,7 +111,7 @@ func (c *gatewayCache) ClaimSessionAccountID(ctx context.Context, groupID int64,
 	} else if ttl > 30*time.Second {
 		ttl = 30 * time.Second
 	}
-	return claimOpenAIStickyAccountScript.Run(ctx, c.rdb, sessionBindingKeys(groupID, sessionHash), accountID, ttl.Milliseconds(), flag, uuid.NewString()).Int64()
+	return c.runStickyBinding(ctx, claimOpenAIStickyAccountScript, sessionBindingKeys(groupID, sessionHash), accountID, ttl.Milliseconds(), flag, uuid.NewString()).Int64()
 }
 
 func (c *gatewayCache) DeleteSessionAccountIDIfOwner(ctx context.Context, groupID int64, sessionHash string, owner int64) error {
@@ -114,13 +120,13 @@ func (c *gatewayCache) DeleteSessionAccountIDIfOwner(ctx context.Context, groupI
 }
 
 func (c *gatewayCache) DeleteSessionAccountIDIfOwnerAndReport(ctx context.Context, groupID int64, sessionHash string, owner int64) (bool, error) {
-	deleted, err := deleteOpenAIStickyAccountScript.Run(ctx, c.rdb, sessionBindingKeys(groupID, sessionHash), owner).Int64()
+	deleted, err := c.runStickyBinding(ctx, deleteOpenAIStickyAccountScript, sessionBindingKeys(groupID, sessionHash), owner).Int64()
 	return deleted == 1, err
 }
 
 var _ service.OpenAIStickyAtomicCache = (*gatewayCache)(nil)
 
-var refreshSessionBindingScript = redis.NewScript(`
+var refreshSessionBindingScript = newStickyBindingScript(`
 if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
 redis.call('PEXPIRE', KEYS[1], ARGV[1])
 redis.call('PEXPIRE', KEYS[2], ARGV[1])
@@ -128,7 +134,7 @@ return 1
 `)
 
 func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, sessionHash string, ttl time.Duration) error {
-	return refreshSessionBindingScript.Run(ctx, c.rdb, sessionBindingKeys(groupID, sessionHash), ttl.Milliseconds()).Err()
+	return c.runStickyBinding(ctx, refreshSessionBindingScript, sessionBindingKeys(groupID, sessionHash), ttl.Milliseconds()).Err()
 }
 
 // DeleteSessionAccountID 删除粘性会话与账号的绑定关系。
@@ -143,14 +149,14 @@ func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64
 	return err
 }
 
-var deleteSessionBindingScript = redis.NewScript(`
+var deleteSessionBindingScript = newStickyBindingScript(`
 local existed = redis.call('EXISTS', KEYS[1])
 redis.call('DEL', KEYS[1], KEYS[2])
 return existed
 `)
 
 func (c *gatewayCache) DeleteSessionAccountIDAndReport(ctx context.Context, groupID int64, sessionHash string) (bool, error) {
-	n, err := deleteSessionBindingScript.Run(ctx, c.rdb, sessionBindingKeys(groupID, sessionHash)).Int64()
+	n, err := c.runStickyBinding(ctx, deleteSessionBindingScript, sessionBindingKeys(groupID, sessionHash)).Int64()
 	return n == 1, err
 }
 
@@ -596,6 +602,6 @@ func (c *gatewayCache) GetSessionAccountIDWithTTL(ctx context.Context, groupID i
 
 // SetSessionAccountIDIfAbsent creates a binding unless one already exists.
 func (c *gatewayCache) SetSessionAccountIDIfAbsent(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) (bool, error) {
-	n, err := setSessionBindingScript.Run(ctx, c.rdb, sessionBindingKeys(groupID, sessionHash), accountID, uuid.NewString(), ttl.Milliseconds(), 1).Int64()
+	n, err := c.runStickyBinding(ctx, setSessionBindingScript, sessionBindingKeys(groupID, sessionHash), accountID, uuid.NewString(), ttl.Milliseconds(), 1).Int64()
 	return n == 1, err
 }

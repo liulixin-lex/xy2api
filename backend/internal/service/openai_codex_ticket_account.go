@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"maps"
 	"math/rand/v2"
 	"net/http"
@@ -833,6 +834,8 @@ func (s *OpenAIGatewayService) launchCodexTicketJob(ctx context.Context, id int6
 	s.openaiCodexAccountJobs[id] = job
 	s.openaiCodexAccountWG.Add(1)
 	go func() {
+		defer resilience.RecoverCollabWorker()
+
 		defer cancel()
 		defer s.openaiCodexAccountWG.Done()
 		defer close(job.done)

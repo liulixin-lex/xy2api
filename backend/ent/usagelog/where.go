@@ -1095,6 +1095,16 @@ func PricingSourceNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldPricingSource))
 }
 
+// CollabObservationIsNil applies the IsNil predicate on the "collab_observation" field.
+func CollabObservationIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldCollabObservation))
+}
+
+// CollabObservationNotNil applies the NotNil predicate on the "collab_observation" field.
+func CollabObservationNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldCollabObservation))
+}
+
 // ServiceTierDetailsIsNil applies the IsNil predicate on the "service_tier_details" field.
 func ServiceTierDetailsIsNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldIsNull(FieldServiceTierDetails))

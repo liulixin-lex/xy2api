@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -214,6 +215,8 @@ func (s *BillingCacheService) enqueueCacheWrite(task cacheWriteTask) (enqueued b
 }
 
 func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
+	defer resilience.RecoverCollabWorker()
+
 	defer s.cacheWriteWg.Done()
 	for task := range ch {
 		ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
@@ -660,6 +663,8 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 	if needsReset {
 		keyID := apiKey.ID
 		go func() {
+			defer resilience.RecoverCollabWorker()
+
 			resetCtx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
 			defer cancel()
 			if s.apiKeyRateLimitLoader != nil {

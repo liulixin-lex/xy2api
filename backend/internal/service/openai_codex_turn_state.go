@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // openAICodexTurnStateHeader 是 Codex 的回合状态头。上游在响应头中铸造该
@@ -99,17 +100,55 @@ func extractOpenAICodexTurnState(upstream http.Header) string {
 	return strings.TrimSpace(upstream.Get(openAICodexTurnStateHeader))
 }
 
+// openAICodexTurnStatePendingOriginKey holds the account whose turn-state an
+// optional attempt put on a response that had sent no header yet. The attempt
+// may still be withheld, so only its delivery owner turns it into provenance.
+const openAICodexTurnStatePendingOriginKey = "openai_codex_turn_state_pending_origin"
+
 // noteOpenAICodexTurnStateProvenance 记录（下游会话 → 铸造账号）。
 func (s *OpenAIGatewayService) noteOpenAICodexTurnStateProvenance(c *gin.Context, account *Account) {
+	if c != nil && c.Request != nil {
+		attempt := resilience.CollabAttemptFrom(c.Request.Context())
+		// An optional response may still be withheld. Its delivery owner
+		// records provenance once the response actually reaches the client.
+		// Headers already sent keep the earlier blob, and so keep its origin.
+		if !attempt.AccountEffectsAllowed() && !attempt.CustomerSettlementAllowed() {
+			if s != nil && account != nil && account.ID > 0 && c.Writer != nil && !c.Writer.Written() {
+				c.Set(openAICodexTurnStatePendingOriginKey, account.ID)
+			}
+			return
+		}
+	}
 	if s == nil || account == nil || account.ID <= 0 {
 		return
 	}
+	s.storeOpenAICodexTurnStateOrigin(c, account.ID)
+}
+
+// commitPendingOpenAICodexTurnStateOrigin records the origin an optional
+// attempt deferred, once its response has reached the client. An attempt
+// that put no turn-state on an unsent response leaves the origin unchanged.
+func (s *OpenAIGatewayService) commitPendingOpenAICodexTurnStateOrigin(c *gin.Context) {
+	if s == nil || c == nil {
+		return
+	}
+	raw, ok := c.Get(openAICodexTurnStatePendingOriginKey)
+	if !ok {
+		return
+	}
+	c.Delete(openAICodexTurnStatePendingOriginKey)
+	if accountID, ok := raw.(int64); ok && accountID > 0 {
+		s.storeOpenAICodexTurnStateOrigin(c, accountID)
+	}
+}
+
+func (s *OpenAIGatewayService) storeOpenAICodexTurnStateOrigin(c *gin.Context, accountID int64) {
 	seed := openAICodexTurnStateSeed(c)
 	if seed == "" {
 		return
 	}
 	s.openaiCodexTurnStateOrigins.Store(seed, openAICodexTurnStateOrigin{
-		accountID: account.ID,
+		accountID: accountID,
 		expiresAt: time.Now().Add(s.openAIWSSessionStickyTTL()),
 	})
 	s.sweepOpenAICodexTurnStateOrigins()

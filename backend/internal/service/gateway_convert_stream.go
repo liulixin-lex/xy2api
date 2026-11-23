@@ -168,6 +168,7 @@ func (st *gatewayConvertStream) run() (out gatewayConvertOutcome) {
 		// is set first: a cancel racing the first write runs this although
 		// output started, and the read error that follows is that cancel.
 		st.stopCancel = context.AfterFunc(st.ctx(), func() {
+			defer resilience.RecoverCollabWorker()
 			st.bodyClosed.Store(true)
 			_ = st.resp.Body.Close()
 		})
@@ -199,6 +200,7 @@ func (st *gatewayConvertStream) run() (out gatewayConvertOutcome) {
 	var lastReadAt atomic.Int64
 	lastReadAt.Store(time.Now().UnixNano())
 	go func() {
+		defer resilience.RecoverCollabWorker()
 		defer close(lines)
 		for scanner.Scan() {
 			lastReadAt.Store(time.Now().UnixNano())

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -235,10 +236,14 @@ func (s *OpenAIGatewayService) beginOpenAIWSSessionPreemptContext(
 			// 通知在独立协程里做，不阻塞取代它的新连接。
 			notified := make(chan struct{})
 			go func() {
+				defer resilience.RecoverCollabWorker()
+
 				defer close(notified)
 				notifyPreempted()
 			}()
 			go func() {
+				defer resilience.RecoverCollabWorker()
+
 				select {
 				case <-notified:
 				case <-time.After(openAIWSSessionPreemptCloseGrace):
@@ -317,6 +322,8 @@ func (s *OpenAIGatewayService) watchOpenAIWSSessionPreemptOwner(ctx context.Cont
 	stopCh := make(chan struct{})
 	var once sync.Once
 	go func() {
+		defer resilience.RecoverCollabWorker()
+
 		ticker := time.NewTicker(openAIWSSessionPreemptWatchInterval)
 		defer ticker.Stop()
 		for {

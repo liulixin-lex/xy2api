@@ -139,6 +139,9 @@ func (s *OpenAIGatewayService) lookupStickySessionAccount(ctx context.Context, g
 	if primaryKey == "" {
 		return 0, false, nil
 	}
+	if b := collabBindingFor(ctx, groupID, sessionHash); b != nil {
+		return b.effective(ctx)
+	}
 	fallback := s.openAISessionHashReadOldFallbackEnabled()
 	legacy := s.openAILegacySessionCacheKey(ctx, sessionHash)
 	if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok && fallback && legacy != "" {
@@ -182,6 +185,9 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 	primaryKey := s.openAISessionCacheKey(sessionHash)
 	if primaryKey == "" {
 		return nil
+	}
+	if b := collabBindingFor(ctx, groupID, sessionHash); b != nil {
+		return b.set(ctx, accountID, ttl)
 	}
 
 	if cache, ok := s.cache.(OpenAIStickyAtomicCache); ok && openAIAtomicStickySession(sessionHash) {
@@ -230,6 +236,9 @@ func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, grou
 	if primaryKey == "" {
 		return nil
 	}
+	if b := collabBindingFor(ctx, groupID, sessionHash); b != nil {
+		return b.refresh(ctx, ttl, expectedOwner...)
+	}
 
 	var err error
 	if cache, ok := s.cache.(OpenAIStickyAtomicCache); ok && openAIAtomicStickySession(sessionHash) && len(expectedOwner) > 0 {
@@ -274,6 +283,9 @@ func (s *OpenAIGatewayService) deleteStickySessionAccountID(ctx context.Context,
 		return nil
 	}
 
+	if b := collabBindingFor(ctx, groupID, sessionHash); b != nil {
+		return b.deleteOwner(ctx, 0)
+	}
 	if handled, err := s.deleteOpenAIStickyAliases(ctx, groupID, sessionHash, 0); handled {
 		return err
 	}

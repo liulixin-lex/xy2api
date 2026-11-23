@@ -30,7 +30,7 @@ func openAICollaborationEligible(c *gin.Context, a *Account, model string, trans
 		transport == OpenAIUpstreamTransportHTTPSSE && !passthrough && !compact && !bridge &&
 		a != nil && a.IsOpenAI() && a.IsOpenAICollaborationPlaintextEnabled() && !a.IsOpenAIResponsesFlattenNamespacesEnabled() &&
 		openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) &&
-		resilience.Current().CollaborationPlaintextModel(model)
+		openAICollabSettings(c).CollaborationPlaintextModel(model)
 }
 
 // Only declaration carriers are visited; historical calls and arbitrary input
@@ -57,6 +57,8 @@ func declaresOpenAICollaboration(body []byte) bool {
 
 type openAICollabAttempt struct {
 	restorer          *codexCollabRestorer
+	generation        resilience.CollabGeneration
+	sendSequence      resilience.CollabSendSequence
 	outcome           codexCollabOutcome
 	model             string
 	applied           bool
@@ -71,11 +73,27 @@ func armOpenAICollaboration(c *gin.Context, body []byte, model string, eligible 
 		return body, nil
 	}
 	outcome := codexCollabUnsupported
-	var plan *codexCollabPlan
+	var plan *CollabPlan
 	if eligible {
-		body, plan, outcome = applyCodexCollaborationPlaintext(body)
+		value, _ := c.Get(openAICollabDeclarationKey)
+		if declaration, ok := value.(*openAICollabDeclarationPlan); ok && declaration != nil {
+			var result CollabDeclarationResult
+			body, result = ApplyCodexCollaborationNormalizedDeclarations(declaration.original, body, declaration.raw, declaration.options)
+			plan, outcome = result.Plan, codexCollabOutcome(result.Outcome)
+		} else {
+			var legacy *codexCollabPlan
+			body, legacy, outcome = applyCodexCollaborationPlaintext(body)
+			plan = openAICollabLegacyRestorePlan(legacy)
+		}
 	}
-	a := &openAICollabAttempt{restorer: newCodexCollabRestorer(plan), outcome: outcome, model: model, applied: plan != nil}
+	restorer := NewCollabResponseRestorer(plan, *openAICollabSettings(c), 0, 0)
+	a := &openAICollabAttempt{restorer: restorer, outcome: outcome, model: model, applied: plan != nil}
+	if c != nil && c.Request != nil {
+		if request := openAICollabRequestFrom(c.Request.Context()); request != nil {
+			request.attempt = a
+			request.state.DeliveryHooks.Register(restorer)
+		}
+	}
 	if eligible {
 		a.eligibilitySource = "account"
 	}

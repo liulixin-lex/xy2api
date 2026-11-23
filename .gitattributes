@@ -20,3 +20,6 @@ backend/migrations/*.sql text eol=lf
 
 # Dockerfile
 Dockerfile text eol=lf
+
+# SSE golden frames require a final empty line to dispatch the terminal event.
+backend/internal/service/testdata/collab_local_ending*.sse whitespace=-blank-at-eof

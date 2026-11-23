@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"io"
 	"strings"
 
@@ -143,6 +144,8 @@ func transformResponsesClientToolStream(
 	mapping apicompat.ResponsesClientToolMapping,
 	maxLineSize int,
 ) {
+	defer resilience.RecoverCollabWorker()
+
 	defer func() { _ = source.Close() }()
 	if maxLineSize <= 0 {
 		maxLineSize = defaultMaxLineSize

@@ -244,6 +244,44 @@ func MarkOpsStreamFailure(c *gin.Context, errType, code, message string, intende
 	})
 }
 
+// PromoteOpsStreamFailure records a failure that must count towards the SLA.
+// An in-band error the request already recorded keeps its attribution and is
+// only made to count; otherwise the failure is recorded as given.
+func PromoteOpsStreamFailure(c *gin.Context, errType, code, message string, intendedStatus int) {
+	if c == nil {
+		return
+	}
+	promote := func(existing *OpsStreamError) {
+		existing.CountTowardsSLA = true
+		if existing.IntendedStatus < http.StatusBadRequest {
+			existing.IntendedStatus = intendedStatus
+		}
+	}
+	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+		turn := 0
+		if value, ok := c.Get(OpsStreamTurnKey); ok {
+			turn, _ = value.(int)
+		}
+		var markers []OpsStreamError
+		if value, ok := c.Get(OpsStreamErrorsKey); ok {
+			markers, _ = value.([]OpsStreamError)
+		}
+		// Only the current turn's marker; a copy, since saved snapshots share it.
+		if n := len(markers); n > 0 && markers[n-1].Turn == turn {
+			markers = append([]OpsStreamError(nil), markers...)
+			promote(&markers[n-1])
+			c.Set(OpsStreamErrorsKey, markers)
+			c.Set(OpsStreamErrorKey, markers[n-1])
+			return
+		}
+	} else if existing, ok := GetOpsStreamError(c); ok {
+		promote(&existing)
+		c.Set(OpsStreamErrorKey, existing)
+		return
+	}
+	MarkOpsStreamFailure(c, errType, code, message, intendedStatus)
+}
+
 // MarkOpsStreamErrorValue 以完整的 OpsStreamError 记录一次带内错误，供需要
 // RequestScoped / NonStream 等附加语义的调用方使用；首个标记生效的规则不变。
 // 调用方只填 ErrType / Code / Message / IntendedStatus / CountTowardsSLA / RequestScoped / NonStream。

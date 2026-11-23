@@ -463,7 +463,7 @@ func (s *GatewayService) resilienceGatewayLastResort(ctx context.Context, group 
 
 func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, account *Account, recoverAt time.Time, avoided map[int64]struct{}, meta lastResortLogMeta) {
 	resilience.StateFrom(ctx).SetLastResort(account.ID)
-	s.resilience.noteLastResortSelected(account.ID)
+	s.resilience.noteLastResortSelected(ctx, account.ID)
 	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
 	slog.Warn("resilience.last_resort", append(resilience.EventFields(ctx),
 		"group_id", derefGroupID(groupID),
@@ -487,8 +487,8 @@ func (s *GatewayService) noteLastResort(ctx context.Context, groupID *int64, acc
 
 // noteLastResortSelected remembers that an account served as last resort so
 // that a success lifts its transient cooldown early.
-func (r *ResilienceService) noteLastResortSelected(accountID int64) {
-	if r == nil {
+func (r *ResilienceService) noteLastResortSelected(ctx context.Context, accountID int64) {
+	if r == nil || !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		return
 	}
 	r.lastResortUsed.Store(accountID, time.Now())
@@ -637,6 +637,16 @@ func (s *OpenAIGatewayService) AvoidOpenAIStateAccount(ctx context.Context, grou
 		resilience.StateFrom(ctx).AddAvoided(accountID)
 		return
 	}
+	if b := openAICollabBindingFrom(ctx); b != nil && b.affinity.groupID == groupID && (sessionHash == b.scope || sessionHash == b.session) {
+		avoid := time.Duration(resilience.Current().Session.AvoidSeconds) * time.Second
+		if avoid <= 0 {
+			avoid = 10 * time.Minute
+		}
+		b.avoid(ctx, accountID, time.Now().Add(avoid))
+		_ = s.deleteStickySessionAccountIDIfOwner(ctx, &groupID, b.session, accountID)
+		return
+	}
+
 	avoid := time.Duration(resilience.Current().Session.AvoidSeconds) * time.Second
 	if avoid <= 0 {
 		avoid = 10 * time.Minute

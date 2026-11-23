@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -38,6 +39,9 @@ type deliveryWriter struct {
 	heartbeat atomic.Int64
 	sse       atomic.Pointer[openAICompactSSEKeepalive]
 	images    atomic.Pointer[openAIImagesJSONKeepalive]
+	// xy2api collaboration: odd while bytes move between those three, so that
+	// the probe reads them as one snapshot (see MarkDeliveryHeartbeats).
+	heartbeatEpoch atomic.Uint32
 
 	// state of the request, for the edge marker (WriteHeader).
 	state *resilience.RequestState
@@ -77,25 +81,35 @@ func deliveryWriterFrom(c *gin.Context) *deliveryWriter {
 // semanticBytes returns the bytes written to the client minus heartbeats
 // and keepalive padding: the delivered semantic output.
 func (w *deliveryWriter) semanticBytes() int64 {
-	total := w.written.Load()
-	if total <= 0 {
-		return 0
+	for {
+		epoch := w.heartbeatEpoch.Load()
+		if epoch&1 != 0 {
+			runtime.Gosched()
+			continue
+		}
+		total := w.written.Load()
+		if total <= 0 {
+			return 0
+		}
+		heartbeat := w.heartbeat.Load()
+		if k := w.sse.Load(); k != nil {
+			k.mu.Lock()
+			heartbeat += int64(k.bytes)
+			k.mu.Unlock()
+		}
+		if k := w.images.Load(); k != nil {
+			k.mu.Lock()
+			heartbeat += int64(k.bytes)
+			k.mu.Unlock()
+		}
+		if w.heartbeatEpoch.Load() != epoch {
+			continue
+		}
+		if total <= heartbeat {
+			return 0
+		}
+		return total - heartbeat
 	}
-	heartbeat := w.heartbeat.Load()
-	if k := w.sse.Load(); k != nil {
-		k.mu.Lock()
-		heartbeat += int64(k.bytes)
-		k.mu.Unlock()
-	}
-	if k := w.images.Load(); k != nil {
-		k.mu.Lock()
-		heartbeat += int64(k.bytes)
-		k.mu.Unlock()
-	}
-	if total <= heartbeat {
-		return 0
-	}
-	return total - heartbeat
 }
 
 func (w *deliveryWriter) Write(data []byte) (int, error) {

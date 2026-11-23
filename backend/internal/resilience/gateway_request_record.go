@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,15 +12,18 @@ import (
 )
 
 const (
-	RequestSuccess  int16 = 1
-	RequestRescued  int16 = 2
-	RequestFailed   int16 = 3
-	RequestCanceled int16 = 4
+	RequestSuccess            int16 = 1
+	RequestRescued            int16 = 2
+	RequestFailed             int16 = 3
+	RequestCanceled           int16 = 4
+	RequestLocalEnded         int16 = 5
+	RequestLocalUndeliverable int16 = 6
 )
 
 // GatewayRequestMetadata is frozen before arranging billing. It must survive a
 // later websocket turn and client cancellation without consulting mutable state.
 type GatewayRequestMetadata struct {
+	CollabObservation  json.RawMessage
 	ProfitBasis        *ProfitBasis
 	RequestScope       GatewayRequestScope
 	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
@@ -248,6 +252,17 @@ func (s *RequestState) CompleteGatewayForward(complete, canceled bool) {
 
 // ClaimGatewayRequest picks the sole row owner. Billing writes keep ownership
 // even if persistence later fails; the deferred tail must not write a second row.
+// GatewayRequestFinalized reports whether billing or the unbilled record has
+// already claimed and frozen this request.
+func (s *RequestState) GatewayRequestFinalized() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.gatewayRecord != nil && s.gatewayRecord.final != nil
+}
+
 func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadata, bool) {
 	if s == nil {
 		return nil, false
@@ -271,6 +286,8 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 	if r.final == nil {
 		result := RequestFailed
 		switch {
+		case s.collab != nil && s.collab.LocalOutcome != 0:
+			result = s.collab.LocalOutcome
 		case r.canceled || !r.complete && canceled:
 			result = RequestCanceled
 		case r.complete && r.sends >= 2 && r.failedBeforeSend:
@@ -282,7 +299,7 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 					zap.String("request_id", s.requestID), zap.Int("sends", r.sends), zap.String("sample_error_class", r.errorClass))
 			}
 		}
-		r.final = cloneGatewayRequest(&GatewayRequestMetadata{RequestID: s.requestID, Result: result, Switches: r.switches, Fallback: r.fallback, Takeover: r.takeover,
+		r.final = cloneGatewayRequest(&GatewayRequestMetadata{CollabObservation: freezeCollabObservationForBilling(s.collab), RequestID: s.requestID, Result: result, Switches: r.switches, Fallback: r.fallback, Takeover: r.takeover,
 			StartedAt: r.started, AccountID: r.lastAccount, FirstOutputMs: first, DurationMs: int(time.Since(r.started).Milliseconds()),
 			ErrorClass: r.errorClass, InputTokens: r.input, CacheReadTokens: r.read, CacheCreationTokens: r.creation,
 			RequestScope: r.RequestScope, ConversionNotices: s.conversionNotices,
@@ -313,6 +330,7 @@ func cloneGatewayRequest(in *GatewayRequestMetadata) *GatewayRequestMetadata {
 		return nil
 	}
 	v := *in
+	v.CollabObservation = NormalizeCollabObservationJSON(in.CollabObservation)
 	v.ProfitBasis = CloneProfitBasis(in.ProfitBasis)
 	copyInt := func(p *int) *int {
 		if p == nil {
@@ -450,6 +468,9 @@ func (s *RequestState) NoteClientOutputBytes(n int) {
 }
 
 func (s *RequestState) ClientOutputBytes() int64 {
+	if s != nil && s.collabParent != nil {
+		return s.collabParent.ClientOutputBytes()
+	}
 	if s == nil {
 		return 0
 	}

@@ -930,6 +930,7 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
     const toggle = wrapper.get('[data-testid="openai-long-context-billing-toggle"]')
     expect(toggle.attributes('aria-checked')).toBe('true')
+    expect(wrapper.get('[data-testid="collaboration-plaintext-consent"]').findAll('li')).toHaveLength(3)
 
     await toggle.trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
@@ -980,7 +981,20 @@ describe('EditAccountModal', () => {
     )
   })
 
-  it('loads the collaboration plaintext toggle and clears it from extra when switched off', async () => {
+  it.each([true, false, undefined, null, 'future'])('preserves untouched plaintext account configuration %s on ordinary updates', async (value) => {
+    const account = buildAccount()
+    account.extra = value === undefined ? {} : { openai_collaboration_plaintext: value }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent'); await flushPromises()
+    const extra = updateAccountMock.mock.calls[0][1].extra
+    if (value === undefined) expect(extra).not.toHaveProperty('openai_collaboration_plaintext')
+    else expect(extra.openai_collaboration_plaintext).toBe(value)
+    wrapper.unmount()
+  })
+
+  it('loads the collaboration plaintext toggle and saves an explicit boolean when switched off', async () => {
     const account = buildAccount()
     account.extra = { openai_collaboration_plaintext: true }
     updateAccountMock.mockReset()
@@ -996,7 +1010,7 @@ describe('EditAccountModal', () => {
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_collaboration_plaintext')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_collaboration_plaintext).toBe(false)
 
     updateAccountMock.mockClear()
     account.extra = {}

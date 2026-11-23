@@ -9,6 +9,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/shopspring/decimal"
 )
 
@@ -88,6 +89,7 @@ func BillingUsageSnapshot(usage *UsageLog) *UsageLog {
 		return nil
 	}
 	snapshot := *usage
+	snapshot.CollabObservation = resilience.NormalizeCollabObservationJSON(usage.CollabObservation)
 	snapshot.User, snapshot.APIKey, snapshot.Account, snapshot.Group, snapshot.Subscription = nil, nil, nil, nil, nil
 	snapshot.ActualCost = QuantizeUsageBillingAmount(snapshot.ActualCost)
 	snapshot.ProfitBasis = append([]byte(nil), usage.ProfitBasis...)

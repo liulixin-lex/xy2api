@@ -360,6 +360,24 @@ func (_u *UsageLogUpdate) ClearPricingSource() *UsageLogUpdate {
 	return _u
 }
 
+// SetCollabObservation sets the "collab_observation" field.
+func (_u *UsageLogUpdate) SetCollabObservation(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.SetCollabObservation(v)
+	return _u
+}
+
+// AppendCollabObservation appends value to the "collab_observation" field.
+func (_u *UsageLogUpdate) AppendCollabObservation(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.AppendCollabObservation(v)
+	return _u
+}
+
+// ClearCollabObservation clears the value of the "collab_observation" field.
+func (_u *UsageLogUpdate) ClearCollabObservation() *UsageLogUpdate {
+	_u.mutation.ClearCollabObservation()
+	return _u
+}
+
 // SetServiceTierDetails sets the "service_tier_details" field.
 func (_u *UsageLogUpdate) SetServiceTierDetails(v jsontext.Value) *UsageLogUpdate {
 	_u.mutation.SetServiceTierDetails(v)
@@ -2101,6 +2119,17 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.PricingSourceCleared() {
 		_spec.ClearField(usagelog.FieldPricingSource, field.TypeJSON)
 	}
+	if value, ok := _u.mutation.CollabObservation(); ok {
+		_spec.SetField(usagelog.FieldCollabObservation, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedCollabObservation(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldCollabObservation, value)
+		})
+	}
+	if _u.mutation.CollabObservationCleared() {
+		_spec.ClearField(usagelog.FieldCollabObservation, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.ServiceTierDetails(); ok {
 		_spec.SetField(usagelog.FieldServiceTierDetails, field.TypeJSON, value)
 	}
@@ -3039,6 +3068,24 @@ func (_u *UsageLogUpdateOne) AppendPricingSource(v jsontext.Value) *UsageLogUpda
 // ClearPricingSource clears the value of the "pricing_source" field.
 func (_u *UsageLogUpdateOne) ClearPricingSource() *UsageLogUpdateOne {
 	_u.mutation.ClearPricingSource()
+	return _u
+}
+
+// SetCollabObservation sets the "collab_observation" field.
+func (_u *UsageLogUpdateOne) SetCollabObservation(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.SetCollabObservation(v)
+	return _u
+}
+
+// AppendCollabObservation appends value to the "collab_observation" field.
+func (_u *UsageLogUpdateOne) AppendCollabObservation(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.AppendCollabObservation(v)
+	return _u
+}
+
+// ClearCollabObservation clears the value of the "collab_observation" field.
+func (_u *UsageLogUpdateOne) ClearCollabObservation() *UsageLogUpdateOne {
+	_u.mutation.ClearCollabObservation()
 	return _u
 }
 
@@ -4812,6 +4859,17 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.PricingSourceCleared() {
 		_spec.ClearField(usagelog.FieldPricingSource, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.CollabObservation(); ok {
+		_spec.SetField(usagelog.FieldCollabObservation, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedCollabObservation(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldCollabObservation, value)
+		})
+	}
+	if _u.mutation.CollabObservationCleared() {
+		_spec.ClearField(usagelog.FieldCollabObservation, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.ServiceTierDetails(); ok {
 		_spec.SetField(usagelog.FieldServiceTierDetails, field.TypeJSON, value)

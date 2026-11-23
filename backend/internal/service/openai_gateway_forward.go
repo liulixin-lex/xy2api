@@ -21,6 +21,18 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, forwardErr error) {
+	if request := openAICollabRequestFrom(ctx); request != nil {
+		request.gateway = s
+		defer request.sealSend()
+	}
+	body = s.applyCollabDispositions(ctx, account, body)
+	if s.collabAliasStore() != nil {
+		var aliasErr error
+		body, aliasErr = s.restoreCollabContinuation(ctx, c, account, body)
+		if aliasErr != nil {
+			return nil, aliasErr
+		}
+	}
 	fcoCompat := armOpenAIFCOCompat(ctx, c, account, body, true, 0)
 	if fcoCompat != nil {
 		ctx = WithOpenAIFCOCompatSnapshot(ctx, fcoCompat.snapshot)
@@ -46,17 +58,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}()
 	// Run the same complete checks on original bytes without applying edits;
 	// requests that cannot obtain a raw plan cannot gain one after normalization.
-	collabRawBlocked, collabRawConflict := true, false
-	if resilience.Current().CollaborationPlaintextOn() && bytes.Contains(body, []byte(`"collaboration"`)) {
-		_, rawPlan, rawOutcome := planCodexCollaborationPlaintext(body)
-		collabRawBlocked = rawPlan == nil
-		collabRawConflict = rawOutcome == codexCollabConflict
-	}
+	collabRawBlocked, collabRawConflict := planOpenAICollabIngress(c, body)
 	defer func() {
 		s.finishCacheDiagnostic(c, body, result)
 	}()
 	if c != nil {
 		// Reset before any early return so failover attempts never inherit a plan.
+		if request := openAICollabRequestFrom(ctx); request != nil {
+			request.attempt = nil
+		}
 		c.Set(openAICollabResponseKey, nil)
 		c.Set(codexCollabAttemptContextKey, nil)
 		c.Set("openai_cache_diagnostic", nil)
@@ -851,8 +861,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if lineage := s.beginOpenAIM3(c, lineageEntryBody); lineage != nil {
 			lineageSessionHash = lineage.session
 		}
-		if stripped, count := s.stripHTTPInvalidEncryptedContent(body, lineageGroupID, lineageSessionHash, account.ID, credentialVersion); count > 0 {
-			body, requestView, reqBody = stripped, newOpenAIRequestView(stripped), nil
+		if resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+			if stripped, count := s.stripHTTPInvalidEncryptedContent(body, lineageGroupID, lineageSessionHash, account.ID, credentialVersion); count > 0 {
+				body, requestView, reqBody = stripped, newOpenAIRequestView(stripped), nil
+			}
 		}
 	}
 	SetOpsUpstreamModel(c, upstreamModel)
@@ -1158,6 +1170,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if deriveErr != nil {
 			return nil, deriveErr
 		}
+		derivedBody = protectCollabUnreceiptedFirstSend(ctx, derivedBody)
 		body, requestView, reqBody = derivedBody, newOpenAIRequestView(derivedBody), nil
 		requestRepair.setBody(body)
 		attemptStart := resetOpenAIRepairAttempt(ctx, account, upstreamModel, reqStream, body, replayAttempt)
@@ -1207,7 +1220,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
+		if openAICollabRequestFrom(ctx) == nil {
+			beginOpenAICollabRestoration(c, false)
+		}
 		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
+		beginOpenAICollabRestoration(c, true)
 		fcoCompat.dispatched(ctx, account, resp)
 		noteOpenAIRequestRepairResent(ctx, c, account)
 		if rejectedFieldRetryEvent != nil {
@@ -1255,6 +1272,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Handle error response
 		if resp.StatusCode >= 400 {
 			respBody := s.readUpstreamErrorBody(resp)
+			if signal := collabPreemptLossless(ctx, c, account, respBody, resp.StatusCode, ""); signal != nil {
+				_ = resp.Body.Close()
+				return nil, signal
+			}
 			observeOpenAIFCOHTTPError(ctx, c, body, respBody, resp.StatusCode, fcoCompat.rules(ctx))
 			schedCapture.finishHTTP(resp, respBody)
 			_ = resp.Body.Close()
@@ -1573,7 +1594,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 				s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 			}
-		} else if partialErr == nil && account.IsShadow() && account.ParentAccountID != nil {
+		} else if partialErr == nil && resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() && account.IsShadow() && account.ParentAccountID != nil {
 			notifyOpenAIAutoReset(*account.ParentAccountID)
 		}
 
@@ -1655,6 +1676,9 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 // group prompt or normalize stream after the caller's original body was read.
 // Missing replayable request bytes make learning unsafe, so skip it then.
 func (s *OpenAIGatewayService) learnOpenAIStreamOnlyHTTPFailure(ctx context.Context, c *gin.Context, account *Account, request *http.Request, response *http.Response, errorBody []byte, protocol string) *UpstreamFailoverError {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return nil
+	}
 	if !resilience.Current().StreamOnlyLearningOn() || account == nil || response == nil || response.StatusCode != http.StatusBadRequest ||
 		request == nil || request.URL == nil || request.GetBody == nil || isExplicitOpenAICompactContext(c) || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
 		return nil

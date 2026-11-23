@@ -368,6 +368,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	avoided := s.resilience.sessionAvoid(ctx, groupID, sessionHash)
 	if scope := openAIRejectionScope(ctx).session; scope != "" && scope != sessionHash {
 		threadAvoid := s.resilience.sessionAvoid(ctx, groupID, scope)
+		threadAvoid = mergeExcluded(threadAvoid, s.collabThreadAvoidances(ctx))
 		avoided = mergeExcluded(avoided, threadAvoid)
 		if rejectionScope := openAIRejectionScope(ctx); len(threadAvoid) > 0 && rejectionScope.preserveBinding && rejectionScope.selectionPreservesBinding != nil {
 			owner, ownerErr := s.getStickySessionAccountID(ctx, groupID, sessionHash)
@@ -441,7 +442,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		resilienceMarkGroupNoAccount(ctx, groupID, requestedModel, origExcluded, err)
 	}
 	if err == nil && selection != nil {
-		resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.openAISessionRecorder())
+		resilience.StateFrom(ctx).SetSession(derefGroupID(groupID), sessionHash, s.collabSessionRecorder(ctx))
 	}
 	return selection, decision, capabilitySelectionError(ctx, err)
 }
@@ -599,6 +600,9 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		decision.SelectedAccountType = selection.Account.Type
 		return selection, decision, nil
 	}
+	if id := openAICollabHint(ctx, guardianParentAccountID); id > 0 {
+		ctx = context.WithValue(ctx, openAICollabHintKey{}, id)
+	}
 	if guardianParentAccountID > 0 {
 		if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 			return nil, decision, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
@@ -738,7 +742,7 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 // scheduler and API-key health observer. Credential, quota and provider
 // Retry-After handlers remain independent.
 func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithContext(ctx context.Context, account *Account, model string, success bool, firstTokenMs *int, observedErr ...error) bool {
-	if account == nil {
+	if account == nil || !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		return false
 	}
 	accountID := account.ID

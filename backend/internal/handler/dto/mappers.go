@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/usagestats"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 )
 
@@ -809,6 +810,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	usageLog.UpstreamEndpoint = l.UpstreamEndpoint
 	usageLog.ServiceTierDetails = l.ServiceTierDetails
 	return &AdminUsageLog{
+		CollabObservation:       resilience.NormalizeCollabObservationJSON(l.CollabObservation),
 		UsageLog:                usageLog,
 		UpstreamModel:           l.UpstreamModel,
 		UpstreamReasoningEffort: adminUpstreamReasoningEffort(l),

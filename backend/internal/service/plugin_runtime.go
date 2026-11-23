@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"io"
 	"log/slog"
 	"net/http"
@@ -303,6 +304,8 @@ func (r *pluginRuntime) roundTrip(ctx context.Context, request *http.Request, pr
 	}
 	sendErr := make(chan error, 1)
 	go func() {
+		defer resilience.RecoverCollabWorker()
+
 		err := sendPluginRequestBody(stream, request.Body)
 		sendErr <- err
 		if err != nil {
@@ -415,6 +418,8 @@ func sendPluginRequestBody(stream pluginv1.TransportPlugin_ForwardClient, body i
 }
 
 func receivePluginResponseBody(stream pluginv1.TransportPlugin_ForwardClient, writer *io.PipeWriter, sendErr <-chan error) {
+	defer resilience.RecoverCollabWorker()
+
 	defer func() { _ = writer.Close() }()
 	for {
 		frame, err := stream.Recv()

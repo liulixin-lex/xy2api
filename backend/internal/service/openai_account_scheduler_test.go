@@ -159,6 +159,12 @@ type schedulerTestGatewayCache struct {
 }
 
 func (c *schedulerTestGatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		_, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "read", 0, 0)
+		defer finish()
+	}
+
 	if id, ok := c.sessionBindings[sessionHash]; ok {
 		return id, nil
 	}
@@ -166,6 +172,12 @@ func (c *schedulerTestGatewayCache) GetSessionAccountID(ctx context.Context, gro
 }
 
 func (c *schedulerTestGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		_, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "set", accountID, ttl)
+		defer finish()
+	}
+
 	if c.sessionBindings == nil {
 		c.sessionBindings = make(map[string]int64)
 	}
@@ -174,10 +186,22 @@ func (c *schedulerTestGatewayCache) SetSessionAccountID(ctx context.Context, gro
 }
 
 func (c *schedulerTestGatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, sessionHash string, ttl time.Duration) error {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		_, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "refresh", 0, ttl)
+		defer finish()
+	}
+
 	return nil
 }
 
 func (c *schedulerTestGatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		_, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "delete", 0, 0)
+		defer finish()
+	}
+
 	if c.sessionBindings == nil {
 		return nil
 	}
@@ -190,6 +214,12 @@ func (c *schedulerTestGatewayCache) DeleteSessionAccountID(ctx context.Context, 
 }
 
 func (c *schedulerTestGatewayCache) DeleteSessionAccountIDAndReport(ctx context.Context, groupID int64, sessionHash string) (bool, error) {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, groupID, c.sessionBindings, nil, "delete", 0, 0)
+		defer finish()
+	}
+
 	_, existed := c.sessionBindings[sessionHash]
 	return existed, c.DeleteSessionAccountID(ctx, groupID, sessionHash)
 }

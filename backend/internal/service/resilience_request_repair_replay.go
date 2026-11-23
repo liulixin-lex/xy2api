@@ -171,6 +171,9 @@ func openAIRequestRepairErrorObject(payload []byte) []byte {
 // newOpenAIRequestRepairSignal prepares a same-account replay for an in-band
 // rejection. It performs all local validation before changing attempt state.
 func newOpenAIRequestRepairSignal(ctx context.Context, c *gin.Context, account *Account, payload []byte, message string, wrappedStatus int) error {
+	if signal := collabPreemptLossless(ctx, c, account, payload, wrappedStatus, "error"); signal != nil {
+		return signal
+	}
 	r := openAIRequestRepairFrom(c)
 	if r == nil || account == nil || r.accountID != account.ID || len(r.body) == 0 {
 		return nil

@@ -52,6 +52,10 @@ type OpenAIGatewayHandler struct {
 	imageLimiter               *imageConcurrencyLimiter
 	maxAccountSwitches         int
 	cfg                        *config.Config
+	// collabRescue is the collaboration ladder and collabRescuable yields the
+	// flag of whether it could act. Without both, no request gets a seam.
+	collabRescue    collabRescue
+	collabRescuable collabRescuable
 }
 
 type openAIWSTurnChannelMappingSnapshot struct {
@@ -263,6 +267,9 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 		base = resilience.WithGatewayRequestMetadata(base, meta)
 	}
 	base = service.WithInflightReservation(base, service.InflightReservationFromContext(parent))
+	if attempt := resilience.CollabAttemptFrom(parent); attempt.Optional {
+		base = resilience.WithCollabAttempt(base, attempt)
+	}
 	// xy2api resilience: billing needs the request's delivery state; a client
 	// already gone is resolved now (design §8.2).
 	if st := resilience.StateFrom(parent); st != nil {
@@ -396,7 +403,7 @@ func NewOpenAIGatewayHandler(
 			maxAccountSwitches = cfg.Gateway.MaxAccountSwitches
 		}
 	}
-	return &OpenAIGatewayHandler{
+	h := &OpenAIGatewayHandler{
 		gatewayService:           gatewayService,
 		billingCacheService:      billingCacheService,
 		apiKeyService:            apiKeyService,
@@ -409,6 +416,8 @@ func NewOpenAIGatewayHandler(
 		maxAccountSwitches:       maxAccountSwitches,
 		cfg:                      cfg,
 	}
+	h.collabRescue, h.collabRescuable = h.rescueCollab, collabCanRescue
+	return h
 }
 
 // Responses handles OpenAI Responses API endpoint
@@ -526,6 +535,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// 使用 gjson 只读提取字段做校验，避免完整 Unmarshal
+	collabGroupID := int64(0)
+	if apiKey.GroupID != nil {
+		collabGroupID = *apiKey.GroupID
+	}
+	service.BeginOpenAICollabRequest(c, body, subject.UserID, collabGroupID)
+	h.gatewayService.PrepareOpenAICollabIdentity(c)
+	defer service.FinishOpenAICollabDelivery(c)
+	defer service.LogOpenAICollabObservation(c, body)
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
@@ -717,6 +734,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIGuardianParentAffinity(
 		c.Request.Context(), c, sessionHashBody, reqModel,
 	))
+	h.gatewayService.PrepareOpenAICollabAffinity(c, apiKey.ID, sessionHash, requestPlatform, !legacyCompact && !nativeV2)
 	scope := openAIResponsesRequestScope(imageIntent)
 	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, scope)()
 
@@ -752,8 +770,77 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		c.Request = c.Request.WithContext(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()))
 	}
 
+	// xy2api collaboration: the ladder takes over only from the final error of
+	// the loop below. finish runs before all other deferred cleanup; restore
+	// runs after the heartbeat wrapper above the seam is gone.
+	defer service.FinishOpenAICollabDelivery(c)
+	collabSeam := h.armCollabSeam(c, forwardBody, previousResponseID, requestPlatform, legacyCompact)
+	wireCollabDeliveryRescue(collabSeam)
+	h.wireCollabLocalEnding(collabSeam)
+	if collabSeam != nil {
+		collabSeam.started = requestStart
+	}
+	h.armCollabLossless(c, collabSeam)
+	defer collabSeam.restore(c)
 	// xy2api resilience: the pre-output heartbeat ends with the request (design §7.2).
 	defer stopPreOutputKeepalive(c)
+	defer collabSeam.finish(c)
+	submitResponsesUsage := func(account *service.Account, res *service.OpenAIForwardResult) {
+		if res == nil {
+			return
+		}
+		if collabSeam.beforeSettlement(c, res) {
+			return
+		}
+		service.SealOpenAICollabObservation(c)
+		stampOpenAIRequestedReasoningEffort(res, c)
+		userAgent := c.GetHeader("User-Agent")
+		clientIP := ip.GetClientIP(c)
+		requestPayloadHash := service.HashUsageRequestPayload(body)
+		inboundEndpoint := GetInboundEndpoint(c)
+		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, res)
+		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+		sessionID := service.ExtractClientSessionID(c)
+		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
+		h.submitOpenAIUsageRecordTask(c.Request.Context(), res, func(ctx context.Context) {
+			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
+				Result:             res,
+				APIKey:             apiKey,
+				User:               apiKey.User,
+				Account:            account,
+				Subscription:       subscription,
+				InboundEndpoint:    inboundEndpoint,
+				UpstreamEndpoint:   upstreamEndpoint,
+				UserAgent:          userAgent,
+				IPAddress:          clientIP,
+				RequestPayloadHash: requestPayloadHash,
+				APIKeyService:      h.apiKeyService,
+				QuotaPlatform:      quotaPlatform,
+				SessionID:          sessionID,
+				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel),
+				PricingAt:          pricingAt,
+				CyberBlocked:       cyberBlocked,
+				NativeCompactionV2: nativeV2,
+			}); err != nil {
+				logger.L().With(
+					zap.String("component", "handler.openai_gateway.responses"),
+					zap.Int64("user_id", subject.UserID),
+					zap.Int64("api_key_id", apiKey.ID),
+					zap.Any("group_id", apiKey.GroupID),
+					zap.String("model", reqModel),
+					zap.Int64("account_id", account.ID),
+				).Error("openai.record_usage_failed", zap.Error(err))
+			}
+		})
+	}
+	if collabSeam != nil {
+		collabSeam.settle = func(account *service.Account, result *service.OpenAIForwardResult, err error) {
+			recordOpenAIForwardUsage(c, account, result)
+			recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, gatewayOpenAICompleted(result))
+			setOpsSelectedAccount(c, account.ID, account.Platform)
+			submitResponsesUsage(account, result)
+		}
+	}
 	for {
 		// Streaming Forward intentionally detaches the upstream request so usage can
 		// be drained after a disconnect. Re-check the client context before every
@@ -880,6 +967,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		account = selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
+		service.NoteOpenAICollabAdmission(c.Request.Context(), account.ID, false)
 
 		// Forward request
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
@@ -908,14 +996,43 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				BodyBytes: len(attemptBody),
 			})
 		}
+		losslessDelivered, losslessYielded := false, false
+		if accountReleaseFunc != nil && collabSeam != nil && collabSeam.lossless {
+			accountReleaseFunc = sync.OnceFunc(accountReleaseFunc)
+		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
+			if h.tryCollabBorrow(c, account, attemptBody, forwardModel, submitResponsesUsage) {
+				losslessDelivered = true
+				return nil, nil
+			}
+			result, err := h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
+			var preempt *service.CollabLosslessPreempt
+			if errors.As(err, &preempt) {
+				if collabSeam.tryLossless(c, accountReleaseFunc) {
+					losslessDelivered = true
+					return nil, nil
+				}
+				if collabSeam.retainedReleased() {
+					// A waiter took the retained reservation. Re-enter ordinary
+					// selection/admission before sending any legacy repair.
+					losslessYielded = true
+					return nil, nil
+				}
+				return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
+			}
+			return result, err
 		}()
+		if losslessDelivered {
+			return
+		}
+		if losslessYielded {
+			continue
+		}
 		recordOpenAIForwardUsage(c, account, result)
 		recordForwardRecovery(c, err, result != nil && result.ClientDisconnect, gatewayOpenAICompleted(result))
 		finishOpenAIStickyForward(c, account.ID, result, err)
@@ -936,50 +1053,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		// #5148 对齐：错误返回携带的部分 result（流中断前上游已计量的 usage）照常
 		// 入账；failover 错误恒定 result=nil，不会重复计费。
-		submitResponsesUsage := func(res *service.OpenAIForwardResult) {
-			if res == nil {
-				return
-			}
-			stampOpenAIRequestedReasoningEffort(res, c)
-			userAgent := c.GetHeader("User-Agent")
-			clientIP := ip.GetClientIP(c)
-			requestPayloadHash := service.HashUsageRequestPayload(body)
-			inboundEndpoint := GetInboundEndpoint(c)
-			upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, res)
-			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-			sessionID := service.ExtractClientSessionID(c)
-			cyberBlocked := service.GetOpsCyberPolicy(c) != nil
-			h.submitOpenAIUsageRecordTask(c.Request.Context(), res, func(ctx context.Context) {
-				if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-					Result:             res,
-					APIKey:             apiKey,
-					User:               apiKey.User,
-					Account:            account,
-					Subscription:       subscription,
-					InboundEndpoint:    inboundEndpoint,
-					UpstreamEndpoint:   upstreamEndpoint,
-					UserAgent:          userAgent,
-					IPAddress:          clientIP,
-					RequestPayloadHash: requestPayloadHash,
-					APIKeyService:      h.apiKeyService,
-					QuotaPlatform:      quotaPlatform,
-					SessionID:          sessionID,
-					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel),
-					PricingAt:          pricingAt,
-					CyberBlocked:       cyberBlocked,
-					NativeCompactionV2: nativeV2,
-				}); err != nil {
-					logger.L().With(
-						zap.String("component", "handler.openai_gateway.responses"),
-						zap.Int64("user_id", subject.UserID),
-						zap.Int64("api_key_id", apiKey.ID),
-						zap.Any("group_id", apiKey.GroupID),
-						zap.String("model", reqModel),
-						zap.Int64("account_id", account.ID),
-					).Error("openai.record_usage_failed", zap.Error(err))
-				}
-			})
-		}
+
 		if err != nil {
 			if handleUnsupportedProtocolConversion(c, err, "responses", streamStarted) {
 				return
@@ -989,7 +1063,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					zap.Int64("account_id", account.ID),
 					zap.Error(err),
 				)
-				submitResponsesUsage(result)
+				submitResponsesUsage(account, result)
 				return
 			}
 			if failoverClientGone(c) {
@@ -997,7 +1071,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					zap.Int64("account_id", account.ID),
 					zap.Error(err),
 				)
-				submitResponsesUsage(result)
+				submitResponsesUsage(account, result)
 				return
 			}
 			if result != nil && result.ImageCount > 0 {
@@ -1137,7 +1211,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 					zap.Error(err),
 				}
-				submitResponsesUsage(result)
+				submitResponsesUsage(account, result)
 				if shouldLogOpenAIForwardFailureAsWarn(c, wroteFallback) {
 					reqLog.Warn("openai.forward_failed", fields...)
 					return
@@ -1157,7 +1231,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
-		submitResponsesUsage(result)
+		if result != nil && result.CompletedForDelivery() {
+			service.NoteOpenAICollabSuccess(c.Request.Context(), account.ID, false)
+		}
+		submitResponsesUsage(account, result)
 		reqLog.Debug("openai.request_completed",
 			zap.Int64("account_id", account.ID),
 			zap.Int("switch_count", switchCount),
@@ -4929,6 +5006,12 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		requestCtx = gatewayBillingContext(requestCtx)
 	}
 	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				resilience.NoteCollabWorkerPanic(recovered)
+				logger.L().With(zap.String("component", "openai.policy_recorder"), zap.Any("panic", recovered)).Error("billing.policy_recorder_panic")
+			}
+		}()
 		ctx, cancel := context.WithTimeout(usageRecordContext(requestCtx, resilience.WithRequestState(context.Background(), requestState)), 30*time.Second)
 		defer cancel()
 		if cmSvc != nil {

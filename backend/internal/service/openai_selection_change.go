@@ -27,6 +27,9 @@ func (s *OpenAIGatewayService) stickyChangeAvoid(ctx context.Context, groupID *i
 	if s == nil || s.resilience == nil || s.resilience.store == nil || session == "" {
 		return nil
 	}
+	if b := collabBindingFor(ctx, groupID, session); b != nil {
+		session = b.scope
+	}
 	avoided, err := sessionAvoidAfterReset(ctx, s.resilience.store, derefGroupID(groupID), stickyChangeAvoidSession(session), s.resilience.sessionResetAt)
 	if err != nil {
 		return nil
@@ -50,7 +53,7 @@ func firstOutputMigrationAllowed(ctx context.Context, session string) bool {
 	}
 	protected, _ := ctx.Value(openAITransferProtectedKey{}).(bool)
 	_, guardian := openAIGuardianParentAffinityFromContext(ctx)
-	return !protected && session != "" && !openAINoStickyMigration(ctx) && !guardian &&
+	return !protected && session != "" && !openAINoStickyMigration(ctx) && !openAICollabLeaseSuppressesMigration(ctx) && !guardian &&
 		!openAIRejectionScope(ctx).preserveBinding && !preserveOpenAIRejectionBinding(ctx, session)
 }
 
@@ -263,11 +266,14 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 	if !ok {
 		return
 	}
+	if b := collabBindingFor(ctx, groupID, session); b != nil {
+		cache = collabThreadVersionedCache{b: b}
+	}
 	key := s.openAISessionCacheKey(session)
 	expected, err := cache.GetSessionBinding(ctx, derefGroupID(groupID), key)
 	legacy := s.openAILegacySessionCacheKey(ctx, session)
 	fallback := s.openAISessionHashReadOldFallbackEnabled()
-	if aliases, ok := s.cache.(OpenAIStickyAliasCache); ok {
+	if aliases, ok := cache.(OpenAIStickyAliasCache); ok {
 		if legacy != "" && (fallback || s.openAISessionHashDualWriteOldEnabled()) {
 			expected, err = aliases.ResolveSessionBinding(ctx, derefGroupID(groupID), key, legacy, fallback)
 		}
@@ -674,7 +680,11 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 		// Without the owner's mapping, let the member expire instead of removing
 		// a member under the client model, which may name a different upstream key.
 		if model != "" {
-			releaseSelectionTrial(ctx, change.leases, change.expected.AccountID, model, change.groupID, TrialLeaseSessionMember(change.trialSessionKey()))
+			member := TrialLeaseSessionMember(change.trialSessionKey())
+			if cache, ok := change.cache.(collabThreadVersionedCache); ok {
+				member = TrialLeaseSessionMember(cache.b.key)
+			}
+			releaseSelectionTrial(ctx, change.leases, change.expected.AccountID, model, change.groupID, member)
 		}
 	}
 	if change.dualWriteLegacy && change.expected.LegacyKey != "" {

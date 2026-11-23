@@ -89,6 +89,7 @@ interface Props {
   searchable?: boolean | 'auto'
   categoryTabs?: boolean // XY2API：按分组分类显示标签
   listClass?: string // XY2API：分组列表高度
+  preserveUnavailable?: boolean // Settings may retain inactive or currently hidden group choices.
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -128,7 +129,7 @@ const filteredGroups = computed(() => {
 watch(
   () => [authStore.isSimpleMode, props.groups, props.modelValue] as const,
   () => {
-    if (!authStore.isSimpleMode || props.groups.length === 0) return
+    if (props.preserveUnavailable || !authStore.isSimpleMode || props.groups.length === 0) return
     const visibleIDs = new Set(props.groups.filter((group) => group.platform !== 'composite').map((group) => group.id))
     const cleaned = props.modelValue.filter((id) => visibleIDs.has(id))
     if (cleaned.length !== props.modelValue.length) emit('update:modelValue', cleaned)

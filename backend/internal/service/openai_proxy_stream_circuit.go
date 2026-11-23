@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"go.uber.org/zap"
 )
 
@@ -235,7 +236,10 @@ func openAIProxyStreamCircuitProxyID(account *Account) (int64, bool) {
 	return *account.ProxyID, true
 }
 
-func (s *OpenAIGatewayService) recordOpenAIProxyStreamDisconnect(account *Account, streamErr error, upstreamRequestID string) {
+func (s *OpenAIGatewayService) recordOpenAIProxyStreamDisconnect(ctx context.Context, account *Account, streamErr error, upstreamRequestID string) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	proxyID, ok := openAIProxyStreamCircuitProxyID(account)
 	if !ok || streamErr == nil || errors.Is(streamErr, context.Canceled) || errors.Is(streamErr, context.DeadlineExceeded) {
 		return
@@ -255,7 +259,10 @@ func (s *OpenAIGatewayService) recordOpenAIProxyStreamDisconnect(account *Accoun
 	)
 }
 
-func (s *OpenAIGatewayService) clearOpenAIProxyStreamDisconnect(account *Account) {
+func (s *OpenAIGatewayService) clearOpenAIProxyStreamDisconnect(ctx context.Context, account *Account) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	proxyID, ok := openAIProxyStreamCircuitProxyID(account)
 	if !ok {
 		return

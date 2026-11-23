@@ -560,6 +560,8 @@ export default {
       resultRescued: '已救回',
       resultFailed: '失败',
       resultCanceled: '已取消',
+      resultLocalEnded: '本地收尾',
+      resultLocalUndeliverable: '本地收尾未送达',
       switches: '换号 {n} 次',
       requestOutcomes: '成功 {success} · 救回 {rescued} · 失败 {failed}',
       ipAddress: 'IP',

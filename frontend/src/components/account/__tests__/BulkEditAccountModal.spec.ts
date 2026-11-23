@@ -83,6 +83,22 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 }
 
 describe('BulkEditAccountModal', () => {
+  it('shows three-point plaintext consent before bulk enabling', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
+    const consent = wrapper.get('[data-testid="collaboration-plaintext-consent"]')
+    expect(consent.findAll('li')).toHaveLength(3)
+    for (const key of ['visible', 'moderation', 'permanent']) {
+      expect(consent.text()).toContain('admin.resilience.settings.collab.consent.' + key)
+    }
+    const toggle = wrapper.get('#bulk-edit-openai-collaboration-plaintext-toggle')
+    expect(toggle.attributes('aria-describedby')).toBe(consent.attributes('id'))
+    await wrapper.get('#bulk-edit-openai-collaboration-plaintext-enabled').setValue(true)
+    await toggle.trigger('click')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(vi.mocked(adminAPI.accounts.bulkUpdate).mock.calls[0][1]?.extra?.openai_collaboration_plaintext).toBe(true)
+    wrapper.unmount()
+  })
+
   it('keeps account editing free of scheduling scope and failure-domain settings', async () => {
     const wrapper = mountModal()
     await flushPromises()

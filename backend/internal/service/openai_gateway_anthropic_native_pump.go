@@ -87,6 +87,7 @@ func newAnthropicNativeLinePump(scanner *bufio.Scanner, interval time.Duration) 
 		p.timer = time.NewTimer(interval)
 	}
 	go func() {
+		defer resilience.RecoverCollabWorker()
 		defer close(p.events)
 		for scanner.Scan() {
 			p.progress.observeLine(scanner.Text())

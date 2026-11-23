@@ -35,8 +35,8 @@ export interface AdminUsageStatsResponse {
   cache_ratio?: number | null
 }
 
-/** 请求结果（后端 0.6.5）：1 成功，2 已救回，3 失败，4 已取消。仅管理端列表与统计接受。 */
-export type UsageRequestResult = 1 | 2 | 3 | 4
+/** 请求结果：1 成功，2 已救回，3 失败，4 已取消，5 本地收尾，6 本地收尾未送达。仅管理端列表与统计接受。 */
+export type UsageRequestResult = 1 | 2 | 3 | 4 | 5 | 6
 
 export interface SimpleUser {
   id: number

@@ -47,6 +47,36 @@ export default {
         fcoCompatHint: 'Codex clients send named function_call_output items without a call_id (agent namespace), which some third-party relays reject with a 400. Items whose name is in the built-in list or in the list below are rewritten into a plain user message, with the original content wrapped in an <external_name> tag.',
         fcoCompatScope: 'Applies only to Responses requests that OpenAI API key accounts send to third-party relays; an account can override the mode on its edit page. With the master switch off or Off selected here, no account is handled. While the mode is not Off, listed items newly added at the end of a request go through the keyword check before an account is selected (this needs blocked keywords, Pre-Block mode and a strategy other than API only); a hit follows the site\'s existing keyword rules (block or log only). The output text the compatibility layer adds for these items only gets the keyword check: it neither counts toward nor triggers semantic moderation. Only the global mode counts, whichever account type the request ends up on; select Off to withdraw this check.'
       },
+      collab: {
+        title: 'Collaboration recovery',
+        hint: 'New recovery behavior is off by default; only delivery records are on. Changes apply to new requests. By default, existing repair runs first; the ladder takes over only when it would fail or does not recognize the ciphertext error.',
+        consent: {
+          visible: 'Message bodies are visible to this gateway, the relay, and its upstream provider.',
+          moderation: 'Message bodies enter content moderation and its records.',
+          permanent: 'Turning this off cannot withdraw plaintext already sent or stored in client history.'
+        },
+        incremental_declarations: 'Incremental tool declarations',
+        incremental_declarationsHint: 'Adapt collaboration tool declarations added during a conversation. Off keeps the existing declaration handling.',
+        records: 'Delivery records',
+        recordsHint: 'Record issuance, successful reads, and plaintext routes without changing forwarding. With this off, the recovery ladder works without those records; ended and replaced states are still read and written while the ladder is on.',
+        tree_affinity: 'Keep related threads together',
+        tree_affinityHint: 'Strengthen account affinity within a conversation tree. Suppressing quality migration while unread ciphertext has a live lease also requires Recovery ladder and Try to preserve content first. Off keeps the existing account selection.',
+        ladder: 'Recovery ladder',
+        ladderHint: 'Run existing repair first and unchanged. The ladder takes over only when it would end in an error or does not recognize the ciphertext error. If recovery also fails, return the original error. Off uses only existing repair and stops reading ended and replaced states.',
+        lossless_first: 'Try to preserve content first',
+        lossless_firstHint: 'Requires Recovery ladder. Run the ladder before existing repair to reduce silent content loss. Also enables lease-based migration suppression with Keep related threads together, and temporary account borrowing with Route using delivery records. This can add errors in rare cases due to failures after output, shared upstream quota, or concurrency. Default off; enable only after accepting these risks.',
+        record_routing: 'Route using delivery records',
+        record_routingHint: 'Requires Recovery ladder to rank recovery accounts using delivery records. Temporarily borrowing a convertible account for reassigned tasks also requires Try to preserve content first; Keep related threads together is not required. Off leaves retries untargeted and does not borrow content for reassignment.',
+        strict_marker_veto: 'Stricter plaintext markers',
+        strict_marker_vetoHint: 'Withhold the plaintext marker from content with strong ciphertext evidence. JSON alone does not veto a marker. This can add errors and is not recommended. Off keeps the existing marker checks.',
+        local_ending: 'End unreadable turns locally',
+        local_endingHint: 'Requires Recovery ladder. End eligible unreadable turns with a gateway notice for selected groups or all groups. A completed turn does not mean the task was done. Off stops new local endings; the ladder still reads earlier ended states.',
+        modes: { off: 'Off', groups: 'Selected groups', all: 'All groups' },
+        unsupported: 'This server returned collaboration values this version cannot edit. Defaults are shown and controls are disabled. Unrelated saves omit this section; advanced JSON retains the server values.',
+        groupsEmpty: 'No groups selected: local ending will not run for any group.',
+        groupsFailed: 'Could not load groups. Retry to edit the selection; saved group choices are kept.',
+        ladderRequired: 'Enable Recovery ladder to use content-first recovery, local ending, and routing from delivery records. Their saved choices are kept while the ladder is off.'
+      },
       fields: {
         balancePause: 'Initial pause (s)',
         balancePauseHint: 'Consecutive balance failures on the same account pause it for ×1 → ×3 → ×12 of this duration (5/15/60 min by default; the third step is the cap), resetting after a successful request or a manual "Recover State".',

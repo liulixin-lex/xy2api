@@ -563,6 +563,8 @@ export default {
       resultRescued: 'Rescued',
       resultFailed: 'Failed',
       resultCanceled: 'Canceled',
+      resultLocalEnded: 'Ended locally',
+      resultLocalUndeliverable: 'Local ending not delivered',
       switches: '{n} switches',
       requestOutcomes: 'Success {success} · Rescued {rescued} · Failed {failed}',
       ipAddress: 'IP',

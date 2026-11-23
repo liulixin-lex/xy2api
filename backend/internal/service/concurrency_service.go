@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"os"
 	"strconv"
 	"sync"
@@ -129,6 +130,7 @@ func (l *OpenAIWSIngressLease) Release() {
 }
 
 func (l *OpenAIWSIngressLease) refreshLoop() {
+	defer resilience.RecoverCollabWorker()
 	defer func() {
 		if l != nil && l.refreshDone != nil {
 			close(l.refreshDone)

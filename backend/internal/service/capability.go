@@ -195,6 +195,9 @@ func LimitCapabilityMarkUpdates(current, updates map[string]any, accountID int64
 // The send binds the final outbound tuple; events only supply refusal evidence.
 // Stream-only observations keep their existing separate TTL and feature gates.
 func (s *OpenAIGatewayService) capabilityFailureLearner(ctx context.Context, account *Account, body []byte, protocol string) func(int, []byte) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return nil
+	}
 	if s == nil || s.accountRepo == nil || account == nil || account.routesByModel() || !gjson.ValidBytes(body) {
 		return nil
 	}

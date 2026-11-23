@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"net"
 	"net/http"
 	"strings"
@@ -115,6 +116,10 @@ func isClientCanceledTransportError(ctx context.Context, err error) bool {
 //
 // passthrough tags the Ops error event for the OpenAI passthrough forward path.
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
+	var duplicate *CollabDuplicateSendError
+	if errors.As(err, &duplicate) {
+		return err
+	}
 	var blocked *UpstreamFailoverError
 	if errors.As(err, &blocked) && (blocked.PreDispatchSelectionInvalidated || blocked.Reason == openAITierUnavailable) {
 		return err
@@ -142,8 +147,8 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		return err
 	}
 
-	// Transport attempt reached the network path; count as Ollama Cloud / OpenCode Go activity.
-	if s != nil {
+	// Ordinary transport activity updates account scheduling history.
+	if s != nil && resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)
 		scheduleOpenCodeGoUsageActivity(s.deferredService, account)
 	}
@@ -176,6 +181,9 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 //   - "openai.account_temp_unscheduled_transport_failed" — DB write attempted
 //     but returned an error.
 func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	if s == nil || account == nil {
 		return
 	}

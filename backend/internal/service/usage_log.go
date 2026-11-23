@@ -105,8 +105,10 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 }
 
 type UsageLog struct {
-	ProfitBasis   json.RawMessage
-	PricingSource json.RawMessage `json:"pricing_source,omitempty"`
+	// CollabObservation is internal accounting metadata; only the admin DTO exposes it.
+	CollabObservation json.RawMessage `json:"collab_observation,omitempty"`
+	ProfitBasis       json.RawMessage
+	PricingSource     json.RawMessage `json:"pricing_source,omitempty"`
 
 	RequestScope       resilience.GatewayRequestScope
 	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`

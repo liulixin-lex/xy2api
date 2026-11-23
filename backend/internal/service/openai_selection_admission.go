@@ -75,6 +75,11 @@ func (s *OpenAIGatewayService) accountRequestCompatibleWithParent(ctx context.Co
 	if account == nil {
 		return false, "account_nil"
 	}
+	if preferred, optional := ctx.Value(collabSelectionKey{}).(int64); optional {
+		if account.IsOpenAIPassthroughEnabled() || preferred > 0 && account.ID != preferred {
+			return false, "request_candidate_constraint"
+		}
+	}
 	if reason := requestCandidateConstraintFailure(req, account); reason != "" {
 		return false, reason
 	}
@@ -95,7 +100,7 @@ func (s *OpenAIGatewayService) accountRequestCompatibleWithParent(ctx context.Co
 	// xy2api resilience: last-resort selection treats in-memory runtime
 	// blocks and proxy quarantine as soft restrictions (design §4.3).
 	lastResort := resilienceLastResortGate(ctx)
-	if !lastResort && s != nil && s.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
+	if !lastResort && s != nil && s.isOpenAIAccountRequestRuntimeBlockedWithContext(ctx, account, req.RequestedModel, req.RequireCompact) {
 		return false, "runtime_blocked"
 	}
 	if !lastResort && s != nil && s.isOpenAIProxyStreamQuarantined(ctx, account) {

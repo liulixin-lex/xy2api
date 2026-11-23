@@ -5,6 +5,10 @@ import zh from '@/i18n/locales/zh'
 // Keys built at runtime (`sections.${key}`, `reasons.${reason}`) escape the
 // static locale completeness check, so the 0.4.4 ones are listed here.
 const dynamicKeys = [
+  ...['incremental_declarations', 'records', 'tree_affinity', 'ladder', 'lossless_first', 'record_routing', 'strict_marker_veto', 'local_ending']
+    .flatMap((key) => ['admin.resilience.settings.collab.' + key, 'admin.resilience.settings.collab.' + key + 'Hint']),
+  ...['off', 'groups', 'all'].map((key) => 'admin.resilience.settings.collab.modes.' + key),
+  ...['visible', 'moderation', 'permanent'].map((key) => 'admin.resilience.settings.collab.consent.' + key),
   ...['failure', 'stream', 'capability'].flatMap((k) => [`admin.resilience.settings.sections.${k}`, `admin.resilience.settings.sections.${k}Hint`]),
   ...['preludeStaging', 'nativePreludeWhitelist', 'strictTerminal', 'failedFrameRetryAfter']
     .flatMap((k) => [`admin.resilience.settings.switches.${k}`, `admin.resilience.settings.switches.${k}Hint`]),
@@ -123,5 +127,31 @@ describe.each([
   })
   it('never reads the repeat count as "only the first counts"', () => {
     expect(lookup(messages, 'admin.resilience.panel.metrics.body_receipt_repeat')).not.toMatch(/只按第一次计|only the first counts/)
+  })
+})
+
+
+describe('collaboration recovery risk copy', () => {
+  it.each([
+    ['en', en, 'Try to preserve content first', 'lease', 'Recovery ladder'],
+    ['zh', zh, '优先保留内容', '租约', '恢复阶梯']
+  ])('%s explains borrowing and migration dependencies', (_, messages, lossless, lease, ladder) => {
+    const text = (key: string) => lookup(messages, 'admin.resilience.settings.collab.' + key) as string
+    expect(text('record_routingHint')).toContain(lossless)
+    expect(text('record_routingHint')).toContain(ladder)
+    expect(text('tree_affinityHint')).toContain(lossless)
+    expect(text('tree_affinityHint')).toContain(lease)
+    expect(text('lossless_firstHint')).toContain(lease)
+  })
+
+  it.each([
+    ['en', en, 'can add errors', 'not recommended', 'existing repair first'],
+    ['zh', zh, '增加报错', '不建议开启', '先原样走完现有修复']
+  ])('%s explains the two risky switches and default repair order', (_, messages, risk, recommendation, order) => {
+    const text = (key: string) => lookup(messages, 'admin.resilience.settings.collab.' + key) as string
+    expect(text('lossless_firstHint')).toContain(risk)
+    expect(text('strict_marker_vetoHint')).toContain(risk)
+    expect(text('strict_marker_vetoHint')).toContain(recommendation)
+    expect(text('ladderHint')).toContain(order)
   })
 })

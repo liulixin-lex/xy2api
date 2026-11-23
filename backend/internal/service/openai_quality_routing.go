@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"io"
 	"log/slog"
 	"net/http"
@@ -205,7 +206,7 @@ func (s *OpenAIGatewayService) AdvanceOpenAIQualityTurn(ctx context.Context, acc
 	st := cloneQualityState(q.state)
 	scope, pinned := q.scope, q.pinned
 	q.mu.Unlock()
-	if s.qualityConfig().EffectiveMode() != "enforce" || st.Generation == 0 || oldModel == canonical && st.Generation <= oldGeneration {
+	if s.qualityConfig().EffectiveMode() != "enforce" || st.Generation == 0 || oldModel == canonical && st.Generation <= oldGeneration || openAICollabLeaseSuppressesMigration(ctx) {
 		return nil
 	}
 	bad, affected := st.Avoid[strconv.FormatInt(account.ID, 10)]
@@ -473,6 +474,8 @@ func (s *OpenAIGatewayService) qualityUpdate(scope string, change OpenAIQualityC
 		select {
 		case openAIQualitySyncSlots <- struct{}{}:
 			go func() {
+				defer resilience.RecoverCollabWorker()
+
 				defer func() { <-openAIQualitySyncSlots }()
 				st, updateErr := store.UpdateOpenAIQualityRouting(ctx, scope, change, ttl)
 				result <- syncResult{st, updateErr}
@@ -532,7 +535,7 @@ func (s *OpenAIGatewayService) qualityObserver(ctx context.Context, account *Acc
 		}
 		once.Do(func() {
 			qualityEvent("downgrade_evidence", scope, account.ID, generation, "outbound_model", model, "response_model", observed)
-			if s.qualityConfig().EffectiveMode() != "enforce" {
+			if s.qualityConfig().EffectiveMode() != "enforce" || openAICollabLeaseSuppressesMigration(ctx) {
 				return
 			}
 			now := time.Now().UnixMilli()
@@ -746,6 +749,9 @@ func (s *OpenAIGatewayService) qualitySticky(ctx context.Context, group *int64, 
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.state.Generation > 0 && !q.pinned && s.qualityConfig().EffectiveMode() == "enforce" {
+		if q.state.Binding <= 0 && openAICollabLeaseSuppressesMigration(ctx) {
+			return q.state.Owner, q.state.Owner > 0
+		}
 		return q.state.Binding, true
 	}
 	_, batched := s.cache.(OpenAIQualityRoutingStore)
@@ -792,6 +798,11 @@ func (s *OpenAIGatewayService) selectAccountWithQualityRouting(
 	scope := q.scope
 	q.mu.Unlock()
 	if state.Generation == 0 || s.qualityConfig().EffectiveMode() != "enforce" {
+		return selectPass(excluded)
+	}
+	if !pinned && openAICollabLeaseSuppressesMigration(ctx) {
+		// Reuse the ordinary admission path. Quota, permissions, exclusions
+		// and real cooldowns still apply; only quality avoidance is omitted.
 		return selectPass(excluded)
 	}
 	if pinned {

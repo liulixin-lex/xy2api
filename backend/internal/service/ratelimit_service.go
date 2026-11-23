@@ -172,6 +172,9 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 	now := time.Now().UTC()
 	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
 	decision := EvaluateAccountSchedulingThreshold(account, thresholds, now)
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return decision.ShouldPause && decision.Until != nil && decision.Until.After(now)
+	}
 	if !decision.ShouldPause || decision.Until == nil || !decision.Until.After(now) {
 		s.applyAnthropicFableSchedulingThreshold(ctx, account, thresholds, now)
 		return false
@@ -338,6 +341,9 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 }
 
 func (s *RateLimitService) handleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, inference bool, requestedModel ...string) (shouldDisable bool) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return false
+	}
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIStateRejection(responseBody, "") {
 		return false
 	}
@@ -2413,6 +2419,9 @@ func (s *RateLimitService) applyConfiguredModelCooldown(ctx context.Context, acc
 		return false, false
 	}
 	for _, match := range matchTempUnschedulableRules(account, statusCode, responseBody) {
+		if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+			return true, false
+		}
 		if match.rule.DurationMinutes <= 0 {
 			continue
 		}
@@ -2821,6 +2830,9 @@ func (s *RateLimitService) tryTempUnschedulable(ctx context.Context, account *Ac
 		}
 	}
 	for _, match := range matchTempUnschedulableRules(account, statusCode, responseBody) {
+		if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+			return true
+		}
 		if s.triggerTempUnschedulable(ctx, account, match.rule, match.ruleIndex, statusCode, match.matchedKeyword, responseBody, tempUnschedulableModel(ctx, requestedModel)) {
 			return true
 		}
@@ -2934,7 +2946,7 @@ func truncateTempUnschedMessage(body []byte, maxBytes int) string {
 // 根据系统设置决定是否标记账户为临时不可调度或错误状态
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleStreamTimeout(ctx context.Context, account *Account, model string) bool {
-	if account == nil {
+	if account == nil || !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		return false
 	}
 	// 获取系统设置

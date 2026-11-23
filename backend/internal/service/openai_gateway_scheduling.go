@@ -283,6 +283,9 @@ func resolveOpenAIUpstreamOriginator(c *gin.Context, isOfficialClient bool) stri
 
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *OpenAIGatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return nil
+	}
 	if sessionHash == "" || accountID <= 0 {
 		return nil
 	}
@@ -635,11 +638,11 @@ func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) 
 		utilization5h, has5h := resolveOpenAIQuotaUtilization(account.Extra, "5h", now)
 		utilization7d, has7d := resolveOpenAIQuotaUtilization(account.Extra, "7d", now)
 		if has5h && utilization5h >= config.Threshold5h {
-			notifyOpenAIAutoResetFromScheduler(account.ID)
+			notifyOpenAIAutoResetFromScheduler(ctx, account.ID)
 			return true, openAIQuotaAutoPauseDecision{window: "5h", threshold: config.Threshold5h, utilization: utilization5h, reason: "quota_auto_reset_pending_5h"}
 		}
 		if has7d && utilization7d >= config.Threshold7d {
-			notifyOpenAIAutoResetFromScheduler(account.ID)
+			notifyOpenAIAutoResetFromScheduler(ctx, account.ID)
 			return true, openAIQuotaAutoPauseDecision{window: "7d", threshold: config.Threshold7d, utilization: utilization7d, reason: "quota_auto_reset_pending_7d"}
 		}
 
@@ -653,7 +656,7 @@ func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) 
 			if state != nil && state.Status == OpenAIAutoResetStatusAvailable && state.AvailableCount > 0 && !openAIAutoResetStateStale(state, now) {
 				return false, openAIQuotaAutoPauseDecision{}
 			}
-			notifyOpenAIAutoResetFromScheduler(account.ID)
+			notifyOpenAIAutoResetFromScheduler(ctx, account.ID)
 			if pauseReached5h {
 				return true, openAIQuotaAutoPauseDecision{window: "5h", threshold: pause5h, utilization: utilization5h, reason: "quota_auto_reset_credit_check_5h"}
 			}
@@ -1090,7 +1093,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
 	}
-	if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
+	if s.isOpenAIAccountRequestRuntimeBlockedWithContext(ctx, account, requestedModel, requireCompact) {
 		resilience.StateFrom(ctx).NoteStickyBypassReason("runtime_blocked")
 		_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 		return nil
@@ -1345,7 +1348,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 						if profitReason == openAIProfitFilterReasonFloor {
 							_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 						}
-					} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
+					} else if s.isOpenAIAccountRequestRuntimeBlockedWithContext(ctx, account, requestedModel, requireCompact) {
 						resilience.StateFrom(ctx).NoteStickyBypassReason("runtime_blocked")
 						_ = s.deleteStickySessionAccountIDIfOwner(ctx, groupID, sessionHash, accountID)
 					} else if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
@@ -1495,7 +1498,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if selected, err = openAIMonitorProbeFreeSlot(ctx, tryAcquire); err != nil || selected != nil {
 		return selected, err
 	}
-	s.sortSelectionAccounts(ctx, candidates, req, loads)
+	waitCtx := withoutCollabSelectionHint(ctx)
+	s.sortSelectionAccounts(waitCtx, candidates, req, loads)
 	for len(candidates) > 0 {
 		a := candidates[0]
 		candidates = candidates[1:]
@@ -1511,7 +1515,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		reservation, accepted := trial.reserve(ctx, fresh, full)
 		if !accepted {
 			candidates = append(candidates, fresh)
-			s.sortSelectionAccounts(ctx, candidates, req, loads)
+			s.sortSelectionAccounts(waitCtx, candidates, req, loads)
 			continue
 		}
 		trial.selected = reservation
@@ -1584,7 +1588,7 @@ func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accoun
 	} else {
 		observeSelectionReady(ctx, accountID)
 	}
-	if err == nil && result != nil && !result.Acquired {
+	if err == nil && result != nil && !result.Acquired && resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		s.selectionFullMarks.Mark(accountID, s.selectionNow())
 	}
 	return result, err
@@ -1690,7 +1694,7 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 		observeSelectionFailure(ctx, fresh.ID, "shadow_parent_unhealthy", nil)
 		return nil
 	}
-	if s.isOpenAIAccountRequestRuntimeBlocked(fresh, requestedModel, requireCompact) {
+	if s.isOpenAIAccountRequestRuntimeBlockedWithContext(ctx, fresh, requestedModel, requireCompact) {
 		observeSelectionFailure(ctx, fresh.ID, "runtime_blocked", nil)
 		return nil
 	}
@@ -1797,7 +1801,7 @@ func (s *OpenAIGatewayService) recheckLatestOpenAIAccount(ctx context.Context, l
 		observeSelectionFailure(ctx, latest.ID, "shadow_parent_unhealthy", nil)
 		return nil
 	}
-	if !resilienceLastResortGate(ctx) && s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel, requireCompact) {
+	if !resilienceLastResortGate(ctx) && s.isOpenAIAccountRequestRuntimeBlockedWithContext(ctx, latest, requestedModel, requireCompact) {
 		observeSelectionFailure(ctx, latest.ID, "runtime_blocked", nil)
 		return nil
 	}
@@ -2288,7 +2292,11 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 		ptrs = append(ptrs, item.account)
 	}
 	s.selectionFullMarks.observe(ptrs, loadMap, s.selectionNow())
-	s.sortSelectionAccounts(ctx, ptrs, req, loadMap)
+	sortCtx := ctx
+	if fallbackWait {
+		sortCtx = withoutCollabSelectionHint(ctx)
+	}
+	s.sortSelectionAccounts(sortCtx, ptrs, req, loadMap)
 	candidates = candidates[:0]
 	for _, a := range ptrs {
 		load := loadMap[a.ID]

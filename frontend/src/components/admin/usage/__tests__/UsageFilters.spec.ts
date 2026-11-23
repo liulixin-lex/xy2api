@@ -322,12 +322,12 @@ describe('UsageFilters — request result filter (backend 0.6.5 request ledger)'
     wrapper.findAllComponents(SelectStub).find((select: any) =>
       (select.props('options') as Array<{ label: string }>).some((option) => option.label === 'admin.usage.allResults'))
 
-  it('offers 全部 / 成功 / 已救回 / 失败 / 已取消 on the usage tab and emits the numeric result', async () => {
+  it('offers 全部 / 成功 / 已救回 / 失败 / 已取消 / 本地收尾 / 本地收尾未送达 on the usage tab and emits the numeric result', async () => {
     const filters: Record<string, unknown> = defaultFilters()
     const wrapper = mountWith('usage', filters)
     const select = resultSelect(wrapper)
     expect(select).toBeDefined()
-    expect((select!.props('options') as Array<{ value: unknown }>).map((option) => option.value)).toEqual([null, 1, 2, 3, 4])
+    expect((select!.props('options') as Array<{ value: unknown }>).map((option) => option.value)).toEqual([null, 1, 2, 3, 4, 5, 6])
     select!.vm.$emit('update:modelValue', 3)
     select!.vm.$emit('change')
     await wrapper.vm.$nextTick()

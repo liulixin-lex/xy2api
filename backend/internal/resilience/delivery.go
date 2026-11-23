@@ -116,6 +116,9 @@ func (s *RequestState) swapStage(from, to string) {
 
 // DeliveredBytes returns the semantic bytes written so far (0 without probe).
 func (s *RequestState) DeliveredBytes() int64 {
+	if s != nil && s.collabParent != nil {
+		return s.collabParent.DeliveredBytes()
+	}
 	if s == nil {
 		return 0
 	}
@@ -141,6 +144,9 @@ func (s *RequestState) MarkFinished() {
 
 // ClientGone reports whether the client connection's context ended.
 func (s *RequestState) ClientGone() bool {
+	if s != nil && s.collabParent != nil {
+		return s.collabParent.ClientGone()
+	}
 	if s == nil {
 		return false
 	}
@@ -153,6 +159,9 @@ func (s *RequestState) ClientGone() bool {
 // ClientCanceled distinguishes an actual client cancellation from a timeout
 // or an upstream child context. Completion wins over later cleanup cancellation.
 func (s *RequestState) ClientCanceled() bool {
+	if s != nil && s.collabParent != nil {
+		return s.collabParent.ClientCanceled()
+	}
 	if s == nil {
 		return false
 	}
@@ -176,6 +185,9 @@ func (s *RequestState) Finished() bool {
 // requests, whether the key exceeded its abuse allowance. It returns
 // disconnected=false when the request had already finished.
 func (s *RequestState) ResolveDisconnect() (disconnected, delivered, abuse bool) {
+	if s != nil && s.collabParent != nil {
+		return s.collabParent.ResolveDisconnect()
+	}
 	if s == nil {
 		return false, false, false
 	}
@@ -262,6 +274,9 @@ func (s *RequestState) ResolveDisconnect() (disconnected, delivered, abuse bool)
 
 // Disconnect returns the resolved disconnect, without resolving it.
 func (s *RequestState) Disconnect() (disconnected, delivered, abuse bool) {
+	if s != nil && s.collabParent != nil {
+		return s.collabParent.Disconnect()
+	}
 	if s == nil {
 		return false, false, false
 	}
@@ -344,6 +359,12 @@ func UpstreamContextOnDisconnect(client, detached context.Context) context.Conte
 	}
 	ctx, cancel := context.WithCancel(detached)
 	context.AfterFunc(client, func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				NoteCollabWorkerPanic(recovered)
+				cancel()
+			}
+		}()
 		disconnected, delivered, abuse := st.ResolveDisconnect()
 		if !disconnected {
 			return
@@ -357,7 +378,7 @@ func UpstreamContextOnDisconnect(client, detached context.Context) context.Conte
 			cancel()
 			return
 		}
-		time.AfterFunc(drain, cancel)
+		time.AfterFunc(drain, func() { defer RecoverCollabWorker(); cancel() })
 	})
 	return ctx
 }
@@ -377,6 +398,9 @@ func (s *RequestState) NoteSemanticOutput(at time.Time) {
 
 // SemanticOutputAt returns the first usable output delivered to the client.
 func (s *RequestState) SemanticOutputAt() time.Time {
+	if s != nil && s.collabParent != nil {
+		return s.collabParent.SemanticOutputAt()
+	}
 	if s == nil {
 		return time.Time{}
 	}

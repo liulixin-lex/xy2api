@@ -80,6 +80,8 @@ export interface GatewayResilienceSettings {
    * outbound models after mapping (at most 16, 1 to 128 characters each, no duplicates).
    */
   collaboration_plaintext: { enabled: boolean; models: string[] }
+  /** Older backends omit this section. Only records defaults to true. */
+  collab?: CollaborationSettings
   /**
    * Standalone function_call_output items (agent namespace, no call_id) that third-party relays
    * reject. `admin_names` extends the built-in names (at most 64, ^[A-Za-z0-9_]{1,128}$, no
@@ -90,9 +92,23 @@ export interface GatewayResilienceSettings {
 
 export type FCOCompatMode = 'off' | 'reactive' | 'proactive'
 
+export interface CollaborationSettings {
+  incremental_declarations: boolean
+  records: boolean
+  tree_affinity: boolean
+  ladder: boolean
+  lossless_first: boolean
+  local_ending: { mode: 'off' | 'groups' | 'all'; groups: number[] }
+  record_routing: boolean
+  strict_marker_veto: boolean
+}
+
+/** Preserve server extensions verbatim; the UI validates only deliberate edits. */
+export type GatewayResilienceSettingsDocument = Omit<GatewayResilienceSettings, 'collab'> & { collab?: unknown }
+
 export interface GatewayResilienceSettingsResponse {
-  settings: GatewayResilienceSettings
-  defaults: GatewayResilienceSettings
+  settings: GatewayResilienceSettingsDocument
+  defaults: GatewayResilienceSettingsDocument
 }
 
 export interface ResilienceMetricRow {
@@ -181,7 +197,7 @@ export async function getSettings(): Promise<GatewayResilienceSettingsResponse> 
   return data
 }
 
-export async function updateSettings(settings: GatewayResilienceSettings): Promise<GatewayResilienceSettingsResponse> {
+export async function updateSettings(settings: GatewayResilienceSettingsDocument): Promise<GatewayResilienceSettingsResponse> {
   const { data } = await apiClient.put<GatewayResilienceSettingsResponse>(`${base}/settings/gateway-resilience`, settings)
   return data
 }

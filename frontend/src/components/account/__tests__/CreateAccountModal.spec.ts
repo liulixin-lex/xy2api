@@ -228,6 +228,94 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it.each([false, true])('creates an account with explicit plaintext consent %s', async (enabled) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    const toggle = wrapper.get('[data-testid="create-openai-collaboration-plaintext-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-testid="collaboration-plaintext-consent"]').findAll('li')).toHaveLength(3)
+    if (enabled) await toggle.trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Synthetic account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('fixture')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0][0].extra.openai_collaboration_plaintext).toBe(enabled)
+    wrapper.unmount()
+  })
+
+  it('resets plaintext consent on reopen and keeps it out of other platforms', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-openai-collaboration-plaintext-toggle"]').trigger('click')
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await selectButtonByText(wrapper, 'OpenAI')
+    expect(wrapper.get('[data-testid="create-openai-collaboration-plaintext-toggle"]').attributes('aria-checked')).toBe('false')
+    wrapper.unmount()
+    const other = await submitApiKeyAccount('anthropic')
+    expect(other.find('[data-testid="create-openai-collaboration-plaintext-toggle"]').exists()).toBe(false)
+    expect(createAccountMock.mock.calls[0][0].extra).not.toHaveProperty('openai_collaboration_plaintext')
+    other.unmount()
+  })
+
+  it.each(['manual', 'agent_identity'])('preserves existing plaintext on untouched %s session upserts', async (method) => {
+    const wrapper = await openCodexImportStep()
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    flow.vm.inputMethod = method
+    const content = method === 'agent_identity'
+      ? JSON.stringify({ auth_mode: 'agent_identity', agent_identity: { agent_runtime_id: 'synthetic-runtime' } })
+      : 'synthetic-session'
+    flow.vm.$emit('import-codex-session', content)
+    await flushPromises()
+    expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
+    const payload = importCodexSessionMock.mock.calls[0][0]
+    expect(payload.update_existing).toBe(true)
+    expect(payload.extra).not.toHaveProperty('openai_collaboration_plaintext')
+    // Both import handlers merge incoming extra over stored extra, key by key.
+    const stored = { openai_collaboration_plaintext: true }
+    expect({ ...stored, ...payload.extra }.openai_collaboration_plaintext).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('forgets an earlier plaintext choice when reopening for an untouched import', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-openai-collaboration-plaintext-toggle"]').trigger('click')
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Synthetic import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0][0].extra).not.toHaveProperty('openai_collaboration_plaintext')
+    wrapper.unmount()
+  })
+
+  it('keeps explicit false for untouched creation-only PAT imports', async () => {
+    const wrapper = await openCodexImportStep()
+    await wrapper.get('[data-testid="import-codex-pat"]').trigger('click')
+    await flushPromises()
+    expect(createOpenAICodexPATMock.mock.calls[0][0].extra.openai_collaboration_plaintext).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('carries plaintext consent %s through Codex session import', async (enabled) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-openai-collaboration-plaintext-toggle"]').trigger('click')
+    if (!enabled) await wrapper.get('[data-testid="create-openai-collaboration-plaintext-toggle"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Synthetic import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
+    expect(importCodexSessionMock.mock.calls[0][0].extra.openai_collaboration_plaintext).toBe(enabled)
+    wrapper.unmount()
+  })
+
   it('sets month and year expiry presets without submitting the account form', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-01-31T12:34:00'))

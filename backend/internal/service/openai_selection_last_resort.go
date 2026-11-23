@@ -18,7 +18,9 @@ func (s *OpenAIGatewayService) pickOpenAILastResort(ctx context.Context, req Ope
 	if s.concurrencyService != nil {
 		loads, _ = s.concurrencyService.GetAccountsLoadBatchFresh(ctx, selectionLoadRequests(accounts))
 	}
-	s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
+	if resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
+	}
 	request := s.selectionRequest(ctx, req, loads)
 	request.newSessionOutcome = req.newSessionOutcome
 	view, now := s.selectionView(), s.selectionNow()
@@ -194,7 +196,7 @@ func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, req Ope
 	state := resilience.StateFrom(ctx)
 	state.SetLastResort(account.ID)
 	groupID := req.GroupID
-	s.resilience.noteLastResortSelected(account.ID)
+	s.resilience.noteLastResortSelected(ctx, account.ID)
 	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
 	slog.Warn("resilience.last_resort", append(resilience.EventFields(ctx),
 		"group_id", derefGroupID(groupID),

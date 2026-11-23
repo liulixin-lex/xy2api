@@ -44,6 +44,7 @@ func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accoun
 	view, now := s.selectionView(), s.selectionNow()
 	request := s.selectionRequest(ctx, req, loads)
 	request.newSessionOutcome = req.newSessionOutcome
+	hint := openAICollabSelectionHint(ctx)
 	keys := make(map[int64]selectionKey, len(accounts))
 	for _, account := range accounts {
 		keys[account.ID] = buildSelectionKey(view, derefGroupID(req.GroupID), req.RequestedModel, account, request, now)
@@ -58,8 +59,9 @@ func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accoun
 			}
 		}
 
-		return selectionLess(keys[accounts[i].ID], keys[accounts[j].ID])
+		return openAICollabSelectionLess(keys[accounts[i].ID], keys[accounts[j].ID], hint)
 	})
+	s.orderCollabSelection(ctx, accounts, keys, req.RequireCompact)
 }
 
 // selectionCandidates is shared by new placement and owner migration. Compact
@@ -178,7 +180,9 @@ func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts 
 	if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
 		outcome = req.newSessionOutcome
 	}
-	s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
+	if resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
+	}
 	available := make([]*Account, 0, len(accounts))
 	for _, a := range accounts {
 		if load := loads[a.ID]; load == nil || load.LoadRate < 100 {
@@ -239,7 +243,7 @@ func (s *OpenAIGatewayService) switchVetoOpportunity(ctx context.Context, req Op
 }
 
 func (s *OpenAIGatewayService) selectSessionOwner(ctx context.Context, req OpenAIAccountScheduleRequest, owner *Account, members func() ([]Account, error)) *AccountSelectionResult {
-	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAINoStickyMigration(ctx) || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
+	if req.Platform != PlatformOpenAI || req.SessionHash == "" || openAINoStickyMigration(ctx) || openAICollabLeaseSuppressesMigration(ctx) || openAISelectionExempt(ctx) || openAISelectionManualOnly(ctx) {
 		return nil
 	}
 	cache, ok := s.cache.(OpenAIStickyVersionedCache)

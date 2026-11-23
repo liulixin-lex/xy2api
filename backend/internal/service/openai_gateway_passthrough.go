@@ -2672,7 +2672,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// upstream context is detached, so close the body (review P0).
 	stopPreludeCancel := func() bool { return false }
 	if guarded {
-		stopPreludeCancel = context.AfterFunc(reqCtx, func() { _ = resp.Body.Close() })
+		stopPreludeCancel = context.AfterFunc(reqCtx, func() {
+			defer resilience.RecoverCollabWorker()
+			_ = resp.Body.Close()
+		})
 		defer func() {
 			if stopPreludeCancel() && reqCtx.Err() != nil {
 				_ = resp.Body.Close()
@@ -3217,7 +3220,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		}
 		if err := scanErr; err != nil {
 			if (sawDone || sawTerminalEvent) && !sawFailedEvent {
-				s.clearOpenAIProxyStreamDisconnect(account)
+				s.clearOpenAIProxyStreamDisconnect(ctx, account)
 				return resultWithUsage(), nil
 			}
 			if sawFailedEvent {
@@ -3242,7 +3245,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			if clientDisconnected {
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete after disconnect: %w", err)
 			}
-			s.recordOpenAIProxyStreamDisconnect(account, err, upstreamRequestID)
+			s.recordOpenAIProxyStreamDisconnect(ctx, account, err, upstreamRequestID)
 			resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, err, true)
 			logger.LegacyPrintf("service.openai_gateway",
 				"[OpenAI passthrough] 流读取异常中断: account=%d request_id=%s err=%v",
@@ -3265,12 +3268,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				return resultWithUsage(),
 					s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before a terminal event")
 			}
-			s.recordOpenAIProxyStreamDisconnect(account, errors.New("stream ended before terminal event"), upstreamRequestID)
+			s.recordOpenAIProxyStreamDisconnect(ctx, account, errors.New("stream ended before terminal event"), upstreamRequestID)
 			resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, true)
 			return resultWithUsage(), errors.New("stream usage incomplete: missing terminal event")
 		}
 		if (sawDone || sawTerminalEvent) && !sawFailedEvent {
-			s.clearOpenAIProxyStreamDisconnect(account)
+			s.clearOpenAIProxyStreamDisconnect(ctx, account)
 		}
 		logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, terminalEventType, clientDisconnected, usageSource != "missing")
 

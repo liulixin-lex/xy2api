@@ -100,12 +100,14 @@
               <p class="mt-1 max-w-prose text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.settings.sections.collaborationPlaintextHint') }}</p>
               <p class="mt-1 max-w-prose text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.settings.sections.collaborationPlaintextScope') }}</p>
               <p class="mt-1 max-w-prose text-xs text-gray-500 dark:text-dark-400">{{ t('admin.resilience.settings.sections.collaborationPlaintextOff') }}</p>
+              <CollaborationPlaintextConsent id="resilience-collaboration-consent" />
             </div>
             <Toggle
               v-model="draft.collaboration_plaintext.enabled"
               :disabled="saving || !draft.enabled"
               :aria-label="t('admin.resilience.settings.sections.collaborationPlaintext')"
               data-testid="resilience-section-collaborationPlaintext"
+              aria-describedby="resilience-collaboration-consent"
             />
           </div>
           <div class="mt-3 max-w-xl">
@@ -136,6 +138,8 @@
             >{{ t('admin.resilience.settings.fields.collaborationModelsEmpty') }}</p>
           </div>
         </div>
+
+        <CollaborationSettingsFields v-model="collab" :disabled="saving || !draft.enabled || collabUnsupported" :unsupported="collabUnsupported" />
 
         <div class="rounded-xl border border-gray-200 p-4 lg:col-span-2 dark:border-dark-600" data-testid="resilience-card-fcoCompat">
           <div class="min-w-0">
@@ -241,8 +245,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { adminAPI } from '@/api/admin'
-import type { GatewayResilienceSettings } from '@/api/admin/resilience'
+import type { GatewayResilienceSettingsDocument } from '@/api/admin/resilience'
 import Toggle from '@/components/common/Toggle.vue'
+import CollaborationPlaintextConsent from '@/components/common/CollaborationPlaintextConsent.vue'
+import CollaborationSettingsFields from './CollaborationSettingsFields.vue'
+import { readCollaborationSettings, collaborationDefaults, patchCollaborationSettings, validCollaborationEdit, mergeCollaborationEdit, sameValue } from '@/utils/collaborationSettings'
 import Icon from '@/components/icons/Icon.vue'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import {
@@ -252,7 +259,7 @@ import {
   isFCOCompatMode
 } from '@/utils/fcoCompat'
 
-type Settings = GatewayResilienceSettings
+type Settings = GatewayResilienceSettingsDocument
 
 // A card without get/set has no switch of its own (its switches still follow the master switch).
 interface SectionDef {
@@ -284,6 +291,7 @@ const { t } = useI18n()
 const draft = ref<Settings | null>(null)
 const defaults = ref<Settings | null>(null)
 const baseline = ref('')
+const serverCollab = ref<unknown>(undefined)
 const advancedText = ref('')
 const loading = ref(false), saving = ref(false), loaded = ref(false), loadFailed = ref(false), saved = ref(false)
 const error = ref('')
@@ -346,6 +354,14 @@ function fieldsOf(section: string): NumberField[] {
 function switchesOf(section: string): SwitchField[] {
   return switchFields.filter((field) => field.section === section)
 }
+
+// Reading defaults must not add an unsupported section to an older server's document.
+const collab = computed({
+  get: () => readCollaborationSettings(draft.value?.collab) ?? collaborationDefaults(),
+  set: (value) => { if (draft.value) draft.value.collab = patchCollaborationSettings(draft.value.collab, value) }
+})
+
+const collabUnsupported = computed(() => readCollaborationSettings(draft.value?.collab) === null)
 
 const dirty = computed(() => draft.value !== null && JSON.stringify(draft.value) !== baseline.value)
 
@@ -426,11 +442,15 @@ const fcoCompatDefaults = (): FCOCompatSection => ({ mode: 'reactive', admin_nam
 
 // A server answer without a usable section renders with the defaults (mirrors resilience.Defaults).
 function withFCOCompat(doc: SettingsDocument): Settings {
-  return { ...doc, fco_compat: isFCOCompatSection(doc.fco_compat) ? doc.fco_compat : fcoCompatDefaults() }
+  return {
+    ...doc,
+    fco_compat: isFCOCompatSection(doc.fco_compat) ? doc.fco_compat : fcoCompatDefaults()
+  }
 }
 
 function accept(settings: Settings, defaultSettings?: Settings) {
   draft.value = clone(settings)
+  serverCollab.value = settings.collab === undefined ? undefined : clone(settings.collab)
   baseline.value = JSON.stringify(draft.value)
   advancedText.value = JSON.stringify(draft.value, null, 2)
   syncCollabModelsText()
@@ -462,6 +482,18 @@ function applyAdvanced() {
     error.value = t('admin.resilience.settings.invalidJson')
     return
   }
+  // Server responses are tolerant; only a changed collaboration section is an edit.
+  const rawCollab = parsed.collab === undefined ? draft.value.collab : parsed.collab
+  const collabChanged = !sameValue(rawCollab, draft.value.collab)
+  if (collabChanged && !validCollaborationEdit(rawCollab, serverCollab.value)) {
+    error.value = t('admin.resilience.settings.invalidJson')
+    return
+  }
+  const nextCollab = collabChanged ? mergeCollaborationEdit(draft.value.collab, rawCollab) : rawCollab
+  if (collabChanged && !validCollaborationEdit(nextCollab, serverCollab.value)) {
+    error.value = t('admin.resilience.settings.invalidJson')
+    return
+  }
   // A document without the section (saved before it existed) keeps the current one.
   const fco = parsed.fco_compat === undefined ? clone(draft.value.fco_compat) : parsed.fco_compat
   if (!isFCOCompatSection(fco)) {
@@ -481,13 +513,25 @@ function applyAdvanced() {
     error.value = t('admin.resilience.settings.invalidFcoCompatNamesCount', { max: FCO_COMPAT_MAX_ADMIN_NAMES })
     return
   }
-  draft.value = clone({ ...parsed, fco_compat: { ...fco, admin_names: names } })
+  draft.value = clone(withFCOCompat({
+    ...parsed,
+    ...(nextCollab === undefined ? {} : { collab: nextCollab }),
+    fco_compat: { ...fco, admin_names: names }
+  }))
   syncCollabModelsText()
 }
 
 function resetDefaults() {
   if (!defaults.value) return
+  const currentCollab = draft.value?.collab
+  const resetCollab = readCollaborationSettings(currentCollab)
+    ? patchCollaborationSettings(currentCollab, readCollaborationSettings(defaults.value.collab) ?? collaborationDefaults())
+    : currentCollab
   draft.value = clone(defaults.value)
+  delete draft.value.collab
+  if (resetCollab !== undefined && (currentCollab !== undefined || Object.keys(resetCollab as object).length)) {
+    draft.value.collab = resetCollab
+  }
   advancedText.value = JSON.stringify(draft.value, null, 2)
   syncCollabModelsText()
 }
@@ -549,7 +593,10 @@ async function save() {
   }
   saving.value = true
   try {
-    const result = await adminAPI.resilience.updateSettings(clone(draft.value))
+    const payload = clone(draft.value)
+    // Unsupported server values stay visible in JSON, but cannot block unrelated saves.
+    if (collabUnsupported.value) delete payload.collab
+    const result = await adminAPI.resilience.updateSettings(payload)
     if (disposed) return
     if (!isSettings(result?.settings)) throw new Error('unexpected gateway resilience settings')
     accept(withFCOCompat(result.settings), isSettings(result.defaults) ? withFCOCompat(result.defaults) : undefined)
