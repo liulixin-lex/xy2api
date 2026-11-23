@@ -5,16 +5,55 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type collabWiringConsumer struct {
 	resilience.NoopCollabDeliveryConsumer
 	events []resilience.CollabDeliveryEvent
+}
+
+func TestCollabWiringRestorationSnapshot(t *testing.T) {
+	quietReplayLogs(t)
+	for _, strict := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy_marker", true: "strict_marker"}[strict], func(t *testing.T) {
+			consumer := &collabWiringConsumer{}
+			previous := collabResponseFault
+			collabResponseFault = func(req *http.Request, response *http.Response) {
+				state := resilience.StateFrom(req.Context()).CollabState()
+				state.DeliveryHooks.Register(consumer)
+				changed := resilience.Current().Clone()
+				changed.Collab.StrictMarkerVeto = !strict
+				resilience.Publish(changed)
+				arguments, _ := json.Marshal(map[string]string{"message": strings.Repeat("a.", 40)})
+				item, _ := json.Marshal(map[string]any{"id": "item_sample", "call_id": "call_sample", "type": "function_call", "namespace": "collaboration-xy", "name": "send_message", "arguments": string(arguments)})
+				body := `{"id":"resp_sample","object":"response","status":"completed","model":"gpt-5.5","output":[` + string(item) + `],"usage":{"input_tokens":1,"output_tokens":1}}`
+				response.Header.Set("Content-Type", "application/json")
+				response.Body = io.NopCloser(strings.NewReader(body))
+			}
+			t.Cleanup(func() { collabResponseFault = previous })
+			snapshot := resilience.Defaults()
+			snapshot.Collab.StrictMarkerVeto = strict
+			result := runCollaborationReplay(t, replayCase{Name: "restoration_snapshot", Route: "responses", Form: "http", Turns: 1, MixedMarkers: true, Items: []json.RawMessage{json.RawMessage(replayQuestion)}}, snapshot)
+			require.True(t, result.Turns[0].Success)
+			var delivered string
+			for _, event := range consumer.events {
+				if event.Phase == resilience.CollabDeliveryPhaseWritten && event.EventType == "response.json" {
+					delivered = event.Payload
+				}
+			}
+			require.NotEmpty(t, delivered)
+			require.Equal(t, "collaboration", gjson.Get(delivered, "output.0.namespace").String())
+			require.Equal(t, !strict, gjson.Get(delivered, "output.0.encrypted_function_args").Exists(), "strict marker veto must use the ingress snapshot")
+		})
+	}
 }
 
 func (c *collabWiringConsumer) Received(_ context.Context, e resilience.CollabDeliveryEvent) {

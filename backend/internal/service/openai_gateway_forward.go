@@ -54,7 +54,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// Run the same complete checks on original bytes without applying edits;
 	// requests that cannot obtain a raw plan cannot gain one after normalization.
 	collabRawBlocked, collabRawConflict := true, false
-	if resilience.Current().CollaborationPlaintextOn() && bytes.Contains(body, []byte(`"collaboration"`)) {
+	if openAICollabSettings(c).CollaborationPlaintextOn() && bytes.Contains(body, []byte(`"collaboration"`)) {
 		_, rawPlan, rawOutcome := planCodexCollaborationPlaintext(body)
 		collabRawBlocked = rawPlan == nil
 		collabRawConflict = rawOutcome == codexCollabConflict
@@ -1217,7 +1217,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Send request
 		upstreamStart := time.Now()
 		beginOpenAICollabResponse(ctx)
+		beginOpenAICollabRestoration(c, false)
 		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
+		beginOpenAICollabRestoration(c, true)
 		fcoCompat.dispatched(ctx, account, resp)
 		noteOpenAIRequestRepairResent(ctx, c, account)
 		if rejectedFieldRetryEvent != nil {

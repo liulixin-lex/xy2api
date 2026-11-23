@@ -30,7 +30,7 @@ func openAICollaborationEligible(c *gin.Context, a *Account, model string, trans
 		transport == OpenAIUpstreamTransportHTTPSSE && !passthrough && !compact && !bridge &&
 		a != nil && a.IsOpenAI() && a.IsOpenAICollaborationPlaintextEnabled() && !a.IsOpenAIResponsesFlattenNamespacesEnabled() &&
 		openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) &&
-		resilience.Current().CollaborationPlaintextModel(model)
+		openAICollabSettings(c).CollaborationPlaintextModel(model)
 }
 
 // Only declaration carriers are visited; historical calls and arbitrary input
@@ -57,6 +57,8 @@ func declaresOpenAICollaboration(body []byte) bool {
 
 type openAICollabAttempt struct {
 	restorer          *codexCollabRestorer
+	generation        resilience.CollabGeneration
+	sendSequence      resilience.CollabSendSequence
 	outcome           codexCollabOutcome
 	model             string
 	applied           bool
@@ -75,7 +77,13 @@ func armOpenAICollaboration(c *gin.Context, body []byte, model string, eligible 
 	if eligible {
 		body, plan, outcome = applyCodexCollaborationPlaintext(body)
 	}
-	a := &openAICollabAttempt{restorer: newCodexCollabRestorer(plan), outcome: outcome, model: model, applied: plan != nil}
+	restorer := NewCollabResponseRestorer(openAICollabLegacyRestorePlan(plan), *openAICollabSettings(c), 0, 0)
+	a := &openAICollabAttempt{restorer: restorer, outcome: outcome, model: model, applied: plan != nil}
+	if c != nil && c.Request != nil {
+		if request := openAICollabRequestFrom(c.Request.Context()); request != nil {
+			request.state.DeliveryHooks.Register(restorer)
+		}
+	}
 	if eligible {
 		a.eligibilitySource = "account"
 	}
