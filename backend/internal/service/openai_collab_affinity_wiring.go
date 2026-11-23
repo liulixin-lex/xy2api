@@ -1,8 +1,6 @@
 package service
 
 import (
-	"context"
-
 	"github.com/gin-gonic/gin"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
@@ -19,18 +17,25 @@ func (s *OpenAIGatewayService) CollabTreeAffinity() *resilience.CollabTreeAffini
 		return nil
 	}
 	if s.collabTreeAffinity == nil {
-		s.collabTreeAffinity = resilience.NewCollabTreeAffinity(resilience.CollabRecordMaxEntries, s.openAIWSResponseStickyTTL())
+		// The existing session binding TTL is global in this gateway; its
+		// group parameter is currently unused. Response-ID expiry is separate.
+		s.collabTreeAffinity = resilience.NewCollabTreeAffinity(resilience.CollabRecordMaxEntries, s.openAIStickyBindingTTL(nil))
 	}
 	return s.collabTreeAffinity
 }
 
 func (s *OpenAIGatewayService) PrepareOpenAICollabAffinity(c *gin.Context, apiKeyID int64, session, platform string, native bool) {
-	defer func() { _ = recover() }()
+	defer func() {
+		if recover() != nil {
+			resilience.Count("collab_wiring_panic", 0, 0, "affinity")
+		}
+	}()
 	r := openAICollabRequestFrom(c.Request.Context())
 	if r == nil || !r.settings.CollabTreeAffinityOn() || platform != PlatformOpenAI || !native {
 		return
 	}
-	ctx := WithOpenAICollabTreeAffinity(c.Request.Context(), s.CollabTreeAffinity(), r.settings, r.state.GroupID, resilience.CollabTreeHint{Scope: r.scope, Thread: r.state.Thread, Parent: r.state.Parent}, r.state.Role, r.ingress.EncryptedAgent || r.ingress.EncryptedTool)
+	ctx := WithOpenAITerminalRejectionScope(c.Request.Context(), c, r.state.Original)
+	ctx = WithOpenAICollabTreeAffinity(ctx, s.CollabTreeAffinity(), r.settings, r.state.GroupID, resilience.CollabTreeHint{Scope: r.scope, Thread: r.state.Thread, Parent: r.state.Parent}, r.state.Role, r.ingress.EncryptedAgent || r.ingress.EncryptedTool)
 	c.Request = c.Request.WithContext(ctx)
 	if affinity := openAICollabAffinityFrom(ctx); affinity != nil && r.scope.Tree == "" && affinity.identity.Scope.Tree != "" {
 		r.scope = affinity.identity.Scope
@@ -39,10 +44,4 @@ func (s *OpenAIGatewayService) PrepareOpenAICollabAffinity(c *gin.Context, apiKe
 		r.initObservation(c)
 	}
 	s.PrepareOpenAICollabThreadBinding(ctx, apiKeyID, session, platform, GetOpenAIClientTransport(c), native)
-}
-
-func openAICollabDeliveredSuccess(ctx context.Context, account int64) {
-	if request := openAICollabRequestFrom(ctx); request != nil {
-		NoteOpenAICollabSuccess(ctx, account, false)
-	}
 }

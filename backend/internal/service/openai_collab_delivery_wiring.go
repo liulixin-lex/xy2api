@@ -27,6 +27,7 @@ type openAICollabDeliveryWriter struct {
 	gin.ResponseWriter
 	mu          sync.Mutex
 	ctx         context.Context
+	callbackCtx context.Context
 	hooks       *resilience.CollabDeliveryHooks
 	current     resilience.CollabDeliveryEvent
 	generations []resilience.CollabDeliveryEvent
@@ -42,7 +43,7 @@ type openAICollabDeliveryWriter struct {
 
 func (w *openAICollabDeliveryWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-func (w *openAICollabDeliveryWriter) begin(local bool) resilience.CollabDeliveryEvent {
+func (w *openAICollabDeliveryWriter) begin(ctx context.Context, local bool) resilience.CollabDeliveryEvent {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.current.Generation != 0 {
@@ -57,6 +58,7 @@ func (w *openAICollabDeliveryWriter) begin(local bool) resilience.CollabDelivery
 		send++
 	}
 	w.current = resilience.CollabDeliveryEvent{Generation: generation, SendSeq: send}
+	w.callbackCtx = ctx
 	w.generations = append(w.generations, w.current)
 	w.local, w.sequence, w.failed, w.oversized = local, 0, nil, false
 	w.partial, w.pending, w.pendingSize = nil, nil, 0
@@ -80,6 +82,7 @@ type CollabDeliveryMark struct {
 	event  resilience.CollabDeliveryEvent
 	local  bool
 	failed error
+	ctx    context.Context
 }
 
 func MarkOpenAICollabDelivery(ctx context.Context) CollabDeliveryMark {
@@ -87,7 +90,7 @@ func MarkOpenAICollabDelivery(ctx context.Context) CollabDeliveryMark {
 		w := request.delivery
 		w.mu.Lock()
 		defer w.mu.Unlock()
-		return CollabDeliveryMark{writer: w, event: w.current, local: w.local, failed: w.failed}
+		return CollabDeliveryMark{writer: w, event: w.current, local: w.local, failed: w.failed, ctx: w.callbackCtx}
 	}
 	return CollabDeliveryMark{}
 }
@@ -100,13 +103,14 @@ func (mark CollabDeliveryMark) Restore() {
 			w.saveCurrent()
 		}
 		w.current, w.local, w.failed = mark.event, mark.local, mark.failed
+		w.callbackCtx = mark.ctx
 		w.partial, w.pending, w.pendingSize, w.oversized = nil, nil, 0, false
 	}
 }
 
 func beginOpenAICollabResponse(ctx context.Context) {
 	if request := openAICollabRequestFrom(ctx); request != nil {
-		event := request.delivery.begin(false)
+		event := request.delivery.begin(ctx, false)
 		request.state.Response = resilience.CollabResponseState{Generation: event.Generation}
 		request.state.Sent++
 	}
@@ -116,7 +120,7 @@ func beginOpenAICollabResponse(ctx context.Context) {
 // Local frames retain delivery tracking but never authorize executable records.
 func BeginOpenAICollabLocalResponse(ctx context.Context) {
 	if request := openAICollabRequestFrom(ctx); request != nil {
-		event := request.delivery.begin(true)
+		event := request.delivery.begin(ctx, true)
 		request.state.Response = resilience.CollabResponseState{Generation: event.Generation}
 	}
 }
@@ -161,13 +165,14 @@ func (w *openAICollabDeliveryWriter) write(p []byte, asString bool) (int, error)
 	defer w.mu.Unlock()
 	if w.current.Generation == 0 {
 		w.current.Generation, w.local = 1, true
+		w.callbackCtx = w.ctx
 		w.generations = append(w.generations, w.current)
 	}
 	stream := strings.Contains(w.Header().Get("Content-Type"), "text/event-stream")
 	frames := w.frames(p, stream)
 	for _, frame := range frames {
-		w.hooks.Received(w.ctx, frame.event, frame.payload)
-		w.hooks.AboutToWrite(w.ctx, frame.event, frame.payload)
+		w.hooks.Received(w.callbackCtx, frame.event, frame.payload)
+		w.hooks.AboutToWrite(w.callbackCtx, frame.event, frame.payload)
 	}
 	var n int
 	var err error
@@ -202,7 +207,7 @@ func (w *openAICollabDeliveryWriter) write(p []byte, asString bool) (int, error)
 func (w *openAICollabDeliveryWriter) written(frame openAICollabDeliveryFrame) {
 	frame.event.Successful = true
 	frame.event.BytesWritten = len(frame.payload)
-	w.hooks.Written(w.ctx, frame.event, frame.payload)
+	w.hooks.Written(w.callbackCtx, frame.event, frame.payload)
 }
 
 func (w *openAICollabDeliveryWriter) Flush() {

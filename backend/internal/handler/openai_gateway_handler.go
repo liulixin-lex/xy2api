@@ -734,6 +734,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIGuardianParentAffinity(
 		c.Request.Context(), c, sessionHashBody, reqModel,
 	))
+	h.gatewayService.PrepareOpenAICollabAffinity(c, apiKey.ID, sessionHash, requestPlatform, !legacyCompact && !nativeV2)
 	scope := openAIResponsesRequestScope(imageIntent)
 	defer beginGatewayRequestWithScope(c, func() *service.APIKey { return apiKey }, reqModel, reqStream, h.gatewayService, scope)()
 
@@ -965,6 +966,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		account = selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
+		service.NoteOpenAICollabAdmission(c.Request.Context(), account.ID, false)
 
 		// Forward request
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
@@ -1212,6 +1214,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
+		if result != nil && result.CompletedForDelivery() {
+			service.NoteOpenAICollabSuccess(c.Request.Context(), account.ID, false)
+		}
 		submitResponsesUsage(account, result)
 		reqLog.Debug("openai.request_completed",
 			zap.Int64("account_id", account.ID),

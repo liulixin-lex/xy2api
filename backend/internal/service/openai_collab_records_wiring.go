@@ -19,7 +19,11 @@ func (r *openAICollabRequest) beginRecords(ctx context.Context) {
 	}
 	input := CollabRecordDeliveryInput{Settings: r.settings, HasTools: r.ingress.Declared, AgentCiphertext: r.ingress.EncryptedAgent, Scope: r.scope, Account: account, Site: site, Generation: r.send.value.Generation, SendSeq: r.send.value.Seq}
 	if consumer := r.gateway.NewCollabRecordDelivery(input); consumer != nil {
-		r.state.DeliveryHooks.Register(consumer)
+		if r.settings.CollabLeaseMigrationSuppressionOn() && openAICollabAffinityFrom(ctx) != nil {
+			r.state.DeliveryHooks.Register(&openAICollabLeaseConsumer{CollabRecordDelivery: consumer, request: r})
+		} else {
+			r.state.DeliveryHooks.Register(consumer)
+		}
 	}
 	current := gjson.GetBytes(r.state.CurrentBody, "input").Array()
 	original := gjson.GetBytes(r.state.Original, "input").Array()
@@ -55,6 +59,7 @@ func (s *openAICollabSendObservation) consumed() {
 		}
 	}
 	s.request.gateway.RecordCollabConsumed(s.ctx, s.request.settings, true, s.value.Account, s.unchanged)
+	s.request.releaseAcceptedLeases(s.ctx, s.unchanged, resilience.CollabLeaseReleaseConsumed)
 	for _, key := range s.unchanged {
 		s.request.observation.ObserveDelivery(resilience.CollabDeliveryObservation{Delivery: key.Delivery, Item: key.Item, Digest: key.Digest, Position: resilience.CollabPositionMessage, Form: resilience.CollabFormCiphertext, Outcome: resilience.CollabDeliveryOutcomeAcceptedOriginal})
 	}
