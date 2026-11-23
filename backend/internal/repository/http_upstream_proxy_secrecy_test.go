@@ -102,7 +102,7 @@ func TestHTTPUpstreamProxyCredentialsStayOutOfLogsAndErrors(t *testing.T) {
 
 			key, _, err := normalizeProxyURL(raw)
 			require.NoError(t, err)
-			svc.recordOpenAIHTTP2Failure(service.HTTPUpstreamProfileOpenAI, upstreamProtocolModeOpenAIH2, key, errors.New("http2: protocol error"))
+			svc.recordOpenAIHTTP2Failure(context.Background(), service.HTTPUpstreamProfileOpenAI, upstreamProtocolModeOpenAIH2, key, errors.New("http2: protocol error"))
 			if scheme == "http" || scheme == "https" {
 				require.True(t, svc.isOpenAIHTTP2FallbackActive(key))
 				fallback, err := svc.getClientEntry(raw, 7, 1, service.HTTPUpstreamProfileOpenAI, false, false)

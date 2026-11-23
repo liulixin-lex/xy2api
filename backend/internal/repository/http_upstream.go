@@ -31,6 +31,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/pkg/servertiming"
 	"github.com/liulixin-lex/xy2api/internal/pkg/tlsfingerprint"
 	"github.com/liulixin-lex/xy2api/internal/pkg/xai"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/liulixin-lex/xy2api/internal/util/urlvalidator"
 )
@@ -227,13 +228,13 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	resp, err := doUpstreamRequest(client, req)
 	service.RecordGatewayHTTPAttemptResult(req.Context(), resp, err)
 	if err != nil {
-		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
+		s.recordOpenAIHTTP2Failure(req.Context(), profile, entry.protocolMode, entry.proxyKey, err)
 		// 请求失败，立即减少计数
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 		return nil, err
 	}
-	s.recordOpenAIHTTP2Success(profile, entry.protocolMode, entry.proxyKey)
+	s.recordOpenAIHTTP2Success(req.Context(), profile, entry.protocolMode, entry.proxyKey)
 
 	// 包装响应体，在关闭时自动减少计数并更新时间戳
 	// 这确保了流式响应（如 SSE）在完全读取前不会被淘汰
@@ -1181,7 +1182,10 @@ func isUpstreamTimeoutError(err error) bool {
 	return false
 }
 
-func (s *httpUpstreamService) recordOpenAIHTTP2Failure(profile service.HTTPUpstreamProfile, protocolMode, proxyKey string, err error) {
+func (s *httpUpstreamService) recordOpenAIHTTP2Failure(ctx context.Context, profile service.HTTPUpstreamProfile, protocolMode, proxyKey string, err error) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	if profile != service.HTTPUpstreamProfileOpenAI || protocolMode != upstreamProtocolModeOpenAIH2 {
 		return
 	}
@@ -1201,7 +1205,10 @@ func (s *httpUpstreamService) recordOpenAIHTTP2Failure(profile service.HTTPUpstr
 	}
 }
 
-func (s *httpUpstreamService) recordOpenAIHTTP2Success(profile service.HTTPUpstreamProfile, protocolMode, proxyKey string) {
+func (s *httpUpstreamService) recordOpenAIHTTP2Success(ctx context.Context, profile service.HTTPUpstreamProfile, protocolMode, proxyKey string) {
+	if !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
+		return
+	}
 	if profile != service.HTTPUpstreamProfileOpenAI || protocolMode != upstreamProtocolModeOpenAIH2 {
 		return
 	}
