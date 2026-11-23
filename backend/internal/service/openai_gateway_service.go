@@ -489,6 +489,7 @@ type OpenAIGatewayService struct {
 	collabRecords         *resilience.SafeCollabRecordsStore
 	collabRecordsMu       sync.Mutex
 	collabRecordsClosed   bool
+	collabTreeAffinity    *resilience.CollabTreeAffinity
 	schedAttemptRecorder  SchedAttemptRecorder
 	selectionBoard        *OpenAISelectionBoard
 	selectionFullMarks    fullMarks
