@@ -99,7 +99,7 @@ func TestCollabLocalEndingPriorRejectionsAndAsyncCounter(t *testing.T) {
 	retryable := NewCollabSavedTerminal(CollabTerminalSnapshot{Retryable: true})
 	permanent := NewCollabSavedTerminal(CollabTerminalSnapshot{Retryable: false})
 	now := time.Now()
-	delivery := CollabDeliveryKey{Item: "item-a", Delivery: "delivery-a", Digest: "content"}
+	delivery := CollabDeliveryKey{Scope: CollabRecordScope{Tenant: "tenant", Group: "group", Tree: "tree"}, Thread: "thread", Item: "item-a", Delivery: "delivery-a", Digest: "content"}
 	prior := []CollabTerminalRejectionCount{{Key: delivery, Rejection: "rejection-a", Count: 2, ExpiresAt: now.Add(time.Hour)}}
 	require.True(t, CollabLocalEndingPermitted(permanent, delivery, "rejection-a", nil, now))
 	require.False(t, CollabLocalEndingPermitted(retryable, delivery, "rejection-a", nil, now))
@@ -112,7 +112,7 @@ func TestCollabLocalEndingPriorRejectionsAndAsyncCounter(t *testing.T) {
 	require.False(t, CollabLocalEndingPermitted(retryable, delivery, "rejection-a", prior, now.Add(2*time.Hour)))
 	require.False(t, CollabLocalEndingPermitted(nil, delivery, "rejection-a", prior, now))
 	counter := NewCollabTerminalRejectionCounter(2)
-	key := CollabDeliveryKey{Item: "item-a", Delivery: "delivery-a", Digest: "content"}
+	key := delivery
 	record := CollabTerminalRejectionRecord{Key: key, Rejection: "rejection-a", Event: "event-a", ExpiresAt: now.Add(time.Hour)}
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -151,7 +151,7 @@ func TestCollabLocalEndingPriorRejectionsAndAsyncCounter(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, 2, count, "saturates at the eligibility threshold")
 	query := CollabRecordQuery{Key: key}
-	result := store.LookupBatch(context.Background(), CollabRecordBatch{Queries: []CollabRecordQuery{query}, Dispositions: true})
+	result := store.LookupBatch(context.Background(), CollabRecordBatch{Scope: key.Scope, Queries: []CollabRecordQuery{query}, Dispositions: true})
 	require.Equal(t, 2, result.Dispositions[query].TerminalRejections[0].Count)
 	other := record
 	other.Key.Item = "item-b"
@@ -218,7 +218,7 @@ func TestCollabTerminalCounterSharedFailuresAreContained(t *testing.T) {
 		now := time.Now()
 		local := &collabCounterStore{counter: NewCollabTerminalRejectionCounter(1), now: now}
 		store := NewSafeCollabRecordsStore(local, shared, 1)
-		record := CollabTerminalRejectionRecord{Key: CollabDeliveryKey{Delivery: "delivery", Item: "item"}, Rejection: "rejection", Event: "event", ExpiresAt: now.Add(time.Hour)}
+		record := CollabTerminalRejectionRecord{Key: CollabDeliveryKey{Scope: CollabRecordScope{Tenant: "tenant", Group: "group", Tree: "tree"}, Thread: "thread", Delivery: "delivery", Item: "item", Digest: "content"}, Rejection: "rejection", Event: "event", ExpiresAt: now.Add(time.Hour)}
 		count, ok := store.TerminalRejected(context.Background(), record)
 		require.True(t, ok)
 		require.Equal(t, 1, count)
@@ -233,5 +233,72 @@ func TestCollabTerminalCounterSharedFailuresAreContained(t *testing.T) {
 		}, time.Second, time.Millisecond)
 		require.Equal(t, 1, local.counter.Counts(record.Key, now)[0].Count)
 		store.Close()
+	}
+}
+
+func TestCollabTerminalCounterIncompleteKeysStayLocal(t *testing.T) {
+	for _, missing := range []string{"tenant", "group", "tree", "thread", "digest"} {
+		t.Run(missing, func(t *testing.T) {
+			complete := CollabDeliveryKey{Scope: CollabRecordScope{Tenant: "tenant", Group: "group", Tree: "tree"}, Thread: "thread", Item: "item", Delivery: "delivery", Digest: "content"}
+			key := complete
+			switch missing {
+			case "tenant":
+				key.Scope.Tenant = ""
+			case "group":
+				key.Scope.Group = ""
+			case "tree":
+				key.Scope.Tree = ""
+			case "thread":
+				key.Thread = ""
+			case "digest":
+				key.Digest = ""
+			}
+			now := time.Now()
+			local := &collabCounterStore{counter: NewCollabTerminalRejectionCounter(2), now: now}
+			var sharedCalls, incompleteCalls atomic.Int64
+			shared := &collabSharedTestStore{apply: func(_ context.Context, m CollabRecordMutation) error {
+				sharedCalls.Add(1)
+				if m.TerminalRejection.Key != complete {
+					incompleteCalls.Add(1)
+				}
+				return nil
+			}}
+			store := NewSafeCollabRecordsStore(local, shared, 4)
+			defer store.Close()
+			record := CollabTerminalRejectionRecord{Key: key, Rejection: "rejection", Event: "event", ExpiresAt: now.Add(time.Hour)}
+			ctx := context.Background()
+			for _, event := range []string{"event", "event", "second-event"} {
+				record.Event = CollabDigest(event)
+				count, ok := store.TerminalRejected(ctx, record)
+				require.True(t, ok)
+				want := 1
+				if event == "second-event" {
+					want = 2
+				}
+				require.Equal(t, want, count)
+			}
+			counts := local.counter.Counts(key, now)
+			require.Len(t, counts, 1)
+			require.Equal(t, 2, counts[0].Count)
+			store.deferredMu.Lock()
+			pending := len(store.deferred)
+			store.deferredMu.Unlock()
+			require.Zero(t, pending, "incomplete identities must not enter the shared write queue")
+			require.Zero(t, sharedCalls.Load())
+
+			// A complete control proves the shared worker runs. Waiting for its
+			// queue to drain makes the zero-incomplete-write assertion definite.
+			record.Key = complete
+			count, ok := store.TerminalRejected(ctx, record)
+			require.True(t, ok)
+			require.Equal(t, 1, count)
+			require.Eventually(t, func() bool {
+				store.deferredMu.Lock()
+				defer store.deferredMu.Unlock()
+				return len(store.deferred) == 0 && sharedCalls.Load() > 0
+			}, time.Second, time.Millisecond)
+			require.Equal(t, int64(1), sharedCalls.Load())
+			require.Zero(t, incompleteCalls.Load())
+		})
 	}
 }
