@@ -48,6 +48,9 @@ func recordSelectionExhausted(ctx context.Context) {
 
 func recoveryOutcome(c *gin.Context) *string {
 	st := resilience.StateFrom(c.Request.Context())
+	if local := collabLocalRecoveryOutcome(st); local != nil {
+		return local
+	}
 	outcome := st.RecoveryOutcome()
 	// A client may cancel after a timeout was switched away from or while a
 	// detached upstream is draining. This final request reason wins.

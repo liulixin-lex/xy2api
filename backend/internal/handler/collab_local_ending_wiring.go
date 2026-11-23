@@ -73,3 +73,19 @@ func (w *collabSeamWriter) FlushError() error {
 	}
 	return nil
 }
+
+func collabLocalRecoveryOutcome(state *resilience.RequestState) *string {
+	if collab := state.CollabState(); collab != nil {
+		value := ""
+		switch collab.LocalOutcome {
+		case resilience.RequestLocalEnded:
+			value = "local_ended"
+		case resilience.RequestLocalUndeliverable:
+			value = "local_undeliverable"
+		default:
+			return nil
+		}
+		return &value
+	}
+	return nil
+}

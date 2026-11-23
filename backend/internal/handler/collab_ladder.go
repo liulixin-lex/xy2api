@@ -22,9 +22,10 @@ func collabCanRescue(seam *collabSeam) *atomic.Bool {
 }
 
 func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, saved *collabWithheld) {
-	if seam.observer == nil || seam.settle == nil || seam.writer.deliveredPrelude().Created && !h.gatewayService.CanContinueCollabResponse() {
+	if seam.observer == nil || seam.settle == nil {
 		return
 	}
+	seam.localFinal = false
 	rejections := seam.observer.Rejections()
 	if len(rejections) == 0 {
 		return
@@ -66,6 +67,15 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		retryable = last.Status == 408 || last.Status == 409 || last.Status == 429 || last.Status >= 500 || last.Source == resilience.CollabEvidenceSourceStreamError || last.Source == resilience.CollabEvidenceSourceAggregatedStream
 	}
 	saved.retryable = retryable
+	if seam.writer.deliveredPrelude().Created && !h.gatewayService.CanContinueCollabResponse() {
+		// A local notice reuses the delivered identity without registering a
+		// continuation. Only replacement upstream responses need an alias.
+		seam.localFinal = true
+		if seam.localEnding != nil && evidence.Grade == resilience.CollabEvidenceGradeVerified {
+			seam.localEnding(c, seam, saved, evidence)
+		}
+		return
+	}
 	duration := service.CollabTakeoverDuration(time.Now(), started, retryable, saved.committed, deadline)
 	if seam.losslessDuration > 0 {
 		duration = min(duration, seam.losslessDuration)
