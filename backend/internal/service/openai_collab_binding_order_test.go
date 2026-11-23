@@ -22,6 +22,7 @@ type collabBindingTraceCache struct {
 	stubGatewayCache
 	values     map[string]collabBindingCacheValue
 	tombstones map[string]time.Time
+	versions   map[string]int64
 	calls      []string
 	fail       string
 }
@@ -144,12 +145,21 @@ func TestCollabRegressionAsyncBindingDoesNotResurrectDeletion(t *testing.T) {
 
 func (s *collabBindingTraceCache) CreateResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) error {
 	mapKey := fmt.Sprint(group, ":", key)
-	if time.Now().Before(s.tombstones[mapKey]) || time.Now().Before(s.values[mapKey].expires) {
+	publication := CollabBindingPublicationFrom(ctx)
+	if !time.Now().Before(publication.Expires) || publication.Generation <= s.versions[mapKey] {
 		return nil
 	}
+	if s.versions == nil {
+		s.versions = map[string]int64{}
+	}
+	s.versions[mapKey] = publication.Generation
 	return s.SetSessionAccountID(ctx, group, key, id, ttl)
 }
 func (s *collabBindingTraceCache) DeleteResponseBinding(ctx context.Context, group int64, key string) error {
+	if s.versions == nil {
+		s.versions = map[string]int64{}
+	}
+	s.versions[fmt.Sprint(group, ":", key)] = NewCollabBindingPublication().Generation
 	if s.tombstones == nil {
 		s.tombstones = map[string]time.Time{}
 	}
@@ -198,6 +208,10 @@ func TestCollabRegressionDeferredBindingGeneration(t *testing.T) {
 }
 
 func (s *collabBindingTraceCache) SetResponseBinding(ctx context.Context, group int64, key string, id int64, ttl time.Duration) error {
+	if s.versions == nil {
+		s.versions = map[string]int64{}
+	}
+	s.versions[fmt.Sprint(group, ":", key)] = NewCollabBindingPublication().Generation
 	if s.tombstones == nil {
 		s.tombstones = map[string]time.Time{}
 	}

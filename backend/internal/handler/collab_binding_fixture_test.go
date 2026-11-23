@@ -10,17 +10,18 @@ import (
 )
 
 // Match the production cache's conditional response publication contract.
-func (m *replayMemory) CreateResponseBinding(_ context.Context, _ int64, key string, id int64, ttl time.Duration) error {
+func (m *replayMemory) CreateResponseBinding(ctx context.Context, _ int64, key string, id int64, ttl time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.bindings[key] != 0 || time.Now().Before(m.responseGenerations[key]) {
+	publication := service.CollabBindingPublicationFrom(ctx)
+	if !time.Now().Before(publication.Expires) || publication.Generation <= m.responseGenerations[key].UnixMicro() {
 		return nil
 	}
 	if m.responseGenerations == nil {
 		m.responseGenerations = map[string]time.Time{}
 	}
 	m.bindings[key] = id
-	m.responseGenerations[key] = time.Now().Add(max(ttl, service.CollabBindingPublicationLifetime))
+	m.responseGenerations[key] = time.UnixMicro(publication.Generation)
 	return nil
 }
 func (m *replayMemory) DeleteResponseBinding(_ context.Context, _ int64, key string) error {
@@ -30,7 +31,7 @@ func (m *replayMemory) DeleteResponseBinding(_ context.Context, _ int64, key str
 	if m.responseGenerations == nil {
 		m.responseGenerations = map[string]time.Time{}
 	}
-	m.responseGenerations[key] = time.Now().Add(service.CollabBindingPublicationLifetime)
+	m.responseGenerations[key] = time.UnixMicro(service.NewCollabBindingPublication().Generation)
 	m.effects = append(m.effects, "unbind:"+replayDigest([]byte(key)))
 	return nil
 }
@@ -39,7 +40,7 @@ func (m *replayMemory) SetResponseBinding(ctx context.Context, group int64, key 
 	if m.responseGenerations == nil {
 		m.responseGenerations = map[string]time.Time{}
 	}
-	m.responseGenerations[key] = time.Now().Add(max(ttl, service.CollabBindingPublicationLifetime))
+	m.responseGenerations[key] = time.UnixMicro(service.NewCollabBindingPublication().Generation)
 	m.mu.Unlock()
 	return m.SetSessionAccountID(ctx, group, key, id, ttl)
 }
