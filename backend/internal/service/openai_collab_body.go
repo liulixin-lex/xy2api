@@ -2,8 +2,11 @@ package service
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/tidwall/gjson"
@@ -18,8 +21,8 @@ const (
 	collabCompaction    = "[Gateway notice: an earlier conversation summary could not be read and is omitted.]"
 )
 
-// CollabBodyItem retains original locations. Edits replace in place, so indices
-// stay stable across derivations. Unknown message envelopes are protected.
+// CollabBodyItem retains original identities. A physical request resolves its
+// locators before any edit. Unknown message envelopes are protected.
 type CollabBodyItem struct {
 	Identity    string
 	WireID      string
@@ -27,10 +30,12 @@ type CollabBodyItem struct {
 	Family      resilience.CollabFamily
 	Class       resilience.CollabItemClass
 	Paths       []string
+	references  []string // exact locators, enumerated from this physical request
 	Placeholder string
 }
 
 type CollabBody struct {
+	lineage  *collabInputLineage
 	Original []byte
 	Items    []CollabBodyItem
 	Shape    resilience.CollabRequestShape
@@ -42,31 +47,35 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 	original := gjson.GetBytes(p.Original, "input").Array()
 	current := gjson.GetBytes(body, "input").Array()
 	positions := make(map[int]int, len(current))
-	if len(original) == len(current) {
-		ordered := true
-		for i := range current {
-			id, before := current[i].Get("id").String(), original[i].Get("id").String()
-			if id != "" && before != "" && id != before {
-				ordered = false
-				break
-			}
-			positions[i] = i
-		}
-		if ordered {
-			return positions, true
-		}
-		clear(positions)
-	}
 	used := map[int]bool{}
 	for i, item := range current {
 		match := -1
 		for j, candidate := range original {
+			if used[j] {
+				continue
+			}
 			id := item.Get("id").String()
 			if id != "" && id == candidate.Get("id").String() || id == "" && item.Raw == candidate.Raw {
-				if match != -1 || used[j] {
-					return nil, false
-				}
 				match = j
+				break // equal anonymous digests use their occurrence order
+			}
+		}
+		if match < 0 && item.Get("id").String() == "" {
+			for j, candidate := range original {
+				if used[j] {
+					continue
+				}
+				known := p.lineage.matches(item.Raw, j)
+				if candidate.Get("id").String() != "" && !known {
+					continue
+				}
+				// Confirmed field removals retain a unique original identity.
+				if known || collabRemovedFieldsOnly(candidate, item) {
+					if match >= 0 {
+						return nil, false
+					}
+					match = j
+				}
 			}
 		}
 		if match < 0 {
@@ -96,6 +105,7 @@ func (p CollabBody) atBody(body []byte) (CollabBody, bool) {
 		oldPrefix := "input." + strconv.Itoa(item.Index)
 		newPrefix := "input." + strconv.Itoa(index)
 		item.Index = index
+		item.references = collabItemReferences(gjson.GetBytes(body, "input").Array()[index], index)
 		item.Paths = append([]string(nil), item.Paths...)
 		for i, path := range item.Paths {
 			item.Paths[i] = newPrefix + strings.TrimPrefix(path, oldPrefix)
@@ -112,7 +122,7 @@ func (p CollabBody) ResolveEvidence(evidence resilience.CollabEvidence) resilien
 	}
 	items := make([]resilience.CollabOriginalItem, 0, len(p.Items))
 	for _, item := range p.Items {
-		items = append(items, resilience.CollabOriginalItem{Identity: item.Identity, Index: item.Index, Paths: item.Paths, Family: item.Family})
+		items = append(items, resilience.CollabOriginalItem{Identity: item.Identity, Anonymous: item.WireID == "", Index: item.Index, Paths: item.references, Family: item.Family})
 	}
 	named := resilience.ResolveCollabNamedItem(*evidence.Named, items)
 	named.Ambiguous = named.Ambiguous || !named.Located || p.Shape.Ambiguous
@@ -142,7 +152,7 @@ func ParseCollabBodyWithContext(body []byte, facts CollabBodyContext) CollabBody
 			facts.ModernTaskBoundary = e1 == nil && e2 == nil && (major > 0 || minor >= 168)
 		}
 	}
-	out := CollabBody{Original: body}
+	out := CollabBody{Original: body, lineage: &collabInputLineage{items: map[[32]byte]map[int]bool{}}}
 	root := gjson.ParseBytes(body)
 	if !gjson.ValidBytes(body) || !root.IsObject() || !codexCollabUnambiguousJSON(root) || !root.Get("input").IsArray() {
 		out.Shape.Ambiguous = true
@@ -172,7 +182,17 @@ func ParseCollabBodyWithContext(body []byte, facts CollabBodyContext) CollabBody
 		if identity == "" {
 			identity = "@input:" + strconv.Itoa(i)
 		}
-		entry := CollabBodyItem{Identity: identity, WireID: id, Index: i, Class: resilience.CollabItemClassProtected, Placeholder: collabUnreadTask}
+		// The existing protocol repair rewrites standalone tool outputs in
+		// place and drops their ID. Register its exact output against the
+		// original identity; never infer that identity from a later position.
+		if item.Get("type").String() == "function_call_output" && item.Get("output").Type == gjson.String {
+			single := []byte(`{"input":[` + item.Raw + `]}`)
+			rules := DefaultOpenAIFCORules([]string{item.Get("name").String()})
+			if repaired, summary, err := normalizeOpenAIFCOBody(single, rules); err == nil && summary.Matched == 1 {
+				out.lineage.remember(gjson.GetBytes(repaired, "input.0").Raw, i)
+			}
+		}
+		entry := CollabBodyItem{Identity: identity, WireID: id, Index: i, references: collabItemReferences(item, i), Class: resilience.CollabItemClassProtected, Placeholder: collabUnreadTask}
 		path := "input." + strconv.Itoa(i)
 		switch item.Get("type").String() {
 		case "reasoning":
@@ -311,6 +331,7 @@ func collabEnvelopeKind(item gjson.Result) string {
 // claimed error can change only nested agent/tool ciphertext. Call arguments
 // are never rewritten. Compaction is replaced, never removed.
 func (p CollabBody) Derive(current []byte, action resilience.CollabAction, named string, claimed bool) ([]byte, bool) {
+	positions, _ := p.inputPositions(current)
 	var ok bool
 	p, ok = p.atBody(current)
 	if !ok {
@@ -363,6 +384,13 @@ func (p CollabBody) Derive(current []byte, action resilience.CollabAction, named
 			}
 		}
 	}
+	if p.lineage != nil {
+		for i, item := range gjson.GetBytes(next, "input").Array() {
+			if item.Get("id").String() == "" {
+				p.lineage.remember(item.Raw, positions[i])
+			}
+		}
+	}
 	return next, !bytes.Equal(next, current)
 }
 
@@ -375,4 +403,91 @@ func collabModelOutput(item gjson.Result) bool {
 		return true
 	}
 	return false
+}
+
+// collabItemReferences enumerates both upstream locator spellings from the
+// request tree. Scalars have no descendants; unusual object keys have no locator.
+func collabItemReferences(item gjson.Result, index int) []string {
+	var references []string
+	var visit func(gjson.Result, string, string)
+	visit = func(value gjson.Result, bracket, dotted string) {
+		references = append(references, bracket, dotted)
+		if value.IsObject() {
+			value.ForEach(func(key, child gjson.Result) bool {
+				if !strings.ContainsAny(key.Str, ".\\:*?[] \t\r\n'\"`/") {
+					visit(child, bracket+"."+key.Str, dotted+"."+key.Str)
+				}
+				return true
+			})
+		} else if value.IsArray() {
+			for i, child := range value.Array() {
+				n := strconv.Itoa(i)
+				visit(child, bracket+"["+n+"]", dotted+"."+n)
+			}
+		}
+	}
+	visit(item, "input["+strconv.Itoa(index)+"]", "input."+strconv.Itoa(index))
+	return references
+}
+
+// Anonymous identity is a digest plus its occurrence among equal original
+// digests. The displayed @input label remains only a request-local handle.
+func collabInputIdentities(body []byte) []string {
+	counts := map[[32]byte]int{}
+	var identities []string
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		id := item.Get("id").String()
+		if id != "" {
+			identities = append(identities, "id:"+id)
+			continue
+		}
+		digest := sha256.Sum256([]byte(item.Raw))
+		identities = append(identities, fmt.Sprintf("digest:%x:%d", digest, counts[digest]))
+		counts[digest]++
+	}
+	return identities
+}
+
+type collabInputLineage struct {
+	mu    sync.Mutex
+	items map[[32]byte]map[int]bool
+}
+
+func (l *collabInputLineage) matches(raw string, index int) bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.items[sha256.Sum256([]byte(raw))][index]
+}
+func (l *collabInputLineage) remember(raw string, index int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	digest := sha256.Sum256([]byte(raw))
+	if l.items[digest] == nil {
+		l.items[digest] = map[int]bool{}
+	}
+	l.items[digest][index] = true
+}
+func collabRemovedFieldsOnly(before, after gjson.Result) bool {
+	if before.Raw == after.Raw {
+		return true
+	}
+	if !before.IsObject() || !after.IsObject() || after.Get("type").String() == "" || before.Get("type").String() != after.Get("type").String() {
+		return false
+	}
+	valid := true
+	after.ForEach(func(key, value gjson.Result) bool {
+		valid = before.Get(key.Str).Raw == value.Raw
+		return valid
+	})
+	return valid
+}
+
+// ProtectedNamedItem identifies the protected handled-item endpoint for callers that
+// must stop before constructing a controller (for example an expired budget).
+func (p CollabBody) ProtectedNamedItem(e resilience.CollabEvidence) bool {
+	e = p.ResolveEvidence(e)
+	return e.Named != nil && e.Named.Located && collabProtectedItem(p, e.Named.Identity)
 }

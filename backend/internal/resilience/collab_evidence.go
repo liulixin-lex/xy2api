@@ -1,8 +1,8 @@
 package resilience
 
 import (
+	"slices"
 	"strconv"
-	"strings"
 )
 
 // CollabEvidenceInput contains transient request/error bytes. It must never be
@@ -36,6 +36,7 @@ type CollabRequestShape struct {
 type CollabNamedItem struct {
 	InputIndex *int
 	Path       string
+	Locators   []string // complete, unnormalised references from separate error fields
 	Identity   string
 	Family     CollabFamily
 	Located    bool
@@ -76,47 +77,51 @@ func (NoopCollabEvidenceClassifier) Classify(in CollabEvidenceInput) CollabEvide
 // against the immutable original input, before edits or account selection.
 // Even two entries with the same digest are ambiguous; exactly one is required.
 type CollabOriginalItem struct {
-	Index    int
-	Paths    []string
-	Identity string
-	Item     CollabDigest
-	Family   CollabFamily
+	Anonymous bool
+	Index     int
+	Paths     []string
+	Identity  string
+	Item      CollabDigest
+	Family    CollabFamily
 }
 
 func ResolveCollabNamedItem(named CollabNamedItem, original []CollabOriginalItem) CollabNamedItem {
+	resolved := named.Located
 	named.Located = false
 	named.MatchCount = 0
 	named.Item = ""
 	if named.Ambiguous {
 		return named
 	}
-	if named.Identity == "" && named.InputIndex == nil {
+	if named.Identity == "" && named.InputIndex == nil && named.Path == "" && len(named.Locators) == 0 {
 		return named
 	}
 	var match CollabOriginalItem
 	for _, item := range original {
+		if item.Anonymous && named.Identity != "" && !resolved {
+			continue
+		}
 		if named.InputIndex != nil && item.Index != *named.InputIndex || named.Identity != "" && item.Identity != named.Identity {
 			continue
 		}
 		if named.Family != "" && named.Family != CollabFamilyNone && named.Family != CollabFamilyOtherEncrypted && named.Family != item.Family {
 			continue
 		}
+		paths := named.Locators
 		if named.Path != "" {
-			if !collabIndexPattern.MatchString(named.Path) {
-				continue
+			paths = append(slices.Clone(paths), named.Path)
+		}
+		valid := true
+		for _, path := range paths {
+			// The table contains actual fields only. Never parse or normalise
+			// a rejection's reference, or invent children below a scalar.
+			if path != "input["+strconv.Itoa(item.Index)+"]" && path != "input."+strconv.Itoa(item.Index) && !slices.Contains(item.Paths, path) {
+				valid = false
+				break
 			}
-			path := strings.NewReplacer("[", ".", "]", "").Replace(named.Path)
-			base := "input." + strconv.Itoa(item.Index)
-			valid := path == base
-			for _, candidate := range item.Paths {
-				valid = valid || path == candidate || path == candidate+".encrypted_content"
-			}
-			if item.Family == CollabFamilyCallArgs {
-				valid = valid || path == base+".encrypted_function_args" || path == base+".arguments"
-			}
-			if !valid {
-				continue
-			}
+		}
+		if !valid {
+			continue
 		}
 		named.MatchCount++
 		match = item

@@ -18,6 +18,18 @@ const (
 	collabEditAll         = collabEditReasoning | collabEditBodies | collabEditCompaction
 )
 
+// Stop reasons are part of the permission decision, including at handler entry.
+type CollabLadderStop uint8
+
+const (
+	CollabLadderSelecting CollabLadderStop = iota
+	CollabLadderFinalDisposal
+	CollabLadderHandledAgain
+	CollabLadderFallback
+	// Final disposal row (c): time, admission, or response continuation unavailable.
+	CollabLadderDeliveryUnavailable
+)
+
 // The table is applied before names, quotas, selection or local-ending entry.
 // Named verified edits intersect the named identity; invalid names select the
 // empty row. Call arguments have no edit bit, so no evidence can authorize them.
@@ -35,7 +47,7 @@ var collabPolicyTable = [...]CollabLadderPolicy{
 	{eligible: true, LocalEnding: true, named: collabEditAll, probe: collabEditReasoning, drop: collabEditReplaceableAgent, final: collabEditAll}, // verified source conflict
 }
 
-func (p CollabBody) LadderPolicy(e resilience.CollabEvidence) CollabLadderPolicy {
+func (p CollabBody) LadderPolicy(e resilience.CollabEvidence, stop ...CollabLadderStop) CollabLadderPolicy {
 	e = p.ResolveEvidence(e)
 	row := 0
 	switch {
@@ -55,7 +67,18 @@ func (p CollabBody) LadderPolicy(e resilience.CollabEvidence) CollabLadderPolicy
 			row = 3
 		}
 	}
-	return collabPolicyTable[row]
+	policy := collabPolicyTable[row]
+	reason := CollabLadderSelecting
+	if len(stop) > 0 {
+		reason = stop[0]
+	}
+	policy.LocalEnding = policy.LocalEnding && (reason == CollabLadderFinalDisposal || reason == CollabLadderDeliveryUnavailable)
+	// An ordinary failure of an optional action returns to the existing
+	// final repair. It supplies no evidence for learning or local ending.
+	if reason == CollabLadderFallback && (e.Grade == resilience.CollabEvidenceGradeUnclaimed || e.Grade == "") && !p.Shape.Ambiguous && !p.Shape.ContinuationPointer {
+		policy = CollabLadderPolicy{eligible: true, final: collabEditAll}
+	}
+	return policy
 }
 func (p CollabLadderPolicy) edits(action resilience.CollabAction) collabEditClass {
 	switch action {

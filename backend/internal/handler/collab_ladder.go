@@ -71,7 +71,13 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 	}
 	duration = min(duration, time.Minute-seam.optionalSpent)
 	if duration <= 0 {
-		if seam.localEnding != nil && parsed.LadderPolicy(evidence).LocalEnding && parentRequest.Context().Err() == nil {
+		reason := service.CollabLadderDeliveryUnavailable
+		for _, rejection := range rejections {
+			if evidence.Named != nil && rejection.AccountID == last.AccountID && rejection.Handled[evidence.Named.Identity] && !parsed.ProtectedNamedItem(evidence) {
+				reason = service.CollabLadderHandledAgain
+			}
+		}
+		if seam.localEnding != nil && parsed.LadderPolicy(evidence, reason).LocalEnding && parentRequest.Context().Err() == nil {
 			seam.localEnding(c, seam, saved, evidence)
 		}
 		return
@@ -138,7 +144,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		}
 	}
 	l.BeforeDisposal = func(_ context.Context, current resilience.CollabEvidence) bool {
-		if seam.localEnding == nil || !parsed.LadderPolicy(current).LocalEnding || parentRequest.Context().Err() != nil {
+		if seam.localEnding == nil || !parsed.LadderPolicy(current, service.CollabLadderFinalDisposal).LocalEnding || parentRequest.Context().Err() != nil {
 			return false
 		}
 		reset()
@@ -235,7 +241,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		latestEvidence = resilience.CollabEvidence{}
 		return resilience.CollabEvidence{}, false
 	}
-	if !l.Run(ctx) {
+	if !l.Run(ctx) && parsed.LadderPolicy(l.LastEvidence, l.StopReason).LocalEnding {
 		l.BeforeDisposal(parentRequest.Context(), latestEvidence)
 	}
 }

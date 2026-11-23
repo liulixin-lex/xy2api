@@ -27,6 +27,7 @@ func collabPropertyRuns() int {
 }
 
 func TestCollabPropertyReferences(t *testing.T) {
+	t.Run("exact_table", collabPropertyExactReferences)
 	raw := strings.TrimSuffix(collabBatchBody, "]}") + `,{"type":"compaction","id":"cmp_a","encrypted_content":"c"},{"type":"function_call_output","id":"fco_a","call_id":"call_a","output":[{"type":"encrypted_content","encrypted_content":"o"}]},{"type":"function_call","id":"fc_a","encrypted_function_args":["a"],"arguments":"{}"}]}`
 	p := ParseCollabBody([]byte(raw))
 	valid := map[string]string{}
@@ -132,6 +133,9 @@ func TestCollabPropertyReferences(t *testing.T) {
 }
 
 func TestCollabPropertyPermissions(t *testing.T) {
+	t.Run("changing_evidence", collabPropertyChangingPermissions)
+	t.Run("named_endpoints", collabPropertyNamedEndpoints)
+	t.Run("named_isolation", TestCollabExactNamedRepairIsolation)
 	bodies := []string{
 		`{"input":[` + collabBatchTask + `]}`,
 		`{"input":[{"type":"reasoning","id":"rs_a","encrypted_content":"r"}]}`,
@@ -163,7 +167,7 @@ func TestCollabPropertyPermissions(t *testing.T) {
 						switchOnly := !claimed && (owner == resilience.CollabOwnershipClassUnknownSuffix || owner != resilience.CollabOwnershipClassNone && !p.Shape.AgentCiphertext)
 						local := !blocked && !claimed && !switchOnly
 						label := fmt.Sprintf("body=%d class=%s grade=%s owner=%s name=%s", bi, class, grade, owner, name)
-						require.Equal(t, local, p.LadderPolicy(e).LocalEnding, label)
+						require.Equal(t, local, p.LadderPolicy(e, CollabLadderFinalDisposal).LocalEnding, label)
 						for _, action := range []resilience.CollabAction{resilience.CollabActionNamedRepair, resilience.CollabActionProbeReasoning, resilience.CollabActionDropUnprotected, resilience.CollabActionReplaceAll} {
 							family := p.Items[0].Family
 							bodyItem := family == resilience.CollabFamilyAgentMessage || family == resilience.CollabFamilyToolOutput
@@ -219,6 +223,10 @@ func TestCollabPropertyPermissions(t *testing.T) {
 }
 
 func TestCollabPropertyRequestState(t *testing.T) {
+	t.Run("operations", collabPropertyRepairOperations)
+	t.Run("nested_item", TestCollabFenceToolItemRepairSurvivesAccountChange)
+	t.Run("anonymous_protocol", TestCollabAnonymousProtocolRepairIdentity)
+	t.Run("nested_array", TestCollabExactNestedRepairs)
 	for _, seed := range []int64{5, 23, 107} {
 		rng := rand.New(rand.NewSource(seed))
 		for iteration := 0; iteration < collabPropertyRuns(); iteration++ {

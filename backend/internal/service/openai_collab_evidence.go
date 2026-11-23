@@ -7,8 +7,6 @@ import (
 	"io"
 	"maps"
 	"net/http"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -33,6 +31,7 @@ type CollabRejection struct {
 	Handled      map[string]bool
 	Derivation   []byte
 	positions    map[int]int
+	resolved     *resilience.CollabNamedItem
 	namedClasses map[collabNamedClass]bool
 	repairs      collabRequestRepairs
 	unlocatable  bool
@@ -45,19 +44,9 @@ func (r CollabRejection) Evidence(shape resilience.CollabRequestShape) resilienc
 	evidence := resilience.ClassifyCollabEvidence(resilience.CollabEvidenceInput{Payload: r.Payload, Event: r.Event, Source: r.Source, HTTPStatus: r.Status, Shape: shape})
 	if r.unlocatable {
 		evidence.Named = &resilience.CollabNamedItem{Ambiguous: true}
-	} else if evidence.Named != nil && evidence.Named.InputIndex != nil && r.positions != nil {
-		named := evidence.Named
-		physical := *named.InputIndex
-		original, ok := r.positions[physical]
-		if !ok {
-			named.Ambiguous = true
-			return evidence
-		}
-		path := strings.NewReplacer("[", ".", "]", "").Replace(named.Path)
-		if path != "" {
-			named.Path = "input." + strconv.Itoa(original) + strings.TrimPrefix(path, "input."+strconv.Itoa(physical))
-		}
-		named.InputIndex = &original
+	} else if r.resolved != nil {
+		named := *r.resolved
+		evidence.Named = &named
 	}
 	return evidence
 }
@@ -96,6 +85,9 @@ func (s *OpenAIGatewayService) collabDuplicateSend(ctx context.Context, account 
 type CollabSendObserver struct {
 	mu           sync.Mutex
 	rejections   []CollabRejection
+	repairs      collabRequestRepairs
+	namedClasses map[collabNamedClass]bool
+	handled      map[int64]map[string]bool
 	rejected     map[CollabRejectedBody]bool
 	accepted     atomic.Bool
 	semantic     atomic.Bool
@@ -175,7 +167,9 @@ func (o *CollabSendObserver) Rejections() []CollabRejection {
 	out := append([]CollabRejection(nil), o.rejections...)
 	for i := range out {
 		out[i].Payload = bytes.Clone(out[i].Payload)
-		out[i].Handled = maps.Clone(out[i].Handled)
+		out[i].Handled = maps.Clone(o.handled[out[i].AccountID])
+		out[i].repairs = maps.Clone(o.repairs)
+		out[i].namedClasses = maps.Clone(o.namedClasses)
 	}
 	return out
 }
@@ -231,6 +225,26 @@ func (o *CollabSendObserver) record(rejection CollabRejection, generation uint64
 		o.rejected = map[CollabRejectedBody]bool{}
 	}
 	o.rejected[CollabRejectedBody{rejection.AccountID, rejection.BodyDigest}] = true
+	o.repairs.merge(rejection.repairs)
+	if o.namedClasses == nil {
+		o.namedClasses = map[collabNamedClass]bool{}
+	}
+	for class, used := range rejection.namedClasses {
+		if used {
+			o.namedClasses[class] = true
+		}
+	}
+	if o.handled == nil {
+		o.handled = map[int64]map[string]bool{}
+	}
+	if o.handled[rejection.AccountID] == nil {
+		o.handled[rejection.AccountID] = map[string]bool{}
+	}
+	for id, handled := range rejection.Handled {
+		if handled {
+			o.handled[rejection.AccountID][id] = true
+		}
+	}
 	if len(o.rejections) == collabRejectionLimit {
 		o.rejections = o.rejections[:collabRejectionLimit-1]
 	}
@@ -358,11 +372,21 @@ func (b *collabEvidenceBody) record(rejection CollabRejection) {
 	if b.requestBody != nil {
 		rejection.BodyDigest = b.service.collabBodyDigest(b.requestBody)
 	}
-	candidate := rejection.Evidence(resilience.CollabRequestShape{AgentCiphertext: true, ToolOutputCiphertext: true})
-	if b.requestBody != nil && (candidate.Grade == resilience.CollabEvidenceGradeVerified || candidate.Grade == resilience.CollabEvidenceGradeClaimed) {
+	if b.requestBody != nil {
 		original := b.observer.Body()
 		positions, ok := original.inputPositions(b.requestBody)
 		rejection.positions, rejection.unlocatable = positions, !ok
+		if ok {
+			physical, _ := original.atBody(b.requestBody)
+			physical.Original = b.requestBody
+			e := physical.ResolveEvidence(rejection.Evidence(original.Shape))
+			if e.Named != nil {
+				named := *e.Named
+				// Resolution has already checked every locator and family.
+				named.InputIndex, named.Path, named.Locators = nil, "", nil
+				rejection.resolved = &named
+			}
+		}
 		current := ParseCollabBody(b.requestBody)
 		remainingItems := make(map[int]bool, len(current.Items))
 		for _, item := range current.Items {
@@ -383,9 +407,11 @@ func (b *collabEvidenceBody) record(rejection CollabRejection) {
 				rejection.namedClasses[collabNamedItemClass(item)] = true
 			}
 		}
-		if ok && !current.Shape.Ambiguous && !bytes.Equal(original.Original, b.requestBody) {
-			rejection.Derivation = bytes.Clone(b.requestBody)
+		if !current.Shape.Ambiguous && !bytes.Equal(original.Original, b.requestBody) {
 			rejection.repairs = original.independentRepairs(b.requestBody)
+			if ok {
+				rejection.Derivation = bytes.Clone(b.requestBody)
+			}
 		}
 	}
 	b.observer.record(rejection, b.generation)

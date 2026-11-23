@@ -9,9 +9,8 @@ import (
 )
 
 var collabNamedPattern = regexp.MustCompile(`(?i)\bfor\s+item\s+`)
-var collabLocatorPattern = regexp.MustCompile(`\binput(?:[.\[]|\s+[.\[])`)
+var collabLocatorPattern = regexp.MustCompile(`(?i)\binput(?:[.\[]|\s+[.\[])`)
 var collabAtPattern = regexp.MustCompile(`\bat\s+`)
-var collabIndexPattern = regexp.MustCompile(`^input(?:\[([0-9]+)\]|\.([0-9]+))(?:(?:\.[a-zA-Z_0-9]+)|(?:\[[0-9]+\]))*$`)
 
 // Text evidence must assert rejection of the encrypted subject itself. Locator
 // quotes are allowed; quoted examples and unrelated later clauses are not.
@@ -201,7 +200,7 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 	}
 	add(object.Get("item_id").String())
 	for _, field := range []string{"message", "param"} {
-		value := strings.TrimSpace(object.Get(field).String())
+		value := object.Get(field).String()
 		for _, match := range collabNamedPattern.FindAllStringIndex(value, -1) {
 			token, valid := collabReferenceToken(value[match[1]:])
 			add(token)
@@ -219,7 +218,8 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 			starts := map[int]bool{}
 			for _, match := range collabLocatorPattern.FindAllStringIndex(value, -1) {
 				start := match[0]
-				if start > 0 && strings.ContainsRune("'\"`", rune(value[start-1])) {
+				// Keep the entire token, including qualifiers such as body/.
+				for start > 0 && !strings.ContainsRune(" \t\r\n", rune(value[start-1])) {
 					start--
 				}
 				starts[start] = true
@@ -235,27 +235,19 @@ func collabErrorNamed(object gjson.Result) *CollabNamedItem {
 				locators = append(locators, token)
 			}
 		}
+		if len(locators) > 1 {
+			if named == nil {
+				named = &CollabNamedItem{}
+			}
+			named.Ambiguous = true
+		}
 		for _, locator := range locators {
 			if named == nil {
 				named = &CollabNamedItem{}
 			}
-			match := collabIndexPattern.FindStringSubmatch(locator)
-			if match == nil {
-				named.Ambiguous = true
-				continue
-			}
-			index, err := strconv.Atoi(match[1] + match[2])
-			if err != nil || named.InputIndex != nil && *named.InputIndex != index {
-				named.Ambiguous = true
-				continue
-			}
-			named.InputIndex = &index
-			path := strings.NewReplacer("[", ".", "]", "").Replace(locator)
-			if named.Path != "" && named.Path != path && !strings.HasPrefix(path, named.Path+".") && !strings.HasPrefix(named.Path, path+".") {
-				named.Ambiguous = true
-			}
-			if len(path) > len(named.Path) {
-				named.Path = path
+			named.Locators = append(named.Locators, locator)
+			if named.Path == "" {
+				named.Path = locator
 			}
 		}
 	}
@@ -275,6 +267,9 @@ func collabReferenceToken(value string) (string, bool) {
 		}
 		end++
 		tail := value[end+1:]
+		if len(tail) > 0 && strings.ContainsRune(" \t\r\n", rune(tail[0])) && !collabReferenceTail(tail) {
+			return value, false
+		}
 		if tail != "" && !strings.ContainsRune(" \t\r\n", rune(tail[0])) {
 			if !strings.ContainsRune(".,;:!?", rune(tail[0])) || len(tail) > 1 && !strings.ContainsRune(" \t\r\n", rune(tail[1])) {
 				return value, false
@@ -287,6 +282,9 @@ func collabReferenceToken(value string) (string, bool) {
 		end = len(value)
 	}
 	token := value[:end]
+	if end < len(value) && !collabReferenceTail(value[end:]) {
+		return value, false
+	}
 	if strings.ContainsAny(token, "'\"`") {
 		return token, false
 	}
@@ -298,4 +296,15 @@ func collabReferenceToken(value string) (string, bool) {
 		token = token[:len(token)-1]
 	}
 	return token, token != ""
+}
+
+// Only the upstream's rejection clause may follow a reference. An arbitrary
+// suffix cannot turn into a shorter valid locator at the first whitespace.
+func collabReferenceTail(tail string) bool {
+	for _, clause := range []string{" could not be decrypted", " could not be decoded", " could not be verified", " hydration failed", " is invalid for this conversation"} {
+		if tail == clause || tail == clause+"." {
+			return true
+		}
+	}
+	return false
 }
