@@ -37,13 +37,14 @@ import (
 type replayMemory struct {
 	ownerFactsStore
 	service.GatewayCache
-	mu          sync.Mutex
-	bindings    map[string]int64
-	avoids      map[string]map[int64]time.Time
-	avoidUntil  map[string]map[int64]time.Time
-	failures    map[string]map[int64]int64
-	accountBase int64
-	effects     []string
+	mu                  sync.Mutex
+	bindings            map[string]int64
+	responseGenerations map[string]time.Time
+	avoids              map[string]map[int64]time.Time
+	avoidUntil          map[string]map[int64]time.Time
+	failures            map[string]map[int64]int64
+	accountBase         int64
+	effects             []string
 }
 
 type replayRandom struct {

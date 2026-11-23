@@ -201,3 +201,10 @@ func TestCollabRegressionSharedIdentityVisibleBeforePersistence(t *testing.T) {
 	require.EqualValues(t, 3, user)
 	require.EqualValues(t, 5, key)
 }
+
+func (s *collabSlowIdentityStore) PrepareCollabResponseAccount(group int64, id string, account int64, ttl time.Duration) func(context.Context) error {
+	return func(ctx context.Context) error { return s.BindResponseAccount(ctx, group, id, account, ttl) }
+}
+func (s *collabSlowIdentityStore) PrepareCollabHTTPResponseOwner(group int64, id string, user, key int64, ttl time.Duration) func(context.Context) error {
+	return func(ctx context.Context) error { return s.BindHTTPResponseOwner(ctx, group, id, user, key, ttl) }
+}

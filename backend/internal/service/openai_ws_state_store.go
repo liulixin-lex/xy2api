@@ -22,14 +22,16 @@ const (
 )
 
 type openAIWSAccountBinding struct {
-	accountID int64
-	expiresAt time.Time
+	generation uint64
+	accountID  int64
+	expiresAt  time.Time
 }
 
 type openAIHTTPResponseOwnerBinding struct {
-	userID    int64
-	apiKeyID  int64
-	expiresAt time.Time
+	generation uint64
+	userID     int64
+	apiKeyID   int64
+	expiresAt  time.Time
 }
 
 type openAIWSConnBinding struct {
@@ -97,8 +99,9 @@ type OpenAIWSStateStore interface {
 }
 
 type defaultOpenAIWSStateStore struct {
-	cache         GatewayCache
-	collabAliases collabMemoryAliases
+	bindingGeneration atomic.Uint64
+	cache             GatewayCache
+	collabAliases     collabMemoryAliases
 
 	responseToAccountMu  sync.RWMutex
 	responseToAccount    map[string]openAIWSAccountBinding
@@ -151,10 +154,10 @@ func (s *defaultOpenAIWSStateStore) BindHTTPResponseOwner(ctx context.Context, g
 	}
 	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
 	defer cancel()
-	if err := s.cache.SetSessionAccountID(cacheCtx, groupID, openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerUserPrefix, id), userID, ttl); err != nil {
+	if err := s.setResponseBinding(cacheCtx, groupID, openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerUserPrefix, id), userID, ttl); err != nil {
 		return err
 	}
-	return s.cache.SetSessionAccountID(cacheCtx, groupID, openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerKeyPrefix, id), apiKeyID, ttl)
+	return s.setResponseBinding(cacheCtx, groupID, openAIHTTPResponseOwnerCacheKey(openAIHTTPResponseOwnerKeyPrefix, id), apiKeyID, ttl)
 }
 
 func (s *defaultOpenAIWSStateStore) GetHTTPResponseOwner(ctx context.Context, groupID int64, responseID string) (int64, int64, bool, error) {
@@ -212,7 +215,7 @@ func (s *defaultOpenAIWSStateStore) BindResponseAccount(ctx context.Context, gro
 	cacheKey := openAIWSResponseAccountCacheKey(id)
 	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
 	defer cancel()
-	return s.cache.SetSessionAccountID(cacheCtx, groupID, cacheKey, accountID, ttl)
+	return s.setResponseBinding(cacheCtx, groupID, cacheKey, accountID, ttl)
 }
 
 func cleanupExpiredHTTPResponseOwnerBindings(bindings map[string]openAIHTTPResponseOwnerBinding, now time.Time, maxScan int) {
@@ -279,6 +282,9 @@ func (s *defaultOpenAIWSStateStore) DeleteResponseAccount(ctx context.Context, g
 	}
 	cacheCtx, cancel := withOpenAIWSStateStoreRedisTimeout(ctx)
 	defer cancel()
+	if cache, ok := s.cache.(CollabResponseBindingCache); ok {
+		return cache.DeleteResponseBinding(cacheCtx, groupID, openAIWSResponseAccountCacheKey(id))
+	}
 	return s.cache.DeleteSessionAccountID(cacheCtx, groupID, openAIWSResponseAccountCacheKey(id))
 }
 
@@ -662,21 +668,25 @@ func withOpenAIWSStateStoreRedisTimeout(ctx context.Context) (context.Context, c
 	return context.WithTimeout(ctx, openAIWSStateStoreRedisTimeout)
 }
 
-func (s *defaultOpenAIWSStateStore) bindHTTPResponseOwnerLocal(groupID int64, id string, userID, apiKeyID int64, ttl time.Duration) {
+func (s *defaultOpenAIWSStateStore) bindHTTPResponseOwnerLocal(groupID int64, id string, userID, apiKeyID int64, ttl time.Duration) uint64 {
 	mapKey := openAIWSResponseAccountMapKey(groupID, id)
 	s.responseOwnerMu.Lock()
+	generation := s.bindingGeneration.Add(1)
 	ensureBindingCapacity(s.responseOwners, mapKey, openAIWSStateStoreMaxEntriesPerMap)
 	s.responseOwners[mapKey] = openAIHTTPResponseOwnerBinding{
-		userID: userID, apiKeyID: apiKeyID, expiresAt: time.Now().Add(ttl),
+		generation: generation, userID: userID, apiKeyID: apiKeyID, expiresAt: time.Now().Add(ttl),
 	}
 	s.responseOwnerMu.Unlock()
+	return generation
 }
 
-func (s *defaultOpenAIWSStateStore) bindResponseAccountLocal(groupID int64, id string, accountID int64, ttl time.Duration) {
+func (s *defaultOpenAIWSStateStore) bindResponseAccountLocal(groupID int64, id string, accountID int64, ttl time.Duration) uint64 {
 	expiresAt := time.Now().Add(ttl)
 	mapKey := openAIWSResponseAccountMapKey(groupID, id)
 	s.responseToAccountMu.Lock()
+	generation := s.bindingGeneration.Add(1)
 	ensureBindingCapacity(s.responseToAccount, mapKey, openAIWSStateStoreMaxEntriesPerMap)
-	s.responseToAccount[mapKey] = openAIWSAccountBinding{accountID: accountID, expiresAt: expiresAt}
+	s.responseToAccount[mapKey] = openAIWSAccountBinding{generation: generation, accountID: accountID, expiresAt: expiresAt}
 	s.responseToAccountMu.Unlock()
+	return generation
 }

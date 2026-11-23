@@ -44,25 +44,16 @@ func (s *OpenAIGatewayService) CommitCollabResponseIdentity(c *gin.Context, acco
 	if result.CompletedForDelivery() && account != nil && account.ID > 0 {
 		store := s.getOpenAIWSStateStore()
 		group, id, accountID, ttl := getOpenAIGroupIDFromContext(c), normalizeOpenAIWSResponseID(result.ResponseID), account.ID, normalizeOpenAIWSTTL(s.openAIWSResponseStickyTTL())
-		local, isLocal := store.(*defaultOpenAIWSStateStore)
-		if isLocal && id != "" {
-			local.bindResponseAccountLocal(group, id, accountID, ttl)
-		}
-		bindings := []func(context.Context) error{func(ctx context.Context) error { return store.BindResponseAccount(ctx, group, id, accountID, ttl) }}
-		if raw, ok := c.Get(openAIHTTPResponseOwnerContextKey); ok {
-			if owner, ok := raw.(openAIHTTPResponseOwner); ok && owner.userID > 0 && owner.apiKeyID > 0 {
-				if isLocal && id != "" {
-					local.bindHTTPResponseOwnerLocal(group, id, owner.userID, owner.apiKeyID, ttl)
+		if publisher, ok := store.(CollabResponseIdentityStore); ok && id != "" {
+			writes = append(writes, publisher.PrepareCollabResponseAccount(group, id, accountID, ttl))
+			if raw, ok := c.Get(openAIHTTPResponseOwnerContextKey); ok {
+				if owner, ok := raw.(openAIHTTPResponseOwner); ok && owner.userID > 0 && owner.apiKeyID > 0 {
+					writes = append(writes, publisher.PrepareCollabHTTPResponseOwner(group, id, owner.userID, owner.apiKeyID, ttl))
 				}
-				bindings = append(bindings, func(ctx context.Context) error {
-					return store.BindHTTPResponseOwner(ctx, group, id, owner.userID, owner.apiKeyID, ttl)
-				})
 			}
-		}
-		// Local identity is visible immediately. Shared/custom bindings run only
-		// after settlement and capture immutable values rather than gin state.
-		if store != nil && (!isLocal || local.cache != nil) {
-			writes = append(writes, bindings...)
+		} else {
+			// An unconditional deferred Bind could overwrite a later deletion.
+			s.collabAliasFailures.Add(1)
 		}
 	}
 	if len(writes) == 0 {
