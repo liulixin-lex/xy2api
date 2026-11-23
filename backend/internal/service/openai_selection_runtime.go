@@ -61,6 +61,7 @@ func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accoun
 
 		return openAICollabSelectionLess(keys[accounts[i].ID], keys[accounts[j].ID], hint)
 	})
+	s.orderCollabSelection(ctx, accounts, keys, req.RequireCompact)
 }
 
 // selectionCandidates is shared by new placement and owner migration. Compact

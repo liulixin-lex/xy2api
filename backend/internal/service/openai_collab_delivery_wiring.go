@@ -143,6 +143,9 @@ func FinishOpenAICollabDelivery(c *gin.Context) {
 		return
 	}
 	w.completed = true
+	if request.readCancel != nil {
+		request.readCancel()
+	}
 	if w.current.Generation != 0 {
 		w.saveCurrent()
 	}

@@ -94,7 +94,7 @@ func (h *OpenAIGatewayHandler) armCollabSeam(c *gin.Context, body []byte, previo
 	}
 	seam := &collabSeam{original: c.Writer, body: body, rescue: h.collabRescue}
 	seam.lossless = resilience.StateFrom(c.Request.Context()).CollabSettingsSnapshot().CollabLosslessFirstOn()
-	seam.observer = service.NewLazyCollabSendObserver(body)
+	seam.observer = service.NewLazyCollabSendObserver(body, service.CollabBodyFactsForRequest(c.Request.Context()))
 	eligible := h.collabRescuable(seam)
 	if eligible == nil {
 		return nil

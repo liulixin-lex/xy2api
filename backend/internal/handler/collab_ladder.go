@@ -34,6 +34,7 @@ func (h *OpenAIGatewayHandler) rescueCollab(c *gin.Context, seam *collabSeam, sa
 		return
 	}
 	parsed := seam.observer.Body()
+	parsed = service.ParseCollabBodyWithContext(parsed.Original, service.CollabBodyFactsForRequest(c.Request.Context()))
 	if parsed.Shape.Ambiguous || parsed.Shape.ContinuationPointer {
 		return
 	}

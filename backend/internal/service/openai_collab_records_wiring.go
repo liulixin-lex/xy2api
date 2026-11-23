@@ -59,6 +59,7 @@ func (s *openAICollabSendObservation) consumed() {
 		}
 	}
 	s.request.gateway.RecordCollabConsumed(s.ctx, s.request.settings, true, s.value.Account, s.unchanged)
+	s.request.recordReplaced(s.ctx, s.value.Account)
 	s.request.releaseAcceptedLeases(s.ctx, s.unchanged, resilience.CollabLeaseReleaseConsumed)
 	for _, key := range s.unchanged {
 		s.request.observation.ObserveDelivery(resilience.CollabDeliveryObservation{Delivery: key.Delivery, Item: key.Item, Digest: key.Digest, Position: resilience.CollabPositionMessage, Form: resilience.CollabFormCiphertext, Outcome: resilience.CollabDeliveryOutcomeAcceptedOriginal})

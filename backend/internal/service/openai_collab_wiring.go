@@ -13,20 +13,28 @@ type openAICollabRequestKey struct{}
 // The inbound owner survives account retries and optional child contexts.
 // Mutable collaboration data is confined to the request goroutine.
 type openAICollabRequest struct {
-	state        *resilience.CollabRequestState
-	settings     *resilience.Settings
-	ingress      resilience.CollabIngressObservation
-	delivery     *openAICollabDeliveryWriter
-	attempt      *openAICollabAttempt
-	gateway      *OpenAIGatewayService
-	observation  *resilience.CollabObservationAccumulator
-	send         *openAICollabSendObservation
-	client       resilience.CollabClient
-	versionState resilience.CollabVersionState
-	version      string
-	scope        resilience.CollabRecordScope
-	itemPaths    []string
-	thread       string
+	state            *resilience.CollabRequestState
+	settings         *resilience.Settings
+	ingress          resilience.CollabIngressObservation
+	delivery         *openAICollabDeliveryWriter
+	attempt          *openAICollabAttempt
+	gateway          *OpenAIGatewayService
+	observation      *resilience.CollabObservationAccumulator
+	send             *openAICollabSendObservation
+	client           resilience.CollabClient
+	versionState     resilience.CollabVersionState
+	version          string
+	scope            resilience.CollabRecordScope
+	itemPaths        []string
+	thread           string
+	readCtx          context.Context
+	readCancel       context.CancelFunc
+	dispositionsRead bool
+	recordsRead      bool
+	lookup           resilience.CollabRecordBatchResult
+	failed           bool
+	rejectedAccounts map[resilience.CollabDigest]bool
+	borrowAttempted  bool
 }
 
 // BeginOpenAICollabRequest inspects validated ingress before route selection.

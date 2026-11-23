@@ -327,6 +327,13 @@ func (r *openAICollabRequest) sealSend() {
 	}
 	r.observation.ObserveInputTransformations(s.value.Generation, s.transformations)
 	r.observation.SealSend(s.value)
+	r.failed = s.value.Result != resilience.CollabSendResultAccepted
+	if s.value.Result == resilience.CollabSendResultCipherRejected && s.value.Account != "" {
+		if r.rejectedAccounts == nil {
+			r.rejectedAccounts = map[resilience.CollabDigest]bool{}
+		}
+		r.rejectedAccounts[s.value.Account] = true
+	}
 	s.consumed()
 	mode := resilience.CollabFinalModeNone
 	if s.value.Result == resilience.CollabSendResultAccepted {
