@@ -9,12 +9,13 @@ import (
 
 // The shared send boundary runs after admission, for native and passthrough
 // requests alike. A pre-dispatch rejection must not create a physical response.
-func beginCollabWiredSend(ctx context.Context) {
+func beginCollabWiredSend(ctx context.Context, body []byte) {
 	request := openAICollabRequestFrom(ctx)
 	if request == nil {
 		return
 	}
 	request.sealSend()
+	request.state.CurrentBody = body
 	beginOpenAICollabResponse(ctx)
 	if attempt := request.attempt; attempt != nil {
 		request.delivery.mu.Lock()
