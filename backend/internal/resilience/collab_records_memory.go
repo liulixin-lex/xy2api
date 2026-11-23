@@ -307,7 +307,16 @@ func (s *MemoryCollabRecordsStore) applyMutation(m CollabRecordMutation) (count 
 				old.mutation.Reserved = old.mutation.Reserved && m.Reserved
 				tree.entries[field] = old
 			}
-			return count, true
+			if m.Kind != CollabRecordMutationVoid {
+				return count, true
+			}
+			// Invalidation updates extend coverage even when the storage identity
+			// is unchanged. Re-admit the merged row to account for encoded growth.
+			if old.mutation.Issued.ExpiresAt.After(expires) {
+				expires = old.mutation.Issued.ExpiresAt
+			}
+			m.Issued.ExpiresAt = expires
+			payload, _ = json.Marshal(m)
 		}
 		tree.remove(field)
 	}
