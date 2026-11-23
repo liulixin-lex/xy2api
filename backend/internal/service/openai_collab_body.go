@@ -46,12 +46,24 @@ type CollabBody struct {
 func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 	original := gjson.GetBytes(p.Original, "input").Array()
 	current := gjson.GetBytes(body, "input").Array()
+	// The outbound sanitizer removes only invalid IDs. Compare that exact
+	// representation while retaining each original occurrence as its identity.
+	comparable := make([]string, len(original))
+	for i, item := range original {
+		comparable[i] = item.Raw
+		id := item.Get("id")
+		if id.Type == gjson.String && shouldStripOpenAIResponsesInputItemID(item.Get("type").String(), id.Str) {
+			if stripped, err := sjson.Delete(item.Raw, "id"); err == nil {
+				comparable[i] = stripped
+			}
+		}
+	}
 	candidates := make([][]int, len(current))
 	duplicates := make([][]int, len(current))
 	for i, item := range current {
 		id := item.Get("id").String()
 		for j, candidate := range original {
-			if id != "" && id == candidate.Get("id").String() || id == "" && (item.Raw == candidate.Raw || p.lineage.matches(item.Raw, j)) {
+			if id != "" && id == candidate.Get("id").String() || id == "" && (item.Raw == comparable[j] || p.lineage.matches(item.Raw, j)) {
 				candidates[i] = append(candidates[i], j)
 			}
 		}
@@ -70,9 +82,9 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 		if current[i].Get("id").String() != "" {
 			continue
 		}
-		for j, candidate := range original {
+		for j := range original {
 			for _, known := range options {
-				if candidate.Raw == original[known].Raw {
+				if comparable[j] == comparable[known] {
 					duplicates[i] = append(duplicates[i], j)
 					break
 				}
@@ -112,7 +124,7 @@ func (p CollabBody) inputPositions(body []byte) (map[int]int, bool) {
 		}
 		options := candidates[selected]
 		for _, j := range options[1:] {
-			if original[j].Raw != original[options[0]].Raw {
+			if comparable[j] != comparable[options[0]] {
 				return nil, false
 			}
 		}
