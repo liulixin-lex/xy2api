@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"context"
+	"slices"
 	"time"
 )
 
@@ -77,17 +78,26 @@ type CollabReplacedRecord struct {
 }
 
 type CollabTerminatedRecord struct {
-	Key       CollabDeliveryKey
-	Copies    []CollabDigest
-	Event     CollabDigest
-	Parent    CollabDigest
-	ExpiresAt time.Time
+	Key             CollabDeliveryKey
+	CopiesTruncated bool `json:",omitempty"`
+	Copies          []CollabDigest
+	Event           CollabDigest
+	Parent          CollabDigest
+	ExpiresAt       time.Time
 }
 
+// Token snapshots are merged before deriving Issued. A void cannot erase a
+// different request's confirmed delivery.
+type CollabIssuedEntry struct {
+	Token  CollabIssuedToken
+	Record CollabIssuedRecord
+}
 type CollabRecordLookup struct {
-	Issued    []CollabIssuedRecord
-	Plaintext []CollabPlaintextRecord
-	Consumed  []CollabConsumedRecord
+	VoidedTokens []CollabIssuedToken
+	IssuedTokens []CollabIssuedEntry
+	Issued       []CollabIssuedRecord
+	Plaintext    []CollabPlaintextRecord
+	Consumed     []CollabConsumedRecord
 }
 
 type CollabDispositionLookup struct {
@@ -96,8 +106,7 @@ type CollabDispositionLookup struct {
 	Terminated         []CollabTerminatedRecord
 }
 
-// Local methods are strictly in-process and bounded: no network I/O, waits or
-// callbacks. SafeCollabRecordsStore is the request-facing adapter: it recovers
+// Local methods are strictly in-process and bounded, with short mutation locks. SafeCollabRecordsStore is the request-facing adapter: it recovers
 // panics, batches reads under one request deadline and queues shared writes.
 // Pending issues are visible locally before a frame, but cannot create a lease
 // until confirmation. Dispositions remain independent of the records switch.
@@ -110,8 +119,9 @@ type CollabRecordsStore interface {
 	PlaintextDelivered(context.Context, CollabPlaintextRecord) bool
 	Consumed(context.Context, CollabConsumedRecord) bool
 	Replaced(context.Context, CollabReplacedRecord) bool
+	// Register only after complete delivery; provisional until this request has a receipt.
 	Terminated(context.Context, CollabTerminatedRecord) bool
-	// Increment is idempotent per event and occurs only after full delivery.
+	// Deprecated and disabled. Use CollabLocalEndingAdmission before delivery.
 	IncrementTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool)
 }
 
@@ -121,8 +131,8 @@ func (NoopCollabRecordsStore) TerminalRejected(context.Context, CollabTerminalRe
 	return 0, false
 }
 
-func (NoopCollabRecordsStore) LookupBatch(context.Context, CollabRecordBatch) CollabRecordBatchResult {
-	return CollabRecordBatchResult{}
+func (NoopCollabRecordsStore) LookupBatch(_ context.Context, b CollabRecordBatch) CollabRecordBatchResult {
+	return collabUnknownBatch(b)
 }
 func (NoopCollabRecordsStore) PendingIssued(context.Context, CollabIssuedRecord) (CollabIssuedToken, bool) {
 	return CollabIssuedToken{}, false
@@ -136,21 +146,28 @@ func (NoopCollabRecordsStore) Consumed(context.Context, CollabConsumedRecord) bo
 func (NoopCollabRecordsStore) Replaced(context.Context, CollabReplacedRecord) bool     { return false }
 func (NoopCollabRecordsStore) Terminated(context.Context, CollabTerminatedRecord) bool { return false }
 func (NoopCollabRecordsStore) IncrementTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool) {
-	return 0, false
+	return CollabTreeLocalEndingLimit, false
 }
 
 // A single batch includes all original items, disposition lookups and the tree
 // counter. Flags preserve independent records/disposition gates.
 type CollabRecordBatch struct {
-	Scope        CollabRecordScope
-	Queries      []CollabRecordQuery
-	Records      bool
-	Dispositions bool
+	Scope   CollabRecordScope
+	Queries []CollabRecordQuery
+	// DispositionQueries take priority and use their own query allowance.
+	// Nil reuses Queries for compatibility.
+	DispositionQueries                      []CollabRecordQuery
+	recordsTruncated, dispositionsTruncated bool
+	Records                                 bool
+	Dispositions                            bool
 }
 type CollabRecordBatchResult struct {
-	Records          map[CollabRecordQuery]CollabRecordLookup
-	Dispositions     map[CollabRecordQuery]CollabDispositionLookup
-	TreeLocalEndings int
+	RecordsComplete       bool
+	DispositionsComplete  bool
+	TreeLocalEndingsKnown bool
+	Records               map[CollabRecordQuery]CollabRecordLookup
+	Dispositions          map[CollabRecordQuery]CollabDispositionLookup
+	TreeLocalEndings      int
 }
 
 type CollabRecordMutationKind string
@@ -168,19 +185,22 @@ const (
 )
 
 type CollabRecordMutation struct {
-	TerminalRejection CollabTerminalRejectionRecord
-	Kind              CollabRecordMutationKind
-	Token             CollabIssuedToken
-	Issued            CollabIssuedRecord
-	Plaintext         CollabPlaintextRecord
-	Consumed          CollabConsumedRecord
-	Replaced          CollabReplacedRecord
-	Terminated        CollabTerminatedRecord
-	Scope             CollabRecordScope
-	Event             CollabDigest
+	// WriteOrder preserves evidence eviction order if its index is rebuilt.
+	WriteOrder        int64                         `json:",omitzero"`
+	Reserved          bool                          `json:",omitempty"`
+	TerminalRejection CollabTerminalRejectionRecord `json:",omitzero"`
+	Kind              CollabRecordMutationKind      `json:",omitzero"`
+	Token             CollabIssuedToken             `json:",omitzero"`
+	Issued            CollabIssuedRecord            `json:",omitzero"`
+	Plaintext         CollabPlaintextRecord         `json:",omitzero"`
+	Consumed          CollabConsumedRecord          `json:",omitzero"`
+	Replaced          CollabReplacedRecord          `json:",omitzero"`
+	Terminated        CollabTerminatedRecord        `json:",omitzero"`
+	Scope             CollabRecordScope             `json:",omitzero"`
+	Event             CollabDigest                  `json:",omitzero"`
 }
 
-// The shared implementation is called only on bounded background workers.
+// The shared implementation is called only on bounded workers.
 // Apply must be idempotent and preserve pending/confirm/void ordering. An
 // unknown confirmation cannot fabricate an issue; overflow is absence.
 type CollabSharedRecordsStore interface {
@@ -204,4 +224,42 @@ type CollabTerminalRejectionCount struct {
 	Rejection CollabDigest
 	Count     int
 	ExpiresAt time.Time
+}
+
+// Count-only compatibility capability. It does not authorize output; delivery
+// must use CollabLocalEndingAdmission to reserve the concrete dispositions.
+// CollabLocalEndingAdmission reserves all concrete dispositions with the count.
+// Publication only reveals already admitted rows after complete delivery.
+type CollabLocalEndingAdmission interface {
+	ReserveLocalEnding(context.Context, []CollabTerminatedRecord) (int, bool)
+}
+
+type CollabLocalEndingReserver interface {
+	ReserveTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool)
+}
+
+func (r CollabRecordBatchResult) LocalEndingCount() int {
+	if !r.TreeLocalEndingsKnown {
+		return CollabTreeLocalEndingLimit
+	}
+	return min(r.TreeLocalEndings, CollabTreeLocalEndingLimit)
+}
+func collabUnknownBatch(b CollabRecordBatch) CollabRecordBatchResult {
+	r := CollabRecordBatchResult{}
+	if b.Dispositions {
+		r.TreeLocalEndings = CollabTreeLocalEndingLimit
+	}
+	return r
+}
+
+// Receipts prove only that this request carries the gateway notice. A live,
+// matching gateway record and the original delivery identity are still required.
+func CollabTerminationEffective(record CollabTerminatedRecord, key CollabDeliveryKey, receipts []CollabDigest, now time.Time) bool {
+	if !record.ExpiresAt.After(now) || record.Key.Scope != key.Scope || record.Key.Thread != key.Thread || record.Key.Delivery != key.Delivery {
+		return false
+	}
+	if record.Key != key && !slices.Contains(record.Copies, key.Item) {
+		return false
+	}
+	return record.Event != "" && slices.Contains(receipts, record.Event)
 }

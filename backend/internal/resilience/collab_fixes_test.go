@@ -283,9 +283,9 @@ type collabLocalTestStore struct {
 	writes atomic.Int64
 }
 
-func (s *collabLocalTestStore) PendingIssued(context.Context, CollabIssuedRecord) (CollabIssuedToken, bool) {
+func (s *collabLocalTestStore) PendingIssued(_ context.Context, r CollabIssuedRecord) (CollabIssuedToken, bool) {
 	s.writes.Add(1)
-	return CollabIssuedToken{Token: "synthetic"}, true
+	return CollabIssuedToken{Token: "synthetic", Scope: r.Scope, Call: r.Call, Generation: r.Generation}, true
 }
 
 func TestCollabRecordsBatchDeadlineAndNonblockingWrites(t *testing.T) {
@@ -307,7 +307,7 @@ func TestCollabRecordsBatchDeadlineAndNonblockingWrites(t *testing.T) {
 	store := NewSafeCollabRecordsStore(local, shared, 1)
 	t.Cleanup(store.Close)
 	ctx := context.Background()
-	_, ok := store.PendingIssued(ctx, CollabIssuedRecord{})
+	_, ok := store.PendingIssued(ctx, CollabIssuedRecord{Scope: collabTestKey().Scope, Call: "call", Digest: "digest", Account: "account", ExpiresAt: time.Now().Add(time.Hour)})
 	require.True(t, ok)
 	select {
 	case <-started:
@@ -316,7 +316,7 @@ func TestCollabRecordsBatchDeadlineAndNonblockingWrites(t *testing.T) {
 	}
 	before := CollabSafetySnapshot().RecordDropped
 	for i := 0; i < 10; i++ {
-		_, ok = store.PendingIssued(ctx, CollabIssuedRecord{})
+		_, ok = store.PendingIssued(ctx, CollabIssuedRecord{Scope: collabTestKey().Scope, Call: "call", Digest: "digest", Account: "account", ExpiresAt: time.Now().Add(time.Hour)})
 		require.True(t, ok)
 	}
 	require.Equal(t, int64(11), local.writes.Load())
@@ -324,13 +324,15 @@ func TestCollabRecordsBatchDeadlineAndNonblockingWrites(t *testing.T) {
 	close(unblock)
 
 	shared.lookup = func(ctx context.Context, b CollabRecordBatch) (CollabRecordBatchResult, error) {
-		require.Len(t, b.Queries, 64)
+		require.Len(t, b.Queries, 1, "duplicate queries share one slot")
 		return CollabRecordBatchResult{TreeLocalEndings: 2}, nil
 	}
 	readCtx, cancel := WithCollabRecordReadBudget(ctx)
 	defer cancel()
 	batch := CollabRecordBatch{Queries: make([]CollabRecordQuery, 64), Records: true, Dispositions: true}
-	require.Equal(t, 2, store.LookupBatch(readCtx, batch).TreeLocalEndings)
+	result := store.LookupBatch(readCtx, batch)
+	require.False(t, result.TreeLocalEndingsKnown)
+	require.Equal(t, CollabTreeLocalEndingLimit, result.LocalEndingCount())
 	again, againCancel := WithCollabRecordReadBudget(readCtx)
 	defer againCancel()
 	store.LookupBatch(again, batch)
@@ -345,9 +347,9 @@ func TestCollabRecordsBatchDeadlineAndNonblockingWrites(t *testing.T) {
 	readCtx, cancel = WithCollabRecordReadBudget(ctx)
 	defer cancel()
 	start := time.Now()
-	require.Empty(t, slow.LookupBatch(readCtx, batch))
+	require.Equal(t, CollabTreeLocalEndingLimit, slow.LookupBatch(readCtx, batch).LocalEndingCount())
 	require.Less(t, time.Since(start), time.Second)
-	require.Empty(t, slow.LookupBatch(readCtx, batch))
+	require.Equal(t, CollabTreeLocalEndingLimit, slow.LookupBatch(readCtx, batch).LocalEndingCount())
 	require.Equal(t, int64(1), blocked.reads.Load())
 }
 
@@ -373,6 +375,10 @@ func (collabPanicLocal) Terminated(context.Context, CollabTerminatedRecord) bool
 func (collabPanicLocal) IncrementTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool) {
 	panic("synthetic")
 }
+func (collabPanicLocal) ReserveTreeLocalEnding(context.Context, CollabRecordScope, CollabDigest) (int, bool) {
+	panic("synthetic")
+}
+
 func TestCollabRecordsPanicsAndErrorsAreAbsence(t *testing.T) {
 	before := CollabSafetySnapshot()
 	store := NewSafeCollabRecordsStore(collabPanicLocal{}, nil, 1)
@@ -387,7 +393,10 @@ func TestCollabRecordsPanicsAndErrorsAreAbsence(t *testing.T) {
 	require.False(t, store.Consumed(ctx, CollabConsumedRecord{}))
 	require.False(t, store.Replaced(ctx, CollabReplacedRecord{}))
 	require.False(t, store.Terminated(ctx, CollabTerminatedRecord{}))
-	_, ok = store.IncrementTreeLocalEnding(ctx, CollabRecordScope{}, "")
+	count, ok := store.IncrementTreeLocalEnding(ctx, CollabRecordScope{}, "")
+	require.Equal(t, CollabTreeLocalEndingLimit, count)
+	require.False(t, ok)
+	_, ok = store.ReserveTreeLocalEnding(ctx, CollabRecordScope{}, "")
 	require.False(t, ok)
 	_, ok = store.TerminalRejected(ctx, CollabTerminalRejectionRecord{})
 	require.False(t, ok)

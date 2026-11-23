@@ -485,6 +485,9 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
+	collabRecords         *resilience.SafeCollabRecordsStore
+	collabRecordsMu       sync.Mutex
+	collabRecordsClosed   bool
 	schedAttemptRecorder  SchedAttemptRecorder
 	selectionBoard        *OpenAISelectionBoard
 	selectionFullMarks    fullMarks

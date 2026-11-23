@@ -23,10 +23,11 @@ type CollabTerminalRejectionCounter struct {
 	mu       sync.Mutex
 	entries  map[collabRejectionKey]collabRejectionEntry
 	capacity int
+	index    map[CollabDeliveryKey]map[collabRejectionKey]struct{}
 }
 
 func NewCollabTerminalRejectionCounter(capacity int) *CollabTerminalRejectionCounter {
-	return &CollabTerminalRejectionCounter{entries: make(map[collabRejectionKey]collabRejectionEntry), capacity: min(max(capacity, 1), CollabRecordMaxEntries)}
+	return &CollabTerminalRejectionCounter{entries: make(map[collabRejectionKey]collabRejectionEntry), index: make(map[CollabDeliveryKey]map[collabRejectionKey]struct{}), capacity: min(max(capacity, 1), CollabRecordMaxEntries)}
 }
 func (c *CollabTerminalRejectionCounter) Record(record CollabTerminalRejectionRecord, now time.Time) (int, bool) {
 	if c == nil || record.Key.Delivery == "" || record.Key.Item == "" || record.Rejection == "" || record.Event == "" || !record.ExpiresAt.After(now) {
@@ -37,7 +38,7 @@ func (c *CollabTerminalRejectionCounter) Record(record CollabTerminalRejectionRe
 	key := collabRejectionKey{record.Key, record.Rejection}
 	entry, exists := c.entries[key]
 	if exists && !entry.expires.After(now) {
-		delete(c.entries, key)
+		c.remove(key)
 		exists = false
 		entry = collabRejectionEntry{}
 	}
@@ -46,7 +47,7 @@ func (c *CollabTerminalRejectionCounter) Record(record CollabTerminalRejectionRe
 			// Cleanup is bounded by the same hard capacity as storage.
 			for k, v := range c.entries {
 				if !v.expires.After(now) {
-					delete(c.entries, k)
+					c.remove(k)
 				}
 			}
 		}
@@ -65,6 +66,10 @@ func (c *CollabTerminalRejectionCounter) Record(record CollabTerminalRejectionRe
 		entry.count++
 	}
 	c.entries[key] = entry
+	if c.index[key.delivery] == nil {
+		c.index[key.delivery] = make(map[collabRejectionKey]struct{})
+	}
+	c.index[key.delivery][key] = struct{}{}
 	return entry.count, true
 }
 func (c *CollabTerminalRejectionCounter) Counts(key CollabDeliveryKey, now time.Time) []CollabTerminalRejectionCount {
@@ -74,9 +79,10 @@ func (c *CollabTerminalRejectionCounter) Counts(key CollabDeliveryKey, now time.
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var counts []CollabTerminalRejectionCount
-	for k, entry := range c.entries {
+	for k := range c.index[key] {
+		entry := c.entries[k]
 		if !entry.expires.After(now) {
-			delete(c.entries, k)
+			c.remove(k)
 			continue
 		}
 		if k.delivery == key {
@@ -90,4 +96,12 @@ func collabEarlierTime(a, b time.Time) time.Time {
 		return a
 	}
 	return b
+}
+
+func (c *CollabTerminalRejectionCounter) remove(k collabRejectionKey) {
+	delete(c.entries, k)
+	delete(c.index[k.delivery], k)
+	if len(c.index[k.delivery]) == 0 {
+		delete(c.index, k.delivery)
+	}
 }

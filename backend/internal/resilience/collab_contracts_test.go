@@ -52,7 +52,7 @@ func TestCollabNoopContracts(t *testing.T) {
 	require.False(t, records.Terminated(ctx, CollabTerminatedRecord{}))
 	require.Zero(t, records.LookupBatch(ctx, CollabRecordBatch{}).TreeLocalEndings)
 	count, ok := records.IncrementTreeLocalEnding(ctx, CollabRecordScope{}, "")
-	require.Zero(t, count)
+	require.Equal(t, CollabTreeLocalEndingLimit, count)
 	require.False(t, ok)
 	var scheduler CollabScheduler = NoopCollabScheduler{}
 	candidates := []int64{3, 1, 2}
