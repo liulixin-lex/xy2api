@@ -540,6 +540,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		collabGroupID = *apiKey.GroupID
 	}
 	service.BeginOpenAICollabRequest(c, body, subject.UserID, collabGroupID)
+	defer service.FinishOpenAICollabDelivery(c)
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
@@ -769,7 +770,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// xy2api collaboration: the ladder takes over only from the final error of
 	// the loop below. finish runs before all other deferred cleanup; restore
 	// runs after the heartbeat wrapper above the seam is gone.
+	defer service.FinishOpenAICollabDelivery(c)
 	collabSeam := h.armCollabSeam(c, forwardBody, previousResponseID, requestPlatform, legacyCompact)
+	wireCollabDeliveryRescue(collabSeam)
 	if collabSeam != nil {
 		collabSeam.started = requestStart
 	}

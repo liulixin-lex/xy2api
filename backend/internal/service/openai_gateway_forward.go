@@ -1216,6 +1216,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
+		beginOpenAICollabResponse(ctx)
 		resp, err := s.sendSchedHTTP(ctx, account, upstreamReq, proxyURL, body, reqStream, &schedCapture)
 		fcoCompat.dispatched(ctx, account, resp)
 		noteOpenAIRequestRepairResent(ctx, c, account)

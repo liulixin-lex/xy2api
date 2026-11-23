@@ -16,6 +16,7 @@ type openAICollabRequest struct {
 	state    *resilience.CollabRequestState
 	settings *resilience.Settings
 	ingress  resilience.CollabIngressObservation
+	delivery *openAICollabDeliveryWriter
 }
 
 // BeginOpenAICollabRequest inspects validated ingress before route selection.
@@ -49,6 +50,8 @@ func BeginOpenAICollabRequest(c *gin.Context, body []byte, userID, groupID int64
 	}
 	request := &openAICollabRequest{state: state, settings: settings, ingress: ingress}
 	c.Request = c.Request.WithContext(context.WithValue(ctx, openAICollabRequestKey{}, request))
+	request.delivery = &openAICollabDeliveryWriter{ResponseWriter: c.Writer, ctx: c.Request.Context(), hooks: state.DeliveryHooks}
+	c.Writer = request.delivery
 }
 
 func openAICollabRequestFrom(ctx context.Context) *openAICollabRequest {
