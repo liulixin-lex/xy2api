@@ -196,7 +196,7 @@ func (s *OpenAIGatewayService) noteOpenAILastResort(ctx context.Context, req Ope
 	state := resilience.StateFrom(ctx)
 	state.SetLastResort(account.ID)
 	groupID := req.GroupID
-	s.resilience.noteLastResortSelected(account.ID)
+	s.resilience.noteLastResortSelected(ctx, account.ID)
 	resilience.Count(resilience.MetricLastResort, derefGroupID(groupID), account.ID, account.Platform)
 	slog.Warn("resilience.last_resort", append(resilience.EventFields(ctx),
 		"group_id", derefGroupID(groupID),
