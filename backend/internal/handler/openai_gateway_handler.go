@@ -540,6 +540,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		collabGroupID = *apiKey.GroupID
 	}
 	service.BeginOpenAICollabRequest(c, body, subject.UserID, collabGroupID)
+	h.gatewayService.PrepareOpenAICollabIdentity(c)
 	defer service.FinishOpenAICollabDelivery(c)
 	defer service.LogOpenAICollabObservation(c, body)
 	modelResult := gjson.GetBytes(body, "model")

@@ -24,6 +24,9 @@ type openAICollabRequest struct {
 	client       resilience.CollabClient
 	versionState resilience.CollabVersionState
 	version      string
+	scope        resilience.CollabRecordScope
+	itemPaths    []string
+	thread       string
 }
 
 // BeginOpenAICollabRequest inspects validated ingress before route selection.

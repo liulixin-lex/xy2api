@@ -26,6 +26,7 @@ func beginCollabWiredSend(ctx context.Context, body []byte) {
 		request.state.Response.Restorer = attempt.restorer
 	}
 	request.beginSendObservation(ctx)
+	request.beginRecords(ctx)
 }
 
 func receiveCollabWiredResponse(ctx context.Context, response *http.Response, err error) {

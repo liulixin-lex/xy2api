@@ -23,6 +23,7 @@ func (r *openAICollabRequest) initObservation(c *gin.Context) {
 	r.state.InitialReason, r.state.StopReason = resilience.CollabReasonNone, resilience.CollabReasonNone
 	r.observation = resilience.NewCollabObservationAccumulator(resilience.CollabObservation{
 		V: resilience.CollabObservationVersion, Role: r.state.Role, RequestKind: kind, Route: route,
+		Thread: r.state.Thread, Tree: r.state.Tree, Parent: r.state.Parent,
 		Client: r.client, VersionState: r.versionState, ClientVersion: r.version, Covered: route == resilience.CollabRouteResponsesHttp,
 		InitialReason: resilience.CollabReasonNone, StopReason: resilience.CollabReasonNone, FinalMode: resilience.CollabFinalModeNone,
 		Execution: resilience.CollabExecutionUnknown,
@@ -80,6 +81,8 @@ type openAICollabSendObservation struct {
 	evidence        *resilience.CollabEvidence
 	transformations *resilience.CollabInputTransformations
 	readErr         error
+	ctx             context.Context
+	unchanged       []resilience.CollabDeliveryKey
 	upstreamCalls   map[string]bool
 	deliveredCalls  map[string]bool
 	calls           int
@@ -180,7 +183,7 @@ func (r *openAICollabRequest) beginSendObservation(ctx context.Context) {
 	if r.state.RawPlan != "" {
 		value.RawPlan, value.RawReason = r.state.RawPlan, r.state.RawReason
 	}
-	r.send = &openAICollabSendObservation{request: r, value: value, shape: resilience.CollabRequestShape{Kind: r.state.Kind, Route: resilience.CollabRouteResponsesHttp, Codex: r.client != resilience.CollabClientOther && r.client != resilience.CollabClientUnknown, AgentCiphertext: r.ingress.EncryptedAgent, ToolOutputCiphertext: r.ingress.EncryptedTool}}
+	r.send = &openAICollabSendObservation{ctx: ctx, request: r, value: value, shape: resilience.CollabRequestShape{Kind: r.state.Kind, Route: resilience.CollabRouteResponsesHttp, Codex: r.client != resilience.CollabClientOther && r.client != resilience.CollabClientUnknown, AgentCiphertext: r.ingress.EncryptedAgent, ToolOutputCiphertext: r.ingress.EncryptedTool}}
 }
 
 func (s *openAICollabSendObservation) receive(resp *http.Response, err error) {
@@ -324,6 +327,7 @@ func (r *openAICollabRequest) sealSend() {
 	}
 	r.observation.ObserveInputTransformations(s.value.Generation, s.transformations)
 	r.observation.SealSend(s.value)
+	s.consumed()
 	mode := resilience.CollabFinalModeNone
 	if s.value.Result == resilience.CollabSendResultAccepted {
 		mode = resilience.CollabFinalModeCiphertext

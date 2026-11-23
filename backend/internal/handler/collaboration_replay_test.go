@@ -278,6 +278,7 @@ func runCollaborationReplay(t *testing.T, c replayCase, snapshot resilience.Sett
 		configureReplayHandler(h, usage)
 	}
 	synctest.Test(t, func(t *testing.T) {
+		defer gateway.CloseCollabRecords()
 		records := &replayRecordStore{mode: c.RecordMode}
 		if configureReplayRecords != nil {
 			configureReplayRecords(t, gateway, records)
