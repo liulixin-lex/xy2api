@@ -53,6 +53,9 @@ func WithOpenAITerminalRejectionScope(ctx context.Context, c *gin.Context, body 
 // rejection avoidance suppresses writes. Reads and unrelated child requests
 // retain the existing affinity rules. The flag also reaches final admission.
 func preserveOpenAIRejectionBinding(ctx context.Context, session string) bool {
+	if b := openAICollabBindingFrom(ctx); b != nil && b.session == session {
+		return false
+	}
 	scope := openAIRejectionScope(ctx)
 	return session != "" && session != scope.session && scope.selectionPreservesBinding != nil && scope.selectionPreservesBinding.Load()
 }

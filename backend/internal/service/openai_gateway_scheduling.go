@@ -1495,7 +1495,8 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if selected, err = openAIMonitorProbeFreeSlot(ctx, tryAcquire); err != nil || selected != nil {
 		return selected, err
 	}
-	s.sortSelectionAccounts(ctx, candidates, req, loads)
+	waitCtx := withoutCollabSelectionHint(ctx)
+	s.sortSelectionAccounts(waitCtx, candidates, req, loads)
 	for len(candidates) > 0 {
 		a := candidates[0]
 		candidates = candidates[1:]
@@ -1511,7 +1512,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		reservation, accepted := trial.reserve(ctx, fresh, full)
 		if !accepted {
 			candidates = append(candidates, fresh)
-			s.sortSelectionAccounts(ctx, candidates, req, loads)
+			s.sortSelectionAccounts(waitCtx, candidates, req, loads)
 			continue
 		}
 		trial.selected = reservation
@@ -2288,7 +2289,11 @@ func (s *OpenAIGatewayService) selectOpenAIStickyCapacityResult(ctx context.Cont
 		ptrs = append(ptrs, item.account)
 	}
 	s.selectionFullMarks.observe(ptrs, loadMap, s.selectionNow())
-	s.sortSelectionAccounts(ctx, ptrs, req, loadMap)
+	sortCtx := ctx
+	if fallbackWait {
+		sortCtx = withoutCollabSelectionHint(ctx)
+	}
+	s.sortSelectionAccounts(sortCtx, ptrs, req, loadMap)
 	candidates = candidates[:0]
 	for _, a := range ptrs {
 		load := loadMap[a.ID]

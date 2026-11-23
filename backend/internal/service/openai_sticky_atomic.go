@@ -52,6 +52,9 @@ func (s *OpenAIGatewayService) deleteStickySessionAccountIDIfOwner(ctx context.C
 			s.releaseDeletedTrialOwner(ctx, groupID, sessionHash, owner)
 		}
 	}()
+	if b := collabBindingFor(ctx, groupID, sessionHash); b != nil {
+		return b.deleteOwner(ctx, owner)
+	}
 	if handled, err := s.deleteOpenAIStickyAliases(ctx, groupID, sessionHash, owner); handled {
 		return err
 	}

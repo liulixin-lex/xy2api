@@ -55,7 +55,7 @@ func openAISelectionNoWait(ctx context.Context) bool {
 // OpenAIQueueReselectionAllowed preserves the existing hard owner/migration
 // guards when the HTTP admission path considers one local free-slot retry.
 func OpenAIQueueReselectionAllowed(ctx context.Context) bool {
-	return ctx != nil && !openAINoStickyMigration(ctx) && !openAISelectionExempt(ctx)
+	return ctx != nil && (!openAINoStickyMigration(ctx) || openAICollabQueueReselect(ctx)) && !openAISelectionExempt(ctx)
 }
 
 // The scheduling recheck may be capped; the provider's original deadline is not.

@@ -637,6 +637,16 @@ func (s *OpenAIGatewayService) AvoidOpenAIStateAccount(ctx context.Context, grou
 		resilience.StateFrom(ctx).AddAvoided(accountID)
 		return
 	}
+	if b := openAICollabBindingFrom(ctx); b != nil && b.affinity.groupID == groupID && (sessionHash == b.scope || sessionHash == b.session) {
+		avoid := time.Duration(resilience.Current().Session.AvoidSeconds) * time.Second
+		if avoid <= 0 {
+			avoid = 10 * time.Minute
+		}
+		b.avoid(ctx, accountID, time.Now().Add(avoid))
+		_ = s.deleteStickySessionAccountIDIfOwner(ctx, &groupID, b.session, accountID)
+		return
+	}
+
 	avoid := time.Duration(resilience.Current().Session.AvoidSeconds) * time.Second
 	if avoid <= 0 {
 		avoid = 10 * time.Minute

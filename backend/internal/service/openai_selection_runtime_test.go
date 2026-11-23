@@ -48,7 +48,13 @@ func (c *selectionRuntimeCache) GetSessionAccountIDWithTTL(ctx context.Context, 
 	id, err := c.GetSessionAccountID(ctx, group, key)
 	return id, c.remaining, err
 }
-func (c *selectionRuntimeCache) CommitSessionBinding(_ context.Context, _ int64, key string, expected StickySessionBinding, next int64, _ time.Duration, _ BindingCommitOptions) (BindingCommitResult, error) {
+func (c *selectionRuntimeCache) CommitSessionBinding(ctx context.Context, group int64, key string, expected StickySessionBinding, next int64, ttl time.Duration, _ BindingCommitOptions) (BindingCommitResult, error) {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.sessionBindings, nil, "commit", next, ttl)
+		defer finish()
+	}
+
 	c.casKeys = append(c.casKeys, key)
 	if c.sessionBindings[key] != expected.AccountID {
 		return BindingCommitResult{Status: BindingChanged, ObservedGen: expected.Generation}, nil
@@ -81,7 +87,13 @@ func (c *selectionRuntimeCache) SyncSessionBindingAlias(_ context.Context, _ int
 	return nil
 }
 
-func (c *selectionRuntimeCache) DeleteSessionBindingAliases(_ context.Context, _ int64, primary, legacy string, owner int64) (bool, error) {
+func (c *selectionRuntimeCache) DeleteSessionBindingAliases(ctx context.Context, group int64, primary, legacy string, owner int64) (bool, error) {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.sessionBindings, nil, "delete", owner, 0)
+		defer finish()
+	}
+
 	current := c.sessionBindings[primary]
 	if current == 0 {
 		current = c.sessionBindings[legacy]
@@ -95,6 +107,12 @@ func (c *selectionRuntimeCache) DeleteSessionBindingAliases(_ context.Context, _
 }
 
 func (c *selectionRuntimeCache) GetSessionBinding(ctx context.Context, group int64, key string) (StickySessionBinding, error) {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.sessionBindings, nil, "read", 0, 0)
+		defer finish()
+	}
+
 	id, err := c.GetSessionAccountID(ctx, group, key)
 	return StickySessionBinding{AccountID: id, Generation: "g1"}, err
 }
@@ -604,6 +622,12 @@ func TestOpenAISelectionRuntimeFullOwnerRetryBorrowQueue(t *testing.T) {
 }
 
 func (c *selectionRuntimeCache) RecordSessionBindingFailure(ctx context.Context, group int64, key, session string, expected StickySessionBinding, target int64, ttl time.Duration, resetAt ...time.Time) (int64, error) {
+	if binding, ok := StickyThreadBindingFrom(ctx); ok {
+		var finish func()
+		ctx, finish = collabFakeThreadOperation(ctx, binding, c, group, c.sessionBindings, nil, "read", 0, 0)
+		defer finish()
+	}
+
 	if c.sessionBindings[key] != expected.AccountID {
 		return 0, nil
 	}
