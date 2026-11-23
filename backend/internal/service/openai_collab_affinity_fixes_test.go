@@ -8,6 +8,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
@@ -191,7 +192,7 @@ func TestCollabAffinityRecoverySurvivesAnotherInstance(t *testing.T) {
 	// No local hints or legacy execution scope are carried to the other instance.
 	identity := collabAffinityIdentity("child", "root")
 	identity.Scope.Tree = "" // a restarted instance has no membership registry
-	retry := WithOpenAICollabTreeAffinity(selectionReviewContext(), resilience.NewCollabTreeAffinity(32, time.Hour), settings, 7, identity, resilience.CollabRoleChild, true)
+	retry := WithOpenAICollabTreeAffinity(selectionReviewContext(), resilience.NewCollabTreeAffinity(32, time.Hour), settings, 7, identity, resilience.CollabRoleChild, true, &config.Config{})
 	retry = prepareAffinityTest(other, retry, "shared-session")
 	selected, _, err := collabAffinitySelect(other, retry, "m", nil)
 	require.NoError(t, err)
@@ -200,7 +201,7 @@ func TestCollabAffinityRecoverySurvivesAnotherInstance(t *testing.T) {
 	require.NoError(t, openAICollabBindingFrom(ctx).write(ctx, 2, time.Hour))
 	third := newCollabThreadFixture(t, first.repo.accounts...)
 	third.svc.cache, third.svc.resilience = first.svc.cache, first.svc.resilience
-	retry = WithOpenAICollabTreeAffinity(selectionReviewContext(), resilience.NewCollabTreeAffinity(32, time.Hour), settings, 7, identity, resilience.CollabRoleChild, true)
+	retry = WithOpenAICollabTreeAffinity(selectionReviewContext(), resilience.NewCollabTreeAffinity(32, time.Hour), settings, 7, identity, resilience.CollabRoleChild, true, &config.Config{})
 	retry = prepareAffinityTest(third, retry, "shared-session")
 	selected, _, err = collabAffinitySelect(third, retry, "m", nil)
 	require.NoError(t, err)
@@ -225,7 +226,7 @@ func TestCollabAffinityRejectsContradictoryTreeIdentity(t *testing.T) {
 			identity := collabAffinityIdentity("child", "root")
 			identity.Scope.Tree = "contradictory-tree"
 			base := selectionReviewContext()
-			ctx := WithOpenAICollabTreeAffinity(base, s, settings, 7, identity, resilience.CollabRoleChild, true)
+			ctx := WithOpenAICollabTreeAffinity(base, s, settings, 7, identity, resilience.CollabRoleChild, true, &config.Config{})
 			require.True(t, base == ctx, "only an empty tree may be resolved through membership")
 		})
 	}

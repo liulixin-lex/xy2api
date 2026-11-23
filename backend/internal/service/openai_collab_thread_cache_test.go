@@ -24,9 +24,14 @@ func collabFakeThreadOperation(ctx context.Context, b StickyThreadBinding, cache
 		present = false
 		delete(values, b.Key)
 	}
+	marker := b.Key + ":deleted"
+	detached := values[marker] != 0 && (expires == nil || time.Now().Before(expires[marker]))
 	owner := prior
 	if !present {
-		owner, _ = cache.GetSessionAccountID(ctx, group, b.Parent)
+		owner = 0
+		if !detached {
+			owner, _ = cache.GetSessionAccountID(ctx, group, b.Parent)
+		}
 	}
 	if owner > 0 {
 		values[b.Key] = owner
@@ -67,12 +72,31 @@ func collabFakeThreadOperation(ctx context.Context, b StickyThreadBinding, cache
 			_ = cache.RefreshSessionTTL(ctx, group, b.Parent, b.RefreshTTL)
 		}
 		account, known := values[b.Key]
+		if known && changed || operation == "delete" && !restore {
+			values[marker] = 1
+			if expires != nil {
+				until := time.Now().Add(b.TTL)
+				for _, key := range []string{b.Key, b.Parent, marker} {
+					if expires[key].After(until) {
+						until = expires[key]
+					}
+				}
+				expires[marker] = until
+			}
+			detached = true
+		}
 		remaining := ttl
 		if expires != nil {
 			remaining = time.Until(expires[b.Key])
 		}
 		if remaining <= 0 && expires == nil {
 			remaining = b.TTL
+		}
+		if !known && detached {
+			account, known = -1, true
+			if expires != nil {
+				remaining = time.Until(expires[marker])
+			}
 		}
 		parent, _ := cache.GetSessionAccountID(ctx, group, b.Parent)
 		if b.Observe != nil {

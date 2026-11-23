@@ -40,7 +40,7 @@ func TestCollabAffinityQueueReselectionKeepsOriginalTimeoutAndError(t *testing.T
 					body := []byte(`{"input":[{"type":"agent_message","content":[{"type":"encrypted_content","encrypted_content":"synthetic"}]}]}`)
 					ctx := service.WithOpenAIEncryptedContentMigrationGuard(context.Background(), body)
 					ctx = service.WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(16, time.Hour), &settings, 0,
-						resilience.CollabTreeHint{Scope: resilience.CollabRecordScope{Tenant: "tenant", Group: "group", Tree: "tree"}, Thread: "child", Parent: "root"}, resilience.CollabRoleChild, true)
+						resilience.CollabTreeHint{Scope: resilience.CollabRecordScope{Tenant: "tenant", Group: "group", Tree: "tree"}, Thread: "child", Parent: "root"}, resilience.CollabRoleChild, true, &config.Config{})
 					w := httptest.NewRecorder()
 					c, _ := gin.CreateTestContext(w)
 					c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)

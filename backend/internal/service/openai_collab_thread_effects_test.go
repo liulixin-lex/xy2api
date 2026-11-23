@@ -39,7 +39,7 @@ func TestCollabThreadBindingProductionActivation(t *testing.T) {
 		Scope:  resilience.CollabRecordScope{Tenant: f.svc.CollabDigest(resilience.CollabDigestDomainScope, "tenant"), Group: f.svc.CollabDigest(resilience.CollabDigestDomainScope, "group"), Tree: f.svc.CollabDigest(resilience.CollabDigestDomainTree, "root")},
 		Thread: f.svc.CollabDigest(resilience.CollabDigestDomainThread, "child"), Parent: f.svc.CollabDigest(resilience.CollabDigestDomainThread, "root"),
 	}
-	ctx = WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), 7, identity, resilience.CollabRoleChild, openAIRequestHasEncryptedState(body))
+	ctx = WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), 7, identity, resilience.CollabRoleChild, openAIRequestHasEncryptedState(body), f.svc.cfg)
 	require.True(t, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
 	require.NotNil(t, openAICollabBindingFrom(ctx))
 }

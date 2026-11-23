@@ -43,7 +43,7 @@ func collabAtomicRequest(t *testing.T, f *selectionRuntimeFixture, local *resili
 	}
 	cfg := collabAffinitySettings()
 	cfg.Collab.TreeAffinity = on
-	ctx = WithOpenAICollabTreeAffinity(ctx, local, cfg, 7, collabAffinityIdentity(thread, "root"), resilience.CollabRoleChild, true)
+	ctx = WithOpenAICollabTreeAffinity(ctx, local, cfg, 7, collabAffinityIdentity(thread, "root"), resilience.CollabRoleChild, true, f.svc.cfg)
 	active := on && !f.svc.openAISessionHashReadOldFallbackEnabled() && !f.svc.openAISessionHashDualWriteOldEnabled() && f.svc.openAILegacySessionCacheKey(ctx, session) == ""
 	require.Equal(t, active, f.svc.PrepareOpenAICollabThreadBinding(ctx, 1, session, PlatformOpenAI, OpenAIClientTransportHTTP, true))
 	return ctx, session

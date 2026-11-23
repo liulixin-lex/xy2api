@@ -160,7 +160,7 @@ func collabOracleOutcome(t *testing.T, c collabOracleCase, on bool) string {
 	}
 	before := maps.Clone(f.cache.sessionBindings)
 	if requested {
-		ctx = WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
+		ctx = WithOpenAICollabTreeAffinity(ctx, resilience.NewCollabTreeAffinity(32, time.Hour), collabAffinitySettings(), 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true, f.svc.cfg)
 		ctx = prepareAffinityTest(f, ctx, session)
 		b := openAICollabBindingFrom(ctx)
 		require.Equal(t, on, b != nil)

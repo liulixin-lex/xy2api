@@ -41,7 +41,7 @@ func collabAffinityContext(store *resilience.CollabTreeAffinity, settings *resil
 	if parent != "" {
 		role = resilience.CollabRoleChild
 	}
-	return WithOpenAICollabTreeAffinity(selectionReviewContext(), store, settings, 7, collabAffinityIdentity(thread, parent), role, true)
+	return WithOpenAICollabTreeAffinity(selectionReviewContext(), store, settings, 7, collabAffinityIdentity(thread, parent), role, true, &config.Config{})
 }
 
 func prepareAffinityTest(f *selectionRuntimeFixture, ctx context.Context, session string) context.Context {
@@ -105,7 +105,7 @@ func TestCollabAffinityAloneNeverAddsSlotWait(t *testing.T) {
 					if mode == "profit" {
 						base = context.WithValue(base, openAIProfitControlGateCtxKey{}, &openAIProfitControlGate{groupID: 7, platform: PlatformOpenAI, threshold: 0.5, ceilingOn: true, pricingAt: time.Now()})
 					}
-					ctx := WithOpenAICollabTreeAffinity(base, s, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true)
+					ctx := WithOpenAICollabTreeAffinity(base, s, settings, 7, collabAffinityIdentity("child", "root"), resilience.CollabRoleChild, true, &config.Config{})
 					if !on {
 						require.Equal(t, base, ctx, "rollback with live hints does no work")
 					}
@@ -164,7 +164,7 @@ func TestCollabAffinityCrossModelGrandchildAndParentPrecedence(t *testing.T) {
 	NoteOpenAICollabAdmission(child, 1, false)
 	grandchildIdentity := collabAffinityIdentity("grandchild", "child")
 	grandchildIdentity.Scope.Tree = ""
-	grandchild := WithOpenAICollabTreeAffinity(selectionReviewContext(), s, settings, 7, grandchildIdentity, resilience.CollabRoleChild, true)
+	grandchild := WithOpenAICollabTreeAffinity(selectionReviewContext(), s, settings, 7, grandchildIdentity, resilience.CollabRoleChild, true, &config.Config{})
 	selected, _, err = collabAffinitySelect(f, grandchild, "grandchild-model", nil)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, selected.Account.ID)
@@ -293,7 +293,7 @@ func TestCollabAffinityLeaseSuppressesQualityEvidenceOnlyWhenOptedIn(t *testing.
 			settings := collabAffinitySettings()
 			settings.Collab.Ladder, settings.Collab.LosslessFirst = lossless, lossless
 			identity := collabAffinityIdentity("root", "")
-			ctx := WithOpenAICollabTreeAffinity(c.Request.Context(), s, settings, 0, identity, resilience.CollabRoleRoot, false)
+			ctx := WithOpenAICollabTreeAffinity(c.Request.Context(), s, settings, 0, identity, resilience.CollabRoleRoot, false, &config.Config{})
 			require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: identity.Scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: identity.Scope, Token: "token"}, AccountID: 1}))
 			account := selectionFixtureAccount(1, 1)
 			svc.qualityObserver(ctx, &account, "gpt-6-astra").ObserveOpenAI([]byte(`{"model":"gpt-5.6-luna"}`), "")
@@ -350,7 +350,7 @@ func TestCollabAffinityAvoidanceFallbackRetainsTenant(t *testing.T) {
 	second := first
 	second.Scope.Tenant = "another-tenant"
 	for _, identity := range []resilience.CollabTreeHint{first, second} {
-		ctx := WithOpenAICollabTreeAffinity(selectionReviewContext(), s, settings, 7, identity, resilience.CollabRoleChild, true)
+		ctx := WithOpenAICollabTreeAffinity(selectionReviewContext(), s, settings, 7, identity, resilience.CollabRoleChild, true, &config.Config{})
 		ctx = context.WithValue(ctx, openAITerminalRejectionScopeKey{}, openAITerminalRejectionScope{session: string(identity.Scope.Tenant) + ":execution", preserveBinding: true, selectionPreservesBinding: &atomic.Bool{}})
 		ctx = prepareAffinityTest(f, ctx, "shared-session")
 		f.svc.AvoidOpenAICollabStateAccount(ctx, 7, "shared-session", 1, true)
@@ -378,7 +378,7 @@ func TestCollabAffinityLeaseSuppressesPendingQualityMigration(t *testing.T) {
 			settings := collabAffinitySettings()
 			settings.Collab.Ladder, settings.Collab.LosslessFirst = true, true
 			identity := collabAffinityIdentity("root", "")
-			ctx := WithOpenAICollabTreeAffinity(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()), s, settings, 7, identity, resilience.CollabRoleRoot, false)
+			ctx := WithOpenAICollabTreeAffinity(resilience.WithRequestState(c.Request.Context(), resilience.NewRequestState()), s, settings, 7, identity, resilience.CollabRoleRoot, false, &config.Config{})
 			require.True(t, s.AcquireDeliveryLease(ctx, resilience.CollabDeliveryLease{Key: resilience.CollabDeliveryKey{Scope: identity.Scope, Thread: "child", Item: "item", Delivery: "delivery", Digest: "ciphertext"}, Issued: resilience.CollabIssuedToken{Scope: identity.Scope, Token: "token"}, AccountID: 1}))
 			var excluded map[int64]struct{}
 			if hard {

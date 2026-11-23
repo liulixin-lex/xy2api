@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
@@ -25,9 +26,12 @@ type openAICollabAffinity struct {
 // identity. Parent uses the thread digest domain, so grandchildren can resolve
 // membership. Scope uses the same versioned CollabDigest identity as records;
 // the affinity store has its own namespace. Tenant/Group retain ingress isolation.
-// No existing session, cache or quality key is changed.
-func WithOpenAICollabTreeAffinity(ctx context.Context, store *resilience.CollabTreeAffinity, settings *resilience.Settings, groupID int64, identity resilience.CollabTreeHint, role resilience.CollabRole, encrypted bool) context.Context {
-	if ctx == nil || store == nil || !settings.CollabTreeAffinityOn() || identity.Scope.Tenant == "" || identity.Scope.Group == "" || identity.Thread == "" || (role != resilience.CollabRoleRoot && role != resilience.CollabRoleChild) {
+// Pass frozen gateway configuration after session hashing. Migration and legacy
+// identity exclusions return the original context before allocating or reading
+// tree membership. No existing session, cache or quality key is changed.
+func WithOpenAICollabTreeAffinity(ctx context.Context, store *resilience.CollabTreeAffinity, settings *resilience.Settings, groupID int64, identity resilience.CollabTreeHint, role resilience.CollabRole, encrypted bool, gatewayConfig *config.Config) context.Context {
+	if ctx == nil || gatewayConfig == nil || gatewayConfig.Gateway.OpenAIWS.SessionHashReadOldFallback || gatewayConfig.Gateway.OpenAIWS.SessionHashDualWriteOld ||
+		openAILegacySessionHashFromContext(ctx) != "" || store == nil || !settings.CollabTreeAffinityOn() || identity.Scope.Tenant == "" || identity.Scope.Group == "" || identity.Thread == "" || (role != resilience.CollabRoleRoot && role != resilience.CollabRoleChild) {
 		return ctx
 	}
 	lookup := identity.Scope
