@@ -5,6 +5,8 @@ package service
 import (
 	"context"
 	"errors"
+	"slices"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -16,6 +18,7 @@ type perfTickLedger struct {
 	perfReadStub
 	now    func() time.Time
 	delays []time.Duration
+	mu     sync.Mutex
 	loads  int
 	at     time.Time
 	ticks  []time.Time
@@ -24,9 +27,17 @@ type perfTickLedger struct {
 }
 
 func (l *perfTickLedger) PerfDatabaseTime(ctx context.Context) (time.Time, error) {
-	l.calls = append(l.calls, l.now())
-	if l.loads < len(l.delays) {
-		timer := time.NewTimer(l.delays[l.loads])
+	at := l.now()
+	l.mu.Lock()
+	l.calls = append(l.calls, at)
+	wait := l.loads < len(l.delays)
+	var delay time.Duration
+	if wait {
+		delay = l.delays[l.loads]
+	}
+	l.mu.Unlock()
+	if wait {
+		timer := time.NewTimer(delay)
 		defer timer.Stop()
 		select {
 		case <-ctx.Done():
@@ -34,16 +45,44 @@ func (l *perfTickLedger) PerfDatabaseTime(ctx context.Context) (time.Time, error
 		case <-timer.C:
 		}
 	}
+	l.mu.Lock()
 	l.loads++
-	if l.fail {
+	fail := l.fail
+	l.mu.Unlock()
+	if fail {
 		return time.Time{}, errors.New("fixture ledger unavailable")
 	}
 	return l.now(), nil
 }
 
 func (l *perfTickLedger) LoadPerfConfig(context.Context) (map[int64]SchedPolicyRecord, map[int64]time.Time, error) {
+	l.mu.Lock()
 	l.ticks = append(l.ticks, l.at)
+	l.mu.Unlock()
 	return nil, nil, nil
+}
+
+func (l *perfTickLedger) setAt(at time.Time) {
+	l.mu.Lock()
+	l.at = at
+	l.mu.Unlock()
+}
+
+func (l *perfTickLedger) setFailure(fail bool) {
+	l.mu.Lock()
+	l.fail = fail
+	l.mu.Unlock()
+}
+
+type perfTickLedgerSnapshot struct {
+	calls, ticks []time.Time
+	loads        int
+}
+
+func (l *perfTickLedger) snapshot() perfTickLedgerSnapshot {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return perfTickLedgerSnapshot{calls: slices.Clone(l.calls), ticks: slices.Clone(l.ticks), loads: l.loads}
 }
 
 func TestSchedPerfTickPublication(t *testing.T) {
@@ -79,7 +118,7 @@ func TestSchedPerfTickPublication(t *testing.T) {
 				}
 				ledger := &perfTickLedger{now: now, delays: tt.delays}
 				ledger.page = func(_, at time.Time, c SchedAttemptCursor, _ bool) ([]SchedPerfFact, SchedAttemptCursor, bool, error) {
-					ledger.at = at
+					ledger.setAt(at)
 					return nil, c, true, nil
 				}
 				engine := NewSchedQualityEngineService(nil, ledger, nil, now, nil)
@@ -91,9 +130,9 @@ func TestSchedPerfTickPublication(t *testing.T) {
 				time.Sleep(tt.elapsed)
 				synctest.Wait()
 				want := tick.Add(tt.nextTick)
-				t.Logf("wall=%s published=%s ticks=%v loads=%d", now().Format(time.RFC3339Nano), engine.PerformanceSnapshot().at.Format(time.RFC3339Nano), ledger.ticks, ledger.loads)
+				t.Logf("wall=%s published=%s ticks=%v loads=%d", now().Format(time.RFC3339Nano), engine.PerformanceSnapshot().at.Format(time.RFC3339Nano), ledger.snapshot().ticks, ledger.snapshot().loads)
 				require.Equal(t, want, engine.PerformanceSnapshot().at)
-				require.Equal(t, []time.Time{tick, want}, ledger.ticks, "never repeat the old tick or replay missed ticks")
+				require.Equal(t, []time.Time{tick, want}, ledger.snapshot().ticks, "never repeat the old tick or replay missed ticks")
 				cancel()
 				<-done
 				require.Nil(t, engine.PerformanceSnapshot(), "cancellation clears the published snapshot")
@@ -132,9 +171,10 @@ func TestSchedPerfTickFailureWaitsForNextBoundary(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		base := time.Now()
 		now := func() time.Time { return perfAt.Add(119*time.Second + time.Since(base)) }
-		ledger := &perfTickLedger{now: now, fail: true}
+		ledger := &perfTickLedger{now: now}
+		ledger.setFailure(true)
 		ledger.page = func(_, at time.Time, c SchedAttemptCursor, _ bool) ([]SchedPerfFact, SchedAttemptCursor, bool, error) {
-			ledger.at = at
+			ledger.setAt(at)
 			return nil, c, true, nil
 		}
 		engine := NewSchedQualityEngineService(nil, ledger, nil, now, nil)
@@ -145,23 +185,23 @@ func TestSchedPerfTickFailureWaitsForNextBoundary(t *testing.T) {
 		synctest.Wait()
 		time.Sleep(181*time.Second - time.Nanosecond)
 		synctest.Wait()
-		require.Equal(t, []time.Time{perfAt.Add(119 * time.Second)}, ledger.calls)
-		require.Empty(t, ledger.ticks)
+		require.Equal(t, []time.Time{perfAt.Add(119 * time.Second)}, ledger.snapshot().calls)
+		require.Empty(t, ledger.snapshot().ticks)
 		time.Sleep(time.Nanosecond)
 		synctest.Wait()
-		require.Len(t, ledger.calls, 2)
+		require.Len(t, ledger.snapshot().calls, 2)
 		require.False(t, engine.PerformanceSnapshot().complete)
-		ledger.fail = false
+		ledger.setFailure(false)
 		time.Sleep(schedPerfTick - time.Nanosecond)
 		synctest.Wait()
-		require.Len(t, ledger.calls, 2, "quick failure cannot retry within its tick")
+		require.Len(t, ledger.snapshot().calls, 2, "quick failure cannot retry within its tick")
 		time.Sleep(time.Nanosecond)
 		synctest.Wait()
-		require.Equal(t, []time.Time{perfAt.Add(119 * time.Second), perfAt.Add(schedPerfTick), perfAt.Add(2 * schedPerfTick)}, ledger.calls)
-		require.Equal(t, []time.Time{perfAt.Add(2 * schedPerfTick)}, ledger.ticks)
+		require.Equal(t, []time.Time{perfAt.Add(119 * time.Second), perfAt.Add(schedPerfTick), perfAt.Add(2 * schedPerfTick)}, ledger.snapshot().calls)
+		require.Equal(t, []time.Time{perfAt.Add(2 * schedPerfTick)}, ledger.snapshot().ticks)
 		require.Equal(t, perfAt.Add(2*schedPerfTick), engine.PerformanceSnapshot().at)
 		require.True(t, engine.PerformanceSnapshot().complete)
-		t.Logf("attempts=%v published=%v", ledger.calls, ledger.ticks)
+		t.Logf("attempts=%v published=%v", ledger.snapshot().calls, ledger.snapshot().ticks)
 		cancel()
 		<-done
 		require.Nil(t, engine.PerformanceSnapshot())
@@ -182,7 +222,7 @@ func TestSchedPerfTickSustainedSlowLoads(t *testing.T) {
 				now := func() time.Time { return perfAt.Add(119*time.Second + time.Since(base)) }
 				ledger := &perfTickLedger{now: now, delays: []time.Duration{tt.delay, tt.delay, tt.delay, tt.delay}}
 				ledger.page = func(_, at time.Time, c SchedAttemptCursor, _ bool) ([]SchedPerfFact, SchedAttemptCursor, bool, error) {
-					ledger.at = at
+					ledger.setAt(at)
 					return nil, c, true, nil
 				}
 				engine := NewSchedQualityEngineService(nil, ledger, nil, now, nil)
@@ -197,10 +237,10 @@ func TestSchedPerfTickSustainedSlowLoads(t *testing.T) {
 				for _, d := range tt.published {
 					want = append(want, perfAt.Add(d))
 				}
-				require.Equal(t, want, ledger.ticks)
+				require.Equal(t, want, ledger.snapshot().ticks)
 				require.Equal(t, want[len(want)-1], engine.PerformanceSnapshot().at)
-				require.Equal(t, []time.Time{perfAt.Add(119 * time.Second), perfAt.Add(119*time.Second + tt.delay), perfAt.Add(119*time.Second + 2*tt.delay), now()}, ledger.calls, "each load starts only when the previous load finishes")
-				t.Logf("delay=%s attempts=%v published=%v", tt.delay, ledger.calls, ledger.ticks)
+				require.Equal(t, []time.Time{perfAt.Add(119 * time.Second), perfAt.Add(119*time.Second + tt.delay), perfAt.Add(119*time.Second + 2*tt.delay), now()}, ledger.snapshot().calls, "each load starts only when the previous load finishes")
+				t.Logf("delay=%s attempts=%v published=%v", tt.delay, ledger.snapshot().calls, ledger.snapshot().ticks)
 				cancel()
 				<-done
 				require.Equal(t, 3*tt.delay, time.Since(base), "cancel interrupts the fourth slow load")
