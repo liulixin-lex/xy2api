@@ -835,6 +835,45 @@ describe('SchedQualityPanel decision records', () => {
     )
   })
 
+  // Astra review of fe-min, suggestion 2: one minute, one action, three groups with a 4.0 end at the deadline, a 4.0 end
+  // for a reason the copy does not know, and a 3.1 end at the deadline: three lines, each titled, grouped and opened on
+  // its own. Only a trial's end is named by its reason; any other action reads by itself.
+  it('titles same-action records of one minute by their own version and reason, each with its group and why', async () => {
+    atLocalNoon()
+    const at = inMinutes(-1)
+    const ended = (rule_version: string, release_reason: string, samples_local: number, trial_seats: 'full' | 'not_observed') =>
+      ({ action: 'trial_timeout', until: null, basis: basis('ttfo', { rule_version, kind: 'trial', release_reason, samples_local, trial_seats }) })
+    api.accountDecisions.mockResolvedValueOnce([
+      record(90, { at, group_id: 53, ...ended('4.0', 'deadline', 0, 'full') }),
+      record(89, { at, group_id: 54, ...ended('4.0', 'later', 0, 'not_observed') }),
+      record(88, { at, group_id: 55, ...ended('3.1', 'deadline', 0, 'full') }),
+      record(80, { at: inMinutes(-10), action: 'renew', basis: basis('ttfo', { release_reason: 'deadline' }) })
+    ])
+    const names: Record<number, string> = { 53: '晨星组', 54: '北辰组', 55: '次元组' }
+    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: (id: number) => ({ name: names[id] }), model: 'gpt-b' } })
+    await flushPromises()
+    expect(entries()).toEqual(['90', '89', '88', '80'])
+    expect([90, 89, 88, 80].map((id) => entry(id).querySelector('.drow__what')!.textContent)).toEqual([
+      'admin.schedQuality.decisions.deadline',
+      'admin.schedQuality.decisions.action.trial_timeout',
+      'admin.schedQuality.decisions.legacy:{"action":"admin.schedQuality.decisions.action.trial_timeout"}',
+      'admin.schedQuality.decisions.action.renew'
+    ])
+    expect([90, 89, 88].map((id) => entry(id).querySelector('.drow__groups')!.getAttribute('title'))).toEqual(['晨星组', '北辰组', '次元组'])
+    const J = 'admin.schedQuality.decisions.timeout.joiner'
+    const why = (seats: string) =>
+      `admin.schedQuality.decisions.timeout.line:${JSON.stringify({ reasons: `admin.schedQuality.decisions.timeout.noTraffic${J}admin.schedQuality.decisions.timeout.seats.${seats}` })}`
+    for (const [id, seats] of [[90, 'full'], [89, 'not_observed'], [88, 'full']] as const) {
+      const line = entry(id).querySelector<HTMLElement>('.drow__line')!
+      line.click()
+      await flushPromises()
+      expect(line.getAttribute('aria-expanded')).toBe('true')
+      expect(entry(id).querySelectorAll('[data-qp-trial-timeout]')).toHaveLength(1)
+      expect(entry(id).querySelector(`[data-qp-trial-timeout="${id}"]`)!.textContent).toBe(why(seats))
+      expect(entry(id).querySelector('.drow__group')).toBeNull()
+    }
+  })
+
   // Astra 2: records merged by the minute shown keep their own ends and evidence, to the second, when opened.
   it('keeps every merged record\'s own end and evidence when their ends share the minute shown', async () => {
     atLocalNoon()

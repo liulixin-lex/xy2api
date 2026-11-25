@@ -219,15 +219,19 @@ function toggle(key: string) {
  */
 const previousRules = (entry: MergedDecision) => entry.items[0].basis?.rule_version !== SCHED_RULE_VERSION
 
+/** The actions that end a trial: only their release reason may name the entry. */
+const TRIAL_ENDS = new Set(['trial_pass', 'trial_fail', 'trial_timeout'])
+
 /**
  * The action in words (其他 for one the copy does not know); records of the previous rules say so first. Under the rules
- * in force a trial that reached its deadline reads 到期回正常; the other ends read by their action (good is 试用达标,
- * fail 试用不达标). An entry's records share the rule version and the release reason (mergeDecisions).
+ * in force a trial that ended at its deadline reads 到期回正常; any other end, or a reason the copy does not know, reads
+ * by its action (good is 试用达标, fail 试用不达标). An entry's records share the rule version and the release reason
+ * (mergeDecisions).
  */
 function actionWord(entry: MergedDecision): string {
   const word = schedWord('decisions.action', entry.action, t, te)
   if (previousRules(entry)) return t('admin.schedQuality.decisions.legacy', { action: word })
-  return entry.items[0].basis?.release_reason === 'deadline' ? t('admin.schedQuality.decisions.deadline') : word
+  return TRIAL_ENDS.has(entry.action) && entry.items[0].basis?.release_reason === 'deadline' ? t('admin.schedQuality.decisions.deadline') : word
 }
 
 const tone = (entry: MergedDecision) => (!entry.line ? 'muted' : BAD.has(entry.action) ? 'rear' : GOOD.has(entry.action) ? 'pass' : entry.action === 'trial' ? 'trial' : 'muted')
