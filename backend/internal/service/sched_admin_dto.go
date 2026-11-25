@@ -143,6 +143,7 @@ func SchedAdminLastEvalFromState(r schedquality.LineState) *SchedAdminLastEval {
 }
 
 type SchedAdminLine[E any] struct {
+	Basis    *SchedAdminBasis    `json:"basis,omitempty"`
 	LastEval *SchedAdminLastEval `json:"last_eval"`
 	schedquality.SampleCounts
 	Identity       string  `json:"identity"`
