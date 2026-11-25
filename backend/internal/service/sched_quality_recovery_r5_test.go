@@ -193,7 +193,7 @@ func TestRecoveryDiagnosticLogsAfterCommit(t *testing.T) {
 	output := captureSchedObsLogs(t)
 	f := newQualityFixture(t)
 	at := f.now.Add(-10 * time.Second)
-	origin := at.Add(-130 * time.Minute)
+	origin := at.Add(-6 * time.Hour)
 	f.store.Rows = []q.LineState{
 		{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}, Trial: true, Epoch: origin, TrialUntil: origin.Add(120 * time.Minute), EvaluatedAt: origin},
 		{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionCache}, Trial: true, Epoch: origin, EvaluatedAt: origin},

@@ -137,6 +137,15 @@ func TestSchedAssessmentPolicySaveKeepsHistory(t *testing.T) {
 	require.Len(t, before.LastAssessment, 2)
 	require.Equal(t, q.ActionTrial, before.LastAssessment[1].Action)
 	f.now = f.now.Add(2 * time.Second)
+	// The fixed rear period is an hour; replenish evidence before the explicit
+	// policy reassessment instead of relying on the expired 20-minute fixture.
+	oldSamples := len(f.ledger.Rows)
+	f.badTTFT()
+	for i := oldSamples; i < len(f.ledger.Rows); i++ {
+		f.ledger.Rows[i].AttemptID = "fresh-" + f.ledger.Rows[i].AttemptID
+		f.ledger.Rows[i].RequestID = f.ledger.Rows[i].AttemptID
+		f.ledger.Rows[i].InsertedAt = f.ledger.Rows[i].FinishedAt
+	}
 	policy := f.store.Policies[10].Policy
 	policy.TTFTSeconds = 100
 	_, err := f.e.UpdatePolicy(t.Context(), 10, 0, policy)

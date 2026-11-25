@@ -155,7 +155,7 @@ func TestRecoveryRelaxPreservesRecentFailureClock(t *testing.T) {
 					failed := f.line(q.DimensionTTFO)
 					require.Equal(t, q.IdentityRear, failed.Identity)
 					require.Zero(t, failed.Level)
-					require.Equal(t, 160*time.Minute, failed.Until.Sub(failed.Entry))
+					require.Equal(t, q.RearDuration, failed.Until.Sub(failed.Entry))
 					require.Equal(t, at.Add(5*time.Minute), failed.Entry)
 					require.Equal(t, 2, f.line(q.DimensionCache).Level)
 				case "reset":

@@ -308,7 +308,7 @@ func TestEngineDecisionDeadlinesAndCounters(t *testing.T) {
 	require.Equal(t, float64(3), record["released"])
 	require.Equal(t, float64(1), record["trial"])
 	require.Equal(t, float64(1), record["relax"])
-	require.Equal(t, float64(1), record["clear"])
+	require.Equal(t, float64(0), record["clear"], "retired quiet-clock action must not increment counters")
 }
 
 // Even with generation fencing, an unsuccessful Redis cleanup can leave seats
