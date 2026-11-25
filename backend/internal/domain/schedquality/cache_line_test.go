@@ -253,3 +253,24 @@ func TestAssessCachePercentagePointBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestAssessCacheTwoShortLowSessionsDoNotFailAtTwentyTurns(t *testing.T) {
+	rows := machineSamples(20)
+	for i := range rows {
+		read := 50
+		switch {
+		case i < 6:
+			rows[i].SessionKey = "low-a"
+		case i < 12:
+			rows[i].SessionKey = "low-b"
+		default:
+			rows[i].SessionKey = "good"
+			read = 90
+		}
+		rows[i].InputTokens, rows[i].CacheReadTokens = machineInt(100-read), machineInt(read)
+	}
+	got := AssessCache(rows, .8, time.Time{}, machineNow)
+	if got.Turns != 20 || got.LowSessions != 2 || *got.LowSessions10 != 0 || got.Ratio >= .8 || got.Verdict != VerdictUnknown || got.Path != "" {
+		t.Fatalf("two six-turn low sessions are insufficient even with twenty total turns: %+v", got)
+	}
+}
