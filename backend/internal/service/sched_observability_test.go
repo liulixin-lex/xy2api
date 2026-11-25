@@ -87,6 +87,24 @@ func TestSchedObsSummaryWindows(t *testing.T) {
 	})
 }
 
+func TestSchedObsRetiredClearCounterKeepsZeroLogField(t *testing.T) {
+	output := captureSchedObsLogs(t)
+	s := NewSchedObservabilityService()
+	s.Count("clear", 7)
+	s.Count("cooled", 2)
+	s.summary(t.Context())
+	s.Count("clear", 3)
+	s.summary(t.Context())
+	records := schedObsLogRecords(t, output)
+	require.Len(t, records, 2)
+	for _, record := range records {
+		require.Contains(t, record, "clear")
+		require.Equal(t, float64(0), record["clear"])
+	}
+	require.Equal(t, float64(2), records[0]["cooled"])
+	require.Equal(t, float64(0), records[1]["cooled"])
+}
+
 func TestSchedObsConcurrentCountersAndSlowCycle(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		output := captureSchedObsLogs(t)
