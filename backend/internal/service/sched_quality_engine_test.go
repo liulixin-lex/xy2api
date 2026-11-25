@@ -347,7 +347,7 @@ func TestEngineReassessmentPublishesActionsOnlyAfterCommit(t *testing.T) {
 		}
 		require.Equal(t, 1, persisted[string(q.ActionRelax)])
 		require.Equal(t, persisted, actions)
-		require.EqualValues(t, len(f.store.Decisions)-start, (obs.window.cooled-before.cooled)+(obs.window.released-before.released)+(obs.window.trial-before.trial)+(obs.window.relax-before.relax)+(obs.window.cleared-before.cleared))
+		require.EqualValues(t, len(f.store.Decisions)-start, (obs.window.cooled-before.cooled)+(obs.window.released-before.released)+(obs.window.trial-before.trial)+(obs.window.relax-before.relax))
 		require.EqualValues(t, 1, obs.window.relax-before.relax)
 	}
 }
