@@ -158,7 +158,7 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 | `sched_quality.state` | Info | 带 `component=sched_quality`；判定事务提交后每动作一条，含保存门槛引发的重评。字段见下文 |
 | `sched_quality.history_missing` | Info | 带 `component=sched_quality`；事务提交后按线汇总缺历史的评估。含 `account_id`、`model`、`group_id`、`line`、`first_at`、`last_at`（首末评估时刻）、`assessments`（次数） |
 | `sched_quality.missing_deadline` | Warn | 带 `component=sched_quality`；后排或试用记录缺期限，按发现时到期处理并提交动作后记录。含 `at`、`account_id`、`model`、`group_id`、`line` |
-| `sched_quality.performance_ready` | Info | 带 `component=sched_quality`，进系统日志库。每次进程启动首次发布完整长期表现时记一次，部分装载不记；`snapshot_at`、`from` 为统计窗口终点和起点，`rows` 为装入的尝试样本数，`load_ms` 为首次加载到发布的毫秒数（含重试等待） |
+| `sched_quality.performance_ready` | Info | 带 `component=sched_quality`，进系统日志库。长期表现的后台任务每次启动后，第一次完整装载发布时记一次，部分装载不记；通常就是每次进程启动一次，但同一进程里引擎停止后再启动也会再记一次。事件不带进程或启动标识，核对“每次启动都有”要对照启动时刻；`snapshot_at`、`from` 为统计窗口终点和起点，`rows` 为装入的尝试样本数，`load_ms` 为首次加载到发布的毫秒数（含重试等待） |
 | `sched_quality.performance_load` | Warn | 不带组件，按事件名查；长期表现加载或配置读取失败，含 `error` |
 | `sched_quality.first_output_avoid` | Info | 原归属号等够首输出时限后记录避让结果。含 `gateway_request_id`、`group_id`、`model`、`account_id`、`owner_gen`、`expires_at_ms`、`reason`、`confirmed`，存储错误或超时另有 `error_class` |
 | `sched_quality.session_switch` | Info | 带 `component=sched_quality`；会话绑定事务结束，或放弃会话变更，见下表 |
@@ -366,7 +366,7 @@ Responses 拒参修复（包括流内修复）在既有上游错误事件中记�
 
 **OpenAI 账号的后排、试用、恢复或会话搬动看不明白**：先按组件 `sched_quality` 筛选系统日志；不带组件的告警另按事件名找，仅标准输出的 Info 到应用日志里查，清单见 [质量状态](#质量状态)。
 
-1. 重启后先看 `sched_quality.loading`：`page` 表示仍在分页加载，`incomplete` 带错误，加载完成前不分层；`complete` 表示证据加载完成。长期表现另看系统日志里的 `sched_quality.performance_ready`。再看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 个周期；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明引擎周期变慢或失败。`cycle` 的 Error 不带组件，须按事件名找，结合错误字段排查。
+1. 重启后先看 `sched_quality.loading`：`page` 表示仍在分页加载，`incomplete` 带错误，加载完成前不分层；`complete` 表示证据加载完成。长期表现另看系统日志里启动之后的那条 `sched_quality.performance_ready`。再看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 个周期；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明引擎周期变慢或失败。`cycle` 的 Error 不带组件，须按事件名找，结合错误字段排查。
 2. 再按账号看 `sched_quality.state`：何时进入后排、试用或回正常，哪条线（`line`）、依据来自哪里（`basis`），以及试用结束的原因（`release_reason`）。补判资料或期限不全时，再看 `sched_quality.history_missing`、`sched_quality.missing_deadline`。
 3. 新会话没选到号或落到后排，先看 `sched_quality.new_session` 的候选名单；会话搬动看 `sched_quality.session_switch` 的 `committed`，用 `gateway_request_id` 连到访问日志和尝试记录的 `request_id`。`sched_quality.attempt_finished` 可区分首输出截止、真实上游失败与取消；怀疑协议转换失败时查 [协议转换日志](#协议转换)。
 
