@@ -122,6 +122,13 @@ describe('decision figures', () => {
     })
     // No line drawn from the front peers: the peers' own share.
     expect(basisFigures(basis('ttfo', { ttft: ttfoEvidence({ n: 40, k: 9, z: null, prior_mu: 0.146 }) })).measure![1]).toEqual({ label: 'peers', value: '14.6%' })
+    // A rule 4.0 record: no peer comparison (no peer_nu, p_rel, u, z), the tolerance and confidence it was taken with;
+    // its cache evidence carries the path and the low sessions of 10 turns. The figures read as before.
+    const { peer_nu: _nu, ...absolute } = ttfoEvidence({ n: 40, k: 9, p_rel: null, u: null, z: null, prior_mu: 0.146, tolerance: 0.2, confidence: 0.8 })
+    expect(basisFigures(basis('ttfo', { ttft: absolute })).measure).toEqual([{ label: 'over', params: { s: 10 }, value: '22.5%' }, { label: 'peers', value: '14.6%' }])
+    expect(basisFigures(basis('cache', { cache: cacheEvidence({ ratio: 0.6, min_ratio: 0.85, path: 'single5', low_sessions_10: 1, window_from: '2026-11-25T10:00:00Z', window_to: '2026-11-25T10:30:00Z' }) })).measure).toEqual([
+      { label: 'hit', value: '60.0%' }, { label: 'min', value: '85%' }
+    ])
     expect(basisFigures(basis('error', { error: errorEvidence({ failed: 6, padded: 80, limit: 0.025 }) })).measure).toEqual([
       { label: 'failed', value: '7.5%' }, { label: 'limit', value: '2.5%' }
     ])

@@ -136,13 +136,18 @@ export interface BackendTTFOEvidence {
   d: number
   /** Share over the limit of the group's other accounts on the model (the prior the estimate shrinks towards). */
   prior_mu: number
-  /** Share over the limit of all the group's accounts on the model (the peers' prior). */
-  peer_nu: number
+  /** The tolerance and confidence the verdict was taken with; absent on records before rule 4.0. */
+  tolerance?: number | null
+  confidence?: number | null
+  /** Share over the limit of all the group's accounts on the model (the peers' prior); absent from rule 4.0 on. */
+  peer_nu?: number
   /** Confidence that the share over the limit is above the tolerance. */
   p_abs: number
-  /** Confidence that the share is above the peers' by the margin; null without enough peer evidence. */
+  /**
+   * The previous rules' comparison with the front peers: confidence that the share is above theirs by the margin, their
+   * upper share and the line compared against (u + margin). Null without enough peer evidence and from rule 4.0 on.
+   */
   p_rel: number | null
-  /** Upper estimate of the front peers' share over the limit, and the line compared against (u + margin). */
   u: number | null
   z: number | null
   /** Why the verdict is unknown (rule B's unknown reasons). */
@@ -174,6 +179,15 @@ export interface BackendCacheEvidence {
   ratio: number
   sessions: number
   low_sessions: number
+  /**
+   * From rule 4.0, absent on older records (never read as 0): the low sessions with 10 turns or more of their own, the
+   * path a failing verdict took (two adjacent, one at 5 points short, one at 20 points short over 10 turns) and the
+   * window the turns were taken from. Read, not shown yet.
+   */
+  low_sessions_10?: number | null
+  path?: 'pair' | 'single5' | 'deep10' | null
+  window_from?: string | null
+  window_to?: string | null
 }
 
 export interface BackendEvidenceOf {
