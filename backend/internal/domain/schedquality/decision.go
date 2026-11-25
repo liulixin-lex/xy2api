@@ -2,7 +2,7 @@ package schedquality
 
 import "time"
 
-const RuleVersion = "3.1"
+const RuleVersion = "4.0"
 
 // TTFTEvidence is the stable, flat representation stored in decision/state JSON
 // and returned by the API. RuleBResult remains the in-memory assessment.
@@ -14,8 +14,10 @@ type TTFTEvidence struct {
 	X            float64              `json:"x"`
 	S            int                  `json:"s"`
 	D            int                  `json:"d"`
+	Tolerance    *float64             `json:"tolerance,omitempty"`
+	Confidence   *float64             `json:"confidence,omitempty"`
 	PriorMu      float64              `json:"prior_mu"`
-	PeerNu       float64              `json:"peer_nu"`
+	PeerNu       float64              `json:"peer_nu,omitempty"`
 	PAbs         float64              `json:"p_abs"`
 	PRel         *float64             `json:"p_rel"`
 	U            *float64             `json:"u"`
@@ -24,25 +26,16 @@ type TTFTEvidence struct {
 }
 
 // NewTTFTEvidence copies evidence without retaining mutable result pointers.
-// Peer-dependent values stay null when fewer than 20 known peer mass is present.
+// Relative-comparison fields remain empty; historical values still decode unchanged.
 func NewTTFTEvidence(result RuleBResult, limitSeconds float64) *TTFTEvidence {
 	e := &TTFTEvidence{
 		LimitSeconds: limitSeconds,
 		NLocal:       new(result.NLocal),
 		N:            result.Counts.N, K: result.Counts.K, X: result.Counts.X,
 		S: result.Counts.S, D: result.Counts.D,
-		PriorMu: result.Prior, PeerNu: result.PeerPrior, PAbs: result.AbsoluteProbability,
+		PriorMu: result.Prior, PAbs: result.AbsoluteProbability,
+		Tolerance: new(result.Tolerance), Confidence: new(result.Confidence),
 		Causes: append([]RuleBUnknownReason{}, result.UnknownReasons...),
-	}
-	if result.PeerCounts.N-result.PeerCounts.X >= ruleBMinMass {
-		copyValue := func(v *float64) *float64 {
-			if v == nil {
-				return nil
-			}
-			value := *v
-			return &value
-		}
-		e.PRel, e.U, e.Z = copyValue(result.RelativeProbability), copyValue(result.U), copyValue(result.RelativeThreshold)
 	}
 	return e
 }
@@ -59,13 +52,14 @@ func NewSampleCounts(local, total int) SampleCounts {
 
 type Basis struct {
 	// Recovery metadata lives in the existing evidence JSON, never in new state columns.
-	OwnSampleAt60        *bool  `json:"own_sample_at_60,omitempty"`
-	ReleaseReason        string `json:"release_reason,omitempty"` // qualified | no_samples | deadline
+	// OwnSampleAt60 is retained for reading records written before rule 4.0.
+	OwnSampleAt60 *bool `json:"own_sample_at_60,omitempty"`
+	// Rule 4.0 writes fail, good, or deadline. Only older records use qualified or no_samples.
+	ReleaseReason        string `json:"release_reason,omitempty"`
 	TrialDurationSeconds int64  `json:"trial_duration_seconds,omitempty"`
 	HistoryMissing       bool   `json:"history_missing,omitempty"`
 	MissingDeadline      bool   `json:"missing_deadline,omitempty"`
 	SampleCounts
-	PeerKnown    float64          `json:"-"` // Weighted peer mass for the real assessment summary only.
 	TrialSeats   *string          `json:"trial_seats"`
 	RuleVersion  string           `json:"rule_version"`
 	Line         Dimension        `json:"line"`

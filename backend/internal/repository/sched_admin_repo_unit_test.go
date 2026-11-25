@@ -168,3 +168,48 @@ func TestObserveRearEntriesDistinctAndWindow(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, map[int64]service.SchedAdminRearEntries{1: {Decisions: 4, AccountModels: 3}, 2: {Decisions: 1, AccountModels: 1}}, got)
 }
+
+func TestSchedAdminRepositoryPreservesHistoricalJudgeEvidence(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := newAccountRepositoryWithSQL(nil, db, nil)
+	at := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	rows := sqlmock.NewRows([]string{"id", "at", "group_id", "model", "line", "action", "level", "until", "basis"})
+	cases := []string{
+		"{\"rule_version\":\"3.1\",\"line\":\"cache\",\"cache\":{\"turns\":20}}",
+		"{\"rule_version\":\"4.0\",\"line\":\"cache\",\"cache\":{\"turns\":20,\"low_sessions_10\":0}}",
+		"{\"rule_version\":\"4.0\",\"line\":\"cache\",\"cache\":{\"path\":\"deep10\",\"low_sessions_10\":1,\"window_from\":\"2026-11-01T11:30:00Z\",\"window_to\":\"2026-11-01T12:00:00Z\"}}",
+		"{\"rule_version\":\"3.1\",\"line\":\"ttfo\",\"ttft\":{\"n\":20,\"peer_nu\":0.6,\"p_rel\":0.7}}",
+		"{\"rule_version\":\"4.0\",\"line\":\"ttfo\",\"ttft\":{\"n\":20,\"d\":2,\"prior_mu\":0.13,\"tolerance\":0.27,\"confidence\":0.93}}",
+	}
+	for i, raw := range cases {
+		line := "cache"
+		if i >= 3 {
+			line = "ttfo"
+		}
+		rows.AddRow(20-i, at, 2, "m", line, "enter", 0, nil, raw)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(schedAdminDecisionsSQL)).WithArgs(int64(1), int64(0), 50).WillReturnRows(rows)
+	out, err := repo.SchedAdminDecisions(context.Background(), 1, 50, 0)
+	require.NoError(t, err)
+	require.Nil(t, out[0].Basis.Cache.LowSessions10)
+	require.Equal(t, new(0), out[1].Basis.Cache.LowSessions10)
+	require.Equal(t, new(1), out[2].Basis.Cache.LowSessions10)
+	require.Equal(t, "deep10", out[2].Basis.Cache.Path)
+	require.Equal(t, new("2026-11-01T11:30:00Z"), out[2].Basis.Cache.WindowFrom)
+	require.Equal(t, new("2026-11-01T12:00:00Z"), out[2].Basis.Cache.WindowTo)
+	require.Nil(t, out[3].Basis.TTFT.Tolerance)
+	require.Nil(t, out[3].Basis.TTFT.Confidence)
+	require.Equal(t, .6, out[3].Basis.TTFT.PeerNu)
+	require.Equal(t, new(.7), out[3].Basis.TTFT.PRel)
+	require.Equal(t, new(.27), out[4].Basis.TTFT.Tolerance)
+	require.Equal(t, new(.93), out[4].Basis.TTFT.Confidence)
+	require.Equal(t, .13, out[4].Basis.TTFT.PriorMu)
+	raw, err := json.Marshal(out)
+	require.NoError(t, err)
+	var wire []map[string]any
+	require.NoError(t, json.Unmarshal(raw, &wire))
+	cache := func(i int) map[string]any { return wire[i]["basis"].(map[string]any)["cache"].(map[string]any) }
+	require.NotContains(t, cache(0), "low_sessions_10")
+	require.Equal(t, float64(0), cache(1)["low_sessions_10"])
+	require.NoError(t, mock.ExpectationsWereMet())
+}

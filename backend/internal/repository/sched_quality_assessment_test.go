@@ -54,7 +54,7 @@ func TestSchedAssessmentMigrationAndRestart(t *testing.T) {
 		}
 	}
 	eval := func(prev q.LineState, now time.Time, turns int) q.LineState {
-		b := q.Basis{Line: q.DimensionCache, Cache: &q.CacheAssessment{Turns: turns, LowSessions: 1, MinRatio: .8, Ratio: .5}}
+		b := q.Basis{Line: q.DimensionCache, Cache: &q.CacheAssessment{Turns: turns, LowSessions: 1, LowSessions10: new(0), MinRatio: .8, Ratio: .79}}
 		next, _ := q.Step(prev, q.EventRegular, q.VerdictUnknown, b, now)
 		return next
 	}
@@ -102,8 +102,8 @@ func TestSchedAssessmentMigrationAndRestart(t *testing.T) {
 
 	// Mix a long action, several simultaneous causes, and fractional evidence,
 	// then round-trip the entire eight-segment history (oldest to newest).
-	b := q.Basis{Line: q.DimensionTTFO, PeerKnown: 9.123456789123456,
-		TTFT: &q.TTFTEvidence{Causes: []q.RuleBUnknownReason{q.RuleBPeerKnownInsufficient, q.RuleBMassInsufficient, q.RuleBRelativeVeto}}}
+	b := q.Basis{Line: q.DimensionTTFO,
+		TTFT: &q.TTFTEvidence{N: 9.123456789123456, Causes: []q.RuleBUnknownReason{q.RuleBPeerKnownInsufficient, q.RuleBMassInsufficient, q.RuleBRelativeVeto}}}
 	full := q.LineState{LineKey: q.LineKey{AccountID: 1, GroupID: 2, Model: "m", Line: q.DimensionTTFO}}
 	for i := 0; i < 8; i++ {
 		now := at.Add(time.Duration(i) * q.RegularInterval)

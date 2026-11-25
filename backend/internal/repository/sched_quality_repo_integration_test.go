@@ -354,7 +354,7 @@ func TestSchedQualityInvalidPolicyEntryDoesNotBlockOtherGroups(t *testing.T) {
 		want q.Policy
 	}{
 		{name: "unreadable policy object", bad: `[]`, want: q.DefaultPolicy()},
-		{name: "malformed field keeps valid siblings", bad: `{"v4":{"enabled":"invalid","ttft_seconds":12,"max_error_rate":0.01,"min_cache_ratio":0.8,"takeover_idle_seconds":0}}`, want: q.Policy{TTFTSeconds: 12, MaxErrorRate: .05, MinCacheRatio: .8, TakeoverIdleSeconds: 0}},
+		{name: "malformed field keeps valid siblings", bad: `{"v4":{"enabled":"invalid","ttft_seconds":12,"max_error_rate":0.01,"min_cache_ratio":0.8,"takeover_idle_seconds":0}}`, want: q.Policy{TTFTSeconds: 12, MaxErrorRate: .01, MinCacheRatio: .8, TakeoverIdleSeconds: 0}},
 		{name: "invalid numeric values are preserved", bad: `{"v4":{"enabled":true,"ttft_seconds":-1,"max_error_rate":0.8,"min_cache_ratio":1.2,"takeover_idle_seconds":300}}`, want: q.Policy{Enabled: true, TTFTSeconds: -1, MaxErrorRate: .8, MinCacheRatio: 1.2, TakeoverIdleSeconds: 300}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

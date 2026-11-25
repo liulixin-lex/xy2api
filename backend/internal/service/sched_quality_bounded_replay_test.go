@@ -139,7 +139,6 @@ func TestEngineSaveDrainsOldConfiguration(t *testing.T) {
 					require.Equal(t, q.RuleBTightened, result.Change)
 				}
 				require.Equal(t, start.Add(40*time.Minute), f.e.processedAt)
-				require.NotEmpty(t, f.e.peerBuckets, "committed catchup buckets must be published")
 				f.now = start.Add(50*time.Minute + 10*time.Second)
 				f.cycle()
 				require.NotEmpty(t, f.store.Decisions, "tightened rule must actually change the outcome")
@@ -189,7 +188,6 @@ func TestEngineReplayFailureAbortsConfigurationSave(t *testing.T) {
 			f.cycle()
 			before := f.e.Snapshot()
 			watermark := f.e.processedAt
-			buckets := clonePeerBuckets(f.e.peerBuckets, f.now)
 			policies := cloneSchedPolicies(f.store.Policies)
 			rows := append([]q.LineState(nil), f.store.Rows...)
 			store := &failReplaySaveStore{fakeSchedQualityStore: f.store}
@@ -211,7 +209,6 @@ func TestEngineReplayFailureAbortsConfigurationSave(t *testing.T) {
 			require.Zero(t, f.store.Rule.Version)
 			require.Equal(t, rows, f.store.Rows)
 			require.Equal(t, watermark, f.e.processedAt)
-			require.Equal(t, buckets, f.e.peerBuckets)
 			require.Same(t, before, f.e.Snapshot())
 		})
 	}

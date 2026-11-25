@@ -343,7 +343,7 @@ func schedAdminErrorEvidence(e schedquality.ErrorAssessment) SchedAdminErrorEvid
 	return SchedAdminErrorEvidence{RecoveryOverLimit: e.RecoveryOverLimit, Limit: e.Limit, Clear: e.Clear, Failed: e.Failed, Unknown: e.Unknown, Padded: e.Padded, LowerFail: e.LowerFail, LowerPass: e.LowerPass}
 }
 func schedAdminCacheEvidence(e schedquality.CacheAssessment) SchedAdminCacheEvidence {
-	return SchedAdminCacheEvidence{MinRatio: e.MinRatio, Turns: e.Turns, Ratio: e.Ratio, Sessions: e.Sessions, LowSessions: e.LowSessions}
+	return SchedAdminCacheEvidence{Path: e.Path, LowSessions10: e.LowSessions10, WindowFrom: schedAdminTime(e.WindowFrom), WindowTo: schedAdminTime(e.WindowTo), MinRatio: e.MinRatio, Turns: e.Turns, Ratio: e.Ratio, Sessions: e.Sessions, LowSessions: e.LowSessions}
 }
 
 // SchedAdminGroupModel copies each line; it never mutates the published snapshot.

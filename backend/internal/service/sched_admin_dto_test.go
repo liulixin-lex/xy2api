@@ -70,7 +70,9 @@ func TestObservePolicyTripExamples(t *testing.T) {
 		rate, effective float64
 		want            []SchedAdminErrorTripExample
 	}{
-		{.02, .05, []SchedAdminErrorTripExample{{50, 6}, {100, 10}}},
+		{.01, .01, []SchedAdminErrorTripExample{{50, 2}, {100, 3}}},
+		{0, .01, []SchedAdminErrorTripExample{{50, 2}, {100, 3}}},
+		{.02, .02, []SchedAdminErrorTripExample{{50, 3}, {100, 5}}},
 		{.05, .05, []SchedAdminErrorTripExample{{50, 6}, {100, 10}}},
 		{.95, .95, []SchedAdminErrorTripExample{{100, 100}}},
 		{1, 1, []SchedAdminErrorTripExample{}},

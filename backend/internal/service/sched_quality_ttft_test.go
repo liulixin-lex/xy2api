@@ -80,7 +80,6 @@ func TestEngineRuleBReferenceAssembly(t *testing.T) {
 						refs[i] = true
 					}
 				}
-				rows := make(map[q.LineKey]q.LineState)
 				key := q.LineKey{AccountID: tc.Scope.AccountID, GroupID: tc.Scope.GroupID, Model: tc.Scope.Model, Line: q.DimensionTTFO}
 				state := q.LineState{LineKey: key, Epoch: stamp(tc.Cut)}
 				kind := q.EventRegular
@@ -90,14 +89,7 @@ func TestEngineRuleBReferenceAssembly(t *testing.T) {
 					state.Epoch = f.now
 					state.Identity = q.IdentityRear
 				}
-				rows[key] = state
 				for _, peer := range tc.Peers {
-					k := q.LineKey{AccountID: peer.Scope.AccountID, GroupID: peer.Scope.GroupID, Model: peer.Scope.Model, Line: q.DimensionTTFO}
-					identity := q.IdentityUnknown
-					if peer.Identity == 1 {
-						identity = q.IdentityRear
-					}
-					rows[k] = q.LineState{LineKey: k, Identity: identity, Epoch: stamp(peer.Epoch)}
 					for _, i := range peer.Samples {
 						refs[i] = true
 					}
@@ -111,8 +103,7 @@ func TestEngineRuleBReferenceAssembly(t *testing.T) {
 				f.e.window.indexGroups()
 				d, err := f.e.inputs(context.Background(), f.now, f.e.window.samples)
 				require.NoError(t, err)
-				d.peers = freezePeers(f.now, rows)
-				in := ttftInput(d, key, state.Cut(kind), f.now, tc.LimitSeconds, nil)
+				in := ttftInput(d, key, state.Cut(kind), f.now, tc.LimitSeconds)
 				got, err := q.EvaluateRuleB(in, tc.Params)
 				require.NoError(t, err)
 				require.InDelta(t, tc.Expected.Counts.N, got.Counts.N, 1e-8)
@@ -121,23 +112,19 @@ func TestEngineRuleBReferenceAssembly(t *testing.T) {
 				require.Equal(t, tc.Expected.Counts.S, got.Counts.S)
 				require.Equal(t, tc.Expected.Counts.D, got.Counts.D)
 				require.InDelta(t, tc.Expected.Prior, got.Prior, 1e-8)
-				require.InDelta(t, tc.Expected.PeerPrior, got.PeerPrior, 1e-8)
-				require.InDelta(t, tc.Expected.PeerCounts.N, got.PeerCounts.N, 1e-8)
-				require.InDelta(t, tc.Expected.PeerCounts.K, got.PeerCounts.K, 1e-8)
-				require.InDelta(t, tc.Expected.PeerCounts.X, got.PeerCounts.X, 1e-8)
-				if tc.Expected.U == nil {
-					require.Nil(t, got.U)
-				} else {
-					require.NotNil(t, got.U)
-					require.InDelta(t, *tc.Expected.U, *got.U, 1e-8)
+				want := q.RuleBUnknown
+				if tc.Expected.Absolute && tc.Expected.Counts.D >= 2 {
+					want = q.RuleBBad
+				} else if tc.Expected.GoodBase {
+					want = q.RuleBGood
 				}
-				require.Equal(t, tc.Expected.State, got.State)
+				require.Equal(t, want, got.State)
 			})
 		}
 	}
 }
 
-func TestEnginePeerSnapshotPrecedesAllTransitions(t *testing.T) {
+func TestEngineAbsoluteVerdictsIgnoreTransitionOrder(t *testing.T) {
 	f := newQualityFixture(t)
 	f.badTTFT()
 	f.e.window.merge(f.ledger.Rows, f.now)
@@ -162,81 +149,16 @@ func TestEnginePeerSnapshotPrecedesAllTransitions(t *testing.T) {
 		fast.AccountID = 2
 		require.Equal(t, q.IdentityRear, result[slow].Identity)
 		require.Equal(t, q.IdentityPass, result[fast].Identity)
-		require.Equal(t, q.IdentityUnknown, d.peers.rows[slow].Identity, "snapshot predates slow peer's entry")
 		require.Len(t, decisions, 1)
 		require.Equal(t, q.ActionEnter, decisions[0].Action)
-		// This is a discriminating fixture: using the updated membership would
-		// remove the fast account's only peer and change its verdict to unknown.
-		d.peers = freezePeers(at, result)
-		wrong, _ := f.e.assessLine(d, q.LineState{LineKey: fast}, q.EventRegular, at, nil)
-		require.Equal(t, q.VerdictUnknown, wrong)
+		// A peer moving to rear no longer vetoes an otherwise good account.
+		again, basis := f.e.assessLine(d, q.LineState{LineKey: fast}, q.EventRegular, at, nil)
+		require.Equal(t, q.VerdictPass, again)
+		require.Nil(t, basis.TTFT.U)
+		require.Nil(t, basis.TTFT.PRel)
 		return result
 	}
 	require.Equal(t, run(false), run(true))
-}
-
-func TestEnginePeerBucketsSurviveRewindFollowerAndOtherLineChanges(t *testing.T) {
-	f := newQualityFixture(t)
-	f.badTTFT()
-	f.cycle()
-	bucket := f.now.UTC().Truncate(q.RegularInterval)
-	frozen := f.e.peerBuckets[bucket]
-	slow := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}
-	require.Equal(t, q.IdentityUnknown, frozen.rows[slow].Identity)
-	late := engineSamples(1, bucket.Add(-10*time.Second), true)[0]
-	late.AttemptID = "late-for-previous-bucket"
-	late.InsertedAt = late.FinishedAt
-	f.ledger.Rows = append(f.ledger.Rows, late)
-	f.now = f.now.Add(20 * time.Second)
-	f.cycle()
-	require.Same(t, frozen, f.e.peerBuckets[bucket], "replaying the preceding bucket must not refreeze this one")
-	f.store.lock.Lock()
-	f.cycle()
-	f.store.lock.Unlock()
-	require.Same(t, frozen, f.e.peerBuckets[bucket], "losing the cycle lock must keep the frozen membership")
-	for _, line := range []q.Dimension{q.DimensionError, q.DimensionCache} {
-		p := f.store.Policies[10].Policy
-		if line == q.DimensionError {
-			p.MaxErrorRate += .1
-		} else {
-			p.MinCacheRatio -= .1
-		}
-		_, err := f.e.UpdatePolicy(context.Background(), 10, f.store.Version, p)
-		require.NoError(t, err)
-		require.Same(t, frozen, f.e.peerBuckets[bucket], "relaxing %s must not change TTFO membership", line)
-	}
-}
-
-func TestEngineTTFTRelaxOnlyOverridesAffectedBucketKeys(t *testing.T) {
-	f := newQualityFixture(t)
-	f.badTTFT()
-	f.store.Members[20] = []int64{1, 2}
-	f.store.Policies[20] = SchedPolicyRecord{GroupID: 20, Policy: f.store.Policies[10].Policy}
-	f.cycle()
-	bucket := f.now.UTC().Truncate(q.RegularInterval)
-	original := f.e.peerBuckets[bucket]
-	// Recreate a preexisting bucket with both groups in rear to make a
-	// full refreeze distinguishable from replacing only this group's keys.
-	frozen := freezePeers(f.now, original.rows)
-	for k, r := range frozen.rows {
-		r.Identity = q.IdentityRear
-		r.Epoch = f.now
-		frozen.rows[k] = r
-	}
-	f.e.peerBuckets[bucket] = frozen
-	p := f.store.Policies[10].Policy
-	p.TTFTSeconds = 2
-	_, err := f.e.UpdatePolicy(context.Background(), 10, 0, p)
-	require.NoError(t, err)
-	for k, old := range frozen.rows {
-		next := f.e.peerBuckets[bucket].rows[k]
-		if k.GroupID == 10 {
-			require.Equal(t, q.IdentityUnknown, next.Identity)
-			require.True(t, next.Epoch.IsZero())
-		} else {
-			require.Equal(t, old, next)
-		}
-	}
 }
 
 func TestEngineSyntheticCycleTiming(t *testing.T) {
@@ -277,7 +199,7 @@ func TestEngineSyntheticCycleTiming(t *testing.T) {
 	}
 }
 
-func TestEngineDisplayDoesNotFreezeFutureBucket(t *testing.T) {
+func TestEngineDisplayPreservesReplayHorizon(t *testing.T) {
 	f := newQualityFixture(t)
 	bucket := f.now.UTC().Truncate(q.RegularInterval)
 	f.now = bucket.Add(3 * time.Second)
@@ -292,20 +214,15 @@ func TestEngineDisplayDoesNotFreezeFutureBucket(t *testing.T) {
 	f.cycle()
 	require.Equal(t, bucket.Add(-7*time.Second), f.e.processedAt)
 	require.True(t, f.view().TTFO.Trial)
-	require.NotContains(t, f.e.peerBuckets, bucket, "display must not save membership before replay reaches the bucket")
 	require.NoError(t, f.e.SetOverride(context.Background(), SchedOverride{AccountID: 1, GroupID: 10, Mode: q.OverrideExempt}))
-	require.NotContains(t, f.e.peerBuckets, bucket, "rebuild must not freeze a future bucket")
 	require.NoError(t, f.e.ClearOverride(context.Background(), 1, 10))
-	require.NotContains(t, f.e.peerBuckets, bucket)
 	f.now = bucket.Add(13 * time.Second)
 	f.cycle()
 	require.Equal(t, q.IdentityRear, f.view().TTFO.Identity)
 	require.Equal(t, bucket.Add(-5*time.Second), f.line(q.DimensionTTFO).Entry)
-	require.Contains(t, f.e.peerBuckets, bucket)
-	require.Equal(t, q.IdentityRear, f.e.peerBuckets[bucket].rows[key].Identity, "official membership includes the pre-boundary trial failure")
 }
 
-func TestEngineRejudgeDoesNotSaveFutureBucket(t *testing.T) {
+func TestEngineRejudgePreservesReplayHorizon(t *testing.T) {
 	for _, line := range []q.Dimension{q.DimensionTTFO, q.DimensionError, q.DimensionCache} {
 		t.Run(string(line), func(t *testing.T) {
 			f := newQualityFixture(t)
@@ -313,7 +230,6 @@ func TestEngineRejudgeDoesNotSaveFutureBucket(t *testing.T) {
 			f.now = bucket.Add(3 * time.Second)
 			f.badTTFT()
 			f.cycle()
-			require.NotContains(t, f.e.peerBuckets, bucket)
 			policy := f.store.Policies[10].Policy
 			switch line {
 			case q.DimensionTTFO:
@@ -325,7 +241,7 @@ func TestEngineRejudgeDoesNotSaveFutureBucket(t *testing.T) {
 			}
 			_, err := f.e.UpdatePolicy(context.Background(), 10, 0, policy)
 			require.NoError(t, err)
-			require.NotContains(t, f.e.peerBuckets, bucket, "immediate reevaluation uses disposable membership before replay reaches the bucket")
+			require.Equal(t, bucket.Add(-7*time.Second), f.e.processedAt)
 		})
 	}
 }
@@ -401,12 +317,11 @@ func TestTTFTEvidenceWindowNanosecondBoundaries(t *testing.T) {
 				key := q.LineKey{GroupID: a.GroupID, AccountID: a.AccountID, Model: a.Model, Line: q.DimensionTTFO}
 				states[key] = q.LineState{LineKey: key, Epoch: tc.cut}
 			}
-			d.peers = freezePeers(tc.at, states)
 			for key, state := range states {
-				in := ttftInput(d, key, tc.cut, tc.at, 1, nil)
+				in := ttftInput(d, key, tc.cut, tc.at, 1)
 				result, err := q.EvaluateRuleB(in, q.DefaultRuleBParams())
 				require.NoError(t, err)
-				for _, counts := range []q.RuleBCounts{result.Counts, result.PeerCounts} {
+				for _, counts := range []q.RuleBCounts{result.Counts} {
 					require.Equal(t, tc.mass, counts.N)
 					require.Equal(t, tc.mass, counts.K)
 				}
@@ -431,4 +346,78 @@ func TestTTFTEvidenceWindowNanosecondBoundaries(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEngineRuleBGroupPriorUsesEventTimeAndKeepsSettings(t *testing.T) {
+	f := newQualityFixture(t)
+	ctx := context.Background()
+	key := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}
+	var outcomes []q.Verdict
+	for _, peerSlow := range []bool{false, true} {
+		rows := engineSamples(40, f.now, true)
+		for i := range rows {
+			a := &rows[i]
+			a.AccountID = 1
+			a.SessionKey = fmt.Sprintf("s%d", i%3)
+			a.StartedAt, a.FinishedAt, a.InsertedAt = f.now.Add(-time.Second), f.now, f.now
+			ms := 100
+			if i >= 20 {
+				a.AccountID = 2
+			}
+			if i < 6 || (i >= 20 && peerSlow) {
+				ms = 2000
+			}
+			a.TTFOMs = &ms
+		}
+		// Another source group and evidence not yet visible must not alter the prior.
+		foreign, future := rows[20], rows[20]
+		foreign.AttemptID, foreign.GroupID = "foreign", 20
+		future.AttemptID, future.InsertedAt = "future", f.now.Add(time.Second)
+		opposite := 2000
+		if peerSlow {
+			opposite = 100
+		}
+		foreign.TTFOMs, future.TTFOMs = &opposite, &opposite
+		f.e.window.samples = map[SchedAccountModel][]q.AttemptSample{
+			{AccountID: 1, Model: key.Model}: rows[:20],
+			{AccountID: 2, Model: key.Model}: append(rows[20:], foreign, future),
+		}
+		f.e.window.indexGroups()
+		d, err := f.e.inputs(ctx, f.now, f.e.window.samples)
+		require.NoError(t, err)
+		// A peer reset does not filter the unchanged group-prior input path.
+		verdict, basis := f.e.assessLine(d, q.LineState{LineKey: key}, q.EventRegular, f.now, map[int64]time.Time{2: f.now})
+		outcomes = append(outcomes, verdict)
+		prior := .001
+		if peerSlow {
+			prior = .999
+		}
+		require.Equal(t, prior, basis.TTFT.PriorMu)
+		require.Equal(t, new(.2), basis.TTFT.Tolerance)
+		require.Equal(t, new(.8), basis.TTFT.Confidence)
+		require.Nil(t, basis.TTFT.PRel)
+		require.Nil(t, basis.TTFT.U)
+		f.e.rule.Params.Tolerance, f.e.rule.Params.Confidence = .3, .9
+		require.Equal(t, new(.2), basis.TTFT.Tolerance, "old evidence must not follow later settings")
+		require.Equal(t, new(.8), basis.TTFT.Confidence)
+		f.e.rule.Params = q.DefaultRuleBParams()
+	}
+	require.Equal(t, []q.Verdict{q.VerdictUnknown, q.VerdictFail}, outcomes)
+}
+
+func TestEnginePeerMarginSaveDoesNotRejudge(t *testing.T) {
+	f := newQualityFixture(t)
+	f.badTTFT()
+	f.cycle()
+	before := append([]q.LineState(nil), f.store.Rows...)
+	decisions := len(f.store.Decisions)
+	params := q.DefaultRuleBParams()
+	params.PeerMargin = .77
+	result, err := f.e.UpdateTTFTRule(context.Background(), 0, params)
+	require.NoError(t, err)
+	require.Equal(t, q.RuleBUnchanged, result.Change)
+	require.Zero(t, result.Cleared)
+	require.Equal(t, params, f.store.Rule.Params)
+	require.Equal(t, before, f.store.Rows)
+	require.Len(t, f.store.Decisions, decisions)
 }

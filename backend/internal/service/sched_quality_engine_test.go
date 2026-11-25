@@ -56,7 +56,7 @@ func TestValidatePolicyErrorFloor(t *testing.T) {
 		ttfo, errorRate float64
 		valid           bool
 	}{
-		{"floor", .001, .05, true}, {"unbounded-first-output", 1000, .05, true}, {"too-low-error", 1, .049, false}, {"zero-first-output", 0, .05, false},
+		{"floor", .001, .01, true}, {"below-floor", 1, .009, false}, {"unbounded-first-output", 1000, .05, true}, {"below-old-floor", 1, .049, true}, {"zero-first-output", 0, .05, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateSchedQualityPolicy(q.Policy{TTFTSeconds: tc.ttfo, MaxErrorRate: tc.errorRate, MinCacheRatio: .8, TakeoverIdleSeconds: 900})
@@ -198,8 +198,7 @@ func TestEngineRuleChangesAtomicRejudgeAndConflict(t *testing.T) {
 					f.store.Rows[i] = old
 				}
 			}
-			// A rear peer whose epoch excludes its samples must be cleared before
-			// membership and evidence are frozen for the relaxed reevaluation.
+			// A rear account is still cleared during a relaxed reevaluation.
 			for i, r := range f.store.Rows {
 				if r.AccountID == 2 && r.Line == q.DimensionTTFO {
 					r.Identity = q.IdentityRear
@@ -209,12 +208,6 @@ func TestEngineRuleChangesAtomicRejudgeAndConflict(t *testing.T) {
 				}
 			}
 			before := append([]q.LineState(nil), f.store.Rows...)
-			peers := make(map[q.LineKey]q.LineState)
-			for _, r := range before {
-				peers[r.LineKey] = r
-			}
-			frozen := freezePeers(f.now, peers)
-			f.e.peerBuckets = map[time.Time]*peerBucket{frozen.at: frozen}
 			decisionCount := len(f.store.Decisions)
 			p := q.DefaultRuleBParams()
 			switch change {
@@ -240,7 +233,9 @@ func TestEngineRuleChangesAtomicRejudgeAndConflict(t *testing.T) {
 				require.Equal(t, 1, r.Admissions)
 				require.Equal(t, f.now, r.Epoch)
 				require.Equal(t, f.now, r.Entry)
-				require.NotNil(t, r.Basis.TTFT.PRel, "the cleared rear peer must supply usable evidence")
+				require.Nil(t, r.Basis.TTFT.PRel, "relative evidence is retired")
+				require.Equal(t, .001, r.Basis.TTFT.PriorMu, "group prior still includes the fast account")
+				require.Equal(t, new(p.Confidence), r.Basis.TTFT.Confidence)
 				var actions []q.Action
 				for _, d := range f.store.Decisions[decisionCount:] {
 					if d.Key == r.LineKey {

@@ -352,7 +352,7 @@ func TestRecoveryDiagnosticLogsAfterCommit(t *testing.T) {
 		counts[msg]++
 		if msg == "sched_quality.state" {
 			require.Equal(t, "deadline", r["release_reason"])
-			require.Equal(t, "3.1", r["rule_version"])
+			require.Equal(t, q.RuleVersion, r["rule_version"])
 			require.Greater(t, r["trial_duration_seconds"].(float64), float64(0))
 		}
 	}

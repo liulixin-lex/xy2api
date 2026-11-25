@@ -459,8 +459,7 @@ func decodeSchedQualityPolicy(raw json.RawMessage, groupID string) (service.Sche
 	v.TakeoverIdleSeconds, fieldErr = readSchedQualityPolicyField(fields, "takeover_idle_seconds", defaults.TakeoverIdleSeconds)
 	read(fieldErr)
 	record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.TTFTSeconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheRatio, TakeoverIdleSeconds: v.TakeoverIdleSeconds}
-	// The v0.6.4 editor allowed error thresholds below 5%. Keep old saved
-	// values usable during rollback/blue-green overlap, matching migration 301.
+	// Clamp legacy saved values to the effective floor used by assessments.
 	if record.Policy.MaxErrorRate < schedquality.ErrorRateFloor {
 		record.Policy.MaxErrorRate = schedquality.ErrorRateFloor
 	}

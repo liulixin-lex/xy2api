@@ -27,8 +27,6 @@ type schedQualityData struct {
 	runningCache   schedPredecessorIndex
 	ruleSamples    map[SchedAccountModel][]q.RuleBSample
 	ruleGroups     map[schedGroupModel][]q.RuleBSample
-	peers          *peerBucket
-	peerBuckets    map[time.Time]*peerBucket
 }
 
 type schedQualityView struct {
@@ -102,14 +100,6 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 	view := &schedQualityView{version: version, at: evaluatedAt, globalEnabled: enabled, states: make(map[schedQualityKey]q.StateView), policies: cloneSchedPolicies(s.policies), overrides: active, resets: cloneResetTimes(resets)}
 	keys, previous := s.rowKeys(d, states)
 	groupRows := make(map[int64][]SchedGroupRow)
-	// Display uses the same bucket membership as replay, without changing it.
-	for _, k := range keys {
-		r := previous[k]
-		r.LineKey = k
-		previous[k] = r
-	}
-	d.displayPeers(d.now, previous)
-	s.peerBuckets = d.peerBuckets
 	grouped := make(map[schedQualityKey]*SchedGroupRow)
 	for _, key := range keys {
 		r := previous[key]
