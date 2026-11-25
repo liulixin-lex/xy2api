@@ -47,7 +47,7 @@ func Step(prev LineState, kind EventKind, v Verdict, basis Basis, at time.Time) 
 		switch v {
 		case VerdictFail:
 			s.GoodSince = time.Time{}
-			if s.Line == DimensionTTFO || (!s.PendingAt.IsZero() && s.PendingAt.Equal(at.Add(-RegularInterval))) {
+			if s.Line == DimensionTTFO || singleCacheConfirmation(s.Line, basis.Cache) || (!s.PendingAt.IsZero() && s.PendingAt.Equal(at.Add(-RegularInterval))) {
 				enterRear(&s, at)
 				s.Admissions++
 				action = ActionEnter
@@ -121,6 +121,10 @@ func Step(prev LineState, kind EventKind, v Verdict, basis Basis, at time.Time) 
 		s.Basis = &basis
 	}
 	return s, action
+}
+
+func singleCacheConfirmation(line Dimension, cache *CacheAssessment) bool {
+	return line == DimensionCache && cache != nil && (cache.Path == "single5" || cache.Path == "deep10")
 }
 
 func enterRear(s *LineState, at time.Time) {

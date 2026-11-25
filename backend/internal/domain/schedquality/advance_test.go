@@ -4,6 +4,7 @@ package schedquality
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 	"testing"
@@ -46,6 +47,43 @@ func TestStepOrdinaryConfirmation(t *testing.T) {
 						t.Fatalf("pending state %+v", s)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestStepCacheConfirmationPath(t *testing.T) {
+	for _, tc := range []struct {
+		name, path  string
+		read, turns int
+	}{
+		{"exact five points", "single5", 850, 20},
+		{"one token above the boundary", "pair", 851, 20},
+		{"deep deficit with ten turns", "deep10", 700, 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var samples []AttemptSample
+			for i := range tc.turns {
+				samples = append(samples, AttemptSample{
+					AttemptID: fmt.Sprint(i), SessionKey: "session", Continuation: true, Outcome: OutcomeOK,
+					StartedAt: machineNow.Add(-time.Minute), FinishedAt: machineNow,
+					InputTokens: new(1000 - tc.read), CacheReadTokens: new(tc.read), CacheCreationTokens: new(0),
+				})
+			}
+			cache := AssessCache(samples, .90, time.Time{}, machineNow)
+			if cache.Verdict != VerdictFail || cache.Path != tc.path {
+				t.Fatalf("cache assessment = %+v", cache)
+			}
+			basis := Basis{Line: DimensionCache, Cache: &cache}
+			next, action := Step(machineState(DimensionCache), EventRegular, cache.Verdict, basis, machineNow)
+			if tc.path == "pair" {
+				if action != "" || next.PendingAt != machineNow {
+					t.Fatalf("first assessment = %+v/%s", next, action)
+				}
+				next, action = Step(next, EventRegular, cache.Verdict, basis, machineNow.Add(RegularInterval))
+			}
+			if action != ActionEnter || next.Basis.Cache.Path != tc.path {
+				t.Fatalf("confirmation = %+v/%s", next, action)
 			}
 		})
 	}
