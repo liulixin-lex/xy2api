@@ -78,9 +78,9 @@ func TestStepAuditF3GoodSinceResets(t *testing.T) {
 						(next.Identity != IdentityUnknown || !next.PendingAt.Equal(machineNow)) {
 						t.Fatal("first error/cache failure must remain pending and Unknown")
 					}
-					if tc.kind == EventTrial && (next.Level != 3 || next.Admissions != 4 ||
-						next.Until.Sub(machineNow) != 160*time.Minute) {
-						t.Fatalf("trial failure must advance exactly once from level 2 despite prior admissions: %+v", next)
+					if tc.kind == EventTrial && (next.Level != 0 || next.Admissions != 4 ||
+						next.Until.Sub(machineNow) != RearDuration) {
+						t.Fatalf("trial failure must use a fixed period and count exactly once: %+v", next)
 					}
 				})
 			}
@@ -122,7 +122,7 @@ func TestStepFirstAdmissionRetainedAfterGoodEvidence(t *testing.T) {
 	}
 	at := s.EvaluatedAt.Add(RegularInterval)
 	next, action := machineStep(s, EventRegular, VerdictFail, at)
-	if action != ActionEnter || next.Level != 1 || next.Admissions != 2 || next.Until.Sub(at) != 40*time.Minute {
-		t.Fatalf("cleared first admission escalated on re-entry: %+v / %s", next, action)
+	if action != ActionEnter || next.Level != 0 || next.Admissions != 2 || next.Until.Sub(at) != RearDuration {
+		t.Fatalf("historical admission changed the next rear period: %+v / %s", next, action)
 	}
 }

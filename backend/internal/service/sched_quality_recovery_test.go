@@ -94,7 +94,7 @@ func TestEngineErrorRecoveryKeepsTrialAcrossRestart(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newQualityFixture(t)
 			reviewAt := f.now.Add(-10 * time.Second)
-			entry := reviewAt.Add(-q.CooldownLadder[0])
+			entry := reviewAt.Add(-q.RearDuration)
 			f.store.Rows = []q.LineState{{
 				LineKey:  q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionError},
 				Identity: q.IdentityRear, Entry: entry, LastRear: entry, Until: reviewAt, EvaluatedAt: entry, Admissions: 1,

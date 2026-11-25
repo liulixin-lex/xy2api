@@ -315,7 +315,7 @@ func TestEngineDecisionDeadlinesAndCounters(t *testing.T) {
 // touched through a still-fresh old view. Reassess that residual window if
 // the first cooldown no longer outlasts both view staleness and lease idleness.
 func TestSchedTrialResetResidualWindowFitsFirstCooldown(t *testing.T) {
-	require.Greater(t, q.CooldownLadder[0], TrialLeaseIdle+q.ViewMaxAge)
+	require.Greater(t, q.RearDuration, TrialLeaseIdle+q.ViewMaxAge)
 }
 
 type timeoutSeatProbe struct {

@@ -53,7 +53,7 @@ func TestStepOrdinaryConfirmation(t *testing.T) {
 
 func TestStepCooldownAndReview(t *testing.T) {
 	s, action := machineStep(machineState(DimensionTTFO), EventRegular, VerdictFail, machineNow)
-	if action != ActionEnter || s.Level != 0 || s.Admissions != 1 || s.Until.Sub(machineNow) != 20*time.Minute {
+	if action != ActionEnter || s.Level != 0 || s.Admissions != 1 || s.Until.Sub(machineNow) != RearDuration {
 		t.Fatalf("first entry: %+v/%s", s, action)
 	}
 	frozen := s
@@ -67,7 +67,7 @@ func TestStepCooldownAndReview(t *testing.T) {
 		trial  bool
 		level  int
 	}{
-		{VerdictFail, ActionRenew, IdentityRear, false, 1},
+		{VerdictFail, ActionRenew, IdentityRear, false, 0},
 		{VerdictPass, ActionTrial, IdentityUnknown, true, 0},
 		{VerdictUnknown, ActionTrial, IdentityUnknown, true, 0},
 	} {
@@ -88,16 +88,15 @@ func TestStepCooldownAndReview(t *testing.T) {
 	for level := 1; level <= 6; level++ {
 		at := s.Until
 		s, action = machineStep(s, EventReview, VerdictFail, at)
-		want := min(level, 4)
-		if action != ActionRenew || s.Level != want || s.Until.Sub(at) != CooldownLadder[want] {
-			t.Fatalf("ladder: %+v", s)
+		if action != ActionRenew || s.Level != 0 || s.Until.Sub(at) != RearDuration {
+			t.Fatalf("fixed rear duration: %+v", s)
 		}
 	}
 	s, _ = machineStep(s, EventReview, VerdictPass, s.Until)
 	s, _ = machineStep(s, EventTrial, VerdictPass, s.Epoch.Add(TrialMinimum))
 	s, action = machineStep(s, EventRegular, VerdictFail, s.EvaluatedAt.Add(RegularInterval))
-	if action != ActionEnter || s.Level != 4 || s.Admissions != 2 {
-		t.Fatal("later entry must escalate and count")
+	if action != ActionEnter || s.Level != 0 || s.Admissions != 2 {
+		t.Fatal("later entry must keep the fixed duration and count")
 	}
 }
 
@@ -114,15 +113,15 @@ func TestStepTrialDeadlineEvidenceWins(t *testing.T) {
 		} {
 			prev := trial
 			prev.Line = line
-			next, a := machineStep(prev, EventTrial, tc.v, prev.TrialUntil)
+			next, a := Step(prev, EventTrial, tc.v, Basis{Line: line, Cache: &CacheAssessment{Turns: TrialCacheTurns}}, prev.TrialUntil)
 			if a != tc.a || next.Identity != tc.id || next.Trial || !next.Epoch.Equal(prev.TrialUntil) {
 				t.Fatalf("deadline %+v/%s", next, a)
 			}
 			if tc.v == VerdictUnknown && (next.Level != prev.Level || next.Admissions != prev.Admissions) {
 				t.Fatal("timeout lost history")
 			}
-			if tc.v == VerdictFail && (next.Level != 1 || next.Admissions != 2 || !next.LastRear.Equal(prev.TrialUntil)) {
-				t.Fatal("trial failed to escalate")
+			if tc.v == VerdictFail && (next.Level != 0 || next.Admissions != 2 || !next.LastRear.Equal(prev.TrialUntil)) {
+				t.Fatal("trial failure did not restart rear")
 			}
 			if tc.v == VerdictPass && !next.GoodSince.IsZero() {
 				t.Fatal("trial pass must start good evidence at the actual pass time")
@@ -132,23 +131,6 @@ func TestStepTrialDeadlineEvidenceWins(t *testing.T) {
 	s, a := machineStep(trial, EventTrial, VerdictUnknown, trial.EvaluatedAt.Add(time.Minute))
 	if a != "" || !s.Trial {
 		t.Fatal("unknown ended trial early")
-	}
-}
-
-// Acceptance 4: the local step cannot clear shared history, even after 24h.
-func TestStepLevelClearBoundaries(t *testing.T) {
-	s := machineState(DimensionTTFO)
-	s.Level, s.Admissions, s.LastRear = 2, 3, machineNow.Add(-LevelClearQuiet)
-	for i := 0; i <= 6; i++ {
-		next, a := machineStep(s, EventRegular, VerdictPass, machineNow.Add(time.Duration(i)*RegularInterval))
-		if next.Level != 2 || next.Admissions != 3 || a != "" {
-			t.Fatalf("local history clear: %+v/%s", next, a)
-		}
-		s = next
-	}
-	next, a := machineStep(s, EventRegular, VerdictFail, s.EvaluatedAt.Add(RegularInterval))
-	if next.Level != 3 || a != ActionEnter {
-		t.Fatal("good streak lost history")
 	}
 }
 
