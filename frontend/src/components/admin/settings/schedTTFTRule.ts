@@ -38,7 +38,7 @@ export const outsideReplayed = (range: [number, number] | undefined, ratio: numb
  * Raising any value relaxes the line (accounts go to the rear less easily), lowering tightens it; some up and some
  * down is mixed, which the backend treats as a relaxation. The margin is not edited: it always goes back as loaded.
  */
-export function ttftRuleChange(saved: SchedTTFTRuleValues, next: SchedTTFTRuleValues): SchedRuleChange {
+export function ttftRuleChange(saved: Pick<SchedTTFTRuleValues, TTFTRuleShownField>, next: Pick<SchedTTFTRuleValues, TTFTRuleShownField>): SchedRuleChange {
   const up = TTFT_RULE_FIELDS.some((field) => next[field] > saved[field])
   const down = TTFT_RULE_FIELDS.some((field) => next[field] < saved[field])
   if (up && down) return 'mixed'

@@ -83,7 +83,7 @@ import { computed, reactive, ref, shallowRef, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { BackendTTFTRule, SchedTTFTRuleValues } from '@/api/admin/schedQualityTypes'
+import type { BackendTTFTRule, SchedTTFTRuleUpdateValues } from '@/api/admin/schedQualityTypes'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import {
@@ -139,11 +139,13 @@ const valid = computed(() => Object.fromEntries(FIELDS.map((field) => [field, tt
 // Nothing loaded (still loading, or the load failed and shows its retry): nothing to check or save, so the page saves.
 const isValid = computed(() => !record.value || FIELDS.every((field) => valid.value[field]))
 
-const current = computed<SchedTTFTRuleValues>(() => {
+const current = computed<SchedTTFTRuleUpdateValues>(() => {
   const saved = record.value
   const value = (field: TTFTRuleShownField) => (saved && !edited[field] ? saved[field] : Number((Number(form[field]) / 100).toFixed(6)))
-  // Not shown: the loaded value goes back as it is.
-  return { confidence: value('confidence'), tolerance: value('tolerance'), peer_margin: saved?.peer_margin ?? 0 }
+  // The margin is not shown and the rules in force do not use it, but the previous rules read it after a rollback: the
+  // loaded value goes back as it is. An answer without it sends the default the same answer gives (the backend requires
+  // the key); without either the key is left out and the backend refuses the save. Never a made-up 0.
+  return { confidence: value('confidence'), tolerance: value('tolerance'), peer_margin: saved?.peer_margin ?? saved?.defaults?.peer_margin }
 })
 
 /** Declined, and the values still differ from the saved ones: the note and the marked inputs show. */

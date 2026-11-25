@@ -121,6 +121,25 @@ describe('SchedTTFTRuleField', () => {
     expect(api.updateTTFTRule).toHaveBeenCalledWith({ expected_version: 4, confidence: 0.8, tolerance: 0.15, peer_margin: 0.07 })
   })
 
+  // Astra review of fe-min, suggestion 3: an answer without the margin never makes the save write 0 (the previous rules
+  // read it after a rollback): it sends the answer's default, and with no default either it leaves the key out.
+  it('sends the answer\'s default margin when the loaded rule lacks it, and no margin when the default is missing too', async () => {
+    const { peer_margin: _margin, ...withoutMargin } = rule({ defaults: { confidence: 0.8, tolerance: 0.2, peer_margin: 0.06 } })
+    api.getTTFTRule.mockResolvedValueOnce(withoutMargin)
+    const w = await mountField()
+    await input(w, 'tolerance').setValue('15')
+    expect(await vm(w).save()).toBe(true)
+    expect(api.updateTTFTRule).toHaveBeenLastCalledWith({ expected_version: 4, confidence: 0.8, tolerance: 0.15, peer_margin: 0.06 })
+
+    const { defaults: _defaults, ...bare } = withoutMargin
+    api.getTTFTRule.mockResolvedValueOnce(bare)
+    const v = await mountField()
+    await input(v, 'tolerance').setValue('15')
+    await vm(v).save()
+    expect(api.updateTTFTRule.mock.lastCall![0]).toEqual({ expected_version: 4, confidence: 0.8, tolerance: 0.15, peer_margin: undefined })
+    expect(JSON.parse(JSON.stringify(api.updateTTFTRule.mock.lastCall![0]))).not.toHaveProperty('peer_margin')
+  })
+
   for (const [kind, edit] of [['relaxation', { confidence: '90' }], ['mixed change', { confidence: '90', tolerance: '15' }]] as const) {
     it(`asks before a ${kind}: declining saves nothing, confirming saves`, async () => {
       const w = await mountField()

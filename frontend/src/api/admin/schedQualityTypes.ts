@@ -527,8 +527,14 @@ export interface BackendTTFTRule extends SchedTTFTRuleValues {
   replayed: Record<SchedTTFTRuleField, [number, number]>
 }
 
+/**
+ * The values a save sends. The backend requires `peer_margin` (400 INVALID_TTFT_RULE without it); the settings form
+ * sends it back as loaded, or the answer's default, and leaves it out only when it has neither.
+ */
+export type SchedTTFTRuleUpdateValues = Omit<SchedTTFTRuleValues, 'peer_margin'> & { peer_margin?: number }
+
 /** A version conflict is rejected with HTTP 409, an invalid value with 400 INVALID_TTFT_RULE. */
-export interface SchedTTFTRuleUpdate extends SchedTTFTRuleValues {
+export type SchedTTFTRuleUpdate = SchedTTFTRuleUpdateValues & {
   expected_version: number
 }
 
