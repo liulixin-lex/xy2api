@@ -283,7 +283,7 @@ func (s *SchedAdminService) UpdatePolicy(ctx context.Context, g, version int64, 
 	return SchedAdminPolicySaved{SchedAdminPolicy: schedAdminPolicy(r.SchedPolicyRecord), RelaxedLines: append([]schedquality.Dimension{}, r.RelaxedLines...), Cleared: r.Cleared}, nil
 }
 func schedAdminRule(r SchedTTFTRuleRecord) SchedAdminTTFTRule {
-	return SchedAdminTTFTRule{Version: r.Version, RuleBParams: r.Params, Defaults: schedquality.DefaultRuleBParams(), Replayed: map[string][2]float64{"confidence": {.8, .95}, "tolerance": {.2, .25}, "peer_margin": {.05, .15}}}
+	return SchedAdminTTFTRule{Version: r.Version, RuleBParams: r.Params, Defaults: schedquality.DefaultRuleBParams(), Replayed: map[string][2]float64{"confidence": {.8, .8}, "tolerance": {.2, .2}, "peer_margin": {.05, .15}}}
 }
 func (s *SchedAdminService) TTFTRule(ctx context.Context) (SchedAdminTTFTRule, error) {
 	r, err := s.d.Engine.TTFTRule(ctx)

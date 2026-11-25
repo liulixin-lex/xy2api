@@ -11,11 +11,11 @@
   "replayed": {
     "confidence": [
       0.8,
-      0.95
+      0.8
     ],
     "tolerance": [
       0.2,
-      0.25
+      0.2
     ],
     "peer_margin": [
       0.05,
