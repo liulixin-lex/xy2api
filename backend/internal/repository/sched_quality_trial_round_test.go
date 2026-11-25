@@ -130,3 +130,27 @@ func TestRunResetReturnsGroupsDeletedUnderCycleLock(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx, "SELECT count(*) FROM sched_decisions WHERE account_id=1 AND action='reset'").Scan(&decisions))
 	require.Equal(t, 2, decisions)
 }
+
+func TestSchedQualityDisabledAccountRemainsMember(t *testing.T) {
+	db := newTrialPostgres(t)
+	ctx := t.Context()
+	_, err := db.ExecContext(ctx, `CREATE TABLE groups(id bigint,platform text,deleted_at timestamptz);
+ CREATE TABLE accounts(id bigint,status text,schedulable boolean,deleted_at timestamptz);
+ CREATE TABLE account_groups(account_id bigint,group_id bigint);
+ INSERT INTO groups VALUES(10,'openai',NULL);
+ INSERT INTO accounts VALUES(1,'active',true,NULL);
+ INSERT INTO account_groups VALUES(1,10)`)
+	require.NoError(t, err)
+	repo := &schedQualityRepository{db: db}
+	for _, enabled := range []bool{false, true} {
+		status := "disabled"
+		if enabled {
+			status = "active"
+		}
+		_, err = db.ExecContext(ctx, "UPDATE accounts SET status=$1,schedulable=$2 WHERE id=1", status, enabled)
+		require.NoError(t, err)
+		members, err := repo.LoadMembers(ctx)
+		require.NoError(t, err)
+		require.Equal(t, []int64{1}, members[10], "account eligibility must not pause or rebuild the quality state")
+	}
+}
