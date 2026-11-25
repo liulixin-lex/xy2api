@@ -150,13 +150,15 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 
 成功尝试的 `sched_quality.attempt_finished` 为 Debug，查看时需启用对应日志级别。
 
+<!-- 第 21 条交付后在这里补：换号重发（`openai_conversion_retry`）和长期统计装载完成（`sched_quality.performance_ready`）进系统日志库、换号重发带请求号。 -->
+
 | 事件 | 级别 | 何时写 / 关键字段 |
 |---|---|---|
 | `sched_quality.loading` | 进度 / 完成 Info，加载失败 Warn | 带 `component=sched_quality`；`status` 为 `page`、`complete` 或 `incomplete`、累计 `rows`、`pages`；`page` 和 `incomplete` 另有 `layering=false`，失败有 `error`；加载完成前不分层 |
 | `sched_quality.replay` | Debug | 处理积压的事务提交后；带组件，`horizon` 为处理水位，`batches`、`assessments` 为补跑批次与判定次数，需启用 Debug |
 | `sched_quality.summary` | Info | 带 `component=sched_quality`；每实例每 5 分钟汇总，含 `cycles`、`cycles_failed`、`cycle_ms_max`、`cooled`、`released`、`trial`、`relax`、`clear` |
 | `sched_quality.state` | Info | 带 `component=sched_quality`；判定事务提交后每动作一条，含保存门槛引发的重评。字段见下文 |
-| `sched_quality.history_missing` | Info | 带 `component=sched_quality`；事务提交后按线汇总缺历史或试用在途资料不全的评估。含 `account_id`、`model`、`group_id`、`line`、`first_at`、`last_at`（首末评估时刻）、`assessments`（次数） |
+| `sched_quality.history_missing` | Info | 带 `component=sched_quality`；事务提交后按线汇总缺历史的评估。含 `account_id`、`model`、`group_id`、`line`、`first_at`、`last_at`（首末评估时刻）、`assessments`（次数） |
 | `sched_quality.missing_deadline` | Warn | 带 `component=sched_quality`；后排或试用记录缺期限，按发现时到期处理并提交动作后记录。含 `at`、`account_id`、`model`、`group_id`、`line` |
 | `sched_quality.performance_ready` | Info | 不带组件，只查应用日志。每次进程启动首次发布完整长期表现时记一次，部分装载不记；`snapshot_at`、`from` 为统计窗口终点和起点，`rows` 为装入的尝试样本数，`load_ms` 为首次加载到发布的毫秒数（含重试等待） |
 | `sched_quality.performance_load` | Warn | 不带组件，按事件名查；长期表现加载或配置读取失败，含 `error` |
@@ -187,19 +189,19 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 | `sched_quality.release_trial_group` | Warn | 试用结束后整组名额释放失败；`account_id`、`model`、`group_id`、`error` |
 | `sched_quality.capability_mark_evicted` | Info | 能力标记满额时替换最早到期的一条；`account_id`、`limit`；不带组件，仅应用标准输出 |
 
-`summary` 的 `cycles` 是引擎每 5 秒的工作周期，正常每 5 分钟约 60 次；与每 5 分钟一次的普通质量判定不同。`cooled` 计进入后排、续期、试用失败；`released` 计试用放回；`trial` 计进入试用；`relax` 计门槛放宽写入的动作；`clear` 计再犯档位清零动作。只统计提交成功的动作，回滚的重评不发布也不计数；管理员手动恢复不计入这些计数。
+`summary` 的 `cycles` 是引擎每 5 秒的工作周期，正常每 5 分钟约 60 次；与每 5 分钟一次的普通质量判定不同。`cooled` 计进入后排、续期、试用失败；`released` 计试用放回；`trial` 计进入试用；`relax` 计门槛放宽写入的动作；`clear` 保留这个键，现在恒为 0。只统计提交成功的动作，回滚的重评不发布也不计数；管理员手动恢复不计入这些计数。
 
-**`sched_quality.state`** 的 `at` 是逻辑判定时刻，`rule_version` 当前为 `3.1`；用 `account_id`、`model`、`group_id`、`line` 定位线，`line` 为 `ttfo`、`error` 或 `cache`。`action` 取 `enter`、`renew`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`reset`、`relax`、`clear`，见 [判定记录](group-quality-gate.md#判定记录)；旧日志仍可见 `release`。管理员重置提交后，原先在后排或试用的线各记一条 `reset`。`level` 为 0–4，对应 20、40、80、160、240 分钟。`until` 在进入后排、续期、试用失败时写后排期限，进入试用时写试用期限，其余为零值。
+**`sched_quality.state`** 的 `at` 是逻辑判定时刻，`rule_version` 当前为 `4.0`；用 `account_id`、`model`、`group_id`、`line` 定位线，`line` 为 `ttfo`、`error` 或 `cache`。`action` 取 `enter`、`renew`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`reset`、`relax`，见 [判定记录](group-quality-gate.md#判定记录)；旧日志还可见 `release`、`clear`。管理员重置提交后，原先在后排或试用的线各记一条 `reset`。`level` 规则 4.0 写 0；旧日志的 0–4 对应 20、40、80、160、240 分钟。`until` 在进入后排、续期、试用失败时写后排期限，进入试用时写试用期限，其余为零值。
 
 | 字段 | 含义 |
 |---|---|
-| `release_reason` | `qualified`（满 15 分钟且达标）、`no_samples`（满 60 分钟无本线可用样本）、`deadline`（到期）；未放回为空串 |
-| `trial_duration_seconds` | 放回时记录实际试用秒数；未放回为 0。按期限放回时旧轮通常为 3600、新轮为 7200 |
-| `history_missing` | 是否缺少这次评估所需的历史，含试用 60 分钟检查时在途资料不全 |
-| `basis` | 门槛、证据来源和逐线证据，也含放回原因、试用时长和缺历史标记；`own_sample_at_60` 为 `true`（有）或 `false`（确定没有），未检查或资料不全时省略；缺期限时另有 `missing_deadline`，为 `true` |
+| `release_reason` | 试用结束时写：`fail`（不达标回后排）、`good`（满 15 分钟且达标）、`deadline`（到截止）；旧日志还有 `qualified`、`no_samples`；其余动作为空串 |
+| `trial_duration_seconds` | 试用结束时的实际试用秒数，其余为 0。到截止结束时通常为 3600；升级前开始的试用可能是 7200 |
+| `history_missing` | 是否缺少这次评估所需的历史 |
+| `basis` | 门槛、证据来源和逐线证据，也含结束原因、试用时长和缺历史标记；缺期限时另有 `missing_deadline`，为 `true`。缓存线的 `path`、`low_sessions_10`、`window_from`、`window_to` 和首字线的 `tolerance`、`confidence` 见 [判定记录](group-quality-gate.md#判定记录)；`own_sample_at_60` 只在旧日志里 |
 | `attempt_ids` | 相关尝试 ID，最多 50 个 |
 
-首字证据有时间折扣与同伴比较，不能只看 P50 推断判定。
+首字证据有时间折扣和起估值，不能只看 P50 推断判定。
 
 **`sched_quality.first_output_avoid`** 的 `confirmed=true` 表示写入成功，且回执已由当前请求确认。未确认时，`reason` 可为 `session_disabled`（开关已关）、`protocol_ineligible`（请求无交接资格）、`binding_changed`（原绑定不匹配）、`rejected`（存储拒绝）、`error`（存储错误）、`timeout`（超时）、`expired`（避让期已过）或 `receipt_stale`（回执已不匹配当前轮次）。`error_class` 只记录错误类别。
 
@@ -253,11 +255,39 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 
 无号原因：`profit_ceiling`（倍率上限）、`profit_floor`（倍率下限）、`model_unsupported`（模型不支持）、`no_schedulable_candidate`（初筛无可调度号）、`candidate_read_failed`（候选读取失败）、`selection_failed`（选号失败）、`cached_no_candidate`（命中无号缓存）、`request_cancelled`（取消或到期）、`capacity_unavailable`（观察到容量不足）、`no_candidate`（无其他具体原因）。
 
+打开协作偏好时，选中的号可能比同层、同固定状态的号优先级低或更贵（见[调度](scheduling.md#openai-分组的选号顺序)），这时不能只拿 `cheapest_downgraded_*`、`next_higher_*` 解释为什么选了它。
+
+同一事件里还有这次派发的候选名单：
+
+| 字段 | 含义 |
+|---|---|
+| `pool_rounds` | 这次派发成功读到普通候选池的次数。成员读取失败、命中无号缓存时为 0；为 `null` 表示这次没有采集名单（派发开始时 Info 日志没开） |
+| `candidates` | 最后一次读到的普通候选池里通过初筛的号，取并发检查之前的集合。每项 `account_id`、`placement`、`rank`，以及可省略的 `lines`、`skip`。没读到池为 `null`，读到空池为 `[]` |
+| `placement` | 取值同 `selected_quality_position`；没查过试用名额的试用号记 `trial_unknown` |
+| `lines` | 这个号处于后排或试用的线：键 `ttfo`、`error`、`cache`，值 `rear` 或 `trial`，一个号可以一条在后排、一条在试用。按状态记，豁免生效或质量分层暂停时也照记 |
+| `rank` | 普通派发选中的号为 1；其余参加过排序的号按最后一次参加的那一轮从新到旧、轮内次序排；从没参加排序的号（如一开始就被负载挡下）按账号编号排在最后。不是第一次比较时的名次 |
+| `skip` | 因容量被跳过的原因：`load_full`、`slot_unavailable`，可以都有。被跳过的号仍在名单里，后来也可能又参加排序、甚至被选中 |
+| `excluded` | 初筛时被 `model`（模型不支持）、`profit_floor`、`profit_ceiling`、`profit_invalid_account_rate` 筛掉的号，每项 `account_id`、`reason`。别的筛选原因不在这里，它不是完整的淘汰名单 |
+| `rescue_attempted` | 兜底路径实际排过序时为 `true`，否则省略 |
+| `rescue` | 兜底选中的号：`account_id`、`placement`；不并进 `candidates`。兜底排过序但没抢到号位时，只有 `rescue_attempted` |
+
+**名单和原有计数怎么对。** 原有计数会跨普通候选池的重读累计，兜底也会更新它们；名单只是最后一次普通候选池的快照。所以下面的关系只在 `pool_rounds` 为 1、并且没有 `rescue_attempted` 的派发上成立：`candidates` 的个数等于 `eligible_candidate_count`；各 `placement` 的个数不小于对应的位置计数（`front_or_trial_with_seat_count` 是 `front` 加 `trial_with_seat`），多出来的是没参加过排序的号；`excluded` 各原因的个数等于对应的 `filtered_*_count`；带某种 `skip` 的账号数等于对应的 `*_skipped_count`。其余派发只核对名单本身：名次连续、没有重复账号、选中的号名次为 1 或者在 `rescue` 里。核对和统计以名单为准，原有计数留着和旧日志接得上。
+
+上线后要分开数的三个量，不能互相代替：
+
+1. 实际选中的号在后排：`selected_quality_position` 为 `rear`。
+2. 普通候选池不空、但合格的号全在后排：`candidates` 非空，每项 `placement` 都是 `rear`。
+3. 普通候选池里一个合格的号都没有：`pool_rounds` 至少为 1，`candidates` 为 `[]`。
+
+选号结果可能是等待，不等于请求已经发出。看最终结果用 `gateway_request_id` 连使用记录的 `gateway_request_id`，未计费的请求连未计费记录的 `request_id`。系统日志可能因队列满或写入失败丢失，“没有这条事件”不能当成“没有新会话”。
+
 **`resilience.budget_timeout_plan`** 是 Info 事件，没有 `component=sched_quality`，默认不写入 `ops_system_logs`。统计截止次数时查进程的结构化日志（容器部署时查容器日志）。只查 `ops_system_logs` 会少算。
 
 `gateway_request_id` 对应尝试记录的 `request_id`，`attempt_seq` 标出本请求内的物理发送次序。`group_id` 是分组，`model` 是时限计划的模型。连接或 TLS 阶段就到点时，发送尚未确认，`attempt_seq` 为空，单列为“未确认发送”。
 
 **`sched_quality.attempt_finished`**：`request_id` 是网关本地 ID，`attempt_id` 标识本次发送；`outcome`、`class` 是采样结果与归责类别，`http_status`、`status_origin` 分开记录状态与来源。`client_disconnect`、`terminal_seen`、`terminal_event`、`terminal_failed`、`error_source`、`send_error`、`context_done` 用于区分终态、网络、取消与清理。`terminal_ms`、`finished_ms` 相对本次尝试开始；`first_output_request_ms` 是请求级端到端首输出；`output_bytes` 是实际写给客户端的字节，含已写前奏，不等同语义输出字节。
+
+协作恢复的阶梯和按记录借号发出的可选尝试、被优先保留内容截下改走恢复的原尝试，都是真实的上游发送，但不写质量尝试记录，也没有这条事件；所以不能用质量尝试记录还原全部上游发送。协作发送的去向看使用记录的 `collab_observation`，见 [Codex 协作](codex-collaboration.md)。
 
 以下同前缀名称是管理审计动作，不是上述运行日志事件：`sched_quality.reset`、`sched_quality.override`、`sched_quality.clear_override`、`sched_quality.clear_auto_state`、`sched_quality.policy`、`sched_quality.ttft_rule`。恢复审计记录已清、保留及失败数量；配置保存的运行依据看 `sched_quality.policy_changed`。
 
@@ -339,7 +369,7 @@ Responses 拒参修复（包括流内修复）在既有上游错误事件中记�
 **OpenAI 账号的后排、试用、恢复或会话搬动看不明白**：先按组件 `sched_quality` 筛选系统日志；不带组件的告警另按事件名找，仅标准输出的 Info 到应用日志里查，清单见 [质量状态](#质量状态)。
 
 1. 重启后先看 `sched_quality.loading`：`page` 表示仍在分页加载，`incomplete` 带错误，加载完成前不分层；`complete` 表示证据加载完成。长期表现另看应用日志里的 `sched_quality.performance_ready`。再看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 个周期；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明引擎周期变慢或失败。`cycle` 的 Error 不带组件，须按事件名找，结合错误字段排查。
-2. 再按账号看 `sched_quality.state`：何时进入后排、试用或清零，哪条线（`line`）、依据来自哪里（`basis`），以及放回原因（`release_reason`）。补判资料或期限不全时，再看 `sched_quality.history_missing`、`sched_quality.missing_deadline`。
-3. 新会话没选到号先看 `sched_quality.new_session`；会话搬动看 `sched_quality.session_switch` 的 `committed`，用 `gateway_request_id` 连到访问日志和尝试记录的 `request_id`。`sched_quality.attempt_finished` 可区分首输出截止、真实上游失败与取消；怀疑协议转换失败时查 [协议转换日志](#协议转换)。
+2. 再按账号看 `sched_quality.state`：何时进入后排、试用或回正常，哪条线（`line`）、依据来自哪里（`basis`），以及试用结束的原因（`release_reason`）。补判资料或期限不全时，再看 `sched_quality.history_missing`、`sched_quality.missing_deadline`。
+3. 新会话没选到号或落到后排，先看 `sched_quality.new_session` 的候选名单；会话搬动看 `sched_quality.session_switch` 的 `committed`，用 `gateway_request_id` 连到访问日志和尝试记录的 `request_id`。`sched_quality.attempt_finished` 可区分首输出截止、真实上游失败与取消；怀疑协议转换失败时查 [协议转换日志](#协议转换)。
 
 **设置保存后其他实例行为没变**：其他实例每 10 秒刷新；若长时间未生效，查找 `resilience.settings_refresh_failed`。
