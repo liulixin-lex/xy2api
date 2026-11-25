@@ -138,7 +138,7 @@ import { usePointerCoarse } from '@/composables/usePointerCoarse'
 import { qualityOpenerKey } from '@/composables/useSchedLayers'
 import type { Account, AdminGroup } from '@/types'
 import type { BackendDim, BackendLineDetail, BackendRear, BackendTrial } from '@/api/admin/schedQualityTypes'
-import { basisReading, endTime, knownDim, lineStay, rearStay, trialNote, trialStay } from '@/components/admin/account/quality/qualityPanel'
+import { basisReading, endTime, knownDim, LACK_UNITS, lacksText, lineStay, rearStay, trialNote, trialStay } from '@/components/admin/account/quality/qualityPanel'
 import { anyOverlayOpen, overlaysClosed } from '@/utils/overlayStack'
 import { DASH, kindName } from '@/utils/schedQualityFormat'
 import { hideTip, showTipNow, vTip, type TipCard, type TipCell, type TipContent, type TipTone } from '@/utils/tip'
@@ -232,7 +232,7 @@ function lineRow(model: string, detail: BackendLineDetail, identity: 'rear' | 't
     const reading = basisReading(detail.basis)
     return [model, lineName(detail.line), reading ? { text: reading, tone: 'back' } : '', rearStay(t, detail.until)]
   }
-  const note = detail.last_eval ? trialNote(detail.last_eval, t) : null
+  const note = detail.last_eval ? trialNote(detail.last_eval, detail.line, t) : null
   return [model, lineName(detail.line), note && note.text !== DASH ? { text: note.text, tone: note.pass ? 'ok' : 'info' } : '', trialEndBy(detail.until)]
 }
 
@@ -268,7 +268,8 @@ const trialEndBy = (until: string) => t('admin.schedQuality.stay.trialEnd', { ti
  */
 function lineSizer(): string[] {
   const names = (['ttfo', 'error', 'cache'] as const).map(lineName)
-  const notes = ['100.0 / 99.9', t('admin.schedQuality.verdict.pass'), t('admin.schedQuality.verdict.unknown'), t('admin.schedQuality.panel.lacks', { have: 99, need: 99 })]
+  const lacks = [null, ...LACK_UNITS].map((unit) => lacksText(t, unit, 99, 99))
+  const notes = ['100.0 / 99.9', t('admin.schedQuality.verdict.pass'), t('admin.schedQuality.verdict.unknown'), ...lacks]
   const stays = [t('admin.schedQuality.stay.rear', { time: '00:00' }), t('admin.schedQuality.stay.trialEnd', { time: '00:00' })]
   return ['', names.join('\n'), notes.join('\n'), stays.join('\n')]
 }

@@ -40,7 +40,15 @@ export default {
       window: '近 12 小时',
       windowPartial: '近 {hours} 小时',
       windowSince: '{time} 起',
-      lacks: '样本 {have}\u00a0/\u00a0{need}',
+      lacks: '{have}\u00a0/\u00a0{need}',
+      // What the have / need of a trial's assessment count (qualityPanel lackUnit); the counts stay together.
+      lacksUnit: {
+        samples: '样本 {have}\u00a0/\u00a0{need}',
+        sessions: '会话 {have}\u00a0/\u00a0{need}',
+        slowSessions: '慢会话 {have}\u00a0/\u00a0{need}',
+        turns: '轮 {have}\u00a0/\u00a0{need}',
+        lowSessions: '低会话 {have}\u00a0/\u00a0{need}',
+      },
       gateOff: '门槛关',
       col: {
         requests: '请求',

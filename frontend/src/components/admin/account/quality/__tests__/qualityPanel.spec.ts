@@ -7,7 +7,7 @@ import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import type { BackendDecision, BackendDetailGroup, BackendGroupModel, BackendLastEval } from '@/api/admin/schedQualityTypes'
 import { basis, cacheEvidence, errorEvidence, groupModel, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
 import {
-  basisFigures, basisPeriod, basisReading, evidenceCauses, groupPlace, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeLine, rearStay, trialNote
+  basisFigures, basisPeriod, basisReading, evidenceCauses, groupPlace, LACK_UNITS, lackUnit, lacksText, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeLine, rearStay, trialNote
 } from '../qualityPanel'
 import { groupDotState } from '@/components/admin/account/table/accountGroups'
 
@@ -187,14 +187,51 @@ describe('decision figures', () => {
     const t = (key: string, values?: Record<string, unknown>) => (values ? `${key}:${JSON.stringify(values)}` : key)
     const latest = (patch: Partial<BackendLastEval>): BackendLastEval =>
       ({ at: '2026-11-25T13:15:00Z', since: '2026-11-25T13:10:00Z', count: 1, acted: false, action: '', reason: 'trial_open', causes: [], have: null, need: null, ...patch })
-    expect(trialNote(latest({ reason: 'within' }), t)).toEqual({ text: 'admin.schedQuality.verdict.pass', pass: true })
-    expect(trialNote(latest({ have: 12, need: 40 }), t)).toEqual({ text: 'admin.schedQuality.panel.lacks:{"have":12,"need":40}', pass: false })
+    expect(trialNote(latest({ reason: 'within' }), 'cache', t)).toEqual({ text: 'admin.schedQuality.verdict.pass', pass: true })
+    expect(trialNote(latest({ causes: ['turns_insufficient'], have: 12, need: 40 }), 'cache', t))
+      .toEqual({ text: 'admin.schedQuality.panel.lacksUnit.turns:{"have":12,"need":40}', pass: false })
     // A weighted amount just short of what is needed never reads as enough.
-    expect(trialNote(latest({ have: 19.96, need: 20 }), t).text).toBe('admin.schedQuality.panel.lacks:{"have":19,"need":20}')
-    expect(trialNote(latest({}), t)).toEqual({ text: 'admin.schedQuality.verdict.unknown', pass: false })
+    expect(trialNote(latest({ causes: ['mass_insufficient'], have: 19.96, need: 20 }), 'ttfo', t).text).toBe('admin.schedQuality.panel.lacksUnit.samples:{"have":19,"need":20}')
+    // The pair without a cause to tell what it counts: the counts alone.
+    expect(trialNote(latest({ have: 2, need: 3 }), 'ttfo', t).text).toBe('admin.schedQuality.panel.lacks:{"have":2,"need":3}')
+    expect(trialNote(latest({}), 'ttfo', t)).toEqual({ text: 'admin.schedQuality.verdict.unknown', pass: false })
     // Not assessed on trial yet: the latest is the review that opened it.
-    expect(trialNote(latest({ acted: true, action: 'trial', reason: 'within' }), t)).toEqual({ text: '—', pass: false })
-    expect(trialNote(null, t)).toEqual({ text: '—', pass: false })
+    expect(trialNote(latest({ acted: true, action: 'trial', reason: 'within' }), 'ttfo', t)).toEqual({ text: '—', pass: false })
+    expect(trialNote(null, 'ttfo', t)).toEqual({ text: '—', pass: false })
+  })
+
+  it('writes each unit in both languages with the counts held together, and the bare counts without one', () => {
+    const texts = (messages: unknown, locale: string) => {
+      const { t } = createI18n({ legacy: false, locale, messages: { [locale]: messages } as never }).global
+      return [null, ...LACK_UNITS].map((unit) => lacksText(t as never, unit, 2, 3))
+    }
+    expect(texts(zh, 'zh')).toEqual(['2\u00a0/\u00a03', '样本 2\u00a0/\u00a03', '会话 2\u00a0/\u00a03', '慢会话 2\u00a0/\u00a03', '轮 2\u00a0/\u00a03', '低会话 2\u00a0/\u00a03'])
+    expect(texts(en, 'en')).toEqual(['2\u00a0of\u00a03', '2\u00a0of\u00a03 samples', '2\u00a0of\u00a03 sessions', '2\u00a0of\u00a03 slow sessions', '2\u00a0of\u00a03 turns', '2\u00a0of\u00a03 low sessions'])
+  })
+
+  // Opus review of fe, must 1: the have / need of an assessment are what held it up, not always samples. The unit is
+  // picked as the backend picks the pair (assessment.go: classify, classifyTTFT, consider: the first own-short cause).
+  it('names what the have / need count, in the order the backend picks them, and nothing it cannot tell', () => {
+    // Each cause on its own.
+    expect([
+      lackUnit('ttfo', ['mass_insufficient']), lackUnit('ttfo', ['no_samples', 'mass_insufficient']), lackUnit('ttfo', ['sessions_insufficient']),
+      lackUnit('ttfo', ['slow_sessions_insufficient']), lackUnit('cache', ['turns_insufficient']), lackUnit('cache', ['low_sessions_insufficient']),
+      lackUnit('error', ['clear_insufficient'])
+    ]).toEqual(['samples', 'samples', 'sessions', 'slowSessions', 'turns', 'lowSessions', 'samples'])
+    // Two at once: the one the backend keeps the pair of (weight before sessions before slow sessions; turns first).
+    expect(lackUnit('ttfo', ['mass_insufficient', 'sessions_insufficient', 'slow_sessions_insufficient'])).toBe('samples')
+    expect(lackUnit('ttfo', ['sessions_insufficient', 'slow_sessions_insufficient'])).toBe('sessions')
+    expect(lackUnit('cache', ['turns_insufficient', 'low_sessions_insufficient'])).toBe('turns')
+    // Slow sessions do not hold it up while the share is not confirmed above the tolerance (classifyTTFT skips them).
+    expect(lackUnit('ttfo', ['slow_sessions_insufficient', 'absolute_unconfirmed'])).toBeNull()
+    // Causes that hold nothing up alongside one that does: the one that does.
+    expect(lackUnit('error', ['bounds_unconfirmed', 'recovery_over_limit', 'clear_insufficient'])).toBe('samples')
+    expect(lackUnit('ttfo', ['sessions_insufficient', 'absolute_unconfirmed'])).toBe('sessions')
+    // No cause, one the line does not know (or another line's), or the previous rules' peers: no unit word.
+    expect([
+      lackUnit('ttfo', []), lackUnit('ttfo', ['other']), lackUnit('ttfo', ['mass_insufficient', 'something_new']),
+      lackUnit('cache', ['clear_insufficient']), lackUnit('ttfo', ['peer_known_insufficient', 'mass_insufficient']), lackUnit('error', ['bounds_unconfirmed'])
+    ]).toEqual([null, null, null, null, null, null])
   })
 })
 

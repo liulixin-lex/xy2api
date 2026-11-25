@@ -41,6 +41,13 @@ export default {
       windowPartial: 'Last {hours} h',
       windowSince: 'Since {time}',
       lacks: '{have}\u00a0of\u00a0{need}',
+      lacksUnit: {
+        samples: '{have}\u00a0of\u00a0{need} samples',
+        sessions: '{have}\u00a0of\u00a0{need} sessions',
+        slowSessions: '{have}\u00a0of\u00a0{need} slow sessions',
+        turns: '{have}\u00a0of\u00a0{need} turns',
+        lowSessions: '{have}\u00a0of\u00a0{need} low sessions',
+      },
       gateOff: 'Gate off',
       col: {
         requests: 'Reqs',

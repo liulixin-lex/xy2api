@@ -570,7 +570,7 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     // The rear line reads against the tolerance its decision was taken with; the share is never with its seconds.
     expect(judged(53, 'ttfo')).toEqual(['37.5 / 17', 'is-rear'])
     expect(groupRow(53).querySelector('[data-qp-cell="ttfo"] [data-qp-judged]')!.classList.contains('gt__ref--words')).toBe(false)
-    expect(judged(53, 'error')).toEqual(['admin.schedQuality.panel.lacks:{"have":12,"need":40}', 'is-trial'])
+    expect(judged(53, 'error')).toEqual(['admin.schedQuality.panel.lacksUnit.samples:{"have":12,"need":40}', 'is-trial'])
     expect(judged(53, 'cache')).toBeNull()
     expect(groupRow(53).querySelector('[data-qp-cell="ttfo"]')!.getAttribute('aria-label')).toBe(
       'admin.schedQuality.panel.col.ttfo 53.1% admin.schedQuality.identity.rear 37.5 / 17'
@@ -680,6 +680,21 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     expect(judged(54, 'cache')).toEqual(['—', 'is-trial'])
   })
 
+  // Opus review of fe, must 1: a first-output line on trial held up by its sessions (2 of 3) says sessions, not samples.
+  it('names what a trial line still lacks by what held it up', async () => {
+    const value = detail()
+    const [, b] = value.groups[0].by_model
+    b.placement = 'trial'
+    b.lines.ttfo = line('ttfo', 'trial', { trial_until: inMinutes(50), last_eval: lastEval({ reason: 'trial_open', causes: ['sessions_insufficient'], have: 2, need: 3 }) })
+    b.lines.cache = line('cache', 'trial', { trial_until: inMinutes(40), last_eval: lastEval({ reason: 'trial_open', causes: ['turns_insufficient', 'low_sessions_insufficient'], have: 0, need: 1 }) })
+    api.accountDetail.mockResolvedValue(value)
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { groupId: 53, model: 'gpt-b' })
+    expect(judged(53, 'ttfo')).toEqual(['admin.schedQuality.panel.lacksUnit.sessions:{"have":2,"need":3}', 'is-trial'])
+    expect(judged(53, 'cache')).toEqual(['admin.schedQuality.panel.lacksUnit.turns:{"have":0,"need":1}', 'is-trial'])
+  })
+
   // Plan item 20: a trial whose latest assessment passes reads 达标 in green; never the reading it went on trial with.
   it('reads a trial line\'s latest assessment under its figure, green when it passes', async () => {
     const value = detail()
@@ -692,7 +707,7 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     mount(Panel, { attachTo: document.body })
     await openOn(7, { groupId: 53, model: 'gpt-b' })
     expect(judged(53, 'ttfo')).toEqual(['admin.schedQuality.verdict.pass', 'is-pass'])
-    expect(judged(53, 'cache')).toEqual(['admin.schedQuality.panel.lacks:{"have":39,"need":40}', 'is-trial'])
+    expect(judged(53, 'cache')).toEqual(['admin.schedQuality.panel.lacksUnit.turns:{"have":39,"need":40}', 'is-trial'])
     // On a phone a trial's words may wrap; a reading never does (it is one figure against its line).
     expect(groupRow(53).querySelector('[data-qp-cell="cache"] [data-qp-judged]')!.classList.contains('gt__ref--words')).toBe(true)
   })

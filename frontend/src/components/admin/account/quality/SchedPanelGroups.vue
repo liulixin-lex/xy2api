@@ -203,7 +203,7 @@ const rows = computed(() => {
       let judged: { text: string; tone: 'rear' | 'trial' | 'pass'; words: boolean } | null = null
       if (identity === 'rear') judged = { text: basisReading(line?.basis) ?? DASH, tone: 'rear', words: false }
       else if (identity === 'trial') {
-        const note = trialNote(line?.last_eval, t)
+        const note = trialNote(line?.last_eval, col as BackendDim, t)
         judged = { text: note.text, tone: note.pass ? 'pass' : 'trial', words: true }
       }
       const reference = !held && col === 'ttfo' && value !== null ? peers : null
