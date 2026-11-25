@@ -161,3 +161,21 @@ func BenchmarkSchedPerfReachPublication(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkSchedPerfReachPreview(b *testing.B) {
+	facts := make(map[string]SchedPerfFact, 70000)
+	members := make(map[int64]string, 300)
+	for i := range 70000 {
+		f := perfFact(int64(i%300+1), int64(i%11+1))
+		f.Model, f.Session = fmt.Sprintf("model-%02d", i/300%16), fmt.Sprint(i%11001)
+		f.TTFO, f.Read, f.Input = 9000+(i*173)%12000, 80, 100
+		facts[fmt.Sprint(i)] = f
+		members[f.Account] = ""
+	}
+	p := buildSchedPerf(facts, nil, nil, nil, perfAt)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		p.policyReach(members, nil, q.DefaultPolicy(), .2)
+	}
+}
