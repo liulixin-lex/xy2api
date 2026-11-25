@@ -195,8 +195,8 @@ func TestAssessmentLineOutcomes(t *testing.T) {
 		have    float64
 		need    int
 	}{
-		{"cache-turns", cache(CacheAssessment{Turns: 12, MinRatio: .8, LowSessions: 1}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheTurnsShort, cacheLowSessionsShort}, 12, 20},
-		{"cache-low-sessions", cache(CacheAssessment{Turns: 22, MinRatio: .8, LowSessions: 1}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheLowSessionsShort}, 1, 2},
+		{"cache-turns", cache(CacheAssessment{Turns: 12, MinRatio: .8, Ratio: .79, LowSessions: 1}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheTurnsShort, cacheLowSessionsShort}, 12, 20},
+		{"cache-low-sessions", cache(CacheAssessment{Turns: 22, MinRatio: .8, LowSessions: 1}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheLowSessionsShort}, 0, 1},
 		{"clear", errLine(ErrorAssessment{Clear: 13, LowerPass: .1, Limit: .05}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{errorClearShort, errorBoundsUnconfirmed}, 13, 50},
 		{"bounds", errLine(ErrorAssessment{Clear: 50, LowerPass: .07, Limit: .05}), EventRegular, VerdictUnknown, "", ReasonWithin, []string{errorBoundsUnconfirmed}, 0, 0},
 		{"recovery-blocked", recovery, EventReview, VerdictUnknown, ActionTrial, ReasonPending, []string{errorRecoveryOverLimit}, 0, 0},
@@ -368,5 +368,22 @@ func TestAssessmentWatermarkTolerance(t *testing.T) {
 				require.EqualValues(t, 1, next[1].Count)
 			}
 		})
+	}
+}
+
+func TestAssessmentCacheTrialNeedsFortyTurns(t *testing.T) {
+	for _, turns := range []int{25, 40} {
+		b := Basis{Line: DimensionCache, Cache: &CacheAssessment{Turns: turns, MinRatio: .8, Ratio: .8, Verdict: VerdictPass}}
+		s := RecordAssessment(LineState{Trial: true}, machineNow, EventTrial, VerdictPass, "", b)[0]
+		if turns < 40 {
+			require.Equal(t, ReasonTrialOpen, s.Reason)
+			require.Equal(t, []string{cacheTurnsShort}, s.CauseNames())
+			require.Equal(t, new(float64(turns)), s.Have)
+			require.Equal(t, new(40), s.Need)
+		} else {
+			require.Equal(t, ReasonWithin, s.Reason)
+			require.Empty(t, s.CauseNames())
+			require.Nil(t, s.Need)
+		}
 	}
 }

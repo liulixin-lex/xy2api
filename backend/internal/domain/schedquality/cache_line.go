@@ -6,27 +6,32 @@ import (
 )
 
 const (
-	CacheWindow         = 30 * time.Minute
-	cacheMinLowSessions = 2
-	CacheMinTurns       = 20
-	ContinuationGap     = 5 * time.Minute
+	CacheWindow      = 30 * time.Minute
+	cacheMinLowTurns = 10
+	CacheMinTurns    = 20
+	ContinuationGap  = 5 * time.Minute
 )
 
 type CacheAssessment struct {
-	Verdict      Verdict  `json:"verdict"`
-	MinRatio     float64  `json:"min_ratio"`
-	Ratio        float64  `json:"ratio"`
-	Turns        int      `json:"turns"`
-	Sessions     int      `json:"sessions"`
-	LowSessions  int      `json:"low_sessions"`
-	ReadTokens   int64    `json:"read_tokens"`
-	InputTokens  int64    `json:"input_tokens"`
-	AttemptIDs   []string `json:"-"`
-	SourceGroups []int64  `json:"-"` // Actual selected continuation turns, deduplicated and ascending.
+	Verdict       Verdict   `json:"verdict"`
+	MinRatio      float64   `json:"min_ratio"`
+	Ratio         float64   `json:"ratio"`
+	Turns         int       `json:"turns"`
+	Sessions      int       `json:"sessions"`
+	LowSessions   int       `json:"low_sessions"`
+	LowSessions10 int       `json:"low_sessions_10"`
+	Path          string    `json:"path,omitempty"`
+	WindowFrom    time.Time `json:"window_from,omitzero"`
+	WindowTo      time.Time `json:"window_to,omitzero"`
+	ReadTokens    int64     `json:"read_tokens"`
+	InputTokens   int64     `json:"input_tokens"`
+	AttemptIDs    []string  `json:"-"`
+	SourceGroups  []int64   `json:"-"` // Actual selected continuation turns, deduplicated and ascending.
 }
 
 // 只取续接轮、本轮成功、token 都已知、FinishedAt∈[now-30m,now]、StartedAt>cut 的样本。
-// Pass：Turns≥20 且 Ratio≥MinRatio。Fail：Turns≥20、Ratio<MinRatio 且 LowSessions≥2。其余 Unknown。没有 3 个百分点的容差。
+// Pass requires 20 turns at or above the floor. Fail requires a low session with
+// 10 own turns and 20 total turns (10 for a deficit of at least 20 points).
 func AssessCache(samples []AttemptSample, minRatio float64, cut, now time.Time) CacheAssessment {
 	assessment, _ := AssessCacheForGroup(samples, minRatio, cut, now, 0)
 	return assessment
@@ -34,13 +39,16 @@ func AssessCache(samples []AttemptSample, minRatio float64, cut, now time.Time) 
 
 // AssessCacheForGroup counts only continuation turns with usable token evidence.
 func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now time.Time, groupID int64) (CacheAssessment, int) {
-	out := CacheAssessment{MinRatio: minRatio}
+	out := CacheAssessment{MinRatio: minRatio, WindowFrom: now.Add(-CacheWindow), WindowTo: now}
 	local := 0
 	type session struct {
 		group int64
 		key   string
 	}
-	type tokens struct{ read, input int64 }
+	type tokens struct {
+		read, input int64
+		turns       int
+	}
 	sessions := make(map[session]tokens)
 	groups := make(map[int64]struct{})
 	var bad []AttemptSample
@@ -58,6 +66,7 @@ func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now tim
 		out.InputTokens += input
 		k := session{s.GroupID, s.SessionKey}
 		tally := sessions[k]
+		tally.turns++
 		tally.read += read
 		tally.input += input
 		sessions[k] = tally
@@ -70,16 +79,25 @@ func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now tim
 	for _, tally := range sessions {
 		if float64(tally.read)/float64(tally.input) < minRatio {
 			out.LowSessions++
+			if tally.turns >= cacheMinLowTurns {
+				out.LowSessions10++
+			}
 		}
 	}
 	if out.InputTokens > 0 {
 		out.Ratio = float64(out.ReadTokens) / float64(out.InputTokens)
 	}
-	if out.Turns >= CacheMinTurns {
-		if out.Ratio >= minRatio {
-			out.Verdict = VerdictPass
-		} else if out.LowSessions >= cacheMinLowSessions {
-			out.Verdict = VerdictFail
+	if out.Turns >= CacheMinTurns && out.Ratio >= minRatio {
+		out.Verdict = VerdictPass
+	} else if out.Ratio < minRatio && out.LowSessions10 > 0 {
+		switch {
+		case out.Turns >= CacheMinTurns:
+			out.Verdict, out.Path = VerdictFail, "pair"
+			if out.Ratio <= minRatio-.05 {
+				out.Path = "single5"
+			}
+		case out.Turns >= cacheMinLowTurns && out.Ratio <= minRatio-.20:
+			out.Verdict, out.Path = VerdictFail, "deep10"
 		}
 	}
 	sort.Slice(bad, func(i, j int) bool { return newerRequest(bad[i], bad[j]) })
