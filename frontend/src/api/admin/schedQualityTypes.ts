@@ -58,6 +58,8 @@ export interface BackendRear {
   until: string
   /** The previous rules' stay step; not shown (the rules in force have none). */
   level?: number | null
+  /** Each line at the rear on its own, with its own review and the evidence it went to the rear on; absent from an older backend's answer. */
+  line_details?: BackendRearLine[] | null
   exempt: boolean
   /**
    * The record really puts the account at the back of the group: not exempt, quality scheduling switched on, its
@@ -75,6 +77,23 @@ export interface BackendTrial {
   trial_started_at?: string | null
   /** The trial's end at the latest (it may end sooner). */
   until: string
+  /** Each line on trial on its own, with its own end and latest assessment; absent from an older backend's answer. */
+  line_details?: BackendTrialLine[] | null
+}
+
+/** A line at the rear: when it is reviewed, and the decision that put it there this time (enter, renew or trial_fail). */
+export interface BackendRearLine {
+  line: BackendDim
+  until: string
+  /** The same shape as a decision's basis, from the same mapping; absent when the state keeps none. */
+  basis?: BackendBasis | null
+}
+
+/** A line on trial: its end at the latest and its latest assessment. */
+export interface BackendTrialLine {
+  line: BackendDim
+  until: string
+  last_eval: BackendLastEval | null
 }
 
 /**
@@ -222,6 +241,11 @@ export interface BackendLine<D extends BackendDim = BackendDim> extends BackendS
   source_groups: number[]
   /** The line's latest real assessment; null on rows written before it was kept, or not assessed yet. */
   last_eval?: BackendLastEval | null
+  /**
+   * At the rear only: the decision that began this stay at the rear (enter, renew or trial_fail), the same shape as a
+   * decision's basis, from the same mapping. Absent on other lines and from an older backend.
+   */
+  basis?: BackendBasis | null
 }
 
 /**
@@ -308,6 +332,8 @@ export interface BackendAccountDetail {
   groups: BackendDetailGroup[]
   auto_states: BackendAutoState[]
   exemptions: BackendExemption[]
+  /** The rule version in force; a decision of any other version is of the previous rules. Absent from an older backend. */
+  current_rule_version?: string | null
 }
 
 // ---- GET /accounts/:id/decisions ----
@@ -576,6 +602,8 @@ export interface BackendPerfLine extends BackendSampleCounts {
   until: string | null
   trial_started_at?: string | null
   last_eval: BackendLastEval | null
+  /** At the rear only, as on the panel's line (BackendLine.basis). */
+  basis?: BackendBasis | null
 }
 
 /**

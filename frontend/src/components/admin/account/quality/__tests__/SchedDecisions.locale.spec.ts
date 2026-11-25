@@ -1,7 +1,9 @@
 /**
- * The decision titles with the real copy, in both languages (plan item 18, Astra review of fe-min, suggestion 1):
- * whether a record is of the previous rules is decided by its rule version alone. A record with no version (from
- * before lines and evidence were kept) is; a 4.0 reset or relax without a line is not, and keeps its muted look.
+ * The decision titles with the real copy, in both languages (plan items 18 and 20, Astra review of fe-min, suggestion
+ * 1): whether a record is of the previous rules is decided by its rule version alone, against the version in force the
+ * account's detail carries (current_rule_version). A record with no version (from before lines and evidence were kept)
+ * is old; a reset or relax of the version in force without a line is not, and keeps its muted look. Without the version
+ * in force (an older backend) nothing is marked old and nothing is renamed.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
@@ -38,7 +40,7 @@ describe.each([
       record(5, { action: 'trial_timeout', line: 'ttfo', basis: basis('ttfo', { kind: 'trial', release_reason: 'deadline' }) })
     ])
     const i18n = createI18n({ legacy: false, locale, messages: { zh, en } as never })
-    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: () => ({ name: 'G' }), model: 'gpt-b' }, global: { plugins: [i18n] } })
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: () => ({ name: 'G' }), model: 'gpt-b', ruleVersion: '4.0' }, global: { plugins: [i18n] } })
     await flushPromises()
     const what = (id: number) => w.get(`[data-qp-decision="${id}"] .drow__what`)
     const legacy = (action: string) => words.legacy.replace('{action}', action)
@@ -48,4 +50,27 @@ describe.each([
     // Without a line a record keeps its muted look, of whichever version.
     expect([1, 2, 3].map((id) => what(id).classes())).toEqual([1, 2, 3].map(() => expect.arrayContaining(['drow__what--muted'])))
   })
+
+  it('takes the version in force from the detail; without it no record is old and a deadline reads by its action', async () => {
+    const records = () => [
+      record(1, { action: 'enter', line: 'ttfo', until: at(60), basis: basis('ttfo') }),
+      record(2, { action: 'trial_timeout', line: 'ttfo', basis: basis('ttfo', { kind: 'trial', release_reason: 'deadline' }) }),
+      record(3, { action: 'renew' })
+    ]
+    const i18n = createI18n({ legacy: false, locale, messages: { zh, en } as never })
+    const legacy = (action: string) => words.legacy.replace('{action}', action)
+    const titles = async (ruleVersion: string | null) => {
+      api.accountDecisions.mockResolvedValueOnce(records())
+      const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: () => ({ name: 'G' }), model: 'gpt-b', ruleVersion }, global: { plugins: [i18n] } })
+      await flushPromises()
+      const out = [1, 2, 3].map((id) => w.get(`[data-qp-decision="${id}"] .drow__what`).text())
+      w.unmount()
+      return out
+    }
+    // A later version in force makes the 4.0 records old, read from the prop and not from a constant.
+    expect(await titles('4.1')).toEqual([legacy(words.enter), legacy(timeoutWord[locale]), legacy(words.renew)])
+    expect(await titles(null)).toEqual([words.enter, timeoutWord[locale], words.renew])
+  })
 })
+
+const timeoutWord = { zh: '试用无结论', en: 'Trial without a verdict' } as const

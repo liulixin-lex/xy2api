@@ -77,9 +77,11 @@
  * older pages. A line with evidence is a button: it grows open to the figures the decision was taken on (SchedEvidence),
  * once for the groups that share them and apart, with their pills and own ends, where they differ; and why a trial
  * ended without a verdict. Another account starts over; a quality change made from the page loads the first page again.
- * Records of the previous rules (a rule version other than the one in force, or none) read "旧规则 · <action>", as
- * they always did otherwise; a record without a line keeps its muted look whatever its version. A trial that ends under the rules in force at its deadline reads
- * 到期回正常 (with why it was not released sooner under it); one that passed or failed reads by its action as before.
+ * The rule version in force comes with the account's detail (`ruleVersion`). Records of the previous rules (another
+ * rule version, or none) read "旧规则 · <action>", as they always did otherwise; a record without a line keeps its muted
+ * look whatever its version. A trial that ends under the rules in force at its deadline reads 到期回正常 (with why it was
+ * not released sooner under it); one that passed or failed reads by its action as before. Without the version in force
+ * (an older backend) no record can be told old or new: each reads by its action, as it did before versions were shown.
  */
 import { computed, reactive, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -89,7 +91,7 @@ import schedQualityAPI from '@/api/admin/schedQuality'
 import type { BackendDecision } from '@/api/admin/schedQualityTypes'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
-import { SCHED_RULE_VERSION, schedWord } from '@/utils/schedQualityFormat'
+import { schedWord } from '@/utils/schedQualityFormat'
 import SchedEvidence from './SchedEvidence.vue'
 import { basisFigures, evidenceCauses, mergeDecisions, type MergedDecision } from './qualityPanel'
 
@@ -105,6 +107,8 @@ const props = defineProps<{
   group: (id: number) => { name: string; alias?: string | null }
   /** The model of the panel's tab: entries of another model carry its name. */
   model: string | null
+  /** The rule version in force (the detail's current_rule_version); null when the backend does not say. */
+  ruleVersion: string | null
 }>()
 const { t, te } = useI18n()
 const { changed } = useSchedLayers()
@@ -214,10 +218,14 @@ function toggle(key: string) {
 }
 
 /**
- * Of the previous rules: a basis of another rule version than the one in force, or none (records from before lines
- * and evidence were kept have none). Decided by the version alone: a 4.0 reset or relax without a line is not old.
+ * Which rules an entry is of: the ones in force, the previous ones (a basis of another rule version, or none: records
+ * from before lines and evidence were kept have none), or null when the version in force is not known. Decided by the
+ * version alone: a reset or relax of the version in force without a line is not old.
  */
-const previousRules = (entry: MergedDecision) => entry.items[0].basis?.rule_version !== SCHED_RULE_VERSION
+function rulesOf(entry: MergedDecision): 'current' | 'previous' | null {
+  if (!props.ruleVersion) return null
+  return entry.items[0].basis?.rule_version === props.ruleVersion ? 'current' : 'previous'
+}
 
 /** The actions that end a trial: only their release reason may name the entry. */
 const TRIAL_ENDS = new Set(['trial_pass', 'trial_fail', 'trial_timeout'])
@@ -230,8 +238,11 @@ const TRIAL_ENDS = new Set(['trial_pass', 'trial_fail', 'trial_timeout'])
  */
 function actionWord(entry: MergedDecision): string {
   const word = schedWord('decisions.action', entry.action, t, te)
-  if (previousRules(entry)) return t('admin.schedQuality.decisions.legacy', { action: word })
-  return TRIAL_ENDS.has(entry.action) && entry.items[0].basis?.release_reason === 'deadline' ? t('admin.schedQuality.decisions.deadline') : word
+  const rules = rulesOf(entry)
+  if (rules === 'previous') return t('admin.schedQuality.decisions.legacy', { action: word })
+  return rules === 'current' && TRIAL_ENDS.has(entry.action) && entry.items[0].basis?.release_reason === 'deadline'
+    ? t('admin.schedQuality.decisions.deadline')
+    : word
 }
 
 const tone = (entry: MergedDecision) => (!entry.line ? 'muted' : BAD.has(entry.action) ? 'rear' : GOOD.has(entry.action) ? 'pass' : entry.action === 'trial' ? 'trial' : 'muted')

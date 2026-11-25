@@ -69,7 +69,8 @@ function detail(id = 7): BackendAccountDetail {
       { key: 'iq:gpt-a', kind: 'iq_gate', scope: 'model', model: 'gpt-a', until: inMinutes(5), count: null, shared: 0, clearable: false, why: 'iq_gate' },
       { key: 'iq:gpt-b', kind: 'iq_gate', scope: 'model', model: 'gpt-b', until: inMinutes(42), count: null, shared: 0, clearable: false, why: 'iq_gate' }
     ],
-    exemptions: []
+    exemptions: [],
+    current_rule_version: '4.0'
   }
 }
 
@@ -489,7 +490,7 @@ describe('SchedQualityPanel', () => {
       record(7, { basis: basis('ttfo', { kind: 'trial', samples_local: 0 }) }),
       record(1, { action: 'enter', level: 1, until: inMinutes(20), basis: basis('ttfo') })
     ])
-    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: () => ({ name: '晨星组' }) } })
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, ruleVersion: '4.0', group: () => ({ name: '晨星组' }) } })
     await flushPromises()
     // Eight entries: the newest six first, then the rest.
     await w.get('[data-qp-decisions-more]').trigger('click')
@@ -804,7 +805,7 @@ describe('SchedQualityPanel decision records', () => {
       record(50, { at: inMinutes(-40), action: 'clear', until: null, basis: old({ kind: 'clock' }) }),
       record(40, { at: inMinutes(-50), action: 'renew', basis: null })
     ])
-    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: (id: number) => ({ name: id === 53 ? '晨星组' : '北辰组' }), model: 'gpt-b' } })
+    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, ruleVersion: '4.0', group: (id: number) => ({ name: id === 53 ? '晨星组' : '北辰组' }), model: 'gpt-b' } })
     await flushPromises()
     document.querySelector<HTMLElement>('[data-qp-decisions-more]')!.click()
     await flushPromises()
@@ -835,6 +836,19 @@ describe('SchedQualityPanel decision records', () => {
     )
   })
 
+  // Plan item 20: the version in force is the detail's current_rule_version, handed to the decisions by the panel.
+  it('reads the rule version in force from the account\'s detail', async () => {
+    const later = detail()
+    later.current_rule_version = '4.1'
+    api.accountDetail.mockResolvedValue(later)
+    api.accountDecisions.mockResolvedValue([record(90, { at: inMinutes(-1), basis: basis('ttfo') })])
+    mount(Panel, { attachTo: document.body })
+    await openOn()
+    expect(entry(90).querySelector('.drow__what')!.textContent).toBe(
+      'admin.schedQuality.decisions.legacy:{"action":"admin.schedQuality.decisions.action.enter"}'
+    )
+  })
+
   // Astra review of fe-min, suggestion 2: one minute, one action, three groups with a 4.0 end at the deadline, a 4.0 end
   // for a reason the copy does not know, and a 3.1 end at the deadline: three lines, each titled, grouped and opened on
   // its own. Only a trial's end is named by its reason; any other action reads by itself.
@@ -850,7 +864,7 @@ describe('SchedQualityPanel decision records', () => {
       record(80, { at: inMinutes(-10), action: 'renew', basis: basis('ttfo', { release_reason: 'deadline' }) })
     ])
     const names: Record<number, string> = { 53: '晨星组', 54: '北辰组', 55: '次元组' }
-    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: (id: number) => ({ name: names[id] }), model: 'gpt-b' } })
+    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, ruleVersion: '4.0', group: (id: number) => ({ name: names[id] }), model: 'gpt-b' } })
     await flushPromises()
     expect(entries()).toEqual(['90', '89', '88', '80'])
     expect([90, 89, 88, 80].map((id) => entry(id).querySelector('.drow__what')!.textContent)).toEqual([
@@ -883,7 +897,7 @@ describe('SchedQualityPanel decision records', () => {
       record(90, { at, group_id: 53, until: end(1), basis: basis('ttfo', { samples_local: 4 }) }),
       record(89, { at, group_id: 54, until: end(59), basis: basis('ttfo', { samples_local: 9 }) })
     ])
-    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: (id: number) => ({ name: id === 53 ? '晨星组' : '北辰组' }) } })
+    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, ruleVersion: '4.0', group: (id: number) => ({ name: id === 53 ? '晨星组' : '北辰组' }) } })
     await flushPromises()
     expect(entries()).toEqual(['90'])
     // Evidence that differs between groups shows apart, each with its group and its own end to the second.
@@ -903,7 +917,7 @@ describe('SchedQualityPanel decision records', () => {
       .mockResolvedValueOnce(Array.from({ length: 50 }, (_, i) => record(60 - i)))
       .mockRejectedValueOnce(new Error('down'))
       .mockResolvedValueOnce([record(61, { action: 'reset', until: null }), record(60)])
-    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: () => ({ name: '晨星组' }) } })
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, ruleVersion: '4.0', group: () => ({ name: '晨星组' }) } })
     await flushPromises()
     await markSchedChanged()
     await flushPromises()
