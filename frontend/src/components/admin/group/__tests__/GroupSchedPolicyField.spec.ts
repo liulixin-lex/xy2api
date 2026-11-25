@@ -17,12 +17,6 @@ vi.mock('vue-i18n', async () => ({
 const policy = () => structuredClone(policyFixture) as BackendGroupPolicy
 const preview = (over: Partial<BackendPolicyPreview> = {}): BackendPolicyPreview => ({
   relaxed_lines: [],
-  lines: {
-    ttfo: { now: { pass: 3, unknown: 1, fail: 0 }, after: { pass: 2, unknown: 1, fail: 1 } },
-    error: { now: { pass: 4, unknown: 0, fail: 0 }, after: { pass: 4, unknown: 0, fail: 0 } },
-    cache: { now: { pass: 2, unknown: 2, fail: 0 }, after: { pass: 2, unknown: 2, fail: 0 } }
-  },
-  changed: [{ account_id: 7, name: 'acc-07', model: 'gpt-6.1-sol', line: 'ttfo', from: 'pass', to: 'fail' }],
   reach: [
     { model: 'gpt-6.1-sol', cache: { ok: 5, n: 8 }, first_output: { ok: 3, n: 8 } },
     { model: 'gpt-6.2-astra', cache: { ok: 0, n: 0 }, first_output: { ok: 4, n: 8 } }

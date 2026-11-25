@@ -439,30 +439,16 @@ export interface SchedGroupPolicyUpdate {
   policy: BackendPolicy
 }
 
-/** Verdicts of one line over the group's account × model keys. */
-export interface BackendVerdictCounts {
-  pass: number
-  unknown: number
-  fail: number
-}
-
 /**
- * What the thresholds would say on the evidence in the current windows: each line assessed once with the saved and
- * once with the new thresholds. Not a forecast of identities (a tightened line keeps them; a relaxed one is cleared
- * and judged again on saving).
+ * What the form reads of the preview of unsaved thresholds: the lines saving them would relax (cleared and judged again
+ * at once), and per model, of the group's member accounts with enough samples of their own over the last 12 hours
+ * (every group's requests, none before the account's recovery), how many (n) and how many of them reach the thresholds
+ * (ok): the cache by its minimum, the first output by its limit and the tolerance in the settings. A description of the
+ * 12 hours, not a forecast of verdicts; empty while the 12-hour figures load.
  */
 export interface BackendPolicyPreview {
   relaxed_lines: BackendDim[]
-  lines: Record<BackendDim, { now: BackendVerdictCounts; after: BackendVerdictCounts }>
-  /** At most 50. */
-  changed: { account_id: number; name: string; model: string; line: BackendDim; from: BackendVerdict; to: BackendVerdict }[]
-  /**
-   * Per model, of the group's member accounts with enough samples of their own over the last 12 hours (every group's
-   * requests, none before the account's recovery): how many (n) and how many of them reach the thresholds in the form
-   * (ok). The cache by its minimum; the first output by its limit and the tolerance in the settings. A description of
-   * the 12 hours, not a forecast of verdicts. Empty while the 12-hour figures load; absent from an older backend.
-   */
-  reach?: BackendPolicyReach[]
+  reach: BackendPolicyReach[]
 }
 
 export interface BackendPolicyReach {
