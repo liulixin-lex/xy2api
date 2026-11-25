@@ -332,7 +332,7 @@ export default {
       percent: '%',
       column: '门槛',
       short: '{ttft}s · {error}% · {cache}%',
-      errorTrip: '按已保存的上限 {limit}：{examples}，才判坏一次；进后排还要相邻两次评估都判坏；恢复时失败占比不能高于上限。',
+      errorTrip: '按已保存的上限 {limit}：{examples}，才判坏一次；进后排还要相邻两次评估都判坏；复核和试用中失败占比高于上限时不判达标。',
       errorTripItem: '{known} 个明确结果里至少 {failed} 次失败',
       errorTripJoiner: '，或 ',
       errorTripNone: '按已保存的上限 {limit}，100 个明确结果内不会判坏一次。',

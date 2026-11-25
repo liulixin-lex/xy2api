@@ -235,9 +235,9 @@ describe('AccountGroupPills', () => {
       ].join('\n'),
       [tk('admin.schedQuality.stay.rear', { time: '00:00' }), tk('admin.schedQuality.stay.trialEnd', { time: '00:00' })].join('\n')
     ])
-    // A line whose record kept no basis: its name and time only, no reading made up.
+    // A line whose record kept no basis: a grey dash, as the panel's cell, no reading made up.
     const bare = mountPills(1, baseQuality({ group_status: statuses({ 1: 'rear' }), rear: [{ ...back(1, 'gpt-5', ['error'], ttfoEnd), line_details: [{ line: 'error', identity: 'rear', until: ttfoEnd }] }] }))
-    expect((cardOf(bare.get('[data-test="group-pill-dot"]')) as TipCard).rows).toEqual([['gpt-5', 'admin.schedQuality.panel.col.error', '', rearText(ttfoEnd)]])
+    expect((cardOf(bare.get('[data-test="group-pill-dot"]')) as TipCard).rows).toEqual([['gpt-5', 'admin.schedQuality.panel.col.error', { text: '—', tone: 'muted' }, rearText(ttfoEnd)]])
 
     // A model with one line at the back and another on trial is one rear item listing both, each by its own identity
     // (not guessed from what the record holds), each with its own time.
@@ -256,7 +256,8 @@ describe('AccountGroupPills', () => {
     expect((cardOf(mixed.get('[data-test="group-pill-dot"]')) as TipCard).rows).toEqual([
       ['gpt-5', 'admin.schedQuality.panel.col.ttfo', { text: '67.5 / 20', tone: 'back' }, rearText(ttfoEnd)],
       ['', 'admin.schedQuality.panel.col.cache', { text: tk('admin.schedQuality.panel.lacksUnit.turns', { have: 39, need: 40 }), tone: 'info' }, tk('admin.schedQuality.stay.trialEnd', { time: formatShortTime(mixedTrialEnd) })],
-      ['', 'admin.schedQuality.panel.col.error', '', tk('admin.schedQuality.stay.trialEnd', { time: formatShortTime(mixedTrialEnd) })]
+      // Not assessed on trial yet: a grey dash too.
+      ['', 'admin.schedQuality.panel.col.error', { text: '—', tone: 'muted' }, tk('admin.schedQuality.stay.trialEnd', { time: formatShortTime(mixedTrialEnd) })]
     ])
 
     const passEnd = inMinutes(40)

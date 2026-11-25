@@ -227,15 +227,16 @@ const namedEnd = (line: unknown, stay: string) => {
  * A restricted line on its own row (the model named on the first of its rows), written by the line's own identity:
  * at the rear what the decision that put it there read against it ("76.2 / 86", as the panel's cell and the opened
  * decision show it) and its own review; on trial its latest assessment (达标 in green, what it still lacks, or unknown)
- * and when it ends at the latest. A line whose record keeps neither has only its name and time.
+ * and when it ends at the latest. A line whose record keeps neither (no basis, not assessed on trial yet) has a grey
+ * dash there, as the panel's cell.
  */
 function lineRow(model: string, detail: BackendLineDetail, identity: 'rear' | 'trial'): (string | TipCell)[] {
   if (identity === 'rear') {
     const reading = basisReading(detail.basis)
-    return [model, colName(detail.line), reading ? { text: reading, tone: 'back' } : '', rearStay(t, detail.until)]
+    return [model, colName(detail.line), reading ? { text: reading, tone: 'back' } : MISSING, rearStay(t, detail.until)]
   }
   const note = detail.last_eval ? trialNote(detail.last_eval, detail.line, t) : null
-  return [model, colName(detail.line), note && note.text !== DASH ? { text: note.text, tone: note.pass ? 'ok' : 'info' } : '', trialEndBy(detail.until)]
+  return [model, colName(detail.line), note && note.text !== DASH ? { text: note.text, tone: note.pass ? 'ok' : 'info' } : MISSING, trialEndBy(detail.until)]
 }
 
 /**
@@ -256,6 +257,9 @@ function modelRows(item: BackendRear | BackendTrial, kind: 'rear' | 'trial', own
   if (!last) return [[model, reasonCell(rear.lines), rearEnd(rear)]]
   return [[model, reasonCell([last]), rearEnd(rear)], ...rear.lines.filter((line) => line !== last).map((line) => ['', reasonCell([line]), ''])]
 }
+
+/** A figure the record does not have: a grey dash. */
+const MISSING: TipCell = { text: DASH, tone: 'muted' }
 
 /** Every model of the card has its lines on their own (all rows then have the same columns). */
 const ownLines = (items: (BackendRear | BackendTrial)[]) => items.every((item) => !!item.line_details?.length)
