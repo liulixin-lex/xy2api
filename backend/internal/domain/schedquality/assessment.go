@@ -149,6 +149,10 @@ func RecordAssessment(prev LineState, at time.Time, kind EventKind, verdict Verd
 }
 
 func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
+	// A cache pass below 40 turns cannot qualify an ongoing trial for release.
+	if s.Kind == EventTrial && b.Cache != nil && verdict == VerdictPass && b.Cache.Turns < 40 && s.Action == "" {
+		verdict = VerdictUnknown
+	}
 	switch verdict {
 	case VerdictPass:
 		s.Reason = ReasonWithin
@@ -164,11 +168,18 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 			s.classifyTTFT(b.TTFT, b.PeerKnown)
 		case b.Cache != nil:
 			cache := b.Cache
-			if cache.Turns < CacheMinTurns {
-				s.addCause(cacheTurnsShort, float64(cache.Turns), CacheMinTurns)
+			need := CacheMinTurns
+			if cache.Ratio < cache.MinRatio && cache.Ratio <= cache.MinRatio-.20 {
+				need = cacheMinLowTurns
 			}
-			if cache.Turns > 0 && cache.Ratio < cache.MinRatio && cache.LowSessions < cacheMinLowSessions {
-				s.addCause(cacheLowSessionsShort, float64(cache.LowSessions), cacheMinLowSessions)
+			if s.Kind == EventTrial && cache.Ratio >= cache.MinRatio {
+				need = 40
+			}
+			if cache.Turns < need {
+				s.addCause(cacheTurnsShort, float64(cache.Turns), need)
+			}
+			if cache.Turns > 0 && cache.Ratio < cache.MinRatio && cache.LowSessions10 == 0 {
+				s.addCause(cacheLowSessionsShort, float64(cache.LowSessions10), 1)
 			}
 		case b.Error != nil:
 			errLine := b.Error
