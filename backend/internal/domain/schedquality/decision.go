@@ -60,7 +60,6 @@ type Basis struct {
 	HistoryMissing       bool   `json:"history_missing,omitempty"`
 	MissingDeadline      bool   `json:"missing_deadline,omitempty"`
 	SampleCounts
-	PeerKnown    float64          `json:"-"` // Weighted peer mass for the real assessment summary only.
 	TrialSeats   *string          `json:"trial_seats"`
 	RuleVersion  string           `json:"rule_version"`
 	Line         Dimension        `json:"line"`

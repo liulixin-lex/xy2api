@@ -102,8 +102,8 @@ func TestSchedAssessmentMigrationAndRestart(t *testing.T) {
 
 	// Mix a long action, several simultaneous causes, and fractional evidence,
 	// then round-trip the entire eight-segment history (oldest to newest).
-	b := q.Basis{Line: q.DimensionTTFO, PeerKnown: 9.123456789123456,
-		TTFT: &q.TTFTEvidence{Causes: []q.RuleBUnknownReason{q.RuleBPeerKnownInsufficient, q.RuleBMassInsufficient, q.RuleBRelativeVeto}}}
+	b := q.Basis{Line: q.DimensionTTFO,
+		TTFT: &q.TTFTEvidence{N: 9.123456789123456, Causes: []q.RuleBUnknownReason{q.RuleBPeerKnownInsufficient, q.RuleBMassInsufficient, q.RuleBRelativeVeto}}}
 	full := q.LineState{LineKey: q.LineKey{AccountID: 1, GroupID: 2, Model: "m", Line: q.DimensionTTFO}}
 	for i := 0; i < 8; i++ {
 		now := at.Add(time.Duration(i) * q.RegularInterval)

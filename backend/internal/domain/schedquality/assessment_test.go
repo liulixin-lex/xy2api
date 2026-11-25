@@ -27,17 +27,17 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 		have   float64
 		need   int
 	}{
-		{RuleBNoPeers, ReasonPeerShort, 0, 20},
-		{RuleBAllPeersRear, ReasonPeerShort, 0, 20},
-		{RuleBPeerKnownInsufficient, ReasonPeerShort, 9.25, 20},
+		{RuleBNoPeers, ReasonOther, 0, 0},
+		{RuleBAllPeersRear, ReasonOther, 0, 0},
+		{RuleBPeerKnownInsufficient, ReasonOther, 0, 0},
 		{RuleBNoSamples, ReasonOwnShort, 0, 20},
 		{RuleBMassInsufficient, ReasonOwnShort, 8.75, 20},
 		{RuleBSessionsInsufficient, ReasonOwnShort, 2, 3},
 		{RuleBSlowSessionsInsufficient, ReasonOwnShort, 1, 2},
 		{RuleBAbsoluteUnconfirmed, ReasonWithin, 0, 0},
-		{RuleBRelativeUnconfirmed, ReasonWithin, 0, 0},
+		{RuleBRelativeUnconfirmed, ReasonOther, 0, 0},
 		{RuleBWorstMeanAboveTolerance, ReasonWithin, 0, 0},
-		{RuleBRelativeVeto, ReasonWithin, 0, 0},
+		{RuleBRelativeVeto, ReasonOther, 0, 0},
 	}
 	var tested []string
 	for _, tc := range cases {
@@ -45,9 +45,6 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 		t.Run(string(tc.cause), func(t *testing.T) {
 			e := &TTFTEvidence{N: 8.75, S: 2, D: 1, Causes: []RuleBUnknownReason{tc.cause}}
 			b := Basis{Line: DimensionTTFO, TTFT: e}
-			if tc.cause == RuleBPeerKnownInsufficient {
-				b.PeerKnown = 9.25
-			}
 			if tc.cause == RuleBNoSamples {
 				e.N = 0
 			}
@@ -171,7 +168,7 @@ func TestAssessmentLineOutcomes(t *testing.T) {
 	cache := func(c CacheAssessment) Basis { return Basis{Line: DimensionCache, Cache: &c} }
 	errLine := func(e ErrorAssessment) Basis { return Basis{Line: DimensionError, Error: &e} }
 	recovery := errLine(ErrorAssessment{Clear: 60, RecoveryOverLimit: true})
-	ttft := Basis{Line: DimensionTTFO, PeerKnown: 2.5, TTFT: &TTFTEvidence{
+	ttft := Basis{Line: DimensionTTFO, TTFT: &TTFTEvidence{S: 2,
 		Causes: []RuleBUnknownReason{RuleBRelativeVeto, RuleBSessionsInsufficient, RuleBPeerKnownInsufficient},
 	}}
 	for _, tc := range []struct {
@@ -192,8 +189,8 @@ func TestAssessmentLineOutcomes(t *testing.T) {
 		{"recovery-blocked", recovery, EventReview, VerdictUnknown, ActionTrial, ReasonPending, []string{errorRecoveryOverLimit}, 0, 0},
 		{"recovery-open", recovery, EventTrial, VerdictUnknown, "", ReasonTrialOpen, []string{errorRecoveryOverLimit}, 0, 0},
 		{"recovery-timeout", recovery, EventTrial, VerdictUnknown, ActionTrialTimeout, ReasonPending, []string{errorRecoveryOverLimit}, 0, 0},
-		{"peer-priority", ttft, EventReview, VerdictUnknown, ActionTrial, ReasonPeerShort, []string{string(RuleBPeerKnownInsufficient), string(RuleBSessionsInsufficient), string(RuleBRelativeVeto)}, 2.5, 20},
-		{"trial-open", ttft, EventTrial, VerdictUnknown, "", ReasonTrialOpen, []string{string(RuleBPeerKnownInsufficient), string(RuleBSessionsInsufficient), string(RuleBRelativeVeto)}, 2.5, 20},
+		{"retired-peer-gates", ttft, EventReview, VerdictUnknown, ActionTrial, ReasonOwnShort, []string{string(RuleBPeerKnownInsufficient), string(RuleBSessionsInsufficient), string(RuleBRelativeVeto)}, 2, 3},
+		{"trial-open", ttft, EventTrial, VerdictUnknown, "", ReasonTrialOpen, []string{string(RuleBPeerKnownInsufficient), string(RuleBSessionsInsufficient), string(RuleBRelativeVeto)}, 2, 3},
 		{"pending-error", errLine(ErrorAssessment{}), EventRegular, VerdictFail, "", ReasonPending, []string{}, 0, 0},
 		{"pending-cache", cache(CacheAssessment{}), EventRegular, VerdictFail, "", ReasonPending, []string{}, 0, 0},
 		{"enter", cache(CacheAssessment{}), EventRegular, VerdictFail, ActionEnter, ReasonOver, []string{}, 0, 0},
@@ -310,8 +307,8 @@ func TestAssessmentUnmappedCauseRoundTrip(t *testing.T) {
 		names  []string
 	}{
 		{"only unknown", []RuleBUnknownReason{unknown, "second_unknown"}, ReasonOther, []string{"other"}},
-		{"known and unknown", []RuleBUnknownReason{RuleBNoPeers, unknown}, ReasonPeerShort, []string{"no_peers", "other"}},
-		{"unknown and known", []RuleBUnknownReason{unknown, RuleBNoPeers}, ReasonPeerShort, []string{"no_peers", "other"}},
+		{"retired and unknown", []RuleBUnknownReason{RuleBNoPeers, unknown}, ReasonOther, []string{"no_peers", "other"}},
+		{"unknown and retired", []RuleBUnknownReason{unknown, RuleBNoPeers}, ReasonOther, []string{"no_peers", "other"}},
 		{"unknown and within", []RuleBUnknownReason{unknown, RuleBAbsoluteUnconfirmed}, ReasonWithin, []string{"absolute_unconfirmed", "other"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -324,15 +321,23 @@ func TestAssessmentUnmappedCauseRoundTrip(t *testing.T) {
 			require.NoError(t, json.Unmarshal(data, &after))
 			require.Equal(t, tc.reason, after[0].Reason)
 			require.Equal(t, tc.names, after[0].CauseNames())
-			if tc.reason == ReasonPeerShort {
-				require.Equal(t, new(0.0), after[0].Have)
-				require.Equal(t, new(20), after[0].Need)
-			} else {
-				require.Nil(t, after[0].Have)
-				require.Nil(t, after[0].Need)
-			}
+			require.Nil(t, after[0].Have)
+			require.Nil(t, after[0].Need)
 		})
 	}
+}
+
+func TestAssessmentDecodesHistoricalPeerCauses(t *testing.T) {
+	const stored = `{"f":"2026-01-01T12:00:00Z","l":"2026-01-01T12:00:00Z","n":1,"k":0,"r":"peer_short","c":1287,"h":9.25,"t":20}`
+	var history AssessmentSegment
+	require.NoError(t, json.Unmarshal([]byte(stored), &history))
+	require.Equal(t, ReasonPeerShort, history.Reason)
+	require.Equal(t, []string{"no_peers", "all_peers_rear", "peer_known_insufficient", "relative_unconfirmed", "relative_veto"}, history.CauseNames())
+	require.Equal(t, new(9.25), history.Have)
+	require.Equal(t, new(20), history.Need)
+	encoded, err := json.Marshal(history)
+	require.NoError(t, err)
+	require.JSONEq(t, stored, string(encoded))
 }
 
 func TestAssessmentWatermarkTolerance(t *testing.T) {

@@ -165,7 +165,7 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 		s.Reason = ReasonOther
 		switch {
 		case b.TTFT != nil:
-			s.classifyTTFT(b.TTFT, b.PeerKnown)
+			s.classifyTTFT(b.TTFT)
 		case b.Cache != nil:
 			cache := b.Cache
 			need := CacheMinTurns
@@ -202,10 +202,9 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 // Only unknown verdicts select among competing causes. At equal priority keep
 // the first gate reported by the rule (e.g. TTFT mass before session count).
 var unknownReasonPriority = map[AssessmentReason]int{
-	ReasonPeerShort: 4,
-	ReasonOwnShort:  3,
-	ReasonPending:   2,
-	ReasonWithin:    1,
+	ReasonOwnShort: 3,
+	ReasonPending:  2,
+	ReasonWithin:   1,
 }
 
 func (s *AssessmentSegment) consider(reason AssessmentReason, have float64, need int) {
@@ -218,7 +217,7 @@ func (s *AssessmentSegment) consider(reason AssessmentReason, have float64, need
 	}
 }
 
-func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence, peerKnown float64) {
+func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence) {
 	for _, name := range e.Causes {
 		i := assessmentCauseIndex(name)
 		def := assessmentCauses[i]
@@ -227,9 +226,10 @@ func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence, peerKnown float64) {
 			continue
 		}
 		s.Causes |= 1 << i
+		if def.ruleB == nil {
+			continue // Historical cause bits still decode; retired gates do not classify current assessments.
+		}
 		switch def.reason {
-		case ReasonPeerShort:
-			s.consider(def.reason, peerKnown, ruleBMinMass)
 		case ReasonOwnShort:
 			switch name {
 			case RuleBSessionsInsufficient:
