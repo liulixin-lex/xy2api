@@ -40,6 +40,17 @@ func TestEvidenceWindowsMatchAdmissionBoundaries(t *testing.T) {
 					case DimensionError:
 						e := AssessError(rows, nil, .05, time.Time{}, machineNow)
 						gotFrom, gotTo, n = e.WindowFrom, e.WindowTo, e.Clear
+						units := finalRequests(rows, nil, machineNow)
+						require.Len(t, units, 1)
+						require.Equal(t, rows[0].RequestID, units[0].final.RequestID)
+						require.Equal(t, rows[0].AttemptID, units[0].final.AttemptID)
+						if tc.name == "after_end" {
+							require.Equal(t, 1, e.Unknown, "future completion is an admitted in-flight request")
+							require.True(t, units[0].final.FinishedAt.IsZero())
+							require.Equal(t, []int64{rows[0].GroupID}, e.SourceGroups)
+						} else {
+							require.Zero(t, e.Unknown)
+						}
 					case DimensionCache:
 						e := AssessCache(rows, .8, time.Time{}, machineNow)
 						gotFrom, gotTo, n = e.WindowFrom, e.WindowTo, e.Turns
@@ -48,6 +59,37 @@ func TestEvidenceWindowsMatchAdmissionBoundaries(t *testing.T) {
 					require.Equal(t, machineNow, gotTo)
 					require.Equal(t, tc.want, n)
 				})
+			}
+		})
+	}
+}
+
+func TestErrorWindowCutUsesEarliestRequestStart(t *testing.T) {
+	cut := machineNow.Add(-time.Minute)
+	for _, offset := range []time.Duration{-time.Nanosecond, 0, time.Nanosecond} {
+		t.Run(offset.String(), func(t *testing.T) {
+			first := machineSamples(1)[0]
+			first.StartedAt, first.FinishedAt = cut.Add(offset), cut.Add(time.Second)
+			first.Outcome, first.Class = OutcomeAccountFault, ClassUpstream
+			last := first
+			last.AttemptID = "final-retry"
+			last.StartedAt, last.FinishedAt = cut.Add(2*time.Second), machineNow
+			for _, rows := range [][]AttemptSample{{first}, {first, last}} {
+				units := finalRequests(rows, nil, machineNow)
+				require.Len(t, units, 1)
+				require.Equal(t, first.RequestID, units[0].final.RequestID)
+				require.Equal(t, rows[len(rows)-1].AttemptID, units[0].final.AttemptID)
+				require.Equal(t, first.StartedAt, units[0].startedAt)
+				e := AssessError(rows, nil, .05, cut, machineNow)
+				require.Zero(t, e.Unknown)
+				if offset > 0 {
+					require.Equal(t, 1, e.Clear)
+					require.Equal(t, []string{rows[len(rows)-1].AttemptID}, e.AttemptIDs)
+				} else {
+					require.Zero(t, e.Clear)
+					require.Empty(t, e.AttemptIDs)
+					require.Empty(t, e.SourceGroups)
+				}
 			}
 		})
 	}

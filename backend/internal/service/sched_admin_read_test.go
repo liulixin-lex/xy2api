@@ -4,6 +4,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -25,6 +26,126 @@ func readBasis(line q.Dimension, at time.Time) q.Basis {
 		b.Cache = &q.CacheAssessment{MinRatio: .8, Ratio: .62, Turns: 24, Sessions: 2, LowSessions10: new(1), Path: q.CachePathSingle5, WindowFrom: at.Add(-q.CacheWindow), WindowTo: at}
 	}
 	return b
+}
+
+func TestReadRestrictedLineCombinations(t *testing.T) {
+	at := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	// Each line independently occupies normal/rear/trial: all 3^3 combinations.
+	for combo := 0; combo < 27; combo++ {
+		for _, mode := range []string{"active", "exempt", "not_published", "membership_removed"} {
+			t.Run(fmt.Sprintf("%02d/%s", combo, mode), func(t *testing.T) {
+				var states []q.LineState
+				var wanted []SchedAdminLineDetail
+				var rearLines []q.Dimension
+				var rearLast, trialLast q.LineState
+				value := combo
+				for i, line := range q.Lines {
+					state := q.LineState{LineKey: q.LineKey{AccountID: 1, GroupID: 1, Model: "synthetic-model", Line: line}}
+					b := readBasis(line, at)
+					state.Basis = &b
+					switch value % 3 {
+					case 1:
+						state.Identity, state.Level, state.Until = q.IdentityRear, i+1, at.Add(time.Duration(i+1)*20*time.Minute)
+						wanted = append(wanted, SchedAdminLineDetail{Line: line, Identity: "rear", Until: schedAdminStamp(state.Until), Basis: SchedAdminDecisionBasis(b)})
+						rearLines, rearLast = append(rearLines, line), state
+					case 2:
+						state.Trial, state.Level, state.Epoch, state.TrialUntil = true, i+1, at, at.Add(time.Duration(i+1)*30*time.Minute)
+						state.LastAssessment = q.RecordAssessment(state, at.Add(time.Minute), q.EventTrial, q.VerdictUnknown, "", b)
+						state.EvaluatedAt = at.Add(time.Minute)
+						wanted = append(wanted, SchedAdminLineDetail{Line: line, Identity: "trial", Until: schedAdminStamp(state.TrialUntil), LastEval: SchedAdminLastEvalFromState(state)})
+						trialLast = state
+					}
+					value /= 3
+					states = append(states, state)
+				}
+				f := newQualityFixture(t)
+				f.e.loaded = true
+				f.e.members = map[int64][]int64{1: {1}}
+				f.e.policies = map[int64]SchedPolicyRecord{1: {Policy: q.Policy{Enabled: true, TTFTSeconds: 1, MinCacheRatio: .8}}}
+				var overrides []SchedOverride
+				if mode == "exempt" {
+					overrides = []SchedOverride{{AccountID: 1, GroupID: 1, Mode: q.OverrideExempt}}
+				}
+				if mode == "not_published" {
+					f.e.members[1] = nil
+				}
+				f.e.publish(&schedQualityData{now: at, globalEnabled: true}, states, overrides, nil, at)
+				s, e, repo := schedAdminFixture()
+				s.d.Now = func() time.Time { return at }
+				e.snapshot = f.e.Snapshot()
+				if mode == "membership_removed" {
+					repo.rows[1].Groups, repo.rows[1].GroupIDs = nil, nil
+				}
+				summary, err := s.Summary(t.Context(), []int64{1})
+				require.NoError(t, err)
+				a := summary.Accounts[0]
+				if mode == "not_published" || mode == "membership_removed" {
+					require.Empty(t, a.Rear)
+					require.Empty(t, a.Trial)
+					detail, err := s.Detail(t.Context(), 1)
+					require.NoError(t, err)
+					for _, group := range detail.Groups {
+						require.Empty(t, group.ByModel)
+					}
+					if mode == "not_published" {
+						require.Empty(t, e.snapshot.RowsForAccount(1))
+					}
+					return
+				}
+				if len(rearLines) > 0 {
+					require.Empty(t, a.Trial)
+					require.Len(t, a.Rear, 1)
+					r := a.Rear[0]
+					require.Equal(t, wanted, r.LineDetails)
+					require.Equal(t, rearLines, r.Lines)
+					require.Equal(t, rearLast.Line, r.UntilLine)
+					require.Equal(t, rearLast.Level, r.Level)
+					require.Equal(t, schedAdminStamp(rearLast.Until), r.Until)
+					require.Equal(t, mode == "exempt", r.Exempt)
+					require.Equal(t, mode == "active", r.Effective)
+				} else if len(wanted) > 0 && mode == "active" {
+					require.Empty(t, a.Rear)
+					require.Len(t, a.Trial, 1)
+					r := a.Trial[0]
+					require.Equal(t, wanted, r.LineDetails)
+					require.Equal(t, trialLast.Line, r.UntilLine)
+					require.Equal(t, schedAdminStamp(trialLast.TrialUntil), r.Until)
+				} else {
+					require.Empty(t, a.Rear)
+					require.Empty(t, a.Trial)
+				}
+			})
+		}
+	}
+}
+
+func TestReadErrorWindowDelayedInsertionRemainsInFlight(t *testing.T) {
+	f := newQualityFixture(t)
+	at := f.now
+	f.e.policies = f.store.Policies
+	first := engineSamples(1, at.Add(-2*time.Second), false)[0]
+	first.RequestID, first.AttemptID = "same-request", "first-attempt"
+	first.StartedAt = at.Add(-10 * time.Second)
+	first.Outcome, first.Class = q.OutcomeAccountFault, q.ClassUpstream
+	last := first
+	last.AttemptID, last.StartedAt, last.FinishedAt, last.InsertedAt = "final-attempt", at.Add(-3*time.Second), at.Add(-time.Second), at.Add(time.Second)
+	key := q.LineKey{AccountID: 1, GroupID: 10, Model: last.Model, Line: q.DimensionError}
+	d := &schedQualityData{now: at, samples: map[SchedAccountModel][]q.AttemptSample{{1, last.Model}: {first, last}}}
+	for _, offset := range []time.Duration{-time.Nanosecond, 0} {
+		when := last.InsertedAt.Add(offset)
+		_, basis := f.e.assessLine(d, q.LineState{LineKey: key}, q.EventRegular, when, nil)
+		require.Equal(t, when.Add(-q.ErrorWindow), basis.Error.WindowFrom)
+		require.Equal(t, when, basis.Error.WindowTo)
+		if offset < 0 {
+			require.Zero(t, basis.Error.Clear)
+			require.Equal(t, 1, basis.Error.Unknown)
+			require.Empty(t, basis.AttemptIDs, "neither earlier failure nor future final result is exposed")
+		} else {
+			require.Equal(t, 1, basis.Error.Clear)
+			require.Zero(t, basis.Error.Unknown)
+			require.Equal(t, []string{last.AttemptID}, basis.AttemptIDs)
+		}
+	}
 }
 
 // Exercise the real publication pass, without evaluating or writing a transition.
