@@ -461,8 +461,9 @@ func TestSchedQualityPolicyFloorAndRequiredFields(t *testing.T) {
 				verb = "POST"
 			}
 			valid := map[string]any{"enabled": false, "ttft_seconds": 0.01, "max_error_rate": 0.05, "min_cache_ratio": 0.0, "takeover_idle_seconds": 0}
+			expectedVersion := int64(63)
 			request := func(p map[string]any) *httptest.ResponseRecorder {
-				raw, _ := json.Marshal(map[string]any{"expected_version": 63, "policy": p})
+				raw, _ := json.Marshal(map[string]any{"expected_version": expectedVersion, "policy": p})
 				return schedAdminHandlerRequest(r, verb, path, string(raw))
 			}
 			for key, value := range valid {
@@ -485,6 +486,9 @@ func TestSchedQualityPolicyFloorAndRequiredFields(t *testing.T) {
 			for _, rate := range []float64{0.01, 0.049, 0.05} {
 				valid["max_error_rate"] = rate
 				require.Equal(t, 200, request(valid).Code)
+				if method == "save" {
+					expectedVersion++
+				}
 			}
 		})
 	}
