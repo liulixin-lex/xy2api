@@ -17,7 +17,6 @@ type schedQualityKey struct {
 type schedQualityData struct {
 	missingHistory map[q.LineKey]schedMissingHistory
 	evidenceSince  time.Time
-	observedSince  time.Time
 	replayStats    schedReplayStats
 	now            time.Time
 	samples        map[SchedAccountModel][]q.AttemptSample

@@ -3,70 +3,60 @@
 package schedquality
 
 import (
-	"fmt"
 	"math/rand"
 	"reflect"
 	"testing"
 	"time"
 )
 
-// Acceptance 1/5/9: ordered trial exits, equality boundaries and release reasons.
 func TestRecoveryTrialTable(t *testing.T) {
 	origin := machineNow.Add(5 * time.Second)
-	for _, minute := range []int{0, 14, 15, 59, 60, 119, 120} {
-		for _, v := range []Verdict{VerdictFail, VerdictPass, VerdictUnknown} {
-			for _, own := range []bool{false, true} {
-				t.Run(fmt.Sprintf("minute%d/%s/own%t", minute, v, own), func(t *testing.T) {
-					s := machineState(DimensionCache)
-					s.Trial = true
-					s.Epoch = origin
-					s.TrialUntil = origin.Add(TrialDuration)
-					s.Admissions = 1
-					at := origin.Add(time.Duration(minute) * time.Minute)
-					n, a := Step(s, EventTrial, v, Basis{OwnSampleAt60: &own}, at)
-					want := Action("")
-					reason := ""
-					switch {
-					case v == VerdictFail:
-						want = ActionTrialFail
-					case v == VerdictPass && minute >= 15:
-						want = ActionTrialPass
-						reason = "qualified"
-					case minute >= 120:
-						want = ActionTrialTimeout
-						reason = "deadline"
-					case minute >= 60 && !own:
-						want = ActionTrialTimeout
-						reason = "no_samples"
-					}
-					if a != want {
-						t.Fatalf("action %s want %s", a, want)
-					}
-					if reason != "" {
-						if n.Trial || n.Identity != IdentityUnknown || !n.Epoch.Equal(at) || !n.TrialUntil.IsZero() || n.Basis.ReleaseReason != reason || n.Basis.TrialDurationSeconds != int64(minute*60) {
-							t.Fatalf("release %+v basis %+v", n, n.Basis)
-						}
-						if v == VerdictPass && n.LastAssessment[len(n.LastAssessment)-1].Reason != ReasonWithin {
-							t.Fatal("lost passing assessment")
-						}
-					} else if want == "" && (!n.Trial || !n.TrialUntil.Equal(s.TrialUntil)) {
-						t.Fatal("changed trial round")
-					}
-				})
+	for _, tc := range []struct {
+		name    string
+		offset  time.Duration
+		verdict Verdict
+		turns   int
+		action  Action
+		reason  string
+	}{
+		{"one second before minimum", TrialMinimum - time.Second, VerdictPass, 40, "", ""},
+		{"39 turns at minimum", TrialMinimum, VerdictPass, 39, "", ""},
+		{"40 turns at minimum", TrialMinimum, VerdictPass, 40, ActionTrialPass, "good"},
+		{"one second before deadline", TrialDuration - time.Second, VerdictUnknown, 0, "", ""},
+		{"39 turns at deadline", TrialDuration, VerdictPass, 39, ActionTrialTimeout, "deadline"},
+		{"no samples at deadline", TrialDuration, VerdictUnknown, 0, ActionTrialTimeout, "deadline"},
+		{"fail at minimum", TrialMinimum, VerdictFail, 40, ActionTrialFail, "fail"},
+		{"fail at deadline", TrialDuration, VerdictFail, 40, ActionTrialFail, "fail"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := machineState(DimensionCache)
+			s.Trial, s.Epoch, s.TrialUntil = true, origin, origin.Add(TrialDuration)
+			at := origin.Add(tc.offset)
+			n, a := Step(s, EventTrial, tc.verdict, Basis{Line: s.Line, Cache: &CacheAssessment{Turns: tc.turns}}, at)
+			if a != tc.action {
+				t.Fatalf("action %s want %s", a, tc.action)
 			}
-		}
+			if a == "" {
+				if !n.Trial || n.TrialUntil != s.TrialUntil || n.Epoch != origin {
+					t.Fatal("changed trial round")
+				}
+				return
+			}
+			if n.Trial || n.Epoch != at || !n.TrialUntil.IsZero() || n.Basis.ReleaseReason != tc.reason || n.Basis.TrialDurationSeconds != int64(tc.offset/time.Second) {
+				t.Fatalf("exit %+v basis %+v", n, n.Basis)
+			}
+			if a == ActionTrialFail && (n.Until != at.Add(RearDuration) || n.Identity != IdentityRear) {
+				t.Fatal("failure did not restart rear")
+			}
+			if a != ActionTrialFail && (n.Identity != IdentityUnknown || !n.Until.IsZero()) {
+				t.Fatal("trial did not return to normal")
+			}
+		})
 	}
 	s := machineState(DimensionTTFO)
-	s.Trial = true
-	s.Epoch = origin
-	s.TrialUntil = origin.Add(time.Hour)
-	n, a := Step(s, EventTrial, VerdictUnknown, Basis{OwnSampleAt60: new(true)}, s.TrialUntil)
-	if a != ActionTrialTimeout || n.Basis.ReleaseReason != "deadline" || n.Basis.TrialDurationSeconds != 3600 {
-		t.Fatal("legacy deadline not retained")
-	}
-	for _, offset := range []time.Duration{TrialMinimum, TrialSampleCheck} {
-		kind, due := Due(s, origin.Add(offset), false, false)
-		if !due || kind != EventTrial {
+	s.Trial, s.Epoch, s.TrialUntil = true, origin, origin.Add(TrialDuration)
+	for _, offset := range []time.Duration{TrialMinimum, TrialDuration} {
+		if kind, due := Due(s, origin.Add(offset), false, false); !due || kind != EventTrial {
 			t.Fatal("non-minute checkpoint missed")
 		}
 	}
@@ -95,7 +85,7 @@ func TestRecoveryMissingDeadlinesAndDelayedReview(t *testing.T) {
 		s.Identity = IdentityRear
 		s.Until = machineNow.Add(240 * time.Minute)
 		n, _ := Step(s, EventReview, VerdictUnknown, Basis{}, machineNow.Add(time.Duration(minute)*time.Minute))
-		if minute == 250 && (!n.Trial || n.TrialUntil.Sub(n.EvaluatedAt) != 110*time.Minute) {
+		if minute == 250 && (!n.Trial || n.TrialUntil.Sub(n.EvaluatedAt) != 50*time.Minute) {
 			t.Fatal("reopened clock")
 		}
 		if minute == 500 && (n.Trial || n.Identity != IdentityUnknown) {
@@ -112,8 +102,8 @@ func recoveryGroup() []LineState {
 	return rows
 }
 
-// Acceptance 3: six orders share frozen history and preserve mixed exits.
-func TestRecoverySharedLevelAndMixedBatch(t *testing.T) {
+// Acceptance 3: six orders apply frozen verdicts and preserve mixed exits.
+func TestRecoveryIndependentLinesAndMixedBatch(t *testing.T) {
 	rows := recoveryGroup()
 	rows[0].Identity = IdentityRear
 	rows[0].Until = machineNow
@@ -128,12 +118,12 @@ func TestRecoverySharedLevelAndMixedBatch(t *testing.T) {
 		before := []LineState{rows[order[0]], rows[order[1]], rows[order[2]]}
 		after, _ := StepGroup(before, inputs, machineNow)
 		for _, n := range after {
-			if n.Level != 2 || n.Identity != IdentityRear || n.Until.Sub(machineNow) != 80*time.Minute {
+			if n.Level != 0 || n.Identity != IdentityRear || n.Until.Sub(machineNow) != RearDuration {
 				t.Fatalf("order %v: %+v", order, n)
 			}
 		}
 	}
-	inputs[DimensionCache] = Evaluation{Kind: EventTrial, Verdict: VerdictPass}
+	inputs[DimensionCache] = Evaluation{Kind: EventTrial, Verdict: VerdictPass, Basis: Basis{Cache: &CacheAssessment{Turns: 40}}}
 	delete(inputs, DimensionError)
 	after, actions := StepGroup(rows, inputs, machineNow)
 	if !reflect.DeepEqual(after[1], rows[1]) {
@@ -141,54 +131,6 @@ func TestRecoverySharedLevelAndMixedBatch(t *testing.T) {
 	}
 	if actions[2] != ActionTrialPass || after[2].Trial || after[2].Identity != IdentityUnknown || !after[2].Epoch.Equal(machineNow) {
 		t.Fatal("mixed passing trial was swallowed")
-	}
-	rows = recoveryGroup()
-	rows[1].Admissions = 1
-	after, _ = StepGroup(rows, map[Dimension]Evaluation{DimensionTTFO: {Verdict: VerdictFail}}, machineNow)
-	if after[0].Level != 1 {
-		t.Fatal("first admission history ignored")
-	}
-	rows[1].Level = 2
-	after, _ = StepGroup(rows, map[Dimension]Evaluation{DimensionTTFO: {Verdict: VerdictFail}}, machineNow)
-	if after[0].Level != 3 {
-		t.Fatal("relaxed line ignored sibling history")
-	}
-}
-
-// Acceptance 4: whole-group clearing and simultaneous new failure precedence.
-func TestRecoveryQuietClear(t *testing.T) {
-	rows := recoveryGroup()
-	for i := range rows {
-		rows[i].Level = 2
-		rows[i].Admissions = 1
-		rows[i].LastRear = machineNow
-	}
-	at := machineNow.Add(LevelClearQuiet)
-	rows[2].Trial = true
-	rows[2].Epoch = at.Add(-time.Minute)
-	rows[2].TrialUntil = at.Add(time.Hour)
-	after, _ := StepGroup(rows, nil, at)
-	if after[0].Admissions != 1 || !QuietDeadline(rows).IsZero() {
-		t.Fatal("partial normal cleared")
-	}
-	rows[2].Trial = false
-	after, actions := StepGroup(rows, nil, at.Add(-time.Nanosecond))
-	if after[0].Admissions != 1 || actions[0] != "" {
-		t.Fatal("early clear")
-	}
-	after, actions = StepGroup(rows, nil, at)
-	for i, n := range after {
-		if n.Admissions != 0 || n.Level != 0 || actions[i] != ActionClear {
-			t.Fatal("group did not clear")
-		}
-	}
-	after, _ = StepGroup(after, map[Dimension]Evaluation{DimensionTTFO: {Verdict: VerdictFail}}, at.Add(RegularInterval))
-	if after[0].Level != 0 {
-		t.Fatal("later failure ignored earlier clear")
-	}
-	after, _ = StepGroup(rows, map[Dimension]Evaluation{DimensionTTFO: {Verdict: VerdictFail}}, at)
-	if after[0].Level != 3 || after[1].Admissions != 1 {
-		t.Fatal("same-time failure lost history")
 	}
 }
 
@@ -211,7 +153,7 @@ func TestRecoveryThreeDayBounds(t *testing.T) {
 					if minute%720 >= 300 {
 						v = VerdictUnknown
 					}
-					input[s.Line] = Evaluation{Kind: kind, Verdict: v, Basis: Basis{OwnSampleAt60: new(true)}}
+					input[s.Line] = Evaluation{Kind: kind, Verdict: v, Basis: Basis{Cache: &CacheAssessment{Turns: TrialCacheTurns}}}
 				}
 			}
 			next, actions := StepGroup(rows, input, at)
@@ -219,6 +161,9 @@ func TestRecoveryThreeDayBounds(t *testing.T) {
 			for i, n := range next {
 				if actions[i] == ActionEnter || actions[i] == ActionRenew || actions[i] == ActionTrialFail {
 					lastBad = at
+					if !n.Until.Equal(at.Add(RearDuration)) || !n.Entry.Equal(at) || !n.Epoch.Equal(at) {
+						t.Fatalf("zero or wrong rear period: %+v", n)
+					}
 				}
 				rearAfter = rearAfter || n.Identity == IdentityRear
 				restrictedAfter = restrictedAfter || n.Identity == IdentityRear || n.Trial
@@ -232,13 +177,106 @@ func TestRecoveryThreeDayBounds(t *testing.T) {
 					count++
 				}
 			}
-			if count > 6 {
+			if count > 13 {
 				t.Fatalf("seed %d minute %d: %d entries", seed, minute, count)
 			}
-			if restricted && restrictedAfter && !lastBad.IsZero() && at.Sub(lastBad) >= 360*time.Minute {
+			if restricted && restrictedAfter && !lastBad.IsZero() && at.Sub(lastBad) >= 120*time.Minute {
 				t.Fatalf("seed %d: still restricted after %s", seed, at.Sub(lastBad))
 			}
 			rows = next
 		}
+	}
+}
+
+func TestRecoveryReturnsWithin120Minutes(t *testing.T) {
+	rows := recoveryGroup()
+	// Start two lines in consecutive ordinary evaluations. The newer failure
+	// determines the bound for the whole key.
+	rows, _ = StepGroup(rows, map[Dimension]Evaluation{DimensionTTFO: {Verdict: VerdictFail}}, machineNow.Add(-5*time.Minute))
+	rows, actions := StepGroup(rows, map[Dimension]Evaluation{
+		DimensionCache: {Verdict: VerdictFail, Basis: Basis{Cache: &CacheAssessment{Path: "single5"}}},
+	}, machineNow)
+	if actions[0] != "" || actions[2] != ActionEnter {
+		t.Fatalf("failed to establish staggered rear lines: %v", actions)
+	}
+	deadline := machineNow.Add(120 * time.Minute)
+	for at := machineNow.Add(time.Minute); !at.After(deadline); at = at.Add(time.Minute) {
+		evaluations := make(map[Dimension]Evaluation)
+		for _, row := range rows {
+			if kind, due := Due(row, at, at.Equal(at.Truncate(5*time.Minute)), true); due {
+				evaluations[row.Line] = Evaluation{Kind: kind, Verdict: VerdictUnknown}
+			}
+		}
+		rows, _ = StepGroup(rows, evaluations, at)
+	}
+	for _, row := range rows {
+		if row.Identity == IdentityRear || row.Trial {
+			t.Fatalf("%s still restricted 120 minutes after the last failure: %+v", row.Line, row)
+		}
+	}
+}
+
+func TestRecoveryAtMost13CompositeRearEntriesPer12Hours(t *testing.T) {
+	rows := recoveryGroup()
+	// Two lines fail together. Let review proceed to trial, then fail at
+	// the first later instant where fresh evidence can be assessed.
+	evaluations := map[Dimension]Evaluation{
+		DimensionTTFO:  {Verdict: VerdictFail},
+		DimensionCache: {Verdict: VerdictFail, Basis: Basis{Cache: &CacheAssessment{Path: "single5"}}},
+	}
+	rows, _ = StepGroup(rows, evaluations, machineNow)
+	rearCount := func(rows []LineState) int {
+		n := 0
+		for _, row := range rows {
+			if row.Identity == IdentityRear {
+				n++
+			}
+		}
+		return n
+	}
+	if rearCount(rows) != 2 {
+		t.Fatal("expected one composite entry from two simultaneous failures")
+	}
+	entries := []time.Time{machineNow}
+	left := 0
+	for rows[0].Until.Before(machineNow.Add(48 * time.Hour)) {
+		last := entries[len(entries)-1]
+		review := rows[0].Until
+		if !review.After(last) {
+			t.Fatalf("rear deadline did not advance beyond %s: %s", last, review)
+		}
+		reviews := make(map[Dimension]Evaluation)
+		for _, row := range rows {
+			if kind, due := Due(row, review, false, false); due {
+				reviews[row.Line] = Evaluation{Kind: kind, Verdict: VerdictUnknown}
+			}
+		}
+		rows, _ = StepGroup(rows, reviews, review)
+		if rearCount(rows) != 0 || !rows[0].Trial || !rows[2].Trial {
+			t.Fatalf("expected both rear lines to enter trial at %s", review)
+		}
+		fail := review.Add(time.Second)
+		failures := make(map[Dimension]Evaluation)
+		for _, row := range rows {
+			if kind, due := Due(row, fail, false, true); due {
+				failures[row.Line] = Evaluation{Kind: kind, Verdict: VerdictFail}
+			}
+		}
+		rows, _ = StepGroup(rows, failures, fail)
+		if rearCount(rows) != 2 || !rows[0].EvaluatedAt.After(review) || !rows[2].EvaluatedAt.After(review) {
+			t.Fatalf("both trial failures must advance state at %s", fail)
+		}
+		entries = append(entries, fail)
+		// For a sorted series, the largest count for a given right edge
+		// includes every entry at or after that edge minus twelve hours.
+		for entries[left].Before(fail.Add(-12 * time.Hour)) {
+			left++
+		}
+		if count := len(entries) - left; count > 13 {
+			t.Fatalf("%d composite rear entries in the closed 12-hour window ending %s", count, fail)
+		}
+	}
+	if len(entries) <= 13 {
+		t.Fatalf("only exercised %d entries, want more than one window", len(entries))
 	}
 }

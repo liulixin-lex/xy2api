@@ -98,10 +98,10 @@ func TestSchedAdminRepositoryDecisionJSONLegacyAndUntil(t *testing.T) {
 		}
 	}
 	require.Equal(t, "3.0", items[4]["basis"].(map[string]any)["rule_version"])
-	require.Equal(t, "qualified", items[5]["basis"].(map[string]any)["release_reason"])
+	require.Equal(t, "good", items[5]["basis"].(map[string]any)["release_reason"])
 	require.EqualValues(t, 900, items[5]["basis"].(map[string]any)["trial_duration_seconds"])
 	require.Equal(t, "deadline", items[6]["basis"].(map[string]any)["release_reason"])
-	require.EqualValues(t, 7200, items[6]["basis"].(map[string]any)["trial_duration_seconds"])
+	require.EqualValues(t, 3600, items[6]["basis"].(map[string]any)["trial_duration_seconds"])
 	require.Nil(t, items[len(cases)]["until"])
 	require.NotContains(t, items[len(cases)], "basis")
 	b := items[0]["basis"].(map[string]any)

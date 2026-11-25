@@ -107,7 +107,7 @@ func TestEngineThreeLinesAndAdjacentEvaluations(t *testing.T) {
 	require.Equal(t, q.IdentityUnknown, f.view().TTFO.Identity)
 	require.Len(t, f.store.Decisions, 1)
 	require.Equal(t, q.ActionEnter, f.store.Decisions[0].Action)
-	require.Equal(t, 20*time.Minute, f.line(q.DimensionError).Until.Sub(f.line(q.DimensionError).Entry))
+	require.Equal(t, q.RearDuration, f.line(q.DimensionError).Until.Sub(f.line(q.DimensionError).Entry))
 }
 func TestEngineRestartIdempotentAndExactReview(t *testing.T) {
 	f := newQualityFixture(t)
@@ -342,7 +342,7 @@ func TestEngineReassessmentPublishesActionsOnlyAfterCommit(t *testing.T) {
 		}
 		require.Equal(t, 1, persisted[string(q.ActionRelax)])
 		require.Equal(t, persisted, actions)
-		require.EqualValues(t, len(f.store.Decisions)-start, (obs.window.cooled-before.cooled)+(obs.window.released-before.released)+(obs.window.trial-before.trial)+(obs.window.relax-before.relax)+(obs.window.cleared-before.cleared))
+		require.EqualValues(t, len(f.store.Decisions)-start, (obs.window.cooled-before.cooled)+(obs.window.released-before.released)+(obs.window.trial-before.trial)+(obs.window.relax-before.relax))
 		require.EqualValues(t, 1, obs.window.relax-before.relax)
 	}
 }

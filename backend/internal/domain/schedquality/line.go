@@ -32,8 +32,8 @@ type LineState struct {
 	LineKey
 	Identity                     Identity
 	Trial                        bool
-	Level                        int                 // 0..4，对应 CooldownLadder
-	Admissions                   int                 // 进后排次数；大于 0 即“有过失败记录”
+	Level                        int                 // Reserved for old readers; new rules write zero.
+	Admissions                   int                 // Historical count; never affects timing.
 	PendingAt                    time.Time           `json:",omitzero"` // 报错线和缓存线：上一次普通评估不达标的时刻
 	Epoch                        time.Time           `json:",omitzero"` // 取证起点（常规评估和试用）；零值表示不截
 	Entry                        time.Time           `json:",omitzero"` // 本轮进后排的时刻，到期复核从这里截
@@ -52,15 +52,14 @@ const (
 	EventClock
 )
 
-type Action string // enter renew release trial trial_pass trial_fail trial_timeout reset relax clear，各取同名常量 ActionEnter…ActionClear
-var CooldownLadder = [...]time.Duration{20 * time.Minute, 40 * time.Minute, 80 * time.Minute, 160 * time.Minute, 240 * time.Minute}
+type Action string
 
 const (
-	RegularInterval  = 5 * time.Minute
-	TrialDuration    = 120 * time.Minute
-	TrialMinimum     = 15 * time.Minute
-	TrialSampleCheck = 60 * time.Minute
-	LevelClearQuiet  = 24 * time.Hour
+	RegularInterval = 5 * time.Minute
+	RearDuration    = 60 * time.Minute
+	TrialDuration   = 60 * time.Minute
+	TrialMinimum    = 15 * time.Minute
+	TrialCacheTurns = 40
 )
 
 const (

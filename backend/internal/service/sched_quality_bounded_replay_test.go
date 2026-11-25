@@ -14,7 +14,7 @@ import (
 )
 
 func TestEngineRecoveryBoundsExpiredTimers(t *testing.T) {
-	for _, kind := range []string{"rear", "trial", "clear", "regular"} {
+	for _, kind := range []string{"rear", "trial", "regular"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newQualityFixture(t)
 			f.now = f.now.Add(6 * time.Hour) // 18:00:10, retained replay starts at 13:50.
@@ -30,8 +30,6 @@ func TestEngineRecoveryBoundsExpiredTimers(t *testing.T) {
 			case "trial":
 				r.Trial, r.TrialUntil = true, floor.Add(-time.Hour)
 				want = q.ActionTrialTimeout
-			case "clear":
-				want = q.ActionClear
 			case "regular":
 				r.Level, r.Admissions = 0, 0
 			}
@@ -71,7 +69,7 @@ func TestEngineRecoveryBoundsExpiredTimers(t *testing.T) {
 			require.LessOrEqual(t, d.replayStats.batches, 125, "retention bounds the replay, including the new bounded trial")
 			f.cycle()
 			require.Zero(t, f.line(q.DimensionError).Level)
-			require.Zero(t, f.line(q.DimensionError).Admissions)
+			require.Equal(t, r.Admissions, f.line(q.DimensionError).Admissions)
 			rows := append([]q.LineState(nil), f.store.Rows...)
 			saved := append([]q.Decision(nil), f.store.Decisions...)
 			f.e = NewSchedQualityEngineService(f.store, f.ledger, f.switches, func() time.Time { return f.now }, nil)
