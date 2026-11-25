@@ -106,141 +106,35 @@ func TestRuleBVectors(t *testing.T) {
 		}
 		return rows
 	}
-	var maxAbs, maxRel float64
-	var maxAbsField, maxRelField string
-	passed := 0
-	coverage := make(map[string]bool)
+	// Retain the frozen reference's own evidence, prior and absolute posterior.
+	// Its relative gates and final verdicts describe the retired rule.
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			in := RuleBInput{Scope: tc.Scope, Now: ruleBFixtureTime(tc.Now), Cut: ruleBFixtureTime(tc.Cut), LimitSeconds: tc.LimitSeconds,
 				Samples: resolve(tc.Samples), GroupSamples: resolve(tc.GroupSamples)}
-			for _, p := range tc.Peers {
-				in.Peers = append(in.Peers, RuleBPeer{Scope: p.Scope, Identity: p.Identity, Epoch: ruleBFixtureTime(p.Epoch), Samples: resolve(p.Samples)})
-			}
-			got, err := EvaluateRuleB(in, tc.Params)
-			if err != nil {
-				t.Fatal(err)
-			}
+			got := evaluateRuleBTest(t, in, tc.Params)
 			want := tc.Expected
-			if got.State != want.State || got.Absolute != want.Absolute || got.Relative != want.Relative || got.GoodBase != want.GoodBase {
-				t.Errorf("state/gates = %v/%v/%v/%v, want %v/%v/%v/%v", got.State, got.Absolute, got.Relative, got.GoodBase,
-					want.State, want.Absolute, want.Relative, want.GoodBase)
-			}
-			if (got.State == RuleBUnknown) != (len(got.UnknownReasons) > 0) {
-				t.Errorf("state %v has reasons %v", got.State, got.UnknownReasons)
-			}
-			if strings.HasPrefix(tc.Name, "three_states/") && strings.HasSuffix(tc.Name, "/narrow") &&
-				!slices.Contains(got.UnknownReasons, RuleBRelativeVeto) {
-				t.Errorf("good base with relative confirmation must report relative veto: %v", got.UnknownReasons)
-			}
-			requireRegisteredRuleBReasons(t, got.UnknownReasons)
-			for _, reason := range got.UnknownReasons {
-				coverage[string(reason)] = true
-			}
-			own, peers, group, local := got.Counts, got.PeerCounts, got.PriorGroupCounts, got.PriorLocalCounts
-			for feature, applies := range map[string]bool{
-				"good": got.State == RuleBGood, "bad": got.State == RuleBBad,
-				"no_peer_evidence":         peers.N-peers.X == 0 && got.U == nil,
-				"single_slow_session_veto": got.State == RuleBUnknown && got.Absolute && got.Relative && own.D == 1,
-				"unknown_blocks_good": got.State == RuleBUnknown && own.N >= 20-1e-8 && own.S >= 3 && !got.Relative &&
-					got.WorstMean > tc.Params.Tolerance && (own.K+5*got.Prior)/(own.N+5) <= tc.Params.Tolerance,
-				"prior_fallback":      (group.N-local.N)-(group.X-local.X) <= 0 && got.Prior == .1,
-				"prior_clipped":       got.Prior == .001 || got.Prior == .999,
-				"peer_unknown_as_bad": peers.X > 0 && got.PeerA != nil,
-			} {
-				coverage[feature] = coverage[feature] || applies
-			}
-			if own.N > 0 && own.N < 20 && got.RelativeThreshold != nil {
-				unpaddedB := got.B - (20 - own.N)
-				absoluteCDF, err := ruleBBetaCDF(got.A, unpaddedB, tc.Params.Tolerance, ruleBBetaMaxIterations)
-				if err != nil {
-					t.Fatal(err)
-				}
-				relativeCDF, err := ruleBBetaCDF(got.A, unpaddedB, *got.RelativeThreshold, ruleBBetaMaxIterations)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if 1-absoluteCDF != got.AbsoluteProbability && 1-relativeCDF != *got.RelativeProbability {
-					coverage["padding_changes_both_probabilities"] = true
+			for _, pair := range [][2]RuleBCounts{{got.Counts, want.Counts}, {got.PriorGroupCounts, want.PriorGroupCounts}, {got.PriorLocalCounts, want.PriorLocalCounts}} {
+				if math.Abs(pair[0].N-pair[1].N) > 1e-8 || math.Abs(pair[0].K-pair[1].K) > 1e-8 || math.Abs(pair[0].X-pair[1].X) > 1e-8 || pair[0].S != pair[1].S || pair[0].D != pair[1].D {
+					t.Fatalf("counts: %+v", pair)
 				}
 			}
-			for _, sample := range in.Samples {
-				if sample.TTFOMs <= 0 && sample.CensoredMs/1000 >= in.LimitSeconds {
-					coverage["proven_censor"] = true
+			for _, pair := range [][2]float64{{got.Prior, want.Prior}, {got.A, want.A}, {got.B, want.B}, {got.AbsoluteProbability, want.AbsoluteProbability}, {got.WorstMean, want.WorstMean}} {
+				if math.Abs(pair[0]-pair[1]) > 1e-8 {
+					t.Fatalf("posterior: %v", pair)
 				}
 			}
-			check := func(field string, actual, expected float64) {
-				abs := math.Abs(actual - expected)
-				rel := 0.0
-				if expected != 0 {
-					rel = abs / math.Abs(expected)
-				}
-				if abs > maxAbs {
-					maxAbs, maxAbsField = abs, tc.Name+"/"+field
-				}
-				if rel > maxRel {
-					maxRel, maxRelField = rel, tc.Name+"/"+field
-				}
-				if math.IsNaN(actual) || math.IsInf(actual, 0) || (abs > 1e-8 && (expected == 0 || rel > 1e-9)) {
-					t.Errorf("%s = %.17g, want %.17g (abs %.3g, rel %.3g)", field, actual, expected, abs, rel)
-				}
+			state := RuleBUnknown
+			if want.Absolute && want.Counts.D >= 2 {
+				state = RuleBBad
+			} else if want.GoodBase {
+				state = RuleBGood
 			}
-			for _, c := range []struct {
-				name      string
-				got, want RuleBCounts
-			}{
-				{"own", got.Counts, want.Counts}, {"prior_group", got.PriorGroupCounts, want.PriorGroupCounts},
-				{"prior_local", got.PriorLocalCounts, want.PriorLocalCounts}, {"peers", got.PeerCounts, want.PeerCounts},
-			} {
-				check(c.name+".N", c.got.N, c.want.N)
-				check(c.name+".K", c.got.K, c.want.K)
-				check(c.name+".X", c.got.X, c.want.X)
-				if c.got.S != c.want.S || c.got.D != c.want.D {
-					t.Errorf("%s sessions = %d/%d, want %d/%d", c.name, c.got.S, c.got.D, c.want.S, c.want.D)
-				}
-			}
-			for _, v := range []struct {
-				name      string
-				got, want float64
-			}{
-				{"prior", got.Prior, want.Prior}, {"peer_prior", got.PeerPrior, want.PeerPrior},
-				{"a", got.A, want.A}, {"b", got.B, want.B},
-				{"absolute_probability", got.AbsoluteProbability, want.AbsoluteProbability}, {"worst_mean", got.WorstMean, want.WorstMean},
-			} {
-				check(v.name, v.got, v.want)
-			}
-			for _, v := range []struct {
-				name      string
-				got, want *float64
-			}{
-				{"peer_a", got.PeerA, want.PeerA}, {"peer_b", got.PeerB, want.PeerB}, {"u", got.U, want.U},
-				{"relative_threshold", got.RelativeThreshold, want.RelativeThreshold}, {"relative_probability", got.RelativeProbability, want.RelativeProbability},
-			} {
-				if v.got == nil || v.want == nil {
-					if v.got != v.want {
-						t.Errorf("%s null mismatch: got %v, want %v", v.name, v.got, v.want)
-					}
-					continue
-				}
-				check(v.name, *v.got, *v.want)
-			}
-			if !t.Failed() {
-				passed++
+			if got.State != state || got.Absolute != want.Absolute || got.GoodBase != want.GoodBase {
+				t.Fatalf("absolute verdict: %+v", got)
 			}
 		})
 	}
-	for _, feature := range []string{
-		"good", "bad", "no_peer_evidence", "peer_known_insufficient", "no_samples", "mass_insufficient",
-		"sessions_insufficient", "single_slow_session_veto", "absolute_unconfirmed", "relative_unconfirmed",
-		"unknown_blocks_good", "prior_fallback", "prior_clipped", "padding_changes_both_probabilities",
-		"proven_censor", "peer_unknown_as_bad", "relative_veto",
-	} {
-		if !coverage[feature] {
-			t.Errorf("retained vectors do not cover %s", feature)
-		}
-	}
-	t.Logf("vectors %d/%d; max absolute error %.17g (%s); max relative error %.17g (%s)",
-		passed, len(fixture.Cases), maxAbs, maxAbsField, maxRel, maxRelField)
 }
 
 func TestRuleBParams(t *testing.T) {
@@ -295,9 +189,9 @@ func TestRuleBParams(t *testing.T) {
 		want RuleBParamChange
 	}{
 		{base, RuleBUnchanged},
-		{RuleBParams{.9, .2, .05}, RuleBRelaxed}, {RuleBParams{.8, .3, .05}, RuleBRelaxed}, {RuleBParams{.8, .2, .1}, RuleBRelaxed},
-		{RuleBParams{.7, .2, .05}, RuleBTightened}, {RuleBParams{.8, .1, .05}, RuleBTightened}, {RuleBParams{.8, .2, 0}, RuleBTightened},
-		{RuleBParams{.9, .1, .05}, RuleBMixed}, {RuleBParams{.7, .2, .1}, RuleBMixed},
+		{RuleBParams{.9, .2, .05}, RuleBRelaxed}, {RuleBParams{.8, .3, .05}, RuleBRelaxed}, {RuleBParams{.8, .2, .1}, RuleBUnchanged},
+		{RuleBParams{.7, .2, .05}, RuleBTightened}, {RuleBParams{.8, .1, .05}, RuleBTightened}, {RuleBParams{.8, .2, 0}, RuleBUnchanged},
+		{RuleBParams{.9, .1, .05}, RuleBMixed}, {RuleBParams{.7, .2, .1}, RuleBTightened},
 	} {
 		got, err := CompareRuleBParams(base, tc.next)
 		if err != nil || got != tc.want {
@@ -380,7 +274,7 @@ func TestRuleBSwitchedOwnerTimeoutEvidence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := ruleBTestInput(1, 1, false)
-			for _, rows := range [][]RuleBSample{in.Samples, in.Peers[0].Samples, in.GroupSamples} {
+			for _, rows := range [][]RuleBSample{in.Samples, in.GroupSamples} {
 				for i := range rows {
 					s := &rows[i]
 					s.SwitchedAccount, s.CaptureVersion = true, tc.version
@@ -392,7 +286,7 @@ func TestRuleBSwitchedOwnerTimeoutEvidence(t *testing.T) {
 				}
 			}
 			result := evaluateRuleBTest(t, in, DefaultRuleBParams())
-			for _, counts := range []RuleBCounts{result.Counts, result.PeerCounts, result.PriorLocalCounts} {
+			for _, counts := range []RuleBCounts{result.Counts, result.PriorLocalCounts} {
 				if counts.N != tc.want || counts.K != tc.want {
 					t.Fatalf("counts = %+v, want N=K=%v", counts, tc.want)
 				}
@@ -418,9 +312,8 @@ func ruleBTestInput(ownCount, peerCount int, slow bool) RuleBInput {
 	}
 	in := RuleBInput{Scope: RuleBScope{AccountID: 1, GroupID: 1, Model: "model"}, Now: time.Unix(20000, 0), LimitSeconds: 10,
 		Samples: rows(1, ownCount, slow),
-		Peers:   []RuleBPeer{{Scope: RuleBScope{AccountID: 2, GroupID: 1, Model: "model"}, Identity: -1, Samples: rows(2, peerCount, false)}},
 	}
-	in.GroupSamples = append(slices.Clone(in.Samples), in.Peers[0].Samples...)
+	in.GroupSamples = append(slices.Clone(in.Samples), rows(2, peerCount, false)...)
 	return in
 }
 
@@ -444,51 +337,57 @@ func evaluateRuleBTest(t *testing.T, in RuleBInput, p RuleBParams) RuleBResult {
 	return r
 }
 
-func TestRuleBPeerAndUnknownBoundaries(t *testing.T) {
+func TestRuleBAbsoluteAndGoodBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		mutate func(*RuleBInput)
 		state  RuleBState
 		reason RuleBUnknownReason
-		uNil   bool
 	}{
-		{"peer-known-20", func(*RuleBInput) {}, RuleBGood, "", false},
-		{"peer-known-19.99", func(in *RuleBInput) {
-			in.Peers[0].Samples[0].AvailableAt = in.Now.Add(time.Duration(float64(RuleBHalfLife) * math.Log2(.99)))
-		}, RuleBUnknown, RuleBPeerKnownInsufficient, true},
-		{"no-members", func(in *RuleBInput) { in.Peers = nil }, RuleBUnknown, RuleBNoPeers, true},
-		{"all-rear", func(in *RuleBInput) { in.Peers[0].Identity = 1 }, RuleBUnknown, RuleBAllPeersRear, true},
-		{"self-is-not-peer", func(in *RuleBInput) { in.Peers[0].Scope.AccountID = 1 }, RuleBUnknown, RuleBNoPeers, true},
-		{"other-group-is-not-peer", func(in *RuleBInput) { in.Peers[0].Scope.GroupID = 2 }, RuleBUnknown, RuleBNoPeers, true},
-		{"other-model-is-not-peer", func(in *RuleBInput) { in.Peers[0].Scope.Model = "other" }, RuleBUnknown, RuleBNoPeers, true},
-		{"pending-confirmation-is-front", func(in *RuleBInput) { in.Peers[0].Identity = 2 }, RuleBGood, "", false},
-		{"peer-epoch-cuts-start", func(in *RuleBInput) { in.Peers[0].Epoch = in.Now.Add(time.Second) }, RuleBUnknown, RuleBPeerKnownInsufficient, true},
-		{"empty-own", func(in *RuleBInput) { in.Samples = nil }, RuleBUnknown, RuleBNoSamples, false},
-		{"own-mass-19", func(in *RuleBInput) { in.Samples = in.Samples[:19] }, RuleBUnknown, RuleBMassInsufficient, false},
-		{"own-good-N-tolerance", func(in *RuleBInput) {
+		{"no-peers-good", func(*RuleBInput) {}, RuleBGood, ""},
+		{"no-peers-bad", func(in *RuleBInput) {
+			for i := range in.Samples {
+				in.Samples[i].TTFOMs = 11000
+			}
+		}, RuleBBad, ""},
+		{"no-samples", func(in *RuleBInput) { in.Samples = nil }, RuleBUnknown, RuleBNoSamples},
+		{"mass-19", func(in *RuleBInput) { in.Samples = in.Samples[:19] }, RuleBUnknown, RuleBMassInsufficient},
+		{"mass-rounding", func(in *RuleBInput) {
 			in.Samples[0].AvailableAt = in.Now.Add(time.Duration(float64(RuleBHalfLife) * math.Log2(1-5e-9)))
-		}, RuleBGood, "", false},
-		{"one-session", func(in *RuleBInput) {
+		}, RuleBGood, ""},
+		{"mass-below-tolerance", func(in *RuleBInput) {
+			in.Samples[0].AvailableAt = in.Now.Add(time.Duration(float64(RuleBHalfLife) * math.Log2(1-2e-8)))
+		}, RuleBUnknown, RuleBMassInsufficient},
+		{"two-sessions", func(in *RuleBInput) {
+			for i := range in.Samples {
+				in.Samples[i].SessionKey = fmt.Sprint(i % 2)
+			}
+		}, RuleBUnknown, RuleBSessionsInsufficient},
+		{"one-slow-session", func(in *RuleBInput) {
 			for i := range in.Samples {
 				in.Samples[i].SessionKey = "one"
+				in.Samples[i].TTFOMs = 11000
 			}
-		}, RuleBUnknown, RuleBSessionsInsufficient, false},
-		{"unknowns-block-good", func(in *RuleBInput) {
-			for i := 0; i < 10; i++ {
-				in.Samples[i].TTFOMs, in.Samples[i].Outcome = 0, OutcomeTimeout
+		}, RuleBUnknown, RuleBSlowSessionsInsufficient},
+		{"worst-mean-above", func(in *RuleBInput) {
+			for i := 0; i < 5; i++ {
+				in.Samples[i].TTFOMs = 0
+				in.Samples[i].Outcome = OutcomeTimeout
 			}
-		}, RuleBUnknown, RuleBWorstMeanAboveTolerance, false},
+		}, RuleBUnknown, RuleBWorstMeanAboveTolerance},
+		{"worst-mean-below", func(in *RuleBInput) {
+			for i := 0; i < 4; i++ {
+				in.Samples[i].TTFOMs = 0
+				in.Samples[i].Outcome = OutcomeTimeout
+			}
+		}, RuleBGood, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			in := ruleBTestInput(20, 20, false)
+			in := ruleBTestInput(20, 0, false)
 			tc.mutate(&in)
 			got := evaluateRuleBTest(t, in, DefaultRuleBParams())
-			if got.State != tc.state || (got.U == nil) != tc.uNil ||
-				(tc.reason != "" && !slices.Contains(got.UnknownReasons, tc.reason)) {
-				t.Fatalf("result = %+v", got)
-			}
-			if tc.uNil && (got.RelativeProbability != nil || got.RelativeThreshold != nil || got.PeerA != nil || got.PeerB != nil) {
-				t.Fatalf("insufficient peers must leave relative evidence null: %+v", got)
+			if got.State != tc.state || (tc.reason != "" && !slices.Contains(got.UnknownReasons, tc.reason)) {
+				t.Fatalf("result: %+v", got)
 			}
 		})
 	}
@@ -497,54 +396,56 @@ func TestRuleBPeerAndUnknownBoundaries(t *testing.T) {
 func TestRuleBPriorsPosteriorsAndPurity(t *testing.T) {
 	in := ruleBTestInput(19, 20, true)
 	before := in
-	before.Samples, before.GroupSamples, before.Peers = slices.Clone(in.Samples), slices.Clone(in.GroupSamples), slices.Clone(in.Peers)
-	for i := range before.Peers {
-		before.Peers[i].Samples = slices.Clone(in.Peers[i].Samples)
-	}
+	before.Samples = slices.Clone(in.Samples)
+	before.GroupSamples = slices.Clone(in.GroupSamples)
 	r := evaluateRuleBTest(t, in, DefaultRuleBParams())
-	if r.State != RuleBBad || r.Counts.N != 19 || r.Prior != .001 || math.Abs(r.PeerPrior-19.0/39) > 1e-15 ||
-		r.A != 19.005 || r.B != 5.995 || r.WorstMean != 19.005/24 {
-		t.Fatalf("low-N bad decision, leave-one-out or padding failed: %+v", r)
+	if r.State != RuleBBad || r.Counts.N != 19 || r.Prior != .001 || r.A != 19.005 || r.B != 5.995 || r.WorstMean != 19.005/24 {
+		t.Fatalf("posterior: %+v", r)
 	}
 	if !reflect.DeepEqual(before, in) || !reflect.DeepEqual(r, evaluateRuleBTest(t, in, DefaultRuleBParams())) {
-		t.Fatal("evaluation mutated inputs or was nondeterministic")
+		t.Fatal("mutated inputs or nondeterminism")
 	}
-	for i := range in.Samples {
-		in.Samples[i].SessionKey = "one"
-	}
-	r = evaluateRuleBTest(t, in, DefaultRuleBParams())
-	if r.State != RuleBUnknown || !r.Absolute || !r.Relative || !slices.Contains(r.UnknownReasons, RuleBSlowSessionsInsufficient) {
-		t.Fatalf("one slow session must veto bad: %+v", r)
-	}
-	in = ruleBTestInput(20, 20, false)
 	in.Cut = in.Now.Add(time.Second)
 	r = evaluateRuleBTest(t, in, DefaultRuleBParams())
-	if r.Counts.N != 0 || r.PriorGroupCounts.N != 40 || r.PriorLocalCounts.N != 20 || r.PeerCounts.N != 20 {
-		t.Fatalf("own cutoff must not truncate priors or peers: %+v", r)
+	if r.Counts.N != 0 || r.PriorGroupCounts.N != 39 || r.PriorLocalCounts.N != 19 || r.Prior != .001 {
+		t.Fatalf("cut must not change prior: %+v", r)
 	}
-	in.GroupSamples = nil
-	r = evaluateRuleBTest(t, in, DefaultRuleBParams())
-	if r.Prior != .1 || r.PeerPrior != .1 {
-		t.Fatal(r)
-	}
-	in = ruleBTestInput(20, 30, false)
-	for i := 20; i < 30; i++ {
-		in.Peers[0].Samples[i].TTFOMs, in.Peers[0].Samples[i].Outcome = 0, OutcomeTimeout
-	}
-	r = evaluateRuleBTest(t, in, DefaultRuleBParams())
-	if r.PeerCounts.X != 10 || r.U == nil || *r.PeerA != 10.005 || *r.PeerB != 24.995 {
-		t.Fatalf("peer unknowns must count as bad without filling: %+v", r)
-	}
-	in = ruleBTestInput(20, 20, true)
-	for i := range in.Peers[0].Samples {
-		in.Peers[0].Samples[i].TTFOMs = 11000
-	}
-	in.GroupSamples = append(slices.Clone(in.Samples), in.Peers[0].Samples...)
-	p := DefaultRuleBParams()
-	p.PeerMargin = .99
-	r = evaluateRuleBTest(t, in, p)
-	if r.Prior != .999 || r.PeerPrior != .999 || *r.RelativeThreshold != .999999 || *r.RelativeProbability <= 0 {
-		t.Fatalf("clipped threshold must still evaluate Beta tail: %+v", r)
+}
+
+func TestRuleBGroupPriorAndInactiveMargin(t *testing.T) {
+	for _, slowOwn := range []int{0, 6, 20} {
+		var states []RuleBState
+		for _, slowPeers := range []bool{false, true} {
+			in := ruleBTestInput(20, 20, false)
+			for i := 0; i < slowOwn; i++ {
+				in.Samples[i].TTFOMs = 11000
+			}
+			for i := 20; i < len(in.GroupSamples); i++ {
+				if slowPeers {
+					in.GroupSamples[i].TTFOMs = 11000
+				}
+			}
+			r := evaluateRuleBTest(t, in, DefaultRuleBParams())
+			states = append(states, r.State)
+			want := .001
+			if slowPeers {
+				want = .999
+			}
+			if r.Prior != want {
+				t.Fatalf("prior: %+v", r)
+			}
+			p := DefaultRuleBParams()
+			p.PeerMargin = .99
+			if !reflect.DeepEqual(r, evaluateRuleBTest(t, in, p)) {
+				t.Fatal("peer_margin changed assessment")
+			}
+		}
+		if slowOwn == 6 && (states[0] != RuleBUnknown || states[1] != RuleBBad) {
+			t.Fatalf("prior must change marginal verdict: %v", states)
+		}
+		if slowOwn == 20 && (states[0] != RuleBBad || states[1] != RuleBBad) {
+			t.Fatalf("strong evidence must fail regardless of prior: %v", states)
+		}
 	}
 }
 
@@ -555,9 +456,7 @@ func TestRuleBBetaBoundaries(t *testing.T) {
 			t.Fatalf("CDF(%g) = %.17g, err = %v", x, got, err)
 		}
 	}
-	if got, err := ruleBBetaQuantile(1, 1, .5, ruleBBetaMaxIterations); err != nil || got != .5-math.Exp2(-25) {
-		t.Fatalf("24 bisections with equality moving upper bound: %.17g, err = %v", got, err)
-	}
+
 }
 
 func TestRuleBBetaLargeSymmetricCounts(t *testing.T) {
@@ -579,24 +478,20 @@ func TestRuleBLargeCountsDoNotFalselyFail(t *testing.T) {
 			in.Samples[i].TTFOMs = 11000
 		}
 	}
-	// The target-group prior is 1/2, while peers across both groups have
-	// only one slow sample out of 42, making the relative gate decisive.
-	in.Peers[0].Samples[0].TTFOMs = 11000
-	for i := 2; i < len(in.Peers[0].Samples); i++ {
-		in.Peers[0].Samples[i].GroupID = 2
-	}
-	in.GroupSamples = in.Peers[0].Samples[:2]
+	// Equal fast/slow target-group evidence supplies a symmetric prior.
+	in.GroupSamples = ruleBTestInput(0, 2, false).GroupSamples
+	in.GroupSamples[0].TTFOMs = 11000
 	p := RuleBParams{Confidence: .5000001, Tolerance: math.Nextafter(.5, 0), PeerMargin: 0}
 	got := evaluateRuleBTest(t, in, p)
 	if got.Counts != (RuleBCounts{N: 400000, K: 200000, S: 3, D: 2}) ||
 		got.Prior != .5 || got.A != 200002.5 || got.B != 200002.5 {
 		t.Fatalf("unexpected reproduction evidence: %+v", got)
 	}
-	if got.State != RuleBUnknown || got.Absolute || !got.Relative ||
+	if got.State != RuleBUnknown || got.Absolute ||
 		!slices.Contains(got.UnknownReasons, RuleBAbsoluteUnconfirmed) {
 		t.Fatalf("large symmetric posterior must remain unknown: %+v", got)
 	}
-	t.Logf("state=%d p_abs=%.17g p_rel=%.17g", got.State, got.AbsoluteProbability, *got.RelativeProbability)
+	t.Logf("state=%d p_abs=%.17g", got.State, got.AbsoluteProbability)
 }
 
 func TestRuleBBetaNonConvergence(t *testing.T) {
@@ -607,7 +502,6 @@ func TestRuleBBetaNonConvergence(t *testing.T) {
 		{"fraction", func() (float64, error) { return ruleBBetaFraction(1000, 1000, .5, 1) }},
 		{"cdf-lower", func() (float64, error) { return ruleBBetaCDF(1000, 1000, .49, 1) }},
 		{"cdf-upper", func() (float64, error) { return ruleBBetaCDF(1000, 1000, .5, 1) }},
-		{"quantile", func() (float64, error) { return ruleBBetaQuantile(1000, 1000, .8, 1) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := tc.call(); err == nil {
@@ -615,45 +509,13 @@ func TestRuleBBetaNonConvergence(t *testing.T) {
 			}
 		})
 	}
-	// A tiny tolerance lets the absolute CDF converge in one iteration so
-	// failures deeper in the evaluation cannot be masked by that first call.
-	peerParams := DefaultRuleBParams()
-	peerParams.Tolerance = 1e-12
-	relativeInput := ruleBTestInput(20, 20, false)
-	for i := range relativeInput.Samples {
-		relativeInput.Samples[i].GroupID = 2
-		if i < 10 {
-			relativeInput.Samples[i].TTFOMs = 11000
-		}
+	in := ruleBTestInput(20, 20, false)
+	if _, err := EvaluateRuleB(in, DefaultRuleBParams()); err != nil {
+		t.Fatal(err)
 	}
-	for i := range relativeInput.Peers[0].Samples {
-		relativeInput.Peers[0].Samples[i].GroupID = 2
-	}
-	relativeInput.GroupSamples = ruleBTestInput(0, 5, false).Peers[0].Samples
-	for i := range relativeInput.GroupSamples {
-		relativeInput.GroupSamples[i].AccountID = 3
-	}
-	relativeInput.GroupSamples[0].TTFOMs = 11000
-	// Beta(1,24)'s .99 quantile uses only the terminating upper CDF branch.
-	// The own posterior's CDF at that quantile still needs more than one step.
-	for _, tc := range []struct {
-		name   string
-		input  RuleBInput
-		params RuleBParams
-	}{
-		{"absolute CDF", ruleBTestInput(20, 20, false), DefaultRuleBParams()},
-		{"peer quantile", ruleBTestInput(20, 20, true), peerParams},
-		{"relative CDF", relativeInput, RuleBParams{Confidence: .99, Tolerance: 1e-12}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := EvaluateRuleB(tc.input, tc.params); err != nil {
-				t.Fatalf("normal iteration limit: %v", err)
-			}
-			got, err := evaluateRuleB(tc.input, tc.params, 1)
-			if err == nil || !strings.Contains(err.Error(), tc.name) || got.State != RuleBUnknown {
-				t.Fatalf("unconverged evaluation: state=%d err=%v", got.State, err)
-			}
-		})
+	got, err := evaluateRuleB(in, DefaultRuleBParams(), 1)
+	if err == nil || !strings.Contains(err.Error(), "absolute CDF") || got.State != RuleBUnknown {
+		t.Fatalf("unconverged: %+v / %v", got, err)
 	}
 }
 
@@ -674,5 +536,24 @@ func TestObserveRuleBLocalDiscountedWeight(t *testing.T) {
 	}
 	if result.SamplesLocal != 2 || result.SamplesTotal != 3 || result.NLocal != .75 || result.Counts.N != 1.75 || result.Counts.X != .25 {
 		t.Fatalf("local/total %d/%d, n_local/n/x %v/%v/%v", result.SamplesLocal, result.SamplesTotal, result.NLocal, result.Counts.N, result.Counts.X)
+	}
+}
+
+func TestRuleBGoodWorstMeanBoundary(t *testing.T) {
+	in := ruleBTestInput(20, 0, false)
+	for i := 0; i < 4; i++ {
+		in.Samples[i].TTFOMs = 0
+		in.Samples[i].Outcome = OutcomeTimeout
+	}
+	for _, tc := range []struct {
+		tolerance float64
+		want      RuleBState
+	}{{.18, RuleBGood}, {math.Nextafter(.18, 0), RuleBUnknown}} {
+		p := DefaultRuleBParams()
+		p.Tolerance = tc.tolerance
+		r := evaluateRuleBTest(t, in, p)
+		if r.WorstMean != .18 || r.State != tc.want {
+			t.Fatalf("boundary: %+v", r)
+		}
 	}
 }

@@ -89,8 +89,8 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 	require.ElementsMatch(t, declared, tested)
 	require.LessOrEqual(t, len(assessmentCauses), 32)
 	var registered []string
-	for _, def := range assessmentCauses {
-		if def.ruleB != nil {
+	for i, def := range assessmentCauses {
+		if i < 11 {
 			registered = append(registered, string(def.name))
 		}
 	}
@@ -99,34 +99,27 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 
 func TestAssessmentRuleBOutputWithoutPeers(t *testing.T) {
 	in := ruleBTestInput(40, 0, false)
-	in.Peers = nil
 	result := evaluateRuleBTest(t, in, DefaultRuleBParams())
-	require.Equal(t, RuleBUnknown, result.State)
-	require.Contains(t, result.UnknownReasons, RuleBNoPeers)
+	require.Equal(t, RuleBGood, result.State)
+	require.Empty(t, result.UnknownReasons)
 	b := Basis{Line: DimensionTTFO, TTFT: NewTTFTEvidence(result, in.LimitSeconds)}
-	seg := RecordAssessment(LineState{}, in.Now, EventRegular, VerdictUnknown, "", b)[0]
-	var names []string
-	for _, name := range result.UnknownReasons {
-		names = append(names, string(name))
-	}
-	require.ElementsMatch(t, names, seg.CauseNames())
-	require.Equal(t, ReasonPeerShort, seg.Reason)
-	require.Equal(t, new(0.0), seg.Have)
-	require.Equal(t, new(20), seg.Need)
+	seg := RecordAssessment(LineState{}, in.Now, EventRegular, VerdictPass, "", b)[0]
+	require.Equal(t, ReasonWithin, seg.Reason)
+	require.Empty(t, seg.CauseNames())
+	require.Nil(t, seg.Need)
 }
 
 func TestAssessmentSlowSessionsRequireConfirmedLines(t *testing.T) {
 	for _, tc := range []struct {
 		name                     string
 		slow, censored, peerSlow int
-		absolute, relative       bool
+		absolute                 bool
 		reasons                  []RuleBUnknownReason
 		primary                  AssessmentReason
 	}{
-		{"relative veto", 4, 0, 0, false, true, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBAbsoluteUnconfirmed, RuleBRelativeVeto}, ReasonWithin},
-		{"censored worst mean", 0, 16, 0, false, false, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBAbsoluteUnconfirmed, RuleBRelativeUnconfirmed, RuleBWorstMeanAboveTolerance}, ReasonWithin},
-		{"relative unconfirmed", 22, 0, 30, true, false, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBRelativeUnconfirmed, RuleBWorstMeanAboveTolerance}, ReasonWithin},
-		{"both confirmed", 22, 0, 0, true, true, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBWorstMeanAboveTolerance}, ReasonOwnShort},
+		{"censored worst mean", 0, 16, 0, false, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBAbsoluteUnconfirmed, RuleBWorstMeanAboveTolerance}, ReasonWithin},
+		{"slow peers", 22, 0, 30, true, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBWorstMeanAboveTolerance}, ReasonOwnShort},
+		{"fast peers", 22, 0, 0, true, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBWorstMeanAboveTolerance}, ReasonOwnShort},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := RuleBInput{Scope: RuleBScope{GroupID: 1, AccountID: 1, Model: "m"}, Now: machineNow, LimitSeconds: 15}
@@ -148,17 +141,14 @@ func TestAssessmentSlowSessionsRequireConfirmedLines(t *testing.T) {
 						samples = append(samples, RuleBSample{AccountID: account, GroupID: 1, Model: "m", SessionKey: fmt.Sprintf("t%d", i), StartedAt: at.Add(-5 * time.Second), AvailableAt: at, CensoredMs: 5000, Stream: true, Outcome: OutcomeTimeout})
 					}
 					in.Samples = samples
-				} else {
-					in.Peers = append(in.Peers, RuleBPeer{Scope: RuleBScope{AccountID: account, GroupID: 1, Model: "m"}, Identity: -1, Samples: samples})
 				}
 				in.GroupSamples = append(in.GroupSamples, samples...)
 			}
 			result := evaluateRuleBTest(t, in, DefaultRuleBParams())
 			require.Equal(t, RuleBUnknown, result.State)
 			require.Equal(t, tc.absolute, result.Absolute)
-			require.Equal(t, tc.relative, result.Relative)
 			require.ElementsMatch(t, tc.reasons, result.UnknownReasons)
-			b := Basis{Line: DimensionTTFO, TTFT: NewTTFTEvidence(result, in.LimitSeconds), PeerKnown: result.PeerCounts.N - result.PeerCounts.X}
+			b := Basis{Line: DimensionTTFO, TTFT: NewTTFTEvidence(result, in.LimitSeconds)}
 			seg := RecordAssessment(LineState{}, in.Now, EventRegular, VerdictUnknown, "", b)[0]
 			var causes []string
 			for _, cause := range tc.reasons {

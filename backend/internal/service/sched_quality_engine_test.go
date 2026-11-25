@@ -198,8 +198,7 @@ func TestEngineRuleChangesAtomicRejudgeAndConflict(t *testing.T) {
 					f.store.Rows[i] = old
 				}
 			}
-			// A rear peer whose epoch excludes its samples must be cleared before
-			// membership and evidence are frozen for the relaxed reevaluation.
+			// A rear account is still cleared during a relaxed reevaluation.
 			for i, r := range f.store.Rows {
 				if r.AccountID == 2 && r.Line == q.DimensionTTFO {
 					r.Identity = q.IdentityRear
@@ -209,12 +208,6 @@ func TestEngineRuleChangesAtomicRejudgeAndConflict(t *testing.T) {
 				}
 			}
 			before := append([]q.LineState(nil), f.store.Rows...)
-			peers := make(map[q.LineKey]q.LineState)
-			for _, r := range before {
-				peers[r.LineKey] = r
-			}
-			frozen := freezePeers(f.now, peers)
-			f.e.peerBuckets = map[time.Time]*peerBucket{frozen.at: frozen}
 			decisionCount := len(f.store.Decisions)
 			p := q.DefaultRuleBParams()
 			switch change {

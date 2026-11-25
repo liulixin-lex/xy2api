@@ -208,35 +208,6 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 			rows[k] = relaxed
 		}
 	}
-	peerRows := make(map[schedquality.LineKey]schedquality.LineState)
-	for _, k := range keys {
-		if !remove(k) && s.policies[k.GroupID].Policy.Enabled {
-			r := rows[k]
-			r.LineKey = k
-			peerRows[k] = r
-		}
-	}
-	d.displayPeers(d.now, peerRows)
-	// Only relaxed TTFO keys may replace identities within an existing bucket;
-	// error/cache changes keep all first-output peers frozen as they were.
-	var clearedPeers map[schedquality.LineKey]schedquality.LineState
-	for k, r := range peerRows {
-		if k.Line == schedquality.DimensionTTFO && relax(k) {
-			if clearedPeers == nil {
-				clearedPeers = make(map[schedquality.LineKey]schedquality.LineState, len(d.peers.rows))
-				for pk, pr := range d.peers.rows {
-					clearedPeers[pk] = pr
-				}
-			}
-			clearedPeers[k] = schedquality.LineState{LineKey: k, Identity: r.Identity, Epoch: r.Epoch}
-		}
-	}
-	if clearedPeers != nil {
-		d.peers = &peerBucket{at: d.peers.at, rows: clearedPeers}
-		if _, frozen := d.peerBuckets[d.peers.at]; frozen {
-			d.peerBuckets[d.peers.at] = d.peers
-		}
-	}
 	var changed []schedquality.LineState
 	var decisions []schedquality.Decision
 	inputs := make(map[schedquality.LineKey]schedquality.Evaluation)
@@ -348,7 +319,6 @@ func (s *SchedQualityEngineService) PreviewPolicy(ctx context.Context, group int
 		return nil, err
 	}
 	keys, rows := s.rowKeys(d, states)
-	d.displayPeers(now, rows)
 	old := s.policies[group]
 	s.policies[group] = SchedPolicyRecord{GroupID: group, Policy: p}
 	defer func() { s.policies[group] = old }()

@@ -14,8 +14,10 @@ type TTFTEvidence struct {
 	X            float64              `json:"x"`
 	S            int                  `json:"s"`
 	D            int                  `json:"d"`
+	Tolerance    *float64             `json:"tolerance"`
+	Confidence   *float64             `json:"confidence"`
 	PriorMu      float64              `json:"prior_mu"`
-	PeerNu       float64              `json:"peer_nu"`
+	PeerNu       float64              `json:"peer_nu,omitempty"`
 	PAbs         float64              `json:"p_abs"`
 	PRel         *float64             `json:"p_rel"`
 	U            *float64             `json:"u"`
@@ -24,25 +26,16 @@ type TTFTEvidence struct {
 }
 
 // NewTTFTEvidence copies evidence without retaining mutable result pointers.
-// Peer-dependent values stay null when fewer than 20 known peer mass is present.
+// Relative-comparison fields remain empty; historical values still decode unchanged.
 func NewTTFTEvidence(result RuleBResult, limitSeconds float64) *TTFTEvidence {
 	e := &TTFTEvidence{
 		LimitSeconds: limitSeconds,
 		NLocal:       new(result.NLocal),
 		N:            result.Counts.N, K: result.Counts.K, X: result.Counts.X,
 		S: result.Counts.S, D: result.Counts.D,
-		PriorMu: result.Prior, PeerNu: result.PeerPrior, PAbs: result.AbsoluteProbability,
+		PriorMu: result.Prior, PAbs: result.AbsoluteProbability,
+		Tolerance: new(result.Tolerance), Confidence: new(result.Confidence),
 		Causes: append([]RuleBUnknownReason{}, result.UnknownReasons...),
-	}
-	if result.PeerCounts.N-result.PeerCounts.X >= ruleBMinMass {
-		copyValue := func(v *float64) *float64 {
-			if v == nil {
-				return nil
-			}
-			value := *v
-			return &value
-		}
-		e.PRel, e.U, e.Z = copyValue(result.RelativeProbability), copyValue(result.U), copyValue(result.RelativeThreshold)
 	}
 	return e
 }

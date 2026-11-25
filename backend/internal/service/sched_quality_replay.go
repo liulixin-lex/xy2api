@@ -229,7 +229,6 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 			continue
 		}
 		d.replayStats.batches++
-		d.usePeerBucket(e.at, rows)
 		eventKeys := make([]q.LineKey, 0, len(e.keys))
 		for k := range e.keys {
 			eventKeys = append(eventKeys, k)

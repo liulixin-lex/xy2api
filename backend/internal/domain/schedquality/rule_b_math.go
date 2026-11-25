@@ -77,20 +77,3 @@ func ruleBBetaCDF(a, b, x float64, maxIterations int) (float64, error) {
 	}
 	return 1 - bt*fraction/b, nil
 }
-
-func ruleBBetaQuantile(a, b, confidence float64, maxIterations int) (float64, error) {
-	lower, upper := 0.0, 1.0
-	for q := 0; q < 24; q++ {
-		mid := (lower + upper) / 2
-		cdf, err := ruleBBetaCDF(a, b, mid, maxIterations)
-		if err != nil {
-			return 0, err
-		}
-		if cdf < confidence {
-			lower = mid
-		} else {
-			upper = mid
-		}
-	}
-	return (lower + upper) / 2, nil
-}

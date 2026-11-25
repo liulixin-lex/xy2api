@@ -46,8 +46,7 @@ const (
 
 type ruleBReasonInput struct {
 	*RuleBResult
-	eligiblePeers int
-	tolerance     float64
+	tolerance float64
 }
 
 type assessmentCause struct {
@@ -62,17 +61,17 @@ const otherCauseIndex = 16
 // Append only: indexes are persisted bit positions, not gate priorities.
 // Rule B and the assessment summary use the same names and classifications.
 var assessmentCauses = [...]assessmentCause{
-	{RuleBNoPeers, ReasonPeerShort, func(g ruleBReasonInput) bool { return g.eligiblePeers == 0 }},
-	{RuleBAllPeersRear, ReasonPeerShort, func(g ruleBReasonInput) bool { return g.eligiblePeers > 0 && g.PeerCount == 0 }},
-	{RuleBPeerKnownInsufficient, ReasonPeerShort, func(g ruleBReasonInput) bool { return g.PeerCount > 0 && g.PeerCounts.N-g.PeerCounts.X < ruleBMinMass }},
+	{RuleBNoPeers, ReasonPeerShort, nil},
+	{RuleBAllPeersRear, ReasonPeerShort, nil},
+	{RuleBPeerKnownInsufficient, ReasonPeerShort, nil},
 	{RuleBNoSamples, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.N == 0 }},
 	{RuleBMassInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.N < ruleBMinMass-1e-8 }},
 	{RuleBSessionsInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.S < ruleBMinSessions }},
 	{RuleBSlowSessionsInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.D < ruleBMinSlowSessions }},
 	{RuleBAbsoluteUnconfirmed, ReasonWithin, func(g ruleBReasonInput) bool { return !g.Absolute }},
-	{RuleBRelativeUnconfirmed, ReasonWithin, func(g ruleBReasonInput) bool { return g.U != nil && !g.Relative }},
+	{RuleBRelativeUnconfirmed, ReasonWithin, nil},
 	{RuleBWorstMeanAboveTolerance, ReasonWithin, func(g ruleBReasonInput) bool { return g.WorstMean > g.tolerance }},
-	{RuleBRelativeVeto, ReasonWithin, func(g ruleBReasonInput) bool { return g.GoodBase && g.Relative }},
+	{RuleBRelativeVeto, ReasonWithin, nil},
 	{cacheTurnsShort, ReasonOwnShort, nil},
 	{cacheLowSessionsShort, ReasonOwnShort, nil},
 	{errorClearShort, ReasonOwnShort, nil},
@@ -222,7 +221,7 @@ func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence, peerKnown float64) {
 	for _, name := range e.Causes {
 		i := assessmentCauseIndex(name)
 		def := assessmentCauses[i]
-		if def.ruleB == nil {
+		if i == otherCauseIndex {
 			s.Causes |= 1 << otherCauseIndex
 			continue
 		}
@@ -235,8 +234,8 @@ func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence, peerKnown float64) {
 			case RuleBSessionsInsufficient:
 				s.consider(def.reason, float64(e.S), ruleBMinSessions)
 			case RuleBSlowSessionsInsufficient:
-				// D gates a bad verdict only after both probability tests confirm it.
-				if !slices.Contains(e.Causes, RuleBAbsoluteUnconfirmed) && !slices.Contains(e.Causes, RuleBRelativeUnconfirmed) {
+				// D gates a bad verdict once the absolute probability confirms it.
+				if !slices.Contains(e.Causes, RuleBAbsoluteUnconfirmed) {
 					s.consider(def.reason, float64(e.D), ruleBMinSlowSessions)
 				}
 			default:
