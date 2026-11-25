@@ -44,7 +44,7 @@
 | `internal/handler/` | HTTP 处理器：网关、用户端、`admin/` 管理端、`dto/` 传输对象 |
 | `internal/service/` | 业务逻辑：网关转发、账号调度、计费与定价、运维监控、支付、插件宿主等 |
 | `internal/repository/` | 数据访问：Ent 与原生 SQL 查询、Redis 缓存、上游 HTTP 客户端、迁移执行器 |
-| `internal/domain/` | 跨层共享的常量与领域类型，例如平台清单、角色、状态；`schedquality/` 是 OpenAI 质量状态的纯规则与常量（三线身份、同伴比较、到期复核、试用、阶梯与续接轮） |
+| `internal/domain/` | 跨层共享的常量与领域类型，例如平台清单、角色、状态；`schedquality/` 是 OpenAI 质量状态的纯规则与常量（三线身份、到期复核、试用与续接轮） |
 | `internal/pkg/` | 通用工具包，以及各上游协议的适配代码（`claude`、`openai`、`gemini`、`antigravity`、`xai`、`apicompat`、`tlsfingerprint` 等） |
 | `internal/resilience/` | 网关韧性规则：上游失败分类、请求预算、惩罚与余额暂停、首包前保活。纯函数，不做 I/O |
 | `internal/payment/` | 支付渠道抽象、注册与负载均衡 |
@@ -114,7 +114,7 @@
 
 真实发送以及 WebSocket 实际拨号 / 握手失败，由 `sched_attempt_capture.go`、`sched_attempt_dial.go`、`sched_attempt_recorder.go` 记录到 `account_attempt_samples`，样本按账号 × 模型汇集，身份在 `sched_line_states` 按账号 × 模型 × 分组 × 线持久化。`capture_version` 隔离升级前后的证据。流式尝试分别记录首个事件、首个有效输出、首个答案正文；共用输出分类判据，不用用量或 HTTP 成功状态猜输出。
 
-`sched_quality_*.go` 分页加载 250 分钟窗口证据、恢复评估时刻，并发布只读质量视图；加载完成前不分层，启动进度写 `sched_quality.loading`。补跑起点不早于证据窗口起点，试用样本到达按 UTC 5 秒整点合并。三线独立推进达标、未知、试用与后排；首字做时间折扣和同伴比较，报错按请求最终结果归并，缓存按真实续接轮和 Token 加权。保存配置先在同一事务内按旧配置处理完积压，再保存并对放宽的线清零重判；关闭分组门槛删除对应身份；全局关闭只停止调度应用，仍保留判定与展示。
+`sched_quality_*.go` 分页加载 250 分钟窗口证据、恢复评估时刻，并发布只读质量视图；加载完成前不分层，启动进度写 `sched_quality.loading`。补跑起点不早于证据窗口起点，试用样本到达按 UTC 5 秒整点合并。三线独立推进达标、未知、试用与后排；首字做时间折扣，报错按请求最终结果归并，缓存按真实续接轮和 Token 加权。保存配置先在同一事务内按旧配置处理完积压，再保存并对放宽的线清零重判；关闭分组门槛删除对应身份；全局关闭只停止调度应用，仍保留判定与展示。
 
 试用名额由 `sched_trial_leases.go` 定义、`repository/sched_trial_lease_cache.go` 实现，按账号 × 模型在 Redis 跨分组共享。新候选先占请求名额，绑定成功后转换成会话名额；绑定提交与名额转换不是同一个事务，失败、借号、换号和空闲过期分别释放。期限与已知局限见 [分组质量门槛](../guides/group-quality-gate.md)。
 

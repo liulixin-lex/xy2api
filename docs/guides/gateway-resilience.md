@@ -100,7 +100,7 @@
 - **前提**：需要 `gateway.scheduling.load_batch_enabled`（默认 true）；会话迁出还需要“会话失败改绑”开启。
 - **观测**：`anthropic_account_latency_hold_started`、`anthropic_account_latency_sticky_migrated`、`anthropic_account_latency_sticky_kept`。
 
-OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-quality-gate.md)的首字线按有效输出和同伴证据判定。
+OpenAI 账号没有判慢让位：首字偏慢由[分组质量门槛](group-quality-gate.md)的首字线按这个号自己的首个有效输出判定。
 
 ### 同站断流暂停 `same_site_hold`
 
