@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+- 长期表现快照在系统时钟轻微回调时也会按整点更新，首次装载较慢时及时追上当前统计窗口。
+
 - 客户端未带会话标识时，GPT-6.2 请求也会获得稳定的 `prompt_cache_key`，`/v1/messages` 仍发送完整历史，见 [OpenAI 模型支持](docs/platforms/openai.md#模型支持gpt-62-sol-与-gpt-62-astra)。
 - GPT-6.2 的 `none`、`minimal` 推理强度在 API Key 账号的 HTTP 请求中改按 `low` 发送，在 OAuth 账号与 WebSocket 中改为本地拒绝；带工具的请求不再分给明确不支持 Responses 的账号，部分协议转换路径不再发送 `temperature`、`top_p`。
 - GPT-6.2 在价格目录缺失或名称带推理后缀时不再按其它模型家族计价，带供应商前缀时会匹配渠道价格；目录已有精确 6.2 价格时扣费不变。
