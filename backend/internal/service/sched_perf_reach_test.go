@@ -4,6 +4,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"runtime"
 	"testing"
 	"time"
@@ -177,5 +178,107 @@ func BenchmarkSchedPerfReachPreview(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		p.policyReach(members, nil, q.DefaultPolicy(), .2)
+	}
+}
+
+func TestSchedPerfReachAdjacentRatios(t *testing.T) {
+	policy := q.DefaultPolicy()
+	policy.TTFTSeconds, policy.MinCacheRatio = 12.5, .8
+	members := map[int64]string{1: ""}
+	for _, slow := range []int{29, 30, 31} {
+		t.Run(fmt.Sprint(slow), func(t *testing.T) {
+			facts := map[string]SchedPerfFact{}
+			for i := range 100 {
+				f := perfFact(1, 9)
+				f.Session, f.Read, f.Input, f.TTFO = fmt.Sprint(i%2), 80, 100, 12500
+				if i < slow {
+					f.TTFO = 12600
+				}
+				facts[fmt.Sprint(i)] = f
+			}
+			p := buildSchedPerf(facts, nil, nil, nil, perfAt)
+			for _, tolerance := range []float64{math.Nextafter(.3, 0), .3, math.Nextafter(.3, 1)} {
+				ok := 0
+				if slow < 30 || slow == 30 && tolerance >= .3 {
+					ok = 1
+				}
+				require.Equal(t, SchedAdminReachCount{OK: ok, N: 1}, p.policyReach(members, nil, policy, tolerance)[0].FirstOutput, "tolerance=%.17g", tolerance)
+			}
+			for _, minimum := range []float64{math.Nextafter(.8, 0), .8, math.Nextafter(.8, 1)} {
+				candidate := policy
+				candidate.MinCacheRatio = minimum
+				ok := 1
+				if minimum > .8 {
+					ok = 0
+				}
+				require.Equal(t, SchedAdminReachCount{OK: ok, N: 1}, p.policyReach(members, nil, candidate, .3)[0].Cache, "minimum=%.17g", minimum)
+			}
+		})
+	}
+}
+
+func TestSchedPerfReachWindowAndResetEndpoints(t *testing.T) {
+	cutoff := perfAt.Add(-12 * time.Hour)
+	facts := map[string]SchedPerfFact{}
+	for model, finish := range map[string]time.Time{
+		"before": cutoff.Add(-time.Microsecond), "at-cutoff": cutoff,
+		"inside": perfAt.Add(-time.Microsecond), "at-end": perfAt,
+	} {
+		f := perfFact(1, 9)
+		f.Model, f.Start, f.Finish = model, cutoff.Add(-time.Hour).UnixMicro(), finish.UnixMicro()
+		facts[model] = f
+	}
+	p := buildSchedPerf(facts, nil, nil, nil, perfAt)
+	require.Len(t, p.reach, 2)
+	require.Contains(t, p.reach, SchedAccountModel{1, "at-cutoff"})
+	require.Contains(t, p.reach, SchedAccountModel{1, "inside"})
+	require.Equal(t, []SchedAdminPolicyReach{{Model: "at-cutoff"}, {Model: "inside"}}, p.policyReach(map[int64]string{1: ""}, nil, q.DefaultPolicy(), .2))
+	reset := perfAt.Add(-time.Minute)
+	facts = map[string]SchedPerfFact{}
+	for model, delta := range map[string]time.Duration{"before": -time.Microsecond, "equal": 0, "after": time.Microsecond} {
+		f := perfFact(1, 9)
+		f.Model, f.Start = model, reset.Add(delta).UnixMicro()
+		facts[model] = f
+	}
+	p = buildSchedPerf(facts, nil, nil, map[int64]time.Time{1: reset}, perfAt)
+	require.Len(t, p.reach, 1)
+	require.Contains(t, p.reach, SchedAccountModel{1, "after"})
+}
+
+func TestSchedPerfReachPublishedSnapshotStaysImmutable(t *testing.T) {
+	facts := map[string]SchedPerfFact{}
+	for i := range 20 {
+		f := perfFact(1, 9)
+		f.Session, f.Read, f.Input, f.TTFO = fmt.Sprint(i%2), 80, 100, 12500
+		if i < 4 {
+			f.TTFO = 12600
+		}
+		facts[fmt.Sprint(i)] = f
+	}
+	policy := q.DefaultPolicy()
+	policy.TTFTSeconds, policy.MinCacheRatio = 12.5, .8
+	members := map[int64]string{1: ""}
+	engine := newQualityFixture(t).e
+	first := buildSchedPerf(facts, nil, nil, nil, perfAt)
+	engine.performance.Store(first)
+	held := engine.PerformanceSnapshot()
+	before := held.policyReach(members, nil, policy, .2)
+	require.Equal(t, []SchedAdminPolicyReach{{Model: "text", Cache: SchedAdminReachCount{OK: 1, N: 1}, FirstOutput: SchedAdminReachCount{OK: 1, N: 1}}}, before)
+	// Reuse and overwrite the worker's source map, then publish its next version.
+	for id, f := range facts {
+		f.TTFO, f.Read = 99999, 0
+		facts[id] = f
+	}
+	engine.performance.Store(buildSchedPerf(facts, nil, nil, nil, perfAt.Add(schedPerfTick)))
+	require.NotSame(t, held, engine.PerformanceSnapshot())
+	require.Equal(t, []SchedAdminPolicyReach{{Model: "text", Cache: SchedAdminReachCount{N: 1}, FirstOutput: SchedAdminReachCount{N: 1}}}, engine.PerformanceSnapshot().policyReach(members, nil, policy, .2))
+	require.Equal(t, before, held.policyReach(members, nil, policy, .2))
+	// Also pin both adjacent representable tolerances at the default 4/20 ratio.
+	for _, tolerance := range []float64{math.Nextafter(.2, 0), .2, math.Nextafter(.2, 1)} {
+		ok := 1
+		if tolerance < .2 {
+			ok = 0
+		}
+		require.Equal(t, SchedAdminReachCount{OK: ok, N: 1}, held.policyReach(members, nil, policy, tolerance)[0].FirstOutput)
 	}
 }

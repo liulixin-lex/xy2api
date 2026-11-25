@@ -6,10 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/stretchr/testify/require"
 )
 
 type reachReviewRuleStore struct {
