@@ -68,7 +68,7 @@ func TestSchedAdminV2DetailJSONEvidence(t *testing.T) {
 	require.Equal(t, "fail", ttfo["verdict"])
 	require.EqualValues(t, 2, ttfo["level"])
 	evidence := ttfo["evidence"].(map[string]any)
-	require.ElementsMatch(t, []string{"limit_s", "n_local", "n", "k", "x", "s", "d", "prior_mu", "peer_nu", "p_abs", "p_rel", "u", "z", "causes"}, schedAdminJSONKeys(evidence))
+	require.ElementsMatch(t, []string{"limit_s", "n_local", "n", "k", "x", "s", "d", "prior_mu", "p_abs", "p_rel", "u", "z", "causes"}, schedAdminJSONKeys(evidence))
 	for _, key := range []string{"p_rel", "u", "z"} {
 		require.Nil(t, evidence[key])
 	}

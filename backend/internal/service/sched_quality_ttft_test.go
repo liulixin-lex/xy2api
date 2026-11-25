@@ -80,7 +80,6 @@ func TestEngineRuleBReferenceAssembly(t *testing.T) {
 						refs[i] = true
 					}
 				}
-				rows := make(map[q.LineKey]q.LineState)
 				key := q.LineKey{AccountID: tc.Scope.AccountID, GroupID: tc.Scope.GroupID, Model: tc.Scope.Model, Line: q.DimensionTTFO}
 				state := q.LineState{LineKey: key, Epoch: stamp(tc.Cut)}
 				kind := q.EventRegular
@@ -90,14 +89,7 @@ func TestEngineRuleBReferenceAssembly(t *testing.T) {
 					state.Epoch = f.now
 					state.Identity = q.IdentityRear
 				}
-				rows[key] = state
 				for _, peer := range tc.Peers {
-					k := q.LineKey{AccountID: peer.Scope.AccountID, GroupID: peer.Scope.GroupID, Model: peer.Scope.Model, Line: q.DimensionTTFO}
-					identity := q.IdentityUnknown
-					if peer.Identity == 1 {
-						identity = q.IdentityRear
-					}
-					rows[k] = q.LineState{LineKey: k, Identity: identity, Epoch: stamp(peer.Epoch)}
 					for _, i := range peer.Samples {
 						refs[i] = true
 					}
@@ -362,7 +354,7 @@ func TestEngineRuleBGroupPriorUsesEventTimeAndKeepsSettings(t *testing.T) {
 	key := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}
 	var outcomes []q.Verdict
 	for _, peerSlow := range []bool{false, true} {
-		rows := engineSamples(40, f.now, false)
+		rows := engineSamples(40, f.now, true)
 		for i := range rows {
 			a := &rows[i]
 			a.AccountID = 1

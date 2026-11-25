@@ -5,6 +5,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -23,8 +24,9 @@ func TestSchedAssessmentPublishedOnlyAfterCommit(t *testing.T) {
 		return SchedAdminGroupModel(rows[0], false).Lines
 	}
 	first := lines()
-	require.Equal(t, q.ReasonPeerShort, first.TTFO.LastEval.Reason)
-	require.Equal(t, new(0.0), first.TTFO.LastEval.Have)
+	require.Equal(t, q.ReasonOwnShort, first.TTFO.LastEval.Reason)
+	require.NotNil(t, first.TTFO.LastEval.Have)
+	require.InDelta(t, math.Exp2(-float64(f.line(q.DimensionTTFO).EvaluatedAt.Sub(f.ledger.Rows[0].FinishedAt))/float64(q.RuleBHalfLife)), *first.TTFO.LastEval.Have, 1e-12)
 	require.Equal(t, new(20), first.TTFO.LastEval.Need)
 	require.Equal(t, q.ReasonOwnShort, first.Cache.LastEval.Reason)
 	require.Equal(t, new(50), first.Error.LastEval.Need)
@@ -88,7 +90,7 @@ func TestSchedAssessmentRelaxStartsRun(t *testing.T) {
 	require.Equal(t, before[0], relaxed.LastAssessment[0])
 	seg := relaxed.LastAssessment[1]
 	require.Equal(t, q.EventRegular, seg.Kind)
-	require.Equal(t, q.ReasonPeerShort, seg.Reason)
+	require.Equal(t, q.ReasonOwnShort, seg.Reason)
 	require.Empty(t, seg.Action)
 	require.Equal(t, f.now.Round(time.Microsecond), seg.FirstAt)
 	require.Equal(t, f.now.Round(time.Microsecond), seg.LastAt)
