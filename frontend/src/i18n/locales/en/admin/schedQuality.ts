@@ -39,6 +39,8 @@ export default {
       recoverNone: 'Nothing to recover: not at the rear or on trial, and no clearable automatic state',
       window: 'Last 12 h',
       windowPartial: 'Last {hours} h',
+      windowSince: 'Since {time}',
+      lacks: 'samples {have} / {need}',
       gateOff: 'Gate off',
       col: {
         requests: 'Reqs',
@@ -51,8 +53,6 @@ export default {
       },
       ref: {
         ttfo: 'peers {v}',
-        error: '≤ {v}',
-        cache: '≥ {v}',
       },
     },
     col: {
@@ -211,13 +211,6 @@ export default {
       modelSearch: 'Pick or type a model name',
     },
     evidence: {
-      over: 'Over {s} s',
-      bar: 'Bar',
-      peers: 'Peers',
-      failed: 'Errors',
-      limit: 'Limit',
-      hit: 'Hit',
-      min: 'Min',
       samples: 'Samples',
       local: 'This group',
       joiner: ', ',

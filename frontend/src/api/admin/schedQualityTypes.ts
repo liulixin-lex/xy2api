@@ -171,6 +171,9 @@ export interface BackendTTFOEvidence {
   z: number | null
   /** Why the verdict is unknown (rule B's unknown reasons). */
   causes: string[]
+  /** The window the samples were taken from, as on the cache line; absent on records from before it was kept. */
+  window_from?: string | null
+  window_to?: string | null
 }
 
 export interface BackendErrorEvidence {
@@ -189,6 +192,9 @@ export interface BackendErrorEvidence {
    * account does not recover yet). Omitted when false and on records before it was kept.
    */
   recovery_over_limit?: boolean
+  /** The window the outcomes were taken from, as on the cache line; absent on records from before it was kept. */
+  window_from?: string | null
+  window_to?: string | null
 }
 
 export interface BackendCacheEvidence {
@@ -201,7 +207,7 @@ export interface BackendCacheEvidence {
   /**
    * From rule 4.0, absent on older records (never read as 0): the low sessions with 10 turns or more of their own, the
    * path a failing verdict took (two adjacent, one at 5 points short, one at 20 points short over 10 turns) and the
-   * window the turns were taken from. Read, not shown yet.
+   * window the turns were taken from (shown as the opened decision's period).
    */
   low_sessions_10?: number | null
   path?: 'pair' | 'single5' | 'deep10' | null

@@ -4,7 +4,7 @@ import { defineComponent, h, withDirectives } from 'vue'
 
 import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
 import { basis, groupModel, legacyBasis, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
-import { perfAnswer, perfGroup, perfRow } from '@/__tests__/fixtures/schedQuality/performance'
+import { lastEval, perfAnswer, perfGroup, perfRow } from '@/__tests__/fixtures/schedQuality/performance'
 import SchedQualityPanel from '../SchedQualityPanel.vue'
 import SchedDecisions from '../SchedDecisions.vue'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
@@ -529,14 +529,25 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
   const cells = (groupId: number) => Array.from(groupRow(groupId).querySelectorAll<HTMLElement>('[data-qp-cell]'), (cell) => [
     cell.dataset.qpCell, cell.firstElementChild!.textContent, [...cell.classList].find((name) => name.startsWith('is-')), cell.querySelector('[data-qp-ref]')?.textContent ?? null
   ])
+  /** The line under a held figure: its text and its colour. */
+  const judged = (groupId: number, col: string) => {
+    const el = groupRow(groupId).querySelector<HTMLElement>(`[data-qp-cell="${col}"] [data-qp-judged]`)
+    return el ? [el.textContent, [...el.classList].find((name) => name.startsWith('is-'))] : null
+  }
+  const dot = (groupId: number) => [...groupRow(groupId).querySelector('.status-dot')!.classList].find((name) => name.startsWith('status-dot--'))
   const place = (groupId: number) => groupRow(groupId).querySelector('[data-test="qp-state"] .gt__place-main')!.textContent!.trim()
   const stay = (groupId: number) => groupRow(groupId).querySelector('[data-qp-stay]')?.textContent ?? null
   const trigger = (groupId: number) => groupRow(groupId).querySelector<HTMLElement>(`[data-qp-place-trigger="${groupId}"]`)
 
-  it('puts each group\'s place and 12-hour figures in one row; a held share shows only what it is measured against', async () => {
+  // Plan item 20: a held line's 12-hour figure is plain and its colour moves to the line under it — at the rear what
+  // put it there against its line, on trial its latest assessment; under any other first-output share, the peers'.
+  it('puts each group\'s place and 12-hour figures in one row; a held line shows what it was judged on under its figure', async () => {
     atLocalNoon()
     const value = detail()
-    value.groups[0].by_model[1].lines.error = line('error', 'trial', { trial_started_at: inMinutes(-70), trial_until: inMinutes(50) })
+    value.groups[0].by_model[1].lines.ttfo.basis = basis('ttfo', { ttft: ttfoEvidence({ n: 24, k: 9, tolerance: 0.17 }) })
+    value.groups[0].by_model[1].lines.error = line('error', 'trial', {
+      trial_started_at: inMinutes(-70), trial_until: inMinutes(50), last_eval: lastEval({ reason: 'trial_open', causes: ['clear_insufficient'], have: 12, need: 40 })
+    })
     api.accountDetail.mockResolvedValue(value)
     api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
     mount(Panel, { attachTo: document.body })
@@ -549,13 +560,20 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     expect(stay(54)).toBeNull()
     expect(cells(53)).toEqual([
       ['requests', '463', 'is-plain', null],
-      ['ttfo', '53.1%', 'is-rear', 'admin.schedQuality.panel.ref.ttfo:{"v":"19.7%"}'],
-      ['error', '2.5%', 'is-trial', 'admin.schedQuality.panel.ref.error:{"v":"5%"}'],
+      ['ttfo', '53.1%', 'is-plain', null],
+      ['error', '2.5%', 'is-plain', null],
       ['cache', '90.0%', 'is-unknown', null]
     ])
+    // The rear line reads against the tolerance its decision was taken with; the share is never with its seconds.
+    expect(judged(53, 'ttfo')).toEqual(['37.5 / 17', 'is-rear'])
+    expect(judged(53, 'error')).toEqual(['admin.schedQuality.panel.lacks:{"have":12,"need":40}', 'is-trial'])
+    expect(judged(53, 'cache')).toBeNull()
     expect(groupRow(53).querySelector('[data-qp-cell="ttfo"]')!.getAttribute('aria-label')).toBe(
-      'admin.schedQuality.panel.col.ttfo 53.1% admin.schedQuality.identity.rear admin.schedQuality.panel.ref.ttfo:{"v":"19.7%"}'
+      'admin.schedQuality.panel.col.ttfo 53.1% admin.schedQuality.identity.rear 37.5 / 17'
     )
+    // An unheld first-output share has the peers' share under it (北辰组's row of gpt-b has no line state: unknown).
+    expect(cells(54)[1]).toEqual(['ttfo', '20.1%', 'is-unknown', 'admin.schedQuality.panel.ref.ttfo:{"v":"19.7%"}'])
+    expect(judged(54, 'ttfo')).toBeNull()
     // No sentence, no legend, no section title: the figures and the place say it.
     expect(document.querySelector('[data-qp-why], [data-qp-legend]')).toBeNull()
     expect(document.querySelector('[data-qp-perf-note]')!.textContent).toBe('admin.schedQuality.panel.window')
@@ -568,6 +586,51 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     await flushPromises()
     expect(cells(53).map(([col, text]) => `${col} ${text}`)).toEqual(['requests 120', 'ttfo 20.1%', 'error 0.0%', 'cache 90.0%'])
     expect(place(53)).toBe('admin.schedQuality.placement.front')
+  })
+
+  // Plan item 20: a front with a passing line has a green dot; one none of whose lines passes, a grey one.
+  it('greys the front dot when none of the lines passes', async () => {
+    const value = detail()
+    value.groups[1].by_model = [groupModel('gpt-a', { ttfo: 'unknown', error: 'unknown', cache: 'unknown' })]
+    api.accountDetail.mockResolvedValue(value)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-a' })
+    expect([place(53), dot(53)]).toEqual(['admin.schedQuality.placement.front', 'status-dot--ok'])
+    expect([place(54), dot(54)]).toEqual(['admin.schedQuality.placement.front', 'status-dot--observe'])
+    // A group without a row for the model has no data: grey too.
+    tab('gpt-b').click()
+    await flushPromises()
+    expect([place(54), dot(54)]).toEqual(['admin.schedQuality.placement.front', 'status-dot--observe'])
+  })
+
+  // Plan item 20: the 12-hour figures start at a recovery within them (the snapshot drops what came before it).
+  it('heads the figures with the recovery time when the account was recovered within their window', async () => {
+    const recovered = (reset: string | null) => {
+      const value = detail()
+      value.reset_at = reset
+      return value
+    }
+    const heading = () => document.querySelector('[data-qp-perf-note]')!.textContent
+    const clock = (iso: string) => {
+      const date = new Date(iso)
+      return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+    }
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
+    mount(Panel, { attachTo: document.body })
+    // Window 00:10–12:10 UTC: a recovery at 09:07 inside it heads the figures; one before it or after the figures were
+    // worked out does not (they are the whole window, or from before the recovery).
+    for (const [reset, expected] of [
+      ['2026-11-19T09:07:00Z', `admin.schedQuality.panel.windowSince:{"time":"${clock('2026-11-19T09:07:00Z')}"}`],
+      ['2026-11-19T00:05:00Z', 'admin.schedQuality.panel.window'],
+      ['2026-11-19T12:15:00Z', 'admin.schedQuality.panel.window'],
+      [null, 'admin.schedQuality.panel.window']
+    ] as const) {
+      api.accountDetail.mockResolvedValue(recovered(reset))
+      closeSchedDrawer()
+      await flushPromises()
+      await openOn(7, { model: 'gpt-b' })
+      expect(heading()).toBe(expected)
+    }
   })
 
   // Astra 1: a group whose gate is now off keeps no figures of an older snapshot that still has its row.
@@ -608,7 +671,24 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     expect(place(53)).toBe('admin.schedQuality.placement.trial')
     expect(stay(53)).toBe('admin.schedQuality.stay.line:{"line":"admin.schedQuality.panel.col.error","stay":"admin.schedQuality.stay.trial:{\\"start\\":\\"11:20\\",\\"end\\":\\"13:20\\"}"}')
     expect(stay(54)).toBe('admin.schedQuality.stay.trial:{"start":"11:55","end":"13:55"}')
-    expect(cells(54).slice(1).map(([col, , tone]) => `${col} ${tone}`)).toEqual(['ttfo is-unknown', 'error is-unknown', 'cache is-trial'])
+    expect(cells(54).slice(1).map(([col, , tone]) => `${col} ${tone}`)).toEqual(['ttfo is-unknown', 'error is-unknown', 'cache is-plain'])
+    // On trial the line under the figure is its latest assessment: before any, a dash in the trial's colour.
+    expect(judged(54, 'cache')).toEqual(['—', 'is-trial'])
+  })
+
+  // Plan item 20: a trial whose latest assessment passes reads 达标 in green; never the reading it went on trial with.
+  it('reads a trial line\'s latest assessment under its figure, green when it passes', async () => {
+    const value = detail()
+    const [, b] = value.groups[0].by_model
+    b.placement = 'trial'
+    b.lines.ttfo = line('ttfo', 'trial', { trial_until: inMinutes(50), basis: basis('ttfo', { ttft: ttfoEvidence({ n: 24, k: 9, tolerance: 0.2 }) }), last_eval: lastEval({ reason: 'within', causes: [], have: null, need: null }) })
+    b.lines.cache = line('cache', 'trial', { trial_until: inMinutes(40), last_eval: lastEval({ reason: 'trial_open', causes: ['turns_insufficient'], have: 39, need: 40 }) })
+    api.accountDetail.mockResolvedValue(value)
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { groupId: 53, model: 'gpt-b' })
+    expect(judged(53, 'ttfo')).toEqual(['admin.schedQuality.verdict.pass', 'is-pass'])
+    expect(judged(53, 'cache')).toEqual(['admin.schedQuality.panel.lacks:{"have":39,"need":40}', 'is-trial'])
   })
 
   it('opens a group\'s exemption at its place, and only the removal of one in force there', async () => {
@@ -767,7 +847,8 @@ describe('SchedQualityPanel decision records', () => {
     // The two groups' evidence is alike: it shows once, without naming the groups again.
     expect(open.querySelectorAll('[data-qp-evidence]')).toHaveLength(1)
     expect(open.querySelector('.drow__group')).toBeNull()
-    expect(Array.from(open.querySelectorAll('[data-qp-evidence-measure] dd'), (el) => el.textContent)).toEqual(['4.9%', '17.0%'])
+    // What it read against its line: this fixture's record has no tolerance kept, so the line is unknown, not made up.
+    expect(Array.from(open.querySelectorAll('[data-qp-evidence-measure] dd'), (el) => el.textContent)).toEqual(['4.9 / —'])
 
     const more = () => document.querySelector<HTMLElement>('[data-qp-decisions-more]')
     more()!.click()

@@ -16,7 +16,7 @@ const VALUES: Record<string, string[]> = {
     'no_peers', 'all_peers_rear', 'peer_known_insufficient', 'no_samples', 'mass_insufficient', 'sessions_insufficient',
     'slow_sessions_insufficient', 'absolute_unconfirmed', 'relative_unconfirmed', 'worst_mean_above_tolerance', 'relative_veto'
   ],
-  'admin.schedQuality.evidence': ['over', 'bar', 'peers', 'failed', 'limit', 'hit', 'min', 'samples', 'local'],
+  'admin.schedQuality.evidence': ['samples', 'local'],
   'admin.schedQuality.decisions.timeout.seats': ['full', 'not_observed', 'unknown'],
   'admin.schedQuality.ttftRule': ['confidence', 'tolerance', 'confidenceHint', 'toleranceHint'],
   'admin.schedQuality.ttftRule.legal': ['confidence', 'tolerance'],
@@ -97,10 +97,6 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
     walk(lookup(messages, 'admin.schedQuality.ttftRule'))
     expect(texts.filter((text) => /同伴|前排|peer|front accounts/i.test(text))).toEqual([])
     expect(lookup(messages, 'admin.schedQuality.ttftRule.peer_margin')).toBeUndefined()
-  })
-
-  it('puts the first-output limit into its figure label', () => {
-    expect(String(lookup(messages, 'admin.schedQuality.evidence.over'))).toContain('{s}')
   })
 
   // 前端修整 (package C): the panel's figure headings fit their 56px columns (12px text), and in Chinese the error line

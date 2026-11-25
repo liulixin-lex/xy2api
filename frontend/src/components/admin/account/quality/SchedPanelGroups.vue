@@ -67,14 +67,15 @@
         v-for="cell in item.cells"
         :key="cell.col"
         class="gt__n"
-        :class="[`gt__n--${cell.col}`, cell.value === null && !cell.held ? 'is-none' : `is-${cell.identity}`]"
+        :class="[`gt__n--${cell.col}`, cell.value === null ? 'is-none' : cell.held ? 'is-plain' : `is-${cell.identity}`]"
         role="cell"
         :aria-label="cell.label"
         :data-qp-cell="cell.col"
         :data-identity="cell.identity"
       >
         <span>{{ cell.text }}</span>
-        <span v-if="cell.reference" class="gt__ref" data-qp-ref>{{ cell.reference }}</span>
+        <span v-if="cell.judged" class="gt__ref" :class="`is-${cell.judged.tone}`" data-qp-judged>{{ cell.judged.text }}</span>
+        <span v-else-if="cell.reference" class="gt__ref" data-qp-ref>{{ cell.reference }}</span>
       </span>
     </div>
   </div>
@@ -83,16 +84,20 @@
 <script setup lang="ts">
 /**
  * The quality panel's groups table for the selected model; the layout carries the meaning, not labels:
- * - The first heading is the window ("近 12 小时", or what a filling window covers); when it was worked out is in its tip.
+ * - The first heading is the window ("近 12 小时", what a filling window covers, or "HH:MM 起" when the account was
+ *   recovered within it: its figures start there); when it was worked out is in its tip.
  * - Each group takes two lines: its alias and whole name (once, when the pill already reads it whole), then its place
  *   and the four 12-hour figures. The place reads
  *   前排, 后排, 试用, 豁免至 the time it ends, 停调, or 门槛关; its dot and the figures share one set of colours
- *   (amber rear, blue trial, green front or pass, purple exempt, grey unknown or no figure), so the amber figure is the
- *   line that holds the group at the rear.
+ *   (amber rear, blue trial, green pass, purple exempt, grey unknown or no figure); a front whose lines are none of them
+ *   passing has a grey dot.
  * - Under 后排 when it is reviewed, under 试用 when it started and when it ends at the latest, small like
  *   the figures' references: of the line that ends last, named by its column when more than one line holds the place.
- * - Under a share at the rear or on trial, only what it is measured against, in the same 12-hour terms: the group's
- *   other accounts on the same requests for the first output, the group's limit and minimum for errors and cache.
+ * - A line that holds the group at the rear or on trial keeps its 12-hour figure in the plain colour and has the colour
+ *   on the line under it: at the rear what the decision that put it there read against its line ("76.2 / 86", the
+ *   same text as the list's card and the opened decision); on trial its latest assessment (达标 in green, what it still
+ *   lacks, or unknown). Under any other first-output share, what the group's other accounts show on the same requests
+ *   ("同组 15.0%").
  * - The place is a button for a manager: it opens the group's exemption, or its removal when exempt, at the place.
  */
 import { computed } from 'vue'
@@ -107,7 +112,7 @@ import { DASH, schedWord } from '@/utils/schedQualityFormat'
 import { groupPillText } from '@/utils/groupAlias'
 import { vTip } from '@/utils/tip'
 import SchedPauseMark from './SchedPauseMark.vue'
-import { gateOff, groupPlace, lineStay, modelRow, placeLine, rearStay, trialStay, type PanelPlace } from './qualityPanel'
+import { basisReading, gateOff, groupPlace, lineStay, modelRow, placeLine, rearStay, trialNote, trialStay, type PanelPlace } from './qualityPanel'
 import { fmtCount, fmtPct, MIN_ATTEMPTS, perfView } from './performance'
 
 const props = defineProps<{
@@ -127,22 +132,31 @@ const { panelPerf, retry } = useSchedLayerData()
 
 type Col = 'requests' | BackendDim
 const COLS: Col[] = ['requests', 'ttfo', 'error', 'cache']
+const DIMS: BackendDim[] = ['ttfo', 'error', 'cache']
 const PLACE_TONES: Record<PanelPlace, StatusDotTone> = { front: 'ok', trial: 'info', rear: 'back', exempt: 'exempt', stopped: 'off' }
 
 const perf = computed(() => (panelPerf.id !== null && panelPerf.id === props.detail.account.id ? panelPerf.data : null))
 const perfFailed = computed(() => panelPerf.failedId !== null && panelPerf.failedId === props.detail.account.id)
 
-/** The window as the first heading: 12 hours, or the hours a filling window covers so far. */
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/**
+ * The window as the first heading: 12 hours, or the hours a filling window covers so far; "HH:MM 起" when the account
+ * was recovered by hand within the window the figures cover (they start at the recovery). Never a date: the window is
+ * 12 hours at most.
+ */
 const windowText = computed(() => {
   const data = perf.value
+  const reset = props.detail.reset_at ? Date.parse(props.detail.reset_at) : Number.NaN
+  if (data?.at && Number.isFinite(reset) && reset > Date.parse(data.window_from) && reset <= Date.parse(data.at)) {
+    const since = new Date(reset)
+    return t('admin.schedQuality.panel.windowSince', { time: `${pad2(since.getHours())}:${pad2(since.getMinutes())}` })
+  }
   if (!data?.at || data.complete) return t('admin.schedQuality.panel.window')
   const hours = Math.max(0, (Date.parse(data.at) - Date.parse(data.window_from)) / 3_600_000)
   return t('admin.schedQuality.panel.windowPartial', { hours: hours.toFixed(1) })
 })
 const updated = computed(() => (perf.value?.at ? t('admin.schedQuality.perf.updated', { time: formatShortTime(perf.value.at) }) : ''))
-
-/** A threshold as set: 0.05 → "5%", 0.025 → "2.5%". */
-const limitPct = (ratio: number) => `${Number((ratio * 100).toFixed(1))}%`
 
 function placeText(place: PanelPlace, group: BackendDetailGroup): string {
   if (place === 'exempt') {
@@ -176,28 +190,37 @@ const rows = computed(() => {
       error: view && view.row.attempts.n >= MIN_ATTEMPTS ? view.row.attempts.failures / view.row.attempts.n : null,
       cache: view?.cacheRate ?? null
     }
-    // What a share at the rear or on trial is measured against, in the same 12-hour terms.
-    const references: Record<BackendDim, string | null> = {
-      ttfo: view?.expectedEnough && view.expectedRate !== null ? t('admin.schedQuality.panel.ref.ttfo', { v: fmtPct(view.expectedRate) }) : null,
-      error: t('admin.schedQuality.panel.ref.error', { v: limitPct(group.policy.max_error_rate) }),
-      cache: t('admin.schedQuality.panel.ref.cache', { v: limitPct(group.policy.min_cache_ratio) })
-    }
+    // What the group's other accounts show on the same requests: the first output's 12-hour reference.
+    const peers = view?.expectedEnough && view.expectedRate !== null ? t('admin.schedQuality.panel.ref.ttfo', { v: fmtPct(view.expectedRate) }) : null
     const cells = COLS.map((col) => {
-      const identity: BackendIdentity | 'plain' = col === 'requests' ? 'plain' : (row?.lines[col].identity ?? 'unknown')
+      const line = col === 'requests' ? undefined : row?.lines[col]
+      const identity: BackendIdentity | 'plain' = col === 'requests' ? 'plain' : (line?.identity ?? 'unknown')
       const value = col === 'requests' ? (view ? view.row.requests : null) : shares[col]
       const text = value === null ? DASH : col === 'requests' ? fmtCount(value) : fmtPct(value)
-      // The line that holds the place keeps its colour even without a 12-hour figure (its evidence is other groups').
-      const held = col !== 'requests' && (identity === 'rear' || identity === 'trial')
-      const reference = held && value !== null ? references[col as BackendDim] : null
+      // The line that holds the place has its colour on the line under its 12-hour figure, even without one (its
+      // evidence may be other groups'): what put it at the rear, or how its trial stands.
+      const held = identity === 'rear' || identity === 'trial'
+      let judged: { text: string; tone: 'rear' | 'trial' | 'pass' } | null = null
+      if (identity === 'rear') judged = { text: basisReading(line?.basis) ?? DASH, tone: 'rear' }
+      else if (identity === 'trial') {
+        const note = trialNote(line?.last_eval, t)
+        judged = { text: note.text, tone: note.pass ? 'pass' : 'trial' }
+      }
+      const reference = !held && col === 'ttfo' && value !== null ? peers : null
       const verdict = identity === 'plain' ? '' : schedWord('identity', identity, t, te)
-      return { col, identity, value, held, text, reference, label: [t(`admin.schedQuality.panel.col.${col}`), text, verdict, reference].filter(Boolean).join(' ') }
+      return {
+        col, identity, value, held, text, judged, reference,
+        label: [t(`admin.schedQuality.panel.col.${col}`), text, verdict, judged?.text, reference].filter(Boolean).join(' ')
+      }
     })
+    // A front none of whose lines passes reads grey, as the list's unknown dot.
+    const tone: StatusDotTone = off ? 'off' : place === 'front' && !DIMS.some((dim) => row?.lines[dim].identity === 'pass') ? 'observe' : PLACE_TONES[place]
     return {
       group,
       info,
       pillIsName: groupPillText(info) === group.name,
       place,
-      tone: off ? ('off' as const) : PLACE_TONES[place],
+      tone,
       placeText: off ? t('admin.schedQuality.panel.gateOff') : placeText(place, group),
       stay: off ? '' : stayText(row, place),
       gateOff: off,
@@ -375,14 +398,15 @@ const rows = computed(() => {
 .gt__n--cache {
   grid-area: cache;
 }
-/* What a held share is measured against: small, under it, in the plain text colour of a note. */
+/* Under a figure, small: the peers' share in the plain text colour of a note, or, on the line that holds the place,
+   what it was judged on in that line's colour. */
 .gt__ref {
   color: var(--color-text-secondary);
   font-size: 11px;
   line-height: 14px;
 }
-/* One set of colours with the place's dot: amber rear, blue trial, green pass, grey unknown. A dash is grey, except on
-   the line that holds the group at the rear or on trial: it keeps that colour, so the row still shows which line. */
+/* One set of colours with the place's dot: amber rear, blue trial, green pass, grey unknown or no figure. A held line's
+   12-hour figure is plain; its colour is on the line under it, so the row still shows which line holds it. */
 .is-rear {
   color: var(--color-status-back-text);
 }

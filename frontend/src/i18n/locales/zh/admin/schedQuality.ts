@@ -39,6 +39,8 @@ export default {
       recoverNone: '没有可恢复的状态：不在后排或试用，也没有可清除的自动状态',
       window: '近 12 小时',
       windowPartial: '近 {hours} 小时',
+      windowSince: '{time} 起',
+      lacks: '样本 {have} / {need}',
       gateOff: '门槛关',
       col: {
         requests: '请求',
@@ -51,8 +53,6 @@ export default {
       },
       ref: {
         ttfo: '同组 {v}',
-        error: '≤ {v}',
-        cache: '≥ {v}',
       },
     },
     col: {
@@ -211,13 +211,6 @@ export default {
       modelSearch: '选择或输入模型名',
     },
     evidence: {
-      over: '超 {s} 秒',
-      bar: '判差线',
-      peers: '同组',
-      failed: '报错',
-      limit: '上限',
-      hit: '命中',
-      min: '下限',
       samples: '样本',
       local: '本组',
       joiner: '、',

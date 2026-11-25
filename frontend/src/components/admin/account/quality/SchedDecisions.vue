@@ -74,9 +74,9 @@
  * panel. One entry a line: the time, the action in its colour, where it ends ("→ 10:04"), the line, the model and the
  * groups as their pills; the model only when it is not the tab's. Records of one minute, action, model, line and end
  * minute across groups are one entry (mergeDecisions); the newest six show, "查看更多" shows the rest and then loads
- * older pages. A line with evidence is a button: it grows open to the figures the decision was taken on (SchedEvidence),
- * once for the groups that share them and apart, with their pills and own ends, where they differ; and why a trial
- * ended without a verdict. Another account starts over; a quality change made from the page loads the first page again.
+ * older pages. A line with evidence is a button: it grows open to the figures the decision was taken on (SchedEvidence:
+ * when, and what it read against its line), once for the groups that share them and apart, with their pills and own
+ * ends, where they differ; and why a trial ended without a verdict. Another account starts over; a quality change made from the page loads the first page again.
  * The rule version in force comes with the account's detail (`ruleVersion`). Records of the previous rules (another
  * rule version, or none) read "旧规则 · <action>", as they always did otherwise; a record without a line keeps its muted
  * look whatever its version. A trial that ends under the rules in force at its deadline reads 到期回正常 (with why it was
@@ -148,7 +148,7 @@ const hasShown = (item: BackendDecision) => {
   if (item.line && item.action === 'trial_timeout') return true
   if (!item.basis) return false
   const figures = basisFigures(item.basis)
-  return figures.measure !== null || figures.samples.length > 0
+  return figures.period !== null || figures.reading !== null || figures.samples.length > 0
 }
 
 const entries = computed(() =>

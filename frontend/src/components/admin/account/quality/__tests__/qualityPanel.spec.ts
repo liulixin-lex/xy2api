@@ -4,9 +4,11 @@ import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 
-import type { BackendDecision, BackendDetailGroup, BackendGroupModel } from '@/api/admin/schedQualityTypes'
+import type { BackendDecision, BackendDetailGroup, BackendGroupModel, BackendLastEval } from '@/api/admin/schedQualityTypes'
 import { basis, cacheEvidence, errorEvidence, groupModel, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
-import { basisFigures, evidenceCauses, groupPlace, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeLine, rearStay } from '../qualityPanel'
+import {
+  basisFigures, basisPeriod, basisReading, evidenceCauses, groupPlace, mergeDecisions, modelMarks, panelRecoverable, pickModelTab, placeLine, rearStay, trialNote
+} from '../qualityPanel'
 import { groupDotState } from '@/components/admin/account/table/accountGroups'
 
 const group = (id: number, rows: BackendGroupModel[], exempt = false): BackendDetailGroup => ({
@@ -115,30 +117,63 @@ describe('quality panel place', () => {
 })
 
 describe('decision figures', () => {
-  it('reads each line\'s figure against its measure, then the units counted; what a record lacks is left out', () => {
-    expect(basisFigures(basis('ttfo', { ttft: ttfoEvidence({ limit_s: 8, n: 40, k: 9, z: 0.103 }), samples_local: 11, samples_total: 30 }))).toEqual({
-      measure: [{ label: 'over', params: { s: 8 }, value: '22.5%' }, { label: 'bar', value: '10.3%' }],
-      samples: [{ label: 'samples', value: '30' }, { label: 'local', value: '11' }]
+  // Plan item 20: one text for what a decision read against its line, shared by the panel's cell, the list's card and
+  // the opened decision. The first-output line is measured against the tolerance that decision was taken with.
+  it('reads each line\'s figure against its line as one text; the first output against the decision\'s own tolerance', () => {
+    expect(basisReading(basis('ttfo', { ttft: ttfoEvidence({ limit_s: 8, n: 40, k: 9, tolerance: 0.2 }) }))).toBe('22.5 / 20')
+    expect(basisReading(basis('ttfo', { ttft: ttfoEvidence({ n: 40, k: 9, tolerance: 0.175 }) }))).toBe('22.5 / 17.5')
+    // A record from before the tolerance was kept: unknown, never a bar worked out (no peers' line, no "two times").
+    expect(basisReading(basis('ttfo', { ttft: ttfoEvidence({ n: 40, k: 9, z: 0.103, prior_mu: 0.146 }) }))).toBe('22.5 / —')
+    expect(basisReading(basis('ttfo', { ttft: ttfoEvidence({ n: 40, k: 9, tolerance: null }) }))).toBe('22.5 / —')
+    // The share and the seconds are never written together.
+    expect(basisReading(basis('ttfo', { ttft: ttfoEvidence({ limit_s: 8, n: 40, k: 9, tolerance: 0.2 }) }))).not.toMatch(/8|秒|s/)
+    expect(basisReading(basis('error', { error: errorEvidence({ failed: 6, padded: 80, limit: 0.025 }) }))).toBe('7.5 / 2.5')
+    expect(basisReading(basis('cache', { cache: cacheEvidence({ ratio: 0.7623, min_ratio: 0.86 }) }))).toBe('76.2 / 86')
+    // Nothing counted: the share is a dash, the line still drawn.
+    expect(basisReading(basis('ttfo', { ttft: ttfoEvidence({ n: 0, k: 0, tolerance: 0.2 }) }))).toBe('— / 20')
+    expect(basisReading(basis('cache', { cache: cacheEvidence({ turns: 0, min_ratio: 0.8 }) }))).toBe('— / 80')
+    // No basis, or none of its own line's evidence: nothing to read.
+    expect(basisReading(null)).toBeNull()
+    expect(basisReading(basis('cache', { cache: undefined }))).toBeNull()
+  })
+
+  it('dates the evidence from the later of its cut and its window\'s start to the window\'s end, only from the record', () => {
+    const local = (h: number, m: number) => new Date(2026, 10, 25, h, m).toISOString()
+    const windowed = { window_from: local(12, 45), window_to: local(13, 15) }
+    expect(basisPeriod(basis('cache', { cache: cacheEvidence(windowed) }))).toBe('12:45–13:15')
+    expect(basisPeriod(basis('cache', { cut: local(13, 5), cache: cacheEvidence(windowed) }))).toBe('13:05–13:15')
+    expect(basisPeriod(basis('cache', { cut: local(9, 0), cache: cacheEvidence(windowed) }))).toBe('12:45–13:15')
+    // The same for the other two lines, from their own evidence.
+    expect(basisPeriod(basis('error', { cut: local(12, 30), error: errorEvidence({ window_from: local(12, 15), window_to: local(13, 15) }) }))).toBe('12:30–13:15')
+    expect(basisPeriod(basis('ttfo', { ttft: ttfoEvidence({ window_from: local(9, 15), window_to: local(13, 15) }) }))).toBe('09:15–13:15')
+    // Without its window (older records): no period, even with a cut; never a window worked out here.
+    expect(basisPeriod(basis('ttfo', { cut: local(13, 5) }))).toBeNull()
+    expect(basisPeriod(basis('cache', { cut: local(13, 5), cache: cacheEvidence({ window_from: local(12, 45) }) }))).toBeNull()
+    expect(basisPeriod(null)).toBeNull()
+  })
+
+  it('puts the period, the reading and the units counted together; what a record lacks is left out', () => {
+    expect(basisFigures(basis('cache', { cache: cacheEvidence({ ratio: 0.781, min_ratio: 0.85 }), samples_local: 11, samples_total: 30 }))).toEqual({
+      period: null, reading: '78.1 / 85', samples: [{ label: 'samples', value: '30' }, { label: 'local', value: '11' }]
     })
-    // No line drawn from the front peers: the peers' own share.
-    expect(basisFigures(basis('ttfo', { ttft: ttfoEvidence({ n: 40, k: 9, z: null, prior_mu: 0.146 }) })).measure![1]).toEqual({ label: 'peers', value: '14.6%' })
-    // A rule 4.0 record: no peer comparison (no peer_nu, p_rel, u, z), the tolerance and confidence it was taken with;
-    // its cache evidence carries the path and the low sessions of 10 turns. The figures read as before.
-    const { peer_nu: _nu, ...absolute } = ttfoEvidence({ n: 40, k: 9, p_rel: null, u: null, z: null, prior_mu: 0.146, tolerance: 0.2, confidence: 0.8 })
-    expect(basisFigures(basis('ttfo', { ttft: absolute })).measure).toEqual([{ label: 'over', params: { s: 10 }, value: '22.5%' }, { label: 'peers', value: '14.6%' }])
-    expect(basisFigures(basis('cache', { cache: cacheEvidence({ ratio: 0.6, min_ratio: 0.85, path: 'single5', low_sessions_10: 1, window_from: '2026-11-25T10:00:00Z', window_to: '2026-11-25T10:30:00Z' }) })).measure).toEqual([
-      { label: 'hit', value: '60.0%' }, { label: 'min', value: '85%' }
-    ])
-    expect(basisFigures(basis('error', { error: errorEvidence({ failed: 6, padded: 80, limit: 0.025 }) })).measure).toEqual([
-      { label: 'failed', value: '7.5%' }, { label: 'limit', value: '2.5%' }
-    ])
-    expect(basisFigures(basis('cache', { cache: cacheEvidence({ ratio: 0.781, min_ratio: 0.85 }) })).measure).toEqual([
-      { label: 'hit', value: '78.1%' }, { label: 'min', value: '85%' }
-    ])
-    // Nothing counted, nothing to measure; an older record without counts has no sample line.
-    expect(basisFigures(basis('ttfo', { ttft: ttfoEvidence({ n: 0, k: 0 }), samples_local: null, samples_total: null }))).toEqual({ measure: null, samples: [] })
+    expect(basisFigures(basis('ttfo', { ttft: undefined, samples_local: null, samples_total: null }))).toEqual({ period: null, reading: null, samples: [] })
     expect(evidenceCauses('ttfo', ttfoEvidence({ causes: ['mass_insufficient'] }))).toEqual(['mass_insufficient'])
     expect(evidenceCauses('error', errorEvidence())).toEqual([])
+  })
+
+  // A line on trial: its latest assessment, never the reading it went on trial with.
+  it('reads a trial\'s latest assessment: passing, what it lacks against what it needs, or unknown', () => {
+    const t = (key: string, values?: Record<string, unknown>) => (values ? `${key}:${JSON.stringify(values)}` : key)
+    const latest = (patch: Partial<BackendLastEval>): BackendLastEval =>
+      ({ at: '2026-11-25T13:15:00Z', since: '2026-11-25T13:10:00Z', count: 1, acted: false, action: '', reason: 'trial_open', causes: [], have: null, need: null, ...patch })
+    expect(trialNote(latest({ reason: 'within' }), t)).toEqual({ text: 'admin.schedQuality.verdict.pass', pass: true })
+    expect(trialNote(latest({ have: 12, need: 40 }), t)).toEqual({ text: 'admin.schedQuality.panel.lacks:{"have":12,"need":40}', pass: false })
+    // A weighted amount just short of what is needed never reads as enough.
+    expect(trialNote(latest({ have: 19.96, need: 20 }), t).text).toBe('admin.schedQuality.panel.lacks:{"have":19,"need":20}')
+    expect(trialNote(latest({}), t)).toEqual({ text: 'admin.schedQuality.verdict.unknown', pass: false })
+    // Not assessed on trial yet: the latest is the review that opened it.
+    expect(trialNote(latest({ acted: true, action: 'trial', reason: 'within' }), t)).toEqual({ text: '—', pass: false })
+    expect(trialNote(null, t)).toEqual({ text: '—', pass: false })
   })
 })
 
