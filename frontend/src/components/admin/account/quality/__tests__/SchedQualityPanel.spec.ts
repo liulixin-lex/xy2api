@@ -3,10 +3,13 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, withDirectives } from 'vue'
 
 import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
-import { basis, groupModel, legacyBasis, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
+import { basis, cacheEvidence, groupModel, legacyBasis, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
 import { lastEval, perfAnswer, perfGroup, perfRow } from '@/__tests__/fixtures/schedQuality/performance'
 import SchedQualityPanel from '../SchedQualityPanel.vue'
 import SchedDecisions from '../SchedDecisions.vue'
+import AccountGroupPills from '@/components/admin/account/table/AccountGroupPills.vue'
+import type { AdminGroup } from '@/types'
+import type { TipCard } from '@/utils/tip'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
@@ -810,6 +813,9 @@ describe('SchedQualityPanel decision records', () => {
     id, at: inMinutes(-id * 2), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'enter', level: 1, until: inMinutes(20), basis: basis('ttfo'), ...patch
   })
   const entries = () => Array.from(document.querySelectorAll<HTMLElement>('[data-qp-decision]'), (el) => el.dataset.qpDecision)
+  /** The decision that put the line at the rear, on that basis. */
+  const record90 = (dim: 'ttfo' | 'cache', value: BackendDecision['basis']): BackendDecision =>
+    ({ id: 90, at: inMinutes(-1), group_id: 53, model: 'gpt-b', line: dim, action: 'enter', level: 0, until: inMinutes(20), basis: value })
   const entry = (id: number) => document.querySelector<HTMLElement>(`[data-qp-decision="${id}"]`)!
 
   it('loads with the panel: one line a record, merged across groups, newest six, then the rest and older pages', async () => {
@@ -915,6 +921,44 @@ describe('SchedQualityPanel decision records', () => {
     expect(document.querySelector('[data-qp-trial-timeout="79"]')!.textContent).toBe(
       `admin.schedQuality.decisions.timeout.line:${JSON.stringify({ reasons: `admin.schedQuality.decisions.timeout.noTraffic${J}admin.schedQuality.decisions.timeout.seats.full` })}`
     )
+  })
+
+  // Plan item 20's acceptance line: one line at the rear reads the same in the panel's cell, the list's tip card and the
+  // opened decision — the same basis through the same function — for the cache line and for a first-output line, whose
+  // line is the tolerance its decision was taken with, never written with the seconds.
+  it.each([
+    ['cache', basis('cache', { cache: cacheEvidence({ ratio: 0.762, min_ratio: 0.86 }) }), '76.2 / 86'],
+    ['ttfo', basis('ttfo', { ttft: ttfoEvidence({ limit_s: 8, n: 40, k: 27, tolerance: 0.175 }) }), '67.5 / 17.5'],
+    ['ttfo', basis('ttfo', { rule_version: '3.1', ttft: ttfoEvidence({ limit_s: 8, n: 40, k: 27, z: 0.31 }) }), '67.5 / —']
+  ] as const)('shows the %s line\'s reading as one text in the panel, the list\'s card and the opened decision (%s)', async (dim, record, expected) => {
+    const value = detail()
+    const [, b] = value.groups[0].by_model
+    b.lines.ttfo = line('ttfo', dim === 'ttfo' ? 'rear' : 'pass', dim === 'ttfo' ? { until: inMinutes(20), basis: record } : {})
+    b.lines.cache = line('cache', dim === 'cache' ? 'rear' : 'unknown', dim === 'cache' ? { until: inMinutes(20), basis: record } : {})
+    api.accountDetail.mockResolvedValue(value)
+    api.accountDecisions.mockResolvedValue([record90(dim, record)])
+    api.accountPerformance.mockImplementation(async (id: number) => perfAnswer([perfRow(id, { group_id: 53, model: 'gpt-b' }, { n: 463, slowRate: 0.531 })]))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { groupId: 53, model: 'gpt-b' })
+    const panelText = groupRow(53).querySelector(`[data-qp-cell="${dim}"] [data-qp-judged]`)!.textContent
+    entry(90).querySelector<HTMLElement>('.drow__line')!.click()
+    await flushPromises()
+    const decisionText = entry(90).querySelector('[data-qp-evidence-reading]')!.textContent
+    const pills = mount(AccountGroupPills, {
+      props: {
+        account: { id: 7, name: 'acc-7' } as never,
+        groups: [{ id: 53, name: '晨星组', platform: 'openai', status: 'active' } as AdminGroup],
+        quality: {
+          group_status: { 53: 'rear' }, stop: null, trial: [], exemptions: [],
+          rear: [{ group_id: 53, model: 'gpt-b', lines: [dim], until_line: dim, until: inMinutes(20), level: 0, exempt: false, effective: true, line_details: [{ line: dim, identity: 'rear', until: inMinutes(20), basis: record }] }]
+        }
+      }
+    })
+    const tip = (pills.get('[data-test="group-pill-dot"]').element as HTMLElement & { __tipText: () => TipCard }).__tipText()
+    const cardText = (tip.rows![0][2] as { text: string }).text
+    expect([panelText, cardText, decisionText]).toEqual([expected, expected, expected])
+    // Never the seconds of the limit (8 s) beside the share.
+    expect(cardText).not.toMatch(/秒|\d\s?s\b/)
   })
 
   // Plan item 20: the version in force is the detail's current_rule_version, handed to the decisions by the panel.

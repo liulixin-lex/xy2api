@@ -152,6 +152,10 @@
 .sq-tip__end { color: var(--color-tooltip-muted); text-align: right; }
 /* A card whose notes wrap (wrapEnd in utils/tip.ts): the note takes two lines rather than cut the label or the value. */
 .sq-tip__grid--wrap .sq-tip__end { white-space: normal; overflow-wrap: anywhere; }
+/* The widest cases of a card's columns (sizer in utils/tip.ts): a row that only sets the columns' width; the grid gives
+   back the row gap it adds. */
+.sq-tip__sizer { height: 0; visibility: hidden; white-space: pre; }
+.sq-tip__grid--sized { margin-bottom: -5px; }
 .sq-tip__tone--ok { color: var(--tip-ok); }
 .sq-tip__tone--back { color: var(--tip-back); }
 .sq-tip__tone--exempt { color: var(--tip-exempt); }

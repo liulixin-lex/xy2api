@@ -6,7 +6,9 @@ import { formatShortTime } from '../accountTime'
 import type { BackendAccountSummary } from '@/api/admin/schedQualityTypes'
 import type { AdminGroup } from '@/types'
 import { closeOverlay, openOverlay } from '@/utils/overlayStack'
-import type { TipContent } from '@/utils/tip'
+import type { TipCard, TipContent } from '@/utils/tip'
+import { basis, cacheEvidence, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
+import { lastEval } from '@/__tests__/fixtures/schedQuality/performance'
 
 vi.mock('vue-i18n', async () => ({
   ...(await vi.importActual<typeof import('vue-i18n')>('vue-i18n')),
@@ -202,6 +204,76 @@ describe('AccountGroupPills', () => {
         ['gpt-5', { text: 'admin.accounts.table.dimReasons.cache', tone: 'back' }, rearText(dueEnd)]
       ]
     })
+  })
+
+  // Plan item 20: each line at the back on its own row, with what put it there against its line and its own review;
+  // each line on trial with its latest assessment and its own end. No step. The card keeps its columns at their widest.
+  it('lists each line at the back with its reading and own review, and each line on trial with its assessment and end', () => {
+    const ttfoEnd = inMinutes(15)
+    const cacheEnd = inMinutes(55)
+    const rearItem = {
+      ...back(2, 'gpt-6-astra', ['ttfo', 'cache'], cacheEnd, 0, 'cache'),
+      line_details: [
+        { line: 'ttfo' as const, identity: 'rear' as const, until: ttfoEnd, basis: basis('ttfo', { ttft: ttfoEvidence({ n: 40, k: 27, tolerance: 0.2 }) }) },
+        { line: 'cache' as const, identity: 'rear' as const, until: cacheEnd, basis: basis('cache', { cache: cacheEvidence({ ratio: 0.762, min_ratio: 0.86 }) }) }
+      ]
+    }
+    const rear = mountPills(2, baseQuality({ group_status: statuses({ 2: 'rear' }), rear: [rearItem] }))
+    const card = cardOf(rear.findAll('[data-test="group-pill-dot"]')[1]) as TipCard
+    expect(card.rows).toEqual([
+      ['Astra', 'admin.schedQuality.dim.ttfo', { text: '67.5 / 20', tone: 'back' }, rearText(ttfoEnd)],
+      ['', 'admin.schedQuality.dim.cache', { text: '76.2 / 86', tone: 'back' }, rearText(cacheEnd)]
+    ])
+    expect(JSON.stringify(card)).not.toMatch(/level|档/)
+    // One width for every card of lines, at the back or on trial: the widest reading, assessment and stay.
+    expect(card.sizer).toEqual([
+      '',
+      'admin.schedQuality.dim.ttfo\nadmin.schedQuality.dim.error\nadmin.schedQuality.dim.cache',
+      ['100.0 / 99.9', 'admin.schedQuality.verdict.pass', 'admin.schedQuality.verdict.unknown', tk('admin.schedQuality.panel.lacks', { have: 99, need: 99 })].join('\n'),
+      [tk('admin.schedQuality.stay.rear', { time: '00:00' }), tk('admin.schedQuality.stay.trialEnd', { time: '00:00' })].join('\n')
+    ])
+    // A line whose record kept no basis: its name and time only, no reading made up.
+    const bare = mountPills(1, baseQuality({ group_status: statuses({ 1: 'rear' }), rear: [{ ...back(1, 'gpt-5', ['error'], ttfoEnd), line_details: [{ line: 'error', identity: 'rear', until: ttfoEnd }] }] }))
+    expect((cardOf(bare.get('[data-test="group-pill-dot"]')) as TipCard).rows).toEqual([['gpt-5', 'admin.schedQuality.dim.error', '', rearText(ttfoEnd)]])
+
+    // A model with one line at the back and another on trial is one rear item listing both, each by its own identity
+    // (not guessed from what the record holds), each with its own time.
+    const mixedTrialEnd = inMinutes(65)
+    const mixed = mountPills(1, baseQuality({
+      group_status: statuses({ 1: 'rear' }),
+      rear: [{
+        ...back(1, 'gpt-5', ['ttfo'], ttfoEnd),
+        line_details: [
+          { line: 'ttfo', identity: 'rear', until: ttfoEnd, basis: basis('ttfo', { ttft: ttfoEvidence({ n: 40, k: 27, tolerance: 0.2 }) }) },
+          { line: 'cache', identity: 'trial', until: mixedTrialEnd, last_eval: lastEval({ reason: 'trial_open', causes: ['turns_insufficient'], have: 39, need: 40 }) },
+          { line: 'error', identity: 'trial', until: mixedTrialEnd }
+        ]
+      }]
+    }))
+    expect((cardOf(mixed.get('[data-test="group-pill-dot"]')) as TipCard).rows).toEqual([
+      ['gpt-5', 'admin.schedQuality.dim.ttfo', { text: '67.5 / 20', tone: 'back' }, rearText(ttfoEnd)],
+      ['', 'admin.schedQuality.dim.cache', { text: tk('admin.schedQuality.panel.lacks', { have: 39, need: 40 }), tone: 'info' }, tk('admin.schedQuality.stay.trialEnd', { time: formatShortTime(mixedTrialEnd) })],
+      ['', 'admin.schedQuality.dim.error', '', tk('admin.schedQuality.stay.trialEnd', { time: formatShortTime(mixedTrialEnd) })]
+    ])
+
+    const passEnd = inMinutes(40)
+    const shortEnd = inMinutes(70)
+    const trialItem = {
+      ...onTrial(1, 'gpt-5', 'cache', inMinutes(-20), shortEnd),
+      line_details: [
+        { line: 'ttfo' as const, identity: 'trial' as const, until: passEnd, last_eval: lastEval({ reason: 'within', causes: [], have: null, need: null }) },
+        { line: 'cache' as const, until: shortEnd, last_eval: lastEval({ reason: 'trial_open', causes: ['turns_insufficient'], have: 12, need: 40 }) }
+      ]
+    }
+    const trial = mountPills(1, baseQuality({ group_status: statuses({ 1: 'trial' }), trial: [trialItem] }))
+    const trialCard = cardOf(trial.get('[data-test="group-pill-dot"]')) as TipCard
+    const by = (until: string) => tk('admin.schedQuality.stay.trialEnd', { time: formatShortTime(until) })
+    expect(trialCard.rows).toEqual([
+      ['gpt-5', 'admin.schedQuality.dim.ttfo', { text: 'admin.schedQuality.verdict.pass', tone: 'ok' }, by(passEnd)],
+      ['', 'admin.schedQuality.dim.cache', { text: tk('admin.schedQuality.panel.lacks', { have: 12, need: 40 }), tone: 'info' }, by(shortEnd)]
+    ])
+    // A line without its identity (the first answers with details) takes its item's kind.
+    expect(trialCard.sizer).toEqual(card.sizer)
   })
 
   it('shows a trial\'s line, start and latest end, an exemption\'s end and reason, why unknown, and a stop\'s reason, source and end', async () => {

@@ -58,8 +58,8 @@ export interface BackendRear {
   until: string
   /** The previous rules' stay step; not shown (the rules in force have none). */
   level?: number | null
-  /** Each line at the rear on its own, with its own review and the evidence it went to the rear on; absent from an older backend's answer. */
-  line_details?: BackendRearLine[] | null
+  /** Each restricted line of the model on its own (at the rear or on trial); absent from an older backend's answer. */
+  line_details?: BackendLineDetail[] | null
   exempt: boolean
   /**
    * The record really puts the account at the back of the group: not exempt, quality scheduling switched on, its
@@ -78,22 +78,21 @@ export interface BackendTrial {
   /** The trial's end at the latest (it may end sooner). */
   until: string
   /** Each line on trial on its own, with its own end and latest assessment; absent from an older backend's answer. */
-  line_details?: BackendTrialLine[] | null
+  line_details?: BackendLineDetail[] | null
 }
 
-/** A line at the rear: when it is reviewed, and the decision that put it there this time (enter, renew or trial_fail). */
-export interface BackendRearLine {
+/**
+ * A restricted line of a group × model, on its own: at the rear (its review, and the decision that began this stay:
+ * enter, renew or trial_fail, the same shape as a decision's basis from the same mapping) or on trial (its end at the
+ * latest and its latest assessment). A rear item lists every restricted line of its model, its lines on trial too.
+ */
+export interface BackendLineDetail {
   line: BackendDim
+  /** Absent from the first answers that had details: the item's own kind then (rear[] rear, trial[] trial). */
+  identity?: 'rear' | 'trial'
   until: string
-  /** The same shape as a decision's basis, from the same mapping; absent when the state keeps none. */
   basis?: BackendBasis | null
-}
-
-/** A line on trial: its end at the latest and its latest assessment. */
-export interface BackendTrialLine {
-  line: BackendDim
-  until: string
-  last_eval: BackendLastEval | null
+  last_eval?: BackendLastEval | null
 }
 
 /**

@@ -278,6 +278,7 @@ export default {
       rear: '{time}\u00a0复核',
       trial: '{start}\u00a0起 · 最晚\u00a0{end}',
       line: '{line} · {stay}',
+      trialEnd: '最晚\u00a0{time}',
     },
     ttftRule: {
       title: '首字线判定',
