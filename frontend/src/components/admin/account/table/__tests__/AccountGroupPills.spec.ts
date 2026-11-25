@@ -39,7 +39,7 @@ const onTrial = (groupId: number, model: string, line: Dim, start: string, until
   ({ group_id: groupId, model, until_line: line, trial_started_at: start, until })
 /** What the mocked t writes for a key and its params. */
 const tk = (key: string, params: Record<string, unknown>) => `${key}:${JSON.stringify(params)}`
-const rearText = (level: number, until: string) => tk('admin.schedQuality.stay.rear', { level, time: formatShortTime(until) })
+const rearText = (until: string) => tk('admin.schedQuality.stay.rear', { time: formatShortTime(until) })
 const trialText = (start: string, end: string) => tk('admin.schedQuality.stay.trial', { start: formatShortTime(start), end: formatShortTime(end) })
 const named = (dim: Dim, stay: string) => tk('admin.schedQuality.stay.line', { line: `admin.schedQuality.dim.${dim}`, stay })
 const inMinutes = (m: number) => new Date(Date.now() + m * 60_000).toISOString()
@@ -176,7 +176,7 @@ describe('AccountGroupPills', () => {
   })
 
   // Tip cards (12.7): data and state words only, the same card on both zones.
-  it('shows the group\'s name and state on both zones; at the back a row per model with why, its step and review', () => {
+  it('shows the group\'s name and state on both zones; at the back a row per model with why and its review, never a step', () => {
     const astraEnd = inMinutes(15)
     const dueEnd = inMinutes(-1)
     const wrapper = mountPills(2, baseQuality({
@@ -193,12 +193,13 @@ describe('AccountGroupPills', () => {
       title: 'Group 2',
       chip: { text: 'admin.accounts.table.dotStates.back', tone: 'back', dot: true },
       rows: [
-        // Two lines at the back: the step and review sit on the row of the error line, the one that ends last; the
+        // Two lines at the back: the review sits on the row of the error line, the one that ends last (its level 2 is not
+        // shown); the
         // other line is under it.
-        ['Astra', { text: 'admin.accounts.table.dimReasons.error', tone: 'back' }, rearText(3, astraEnd)],
+        ['Astra', { text: 'admin.accounts.table.dimReasons.error', tone: 'back' }, rearText(astraEnd)],
         ['', { text: 'admin.accounts.table.dimReasons.ttfo', tone: 'back' }, ''],
         // A review already due still shows its time: the account stays at the back until the review is done.
-        ['gpt-5', { text: 'admin.accounts.table.dimReasons.cache', tone: 'back' }, rearText(1, dueEnd)]
+        ['gpt-5', { text: 'admin.accounts.table.dimReasons.cache', tone: 'back' }, rearText(dueEnd)]
       ]
     })
   })
@@ -268,7 +269,7 @@ describe('AccountGroupPills', () => {
       title: 'admin.accounts.table.pillMore:{"n":4}',
       rows: [
         ['Group 9', { text: 'admin.accounts.table.dotStates.ok', tone: 'ok', dot: true }, ''],
-        ['Group 10', { text: 'admin.accounts.table.dotStates.back', tone: 'back', dot: true }, named('error', rearText(1, rearEnd))],
+        ['Group 10', { text: 'admin.accounts.table.dotStates.back', tone: 'back', dot: true }, named('error', rearText(rearEnd))],
         ['Group 11', { text: 'admin.accounts.table.dotStates.exempt', tone: 'exempt', dot: true }, formatShortTime(expires)],
         ['Group 12', { text: 'admin.accounts.table.dotStates.trial', tone: 'info', dot: true }, named('error', trialText(start, lastEnd))]
       ]

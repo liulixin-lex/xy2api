@@ -281,7 +281,7 @@ export default {
     },
     // A stay wraps only at its dots: the words between them are held together by no-break spaces.
     stay: {
-      rear: 'step\u00a0{level} · review\u00a0{time}',
+      rear: 'review\u00a0{time}',
       trial: 'from\u00a0{start} · ends\u00a0by\u00a0{end}',
       line: '{line} · {stay}',
     },

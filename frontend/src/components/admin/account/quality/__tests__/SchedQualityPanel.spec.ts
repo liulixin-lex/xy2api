@@ -540,11 +540,11 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
     mount(Panel, { attachTo: document.body })
     await openOn(7, { groupId: 53, model: 'gpt-b' })
-    // At the rear: under it the rear line's step (level 1 is 第 2 档) and when it is reviewed, a clock time; one line
-    // holds it there, so it is not named (its amber figure shows which).
+    // At the rear: under it when the rear line is reviewed, a clock time, and no step (its level 1 is not shown); one
+    // line holds it there, so it is not named (its amber figure shows which).
     expect(place(53)).toBe('admin.schedQuality.placement.rear')
-    expect(stay(53)).toBe('admin.schedQuality.stay.rear:{"level":2,"time":"12:20"}')
-    expect(trigger(53)!.getAttribute('aria-label')).toBe('晨星组 admin.schedQuality.placement.rear admin.schedQuality.stay.rear:{"level":2,"time":"12:20"}')
+    expect(stay(53)).toBe('admin.schedQuality.stay.rear:{"time":"12:20"}')
+    expect(trigger(53)!.getAttribute('aria-label')).toBe('晨星组 admin.schedQuality.placement.rear admin.schedQuality.stay.rear:{"time":"12:20"}')
     expect(stay(54)).toBeNull()
     expect(cells(53)).toEqual([
       ['requests', '463', 'is-plain', null],

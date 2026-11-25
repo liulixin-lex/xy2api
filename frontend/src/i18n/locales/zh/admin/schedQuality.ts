@@ -281,7 +281,7 @@ export default {
     },
     // A stay wraps only at its dots: the words between them are held together by no-break spaces.
     stay: {
-      rear: '第\u00a0{level}\u00a0档 · {time}\u00a0复核',
+      rear: '{time}\u00a0复核',
       trial: '{start}\u00a0起 · 最晚\u00a0{end}',
       line: '{line} · {stay}',
     },

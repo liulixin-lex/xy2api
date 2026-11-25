@@ -89,7 +89,7 @@
  *   前排, 后排, 试用, 豁免至 the time it ends, 停调, or 门槛关; its dot and the figures share one set of colours
  *   (amber rear, blue trial, green front or pass, purple exempt, grey unknown or no figure), so the amber figure is the
  *   line that holds the group at the rear.
- * - Under 后排 its step and when it is reviewed, under 试用 when it started and when it ends at the latest, small like
+ * - Under 后排 when it is reviewed, under 试用 when it started and when it ends at the latest, small like
  *   the figures' references: of the line that ends last, named by its column when more than one line holds the place.
  * - Under a share at the rear or on trial, only what it is measured against, in the same 12-hour terms: the group's
  *   other accounts on the same requests for the first output, the group's limit and minimum for errors and cache.
@@ -157,7 +157,7 @@ function stayText(row: BackendGroupModel | undefined, place: PanelPlace): string
   const shown = placeLine(row, place)
   if (!shown) return ''
   const { dim, line, held } = shown
-  const stay = place === 'rear' ? rearStay(t, line.level, line.until) : trialStay(t, line.trial_started_at, line.trial_until)
+  const stay = place === 'rear' ? rearStay(t, line.until) : trialStay(t, line.trial_started_at, line.trial_until)
   return held > 1 ? lineStay(t, t(`admin.schedQuality.panel.col.${dim}`), stay) : stay
 }
 

@@ -81,18 +81,13 @@ describe('quality panel place', () => {
     }
   })
 
-  // Astra review of fe, 1: 0..4 are 第 1–5 档; anything else (missing from an older answer) is not made into a step.
-  it.each(['zh', 'en'] as const)('%s: shows the steps 1 to 5 for levels 0 to 4, and a dash for any other level with the review time kept', (locale) => {
+  // Plan item 18: the rules have no steps; a rear stay is only when it is reviewed, and a missing end is a dash.
+  it.each(['zh', 'en'] as const)('%s: shows a rear stay as its review time only, a dash when the end is missing', (locale) => {
     const { t } = createI18n({ legacy: false, locale, messages: { zh, en } }).global
     const until = '2026-11-19T10:40:00Z'
-    const step = (level: string) => (locale === 'zh' ? `第\u00a0${level}\u00a0档` : `step\u00a0${level}`)
-    for (let level = 0; level <= 4; level++) expect(rearStay(t, level, until)).toContain(step(String(level + 1)))
-    for (const level of [undefined, null, -1, 5, 1.5, Number.NaN]) {
-      const shown = rearStay(t, level, until)
-      expect(shown).toContain(step('—'))
-      expect(shown).toContain(formatShortTime(until))
-      expect(shown).not.toMatch(/NaN|undefined|null/)
-    }
+    const review = (time: string) => (locale === 'zh' ? `${time}\u00a0复核` : `review\u00a0${time}`)
+    expect(rearStay(t, until)).toBe(review(formatShortTime(until)))
+    for (const missing of [null, undefined, '']) expect(rearStay(t, missing)).toBe(review('—'))
   })
 
   it('takes the trial that ends last, whatever its start: three lines on trial from three starts', () => {

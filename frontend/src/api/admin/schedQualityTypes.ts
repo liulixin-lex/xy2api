@@ -53,10 +53,10 @@ export interface BackendRear {
   model: string
   /** The lines at the rear. */
   lines: BackendDim[]
-  /** The line with the latest end, whose end and stay step these are; absent from an older backend's answer. */
+  /** The line with the latest end, whose end this is; absent from an older backend's answer. */
   until_line?: BackendDim | null
   until: string
-  /** Stay step, 0..4 (shown as 1..5); absent from an older backend's answer. */
+  /** The previous rules' stay step; not shown (the rules in force have none). */
   level?: number | null
   exempt: boolean
   /**
@@ -194,7 +194,7 @@ export interface BackendSampleCounts {
 /** One line of one group × model. */
 export interface BackendLine<D extends BackendDim = BackendDim> extends BackendSampleCounts {
   identity: BackendIdentity
-  /** Rear stay step, 0..4 (20, 40, 80, 160, 240 minutes). */
+  /** The previous rules' stay step; not shown (the rules in force have none). */
   level: number
   /** End of the rear stay. */
   until: string | null
@@ -543,7 +543,7 @@ export interface BackendPerfGroup {
  */
 export interface BackendPerfLine extends BackendSampleCounts {
   identity: BackendIdentity
-  /** Rear stay step, 0..4 (20, 40, 80, 160, 240 minutes); with the trial's start, absent from an older backend's answer. */
+  /** The previous rules' stay step, not shown; with the trial's start, absent from an older backend's answer. */
   level?: number | null
   until: string | null
   trial_started_at?: string | null

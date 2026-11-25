@@ -212,8 +212,8 @@ const restWorst = computed(() => {
 
 const lineName = (dim: BackendDim) => t(`admin.schedQuality.dim.${dim}`)
 const reasonCell = (lines: BackendDim[]): TipCell => ({ text: lines.map((line) => t(`admin.accounts.table.dimReasons.${line}`)).join('、'), tone: 'back' })
-/** "第 3 档 · 15:30 复核": the step and review of the line at the back that ends last. */
-const rearEnd = (item: BackendRear) => rearStay(t, item.level, item.until)
+/** "15:30 复核": the review of the line at the back that ends last. */
+const rearEnd = (item: BackendRear) => rearStay(t, item.until)
 /** "15:10 起 · 最晚 17:10": when the trial that ends last started, and when it ends at the latest. */
 const trialEnd = (item: BackendTrial) => trialStay(t, item.trial_started_at, item.until)
 /** A stay with its line named before it, when the answer says which line it is of. */
@@ -222,7 +222,7 @@ const namedEnd = (line: unknown, stay: string) => {
   return dim ? lineStay(t, lineName(dim), stay) : stay
 }
 /**
- * A model at the back: its line that ends last with the step and review on the first row, its other lines at the back
+ * A model at the back: its line that ends last with its review on the first row, its other lines at the back
  * under it. An older answer does not say which line that is: the lines are listed together beside the stay.
  */
 function rearRows(item: BackendRear): (string | TipCell)[][] {
@@ -239,8 +239,8 @@ const exemptionOf = (quality: AccountQualityView, group: AdminGroup) =>
 const exemptEnd = (expiresAt: string | null | undefined) => (expiresAt ? formatShortTime(expiresAt) : t('admin.accounts.table.tip.forever'))
 
 /**
- * The rows of the group's state (12.7): a model at the back on the row of its line that ends last, with why, its step
- * and review, its other lines at the back under it; a model on trial with its line, start and latest end; the
+ * The rows of the group's state (12.7): a model at the back on the row of its line that ends last, with why and
+ * its review, its other lines at the back under it; a model on trial with its line, start and latest end; the
  * exemption, …
  */
 function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
