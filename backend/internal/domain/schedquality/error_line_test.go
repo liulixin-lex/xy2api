@@ -74,6 +74,8 @@ func TestAssessErrorRecoveryBoundaries(t *testing.T) {
 		regular, recovery      Verdict
 	}{
 		{"above-floor", 52, 5, 0, .05, VerdictPass, VerdictUnknown},
+		{"one-percent-recovery-above", 50, 1, 0, .01, VerdictPass, VerdictUnknown},
+		{"one-percent-recovery-equal", 100, 1, 0, .01, VerdictPass, VerdictPass},
 		{"equal-to-floor", 100, 5, 0, .05, VerdictPass, VerdictPass},
 		{"equal-to-group-limit", 100, 7, 0, .07, VerdictPass, VerdictPass},
 		{"equal-to-rounded-group-limit", 100, 29, 0, .29, VerdictPass, VerdictPass},

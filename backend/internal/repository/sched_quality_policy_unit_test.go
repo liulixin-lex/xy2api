@@ -39,6 +39,11 @@ func TestSchedQualityPolicyReadCompatibility(t *testing.T) {
 			want: schedquality.Policy{Enabled: true, TTFTSeconds: 12, MaxErrorRate: .01, MinCacheRatio: .8, TakeoverIdleSeconds: 0},
 		},
 		{
+			name: "one percent remains one percent",
+			raw:  `{"version":4,"groups":{"7":{"v4":{"enabled":true,"ttft_seconds":12,"max_error_rate":0.01,"min_cache_ratio":0.8,"takeover_idle_seconds":0}}}}`,
+			want: schedquality.Policy{Enabled: true, TTFTSeconds: 12, MaxErrorRate: .01, MinCacheRatio: .8, TakeoverIdleSeconds: 0},
+		},
+		{
 			name: "malformed field preserves valid siblings",
 			raw:  `{"version":4,"groups":{"7":{"v4":{"enabled":"bad","ttft_seconds":12,"max_error_rate":0.8,"min_cache_ratio":0.8,"takeover_idle_seconds":0}}}}`,
 			want: schedquality.Policy{TTFTSeconds: 12, MaxErrorRate: .8, MinCacheRatio: .8, TakeoverIdleSeconds: 0},
