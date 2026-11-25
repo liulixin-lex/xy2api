@@ -311,7 +311,7 @@ export default {
       declined: 'The other settings were saved; first-output judging was not',
       unsaved: 'Not saved: the marked values relax first-output judging and take effect only when you choose “Save and judge again” on saving; put them back to drop this note.',
       confirmTitle: 'Relax first-output judging',
-      confirmMessage: 'Raising any value makes accounts less likely to go to the rear. Saving clears every first-output rear and trial and judges them again with the new values at once; accounts still below standard go to the rear from the first step.',
+      confirmMessage: 'Raising any value makes accounts less likely to go to the rear. Saving clears every first-output rear and trial and judges them again with the new values at once; accounts still below standard go to the rear again.',
       confirmSave: 'Save and judge again',
     },
     policy: {
@@ -326,7 +326,7 @@ export default {
       trial: 'Preview',
       trialLine: 'On the current evidence: pass {pass} · unknown {unknown} · below standard {fail}',
       trialRelaxed: 'Relaxed: cleared and judged again on saving',
-      trialNote: 'The trial assesses the evidence in the current windows once with the saved and once with the new thresholds; it does not forecast identities. A relaxed line is cleared on saving and judged again at once with the new threshold. Tightening keeps the identities; later assessments use the new threshold, and the error and cache lines need two below-standard assessments in a row to go to the rear.',
+      trialNote: 'The trial assesses the evidence in the current windows once with the saved and once with the new thresholds; it does not forecast identities. A relaxed line is cleared on saving and judged again at once with the new threshold. Tightening keeps the identities; later assessments use the new threshold, and the error and cache lines (the cache line when less than 5 points short) need two below-standard assessments in a row to go to the rear.',
       savedRelaxed: '{lines}: {n} states cleared and judged again with the new thresholds',
       seconds: 's',
       percent: '%',
@@ -487,7 +487,7 @@ export default {
       long: {
         peer_short: 'other accounts on this model in the group have too few samples{counts}',
         own_short: 'this account has too few samples{counts}',
-        within: 'within the line, the rule has not found it worse than the group\'s other accounts (the 12-hour figures average a longer time)',
+        within: 'within the line, the rule has not found it below standard (the 12-hour figures average a longer time)',
         pending: 'signs of falling short, not confirmed by the rule yet',
         trial_open: 'on trial with no verdict yet',
         over: 'over the line',
