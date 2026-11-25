@@ -538,7 +538,7 @@ func TestSchedQualityTTFTRuleJSONValidationAndChange(t *testing.T) {
 	data := schedAdminHandlerData(t, schedAdminHandlerRequest(r, "GET", "/ttft-rule", ""))
 	require.Len(t, data, 6)
 	require.JSONEq(t, `{"confidence":0.8,"tolerance":0.2,"peer_margin":0.05}`, string(data["defaults"]))
-	require.JSONEq(t, `{"confidence":[0.8,0.95],"tolerance":[0.2,0.25],"peer_margin":[0.05,0.15]}`, string(data["replayed"]))
+	require.JSONEq(t, `{"confidence":[0.8,0.8],"tolerance":[0.2,0.2],"peer_margin":[0.05,0.15]}`, string(data["replayed"]))
 	for _, tc := range []struct{ body, change string }{{`{"expected_version":63,"confidence":0.9,"tolerance":0.2,"peer_margin":0.05}`, "relax"}, {`{"expected_version":63,"confidence":0.7,"tolerance":0.2,"peer_margin":0.05}`, "tighten"}, {`{"expected_version":63,"confidence":0.9,"tolerance":0.1,"peer_margin":0.05}`, "mixed"}, {`{"expected_version":63,"confidence":0.8,"tolerance":0.2,"peer_margin":0.05}`, "none"}} {
 		data := schedAdminHandlerData(t, schedAdminHandlerRequest(r, "PUT", "/ttft-rule", tc.body))
 		require.Len(t, data, 8)

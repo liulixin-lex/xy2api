@@ -304,6 +304,7 @@ export default {
         percent: '{min}%–{max}%',
       },
       outside: 'Outside the replayed range ({range}): no data supports it',
+      outsidePoint: 'Only {value}% was replayed: no data supports this value',
       defaults: 'Defaults: confidence {confidence}%, tolerance {tolerance}%. Raising any value makes accounts less likely to go to the rear and clears and re-judges on saving; lowering one affects only later assessments, current rear and trial stay.',
       savedRelaxed: 'First-output line: {n} states cleared and judged again with the new values',
       invalidOnSave: 'The first-output judging values are not valid; nothing was saved',
