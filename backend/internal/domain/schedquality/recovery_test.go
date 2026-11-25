@@ -180,10 +180,103 @@ func TestRecoveryThreeDayBounds(t *testing.T) {
 			if count > 13 {
 				t.Fatalf("seed %d minute %d: %d entries", seed, minute, count)
 			}
-			if restricted && restrictedAfter && !lastBad.IsZero() && at.Sub(lastBad) >= RearDuration+TrialDuration {
+			if restricted && restrictedAfter && !lastBad.IsZero() && at.Sub(lastBad) >= 120*time.Minute {
 				t.Fatalf("seed %d: still restricted after %s", seed, at.Sub(lastBad))
 			}
 			rows = next
 		}
+	}
+}
+
+func TestRecoveryReturnsWithin120Minutes(t *testing.T) {
+	rows := recoveryGroup()
+	// Start two lines in consecutive ordinary evaluations. The newer failure
+	// determines the bound for the whole key.
+	rows, _ = StepGroup(rows, map[Dimension]Evaluation{DimensionTTFO: {Verdict: VerdictFail}}, machineNow.Add(-5*time.Minute))
+	rows, actions := StepGroup(rows, map[Dimension]Evaluation{
+		DimensionCache: {Verdict: VerdictFail, Basis: Basis{Cache: &CacheAssessment{Path: "single5"}}},
+	}, machineNow)
+	if actions[0] != "" || actions[2] != ActionEnter {
+		t.Fatalf("failed to establish staggered rear lines: %v", actions)
+	}
+	deadline := machineNow.Add(120 * time.Minute)
+	for at := machineNow.Add(time.Minute); !at.After(deadline); at = at.Add(time.Minute) {
+		evaluations := make(map[Dimension]Evaluation)
+		for _, row := range rows {
+			if kind, due := Due(row, at, at.Equal(at.Truncate(5*time.Minute)), true); due {
+				evaluations[row.Line] = Evaluation{Kind: kind, Verdict: VerdictUnknown}
+			}
+		}
+		rows, _ = StepGroup(rows, evaluations, at)
+	}
+	for _, row := range rows {
+		if row.Identity == IdentityRear || row.Trial {
+			t.Fatalf("%s still restricted 120 minutes after the last failure: %+v", row.Line, row)
+		}
+	}
+}
+
+func TestRecoveryAtMost13CompositeRearEntriesPer12Hours(t *testing.T) {
+	rows := recoveryGroup()
+	// Two lines fail together. Let review proceed to trial, then fail at
+	// the first later instant where fresh evidence can be assessed.
+	evaluations := map[Dimension]Evaluation{
+		DimensionTTFO:  {Verdict: VerdictFail},
+		DimensionCache: {Verdict: VerdictFail, Basis: Basis{Cache: &CacheAssessment{Path: "single5"}}},
+	}
+	rows, _ = StepGroup(rows, evaluations, machineNow)
+	rearCount := func(rows []LineState) int {
+		n := 0
+		for _, row := range rows {
+			if row.Identity == IdentityRear {
+				n++
+			}
+		}
+		return n
+	}
+	if rearCount(rows) != 2 {
+		t.Fatal("expected one composite entry from two simultaneous failures")
+	}
+	entries := []time.Time{machineNow}
+	left := 0
+	for rows[0].Until.Before(machineNow.Add(48 * time.Hour)) {
+		last := entries[len(entries)-1]
+		review := rows[0].Until
+		if !review.After(last) {
+			t.Fatalf("rear deadline did not advance beyond %s: %s", last, review)
+		}
+		reviews := make(map[Dimension]Evaluation)
+		for _, row := range rows {
+			if kind, due := Due(row, review, false, false); due {
+				reviews[row.Line] = Evaluation{Kind: kind, Verdict: VerdictUnknown}
+			}
+		}
+		rows, _ = StepGroup(rows, reviews, review)
+		if rearCount(rows) != 0 || !rows[0].Trial || !rows[2].Trial {
+			t.Fatalf("expected both rear lines to enter trial at %s", review)
+		}
+		fail := review.Add(time.Second)
+		failures := make(map[Dimension]Evaluation)
+		for _, row := range rows {
+			if kind, due := Due(row, fail, false, true); due {
+				failures[row.Line] = Evaluation{Kind: kind, Verdict: VerdictFail}
+			}
+		}
+		rows, _ = StepGroup(rows, failures, fail)
+		if rearCount(rows) != 2 || !rows[0].EvaluatedAt.After(review) || !rows[2].EvaluatedAt.After(review) {
+			t.Fatalf("both trial failures must advance state at %s", fail)
+		}
+		entries = append(entries, fail)
+		// For a sorted series, the largest count for a given right edge
+		// includes every entry at or after that edge minus twelve hours.
+		for entries[left].Before(fail.Add(-12 * time.Hour)) {
+			left++
+		}
+		if count := len(entries) - left; count > 13 {
+			t.Fatalf("%d composite rear entries in the closed 12-hour window ending %s", count, fail)
+		}
+	}
+	if len(entries) <= 13 {
+		t.Fatalf("only exercised %d entries, want more than one window", len(entries))
 	}
 }
