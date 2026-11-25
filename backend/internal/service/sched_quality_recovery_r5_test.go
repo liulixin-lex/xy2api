@@ -142,7 +142,13 @@ func TestRecoveryRelaxDoesNotUseSiblingHistory(t *testing.T) {
 	for _, history := range []bool{false, true} {
 		f := newQualityFixture(t)
 		f.badTTFT()
+		for i := range f.ledger.Rows {
+			if f.ledger.Rows[i].AccountID == 1 {
+				f.ledger.Rows[i].TTFOMs = new(100000)
+			}
+		}
 		f.cycle()
+		require.Equal(t, q.IdentityRear, f.line(q.DimensionTTFO).Identity)
 		if history {
 			for i := range f.store.Rows {
 				r := &f.store.Rows[i]
@@ -153,11 +159,29 @@ func TestRecoveryRelaxDoesNotUseSiblingHistory(t *testing.T) {
 				}
 			}
 		}
+		sibling := f.line(q.DimensionError)
+		oldDecisions := len(f.store.Decisions)
 		p := q.DefaultRuleBParams()
 		p.Confidence = .9
 		_, err := f.e.UpdateTTFTRule(context.Background(), 0, p)
 		require.NoError(t, err)
-		require.Zero(t, f.line(q.DimensionTTFO).Level)
+		entered := f.line(q.DimensionTTFO)
+		require.Equal(t, q.IdentityRear, entered.Identity)
+		require.False(t, entered.Trial)
+		require.Zero(t, entered.Level)
+		require.Equal(t, 1, entered.Admissions)
+		require.Equal(t, f.now, entered.Entry)
+		require.Equal(t, f.now, entered.Epoch)
+		require.Equal(t, f.now.Add(60*time.Minute), entered.Until)
+		require.Equal(t, sibling, f.line(q.DimensionError))
+		var actions []q.Action
+		for _, decision := range f.store.Decisions[oldDecisions:] {
+			if decision.Key == entered.LineKey {
+				actions = append(actions, decision.Action)
+				require.Equal(t, f.now, decision.At)
+			}
+		}
+		require.Equal(t, []q.Action{q.ActionRelax, q.ActionEnter}, actions)
 	}
 }
 
