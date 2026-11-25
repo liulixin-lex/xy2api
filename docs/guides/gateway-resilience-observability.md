@@ -144,13 +144,11 @@ COMMIT;
 
 OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件字段不记录请求或响应正文、凭据与完整会话值。查询入口分三类：
 
-- 带 `component=sched_quality` 的 Info 会落入运维监控的系统日志，可按组件筛选。
+- 带 `component=sched_quality` 的 Info 会落入运维监控的系统日志，可按组件筛选；协议转换的 `openai_conversion_retry` 也带这个组件。其余普通 Info 不进库。
 - Warn 及以上会落库。`sched_quality.cycle` 的 Error、`sched_quality.view_stale`、`sched_quality.takeover_avoid_failed`、`sched_quality.takeover_commit_failed`、`sched_quality.binding_alias_failed`、`sched_quality.invalid_policy`、`sched_quality.invalid_reset_time`、`sched_quality.rear_entries_read_failed`、`sched_quality.trial_full_record_failed`、`sched_quality.release_trial_group`，以及 `sched_quality.cleanup` 中判定记录清理失败的 Error 均按事件名查找。这些事件不带 `component`。
 - 不带 `component` 的 Info 只在应用标准输出里，包括 `resilience.budget_timeout_plan`、`sched_quality.capability_mark_evicted` 和 `sched_quality.cleanup` 中 `kind=decisions` 的成功清理记录。
 
 成功尝试的 `sched_quality.attempt_finished` 为 Debug，查看时需启用对应日志级别。
-
-<!-- 第 21 条交付后在这里补：换号重发（`openai_conversion_retry`）和长期统计装载完成（`sched_quality.performance_ready`）进系统日志库、换号重发带请求号。 -->
 
 | 事件 | 级别 | 何时写 / 关键字段 |
 |---|---|---|
@@ -160,7 +158,7 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 | `sched_quality.state` | Info | 带 `component=sched_quality`；判定事务提交后每动作一条，含保存门槛引发的重评。字段见下文 |
 | `sched_quality.history_missing` | Info | 带 `component=sched_quality`；事务提交后按线汇总缺历史的评估。含 `account_id`、`model`、`group_id`、`line`、`first_at`、`last_at`（首末评估时刻）、`assessments`（次数） |
 | `sched_quality.missing_deadline` | Warn | 带 `component=sched_quality`；后排或试用记录缺期限，按发现时到期处理并提交动作后记录。含 `at`、`account_id`、`model`、`group_id`、`line` |
-| `sched_quality.performance_ready` | Info | 不带组件，只查应用日志。每次进程启动首次发布完整长期表现时记一次，部分装载不记；`snapshot_at`、`from` 为统计窗口终点和起点，`rows` 为装入的尝试样本数，`load_ms` 为首次加载到发布的毫秒数（含重试等待） |
+| `sched_quality.performance_ready` | Info | 带 `component=sched_quality`，进系统日志库。每次进程启动首次发布完整长期表现时记一次，部分装载不记；`snapshot_at`、`from` 为统计窗口终点和起点，`rows` 为装入的尝试样本数，`load_ms` 为首次加载到发布的毫秒数（含重试等待） |
 | `sched_quality.performance_load` | Warn | 不带组件，按事件名查；长期表现加载或配置读取失败，含 `error` |
 | `sched_quality.first_output_avoid` | Info | 原归属号等够首输出时限后记录避让结果。含 `gateway_request_id`、`group_id`、`model`、`account_id`、`owner_gen`、`expires_at_ms`、`reason`、`confirmed`，存储错误或超时另有 `error_class` |
 | `sched_quality.session_switch` | Info | 带 `component=sched_quality`；会话绑定事务结束，或放弃会话变更，见下表 |
@@ -296,7 +294,7 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 | 事件 | 级别 | 何时写 / 在哪查 |
 |---|---|---|
 | `upstream_conversion_failed` | Warn | 转换错误取得终态写入权时记一次。不带 `component=sched_quality`，在系统日志按事件名查 |
-| `openai_conversion_retry` | Info | Chat 请求走 Responses 上游且 `conversion_reason=conflicting_output_identity` 时，每请求记一次是否换号实发及结果。不带 `component=sched_quality`，只查应用日志 |
+| `openai_conversion_retry` | Info | Chat 请求走 Responses 上游且 `conversion_reason=conflicting_output_identity` 时，每请求记一次是否换号实发及结果。带 `component=sched_quality`，进系统日志库；`gateway_request_id` 是网关本地请求 ID，可连尝试记录的 `request_id` |
 
 流式工具调用身份冲突（`tool_identity_conflict`）、输出序号冲突（`conflicting_output_index`）以及两种输出歧义（`ambiguous_output_identity`、`ambiguous_unindexed_output`）沿用原来的错误处理；查 `upstream_conversion_failed`，不会有 `openai_conversion_retry`。
 
@@ -368,7 +366,7 @@ Responses 拒参修复（包括流内修复）在既有上游错误事件中记�
 
 **OpenAI 账号的后排、试用、恢复或会话搬动看不明白**：先按组件 `sched_quality` 筛选系统日志；不带组件的告警另按事件名找，仅标准输出的 Info 到应用日志里查，清单见 [质量状态](#质量状态)。
 
-1. 重启后先看 `sched_quality.loading`：`page` 表示仍在分页加载，`incomplete` 带错误，加载完成前不分层；`complete` 表示证据加载完成。长期表现另看应用日志里的 `sched_quality.performance_ready`。再看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 个周期；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明引擎周期变慢或失败。`cycle` 的 Error 不带组件，须按事件名找，结合错误字段排查。
+1. 重启后先看 `sched_quality.loading`：`page` 表示仍在分页加载，`incomplete` 带错误，加载完成前不分层；`complete` 表示证据加载完成。长期表现另看系统日志里的 `sched_quality.performance_ready`。再看 `sched_quality.summary` 是否每 5 分钟按时出现、周期是否变慢：每个实例约 60 个周期；`cycles_failed` 大于 0、`cycle_ms_max` 变大或出现 `sched_quality.cycle` 的 Warn，说明引擎周期变慢或失败。`cycle` 的 Error 不带组件，须按事件名找，结合错误字段排查。
 2. 再按账号看 `sched_quality.state`：何时进入后排、试用或回正常，哪条线（`line`）、依据来自哪里（`basis`），以及试用结束的原因（`release_reason`）。补判资料或期限不全时，再看 `sched_quality.history_missing`、`sched_quality.missing_deadline`。
 3. 新会话没选到号或落到后排，先看 `sched_quality.new_session` 的候选名单；会话搬动看 `sched_quality.session_switch` 的 `committed`，用 `gateway_request_id` 连到访问日志和尝试记录的 `request_id`。`sched_quality.attempt_finished` 可区分首输出截止、真实上游失败与取消；怀疑协议转换失败时查 [协议转换日志](#协议转换)。
 
