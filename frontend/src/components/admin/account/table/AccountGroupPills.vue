@@ -266,13 +266,15 @@ const trialEndBy = (until: string) => t('admin.schedQuality.stay.trialEnd', { ti
 /**
  * The widest text of each column of a card of lines, so the card keeps one width whatever the figures and times this
  * time, at the back or on trial alike (the model is as long as its name): every line's name, the widest reading and
- * assessment, the review and the trial's end at their widest clock (digits are of one width).
+ * assessment, the review and the trial's end at their widest (digits are of one width): with the date, as a time
+ * that is not today is written (formatShortTime), so a stay across midnight does not widen the card.
  */
 function lineSizer(): string[] {
   const names = (['ttfo', 'error', 'cache'] as const).map(colName)
   const lacks = [null, ...LACK_UNITS].map((unit) => lacksText(t, unit, 99, 99))
   const notes = ['100.0 / 99.9', t('admin.schedQuality.verdict.pass'), t('admin.schedQuality.verdict.unknown'), ...lacks]
-  const stays = [t('admin.schedQuality.stay.rear', { time: '00:00' }), t('admin.schedQuality.stay.trialEnd', { time: '00:00' })]
+  const widest = '00-00 00:00'
+  const stays = [t('admin.schedQuality.stay.rear', { time: widest }), t('admin.schedQuality.stay.trialEnd', { time: widest })]
   return ['', names.join('\n'), notes.join('\n'), stays.join('\n')]
 }
 /** The group's model that ends last; one with a known end before any without. */
