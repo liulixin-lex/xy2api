@@ -3,7 +3,6 @@
 package schedquality
 
 import (
-	"reflect"
 	"testing"
 	"time"
 )
@@ -94,9 +93,6 @@ func TestStepNormalAssessmentDoesNotClearLegacyHistory(t *testing.T) {
 		s.Level, s.Admissions = level, 4
 		if _, due := Due(s, machineNow, false, false); due {
 			t.Fatalf("normal history created an automatic clock at level %d", level)
-		}
-		if next, action := machineStep(s, EventClock, VerdictUnknown, machineNow); action != "" || !reflect.DeepEqual(next, s) {
-			t.Fatalf("retired clock changed history: %+v / %s", next, action)
 		}
 		if next, action := machineStep(s, EventRegular, VerdictUnknown, machineNow); action != "" || next.Level != level || next.Admissions != 4 {
 			t.Fatalf("regular tick cleared legacy history: %+v / %s", next, action)

@@ -200,7 +200,7 @@ func TestDueCutAndIdempotence(t *testing.T) {
 		kind        EventKind
 		due         bool
 	}{
-		{base, machineNow, false, true, EventClock, false}, {base, machineNow, true, false, EventRegular, true},
+		{base, machineNow, false, true, EventRegular, false}, {base, machineNow, true, false, EventRegular, true},
 		{rear, rear.Until.Add(-time.Second), true, true, EventReview, false}, {rear, rear.Until, true, true, EventReview, true},
 		{trial, trial.EvaluatedAt.Add(time.Second), false, false, EventTrial, false}, {trial, trial.EvaluatedAt.Add(time.Second), false, true, EventTrial, true},
 		{trial, trial.TrialUntil, false, false, EventTrial, true},

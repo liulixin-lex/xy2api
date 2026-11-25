@@ -49,7 +49,7 @@ const (
 	EventRegular EventKind = iota
 	EventTrial
 	EventReview
-	EventClock
+	EventClock // Retained numeric value for reading historical clock assessments.
 )
 
 type Action string

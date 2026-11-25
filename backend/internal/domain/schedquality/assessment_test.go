@@ -390,3 +390,18 @@ func TestAssessmentCacheTrialNeedsFortyTurns(t *testing.T) {
 		}
 	}
 }
+
+func TestAssessmentHistoricalClockReadOnly(t *testing.T) {
+	const stored = "{\"w\":1767268800000000,\"f\":\"2026-01-01T12:00:00Z\",\"l\":\"2026-01-01T12:00:00Z\",\"n\":1,\"k\":3,\"a\":\"clear\",\"r\":\"within\"}"
+	var segment AssessmentSegment
+	require.NoError(t, json.Unmarshal([]byte(stored), &segment))
+	require.Equal(t, EventClock, segment.Kind)
+	require.Equal(t, ActionClear, segment.Action)
+	encoded, err := json.Marshal(segment)
+	require.NoError(t, err)
+	require.JSONEq(t, stored, string(encoded))
+	prev := LineState{LineKey: LineKey{Line: DimensionTTFO}, EvaluatedAt: segment.LastAt, LastAssessment: []AssessmentSegment{segment}}
+	next, action := Step(prev, segment.Kind, VerdictUnknown, Basis{}, segment.LastAt.Add(time.Minute))
+	require.Empty(t, action)
+	require.Equal(t, prev, next, "a historical clock must not change state or its assessment watermark")
+}

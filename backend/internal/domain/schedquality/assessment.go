@@ -125,16 +125,6 @@ func RecordAssessment(prev LineState, at time.Time, kind EventKind, verdict Verd
 	}
 	at = at.UTC().Round(time.Microsecond)
 	history := prev.LastAssessment
-	if kind == EventClock {
-		// A clock can carry a verified assessment forward, but cannot repair a
-		// gap left by an older writer. Never mutate a committed segment.
-		if len(history) == 0 || !history[len(history)-1].MatchesWatermark(prev.EvaluatedAt) {
-			return history
-		}
-		history = slices.Clone(history)
-		history[len(history)-1].Watermark = new(at.UnixMicro())
-		return history
-	}
 	segment := AssessmentSegment{FirstAt: at, LastAt: at, Watermark: new(at.UnixMicro()), Count: 1, Kind: kind, Action: action}
 	segment.classify(verdict, basis)
 	if n := len(history); n > 0 {
