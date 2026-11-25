@@ -215,7 +215,8 @@ describe('decision figures', () => {
       return [null, ...LACK_UNITS].map((unit) => lacksText(t as never, unit, 2, 3))
     }
     expect(texts(zh, 'zh')).toEqual(['2\u00a0/\u00a03', '样本 2\u00a0/\u00a03', '会话 2\u00a0/\u00a03', '慢会话 2\u00a0/\u00a03', '轮 2\u00a0/\u00a03', '低会话 2\u00a0/\u00a03'])
-    expect(texts(en, 'en')).toEqual(['2\u00a0of\u00a03', '2\u00a0of\u00a03 samples', '2\u00a0of\u00a03 sessions', '2\u00a0of\u00a03 slow sessions', '2\u00a0of\u00a03 turns', '2\u00a0of\u00a03 low sessions'])
+    // English as compact, so a card with a long model name stays within its 340 px without cutting the unit.
+    expect(texts(en, 'en')).toEqual(['2/3', '2/3 samples', '2/3 sessions', '2/3 slow', '2/3 turns', '2/3 low'])
   })
 
   // Opus review of fe, must 1: the have / need of an assessment are what held it up, not always samples. The unit is
