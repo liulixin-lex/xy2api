@@ -66,6 +66,7 @@ func ttftInput(d *schedQualityData, k q.LineKey, cut, at time.Time, limit float6
 func (s *SchedQualityEngineService) assessLine(d *schedQualityData, r q.LineState, kind q.EventKind, at time.Time, resets map[int64]time.Time) (q.Verdict, q.Basis) {
 	cut := schedQualitySince(r.Cut(kind), resets[r.AccountID])
 	p := s.policies[r.GroupID].Policy
+	// The final clock name is retained for historical evidence; current events never use it.
 	basis := q.Basis{RuleVersion: q.RuleVersion, Line: r.Line, Cut: cut, Kind: []string{"regular", "trial", "review", "clock"}[kind]}
 	// A missing historical window cannot produce a new confirmed failure.
 	window := q.ErrorWindow

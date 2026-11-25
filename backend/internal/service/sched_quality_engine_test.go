@@ -9,6 +9,7 @@ import (
 	"time"
 
 	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,6 +62,12 @@ func TestValidatePolicyErrorFloor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateSchedQualityPolicy(q.Policy{TTFTSeconds: tc.ttfo, MaxErrorRate: tc.errorRate, MinCacheRatio: .8, TakeoverIdleSeconds: 900})
 			require.Equal(t, tc.valid, err == nil)
+			if tc.name == "below-floor" {
+				var policyError *infraerrors.ApplicationError
+				require.ErrorAs(t, err, &policyError)
+				require.Equal(t, "SCHED_ERROR_RATE_TOO_LOW", policyError.Reason)
+				require.Equal(t, "max_error_rate must be at least 0.01", policyError.Message)
+			}
 		})
 	}
 }

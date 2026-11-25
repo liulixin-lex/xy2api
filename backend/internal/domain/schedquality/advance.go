@@ -17,7 +17,7 @@ func Due(s LineState, at time.Time, fiveMin, touched bool) (EventKind, bool) {
 	if fiveMin {
 		return EventRegular, true
 	}
-	return EventClock, false
+	return EventRegular, false
 }
 
 func (s LineState) Cut(kind EventKind) time.Time {

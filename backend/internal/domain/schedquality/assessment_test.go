@@ -86,8 +86,8 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 	require.ElementsMatch(t, declared, tested)
 	require.LessOrEqual(t, len(assessmentCauses), 32)
 	var registered []string
-	for i, def := range assessmentCauses {
-		if i < 11 {
+	for _, def := range assessmentCauses {
+		if def.line == DimensionTTFO {
 			registered = append(registered, string(def.name))
 		}
 	}
@@ -369,16 +369,39 @@ func TestAssessmentWatermarkTolerance(t *testing.T) {
 func TestAssessmentCacheTrialNeedsFortyTurns(t *testing.T) {
 	for _, turns := range []int{25, 40} {
 		b := Basis{Line: DimensionCache, Cache: &CacheAssessment{Turns: turns, MinRatio: .8, Ratio: .8, Verdict: VerdictPass}}
-		s := RecordAssessment(LineState{Trial: true}, machineNow, EventTrial, VerdictPass, "", b)[0]
+		prev := LineState{LineKey: LineKey{Line: DimensionCache}, Trial: true,
+			Epoch: machineNow.Add(-15 * time.Minute), TrialUntil: machineNow.Add(45 * time.Minute)}
+		next, action := Step(prev, EventTrial, VerdictPass, b, machineNow)
+		require.Len(t, next.LastAssessment, 1)
+		s := next.LastAssessment[0]
 		if turns < 40 {
+			require.Empty(t, action)
+			require.True(t, next.Trial)
 			require.Equal(t, ReasonTrialOpen, s.Reason)
 			require.Equal(t, []string{cacheTurnsShort}, s.CauseNames())
 			require.Equal(t, new(float64(turns)), s.Have)
 			require.Equal(t, new(40), s.Need)
 		} else {
+			require.Equal(t, ActionTrialPass, action)
+			require.False(t, next.Trial)
 			require.Equal(t, ReasonWithin, s.Reason)
 			require.Empty(t, s.CauseNames())
 			require.Nil(t, s.Need)
 		}
 	}
+}
+
+func TestAssessmentHistoricalClockReadOnly(t *testing.T) {
+	const stored = "{\"w\":1767268800000000,\"f\":\"2026-01-01T12:00:00Z\",\"l\":\"2026-01-01T12:00:00Z\",\"n\":1,\"k\":3,\"a\":\"clear\",\"r\":\"within\"}"
+	var segment AssessmentSegment
+	require.NoError(t, json.Unmarshal([]byte(stored), &segment))
+	require.Equal(t, EventClock, segment.Kind)
+	require.Equal(t, ActionClear, segment.Action)
+	encoded, err := json.Marshal(segment)
+	require.NoError(t, err)
+	require.JSONEq(t, stored, string(encoded))
+	prev := LineState{LineKey: LineKey{Line: DimensionTTFO}, EvaluatedAt: segment.LastAt, LastAssessment: []AssessmentSegment{segment}}
+	next, action := Step(prev, segment.Kind, VerdictUnknown, Basis{}, segment.LastAt.Add(time.Minute))
+	require.Empty(t, action)
+	require.Equal(t, prev, next, "a historical clock must not change state or its assessment watermark")
 }

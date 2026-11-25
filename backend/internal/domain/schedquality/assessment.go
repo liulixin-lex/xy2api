@@ -52,6 +52,7 @@ type ruleBReasonInput struct {
 type assessmentCause struct {
 	name   RuleBUnknownReason
 	reason AssessmentReason
+	line   Dimension // Owning line; independent of the persisted bit position.
 	// Rule B emits this cause when the predicate holds on an unknown verdict.
 	ruleB func(ruleBReasonInput) bool
 }
@@ -62,23 +63,23 @@ const otherCauseIndex = 16
 // Rule B and the assessment summary use the same names and classifications.
 // Retired peer gates keep their persisted slots but no longer have predicates.
 var assessmentCauses = [...]assessmentCause{
-	{RuleBNoPeers, ReasonPeerShort, nil},
-	{RuleBAllPeersRear, ReasonPeerShort, nil},
-	{RuleBPeerKnownInsufficient, ReasonPeerShort, nil},
-	{RuleBNoSamples, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.N == 0 }},
-	{RuleBMassInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.N < ruleBMinMass-ruleBMassRounding }},
-	{RuleBSessionsInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.S < ruleBMinSessions }},
-	{RuleBSlowSessionsInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.D < ruleBMinSlowSessions }},
-	{RuleBAbsoluteUnconfirmed, ReasonWithin, func(g ruleBReasonInput) bool { return !g.Absolute }},
-	{RuleBRelativeUnconfirmed, ReasonWithin, nil},
-	{RuleBWorstMeanAboveTolerance, ReasonWithin, func(g ruleBReasonInput) bool { return g.WorstMean > g.tolerance }},
-	{RuleBRelativeVeto, ReasonWithin, nil},
-	{cacheTurnsShort, ReasonOwnShort, nil},
-	{cacheLowSessionsShort, ReasonOwnShort, nil},
-	{errorClearShort, ReasonOwnShort, nil},
-	{errorBoundsUnconfirmed, ReasonWithin, nil},
-	{errorRecoveryOverLimit, ReasonPending, nil},
-	otherCauseIndex: {"other", ReasonOther, nil},
+	{RuleBNoPeers, ReasonPeerShort, DimensionTTFO, nil},
+	{RuleBAllPeersRear, ReasonPeerShort, DimensionTTFO, nil},
+	{RuleBPeerKnownInsufficient, ReasonPeerShort, DimensionTTFO, nil},
+	{RuleBNoSamples, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.N == 0 }},
+	{RuleBMassInsufficient, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.N < ruleBMinMass-ruleBMassRounding }},
+	{RuleBSessionsInsufficient, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.S < ruleBMinSessions }},
+	{RuleBSlowSessionsInsufficient, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.D < ruleBMinSlowSessions }},
+	{RuleBAbsoluteUnconfirmed, ReasonWithin, DimensionTTFO, func(g ruleBReasonInput) bool { return !g.Absolute }},
+	{RuleBRelativeUnconfirmed, ReasonWithin, DimensionTTFO, nil},
+	{RuleBWorstMeanAboveTolerance, ReasonWithin, DimensionTTFO, func(g ruleBReasonInput) bool { return g.WorstMean > g.tolerance }},
+	{RuleBRelativeVeto, ReasonWithin, DimensionTTFO, nil},
+	{cacheTurnsShort, ReasonOwnShort, DimensionCache, nil},
+	{cacheLowSessionsShort, ReasonOwnShort, DimensionCache, nil},
+	{errorClearShort, ReasonOwnShort, DimensionError, nil},
+	{errorBoundsUnconfirmed, ReasonWithin, DimensionError, nil},
+	{errorRecoveryOverLimit, ReasonPending, DimensionError, nil},
+	otherCauseIndex: {"other", ReasonOther, "", nil},
 }
 
 func assessmentCauseIndex(name RuleBUnknownReason) int {
@@ -124,16 +125,6 @@ func RecordAssessment(prev LineState, at time.Time, kind EventKind, verdict Verd
 	}
 	at = at.UTC().Round(time.Microsecond)
 	history := prev.LastAssessment
-	if kind == EventClock {
-		// A clock can carry a verified assessment forward, but cannot repair a
-		// gap left by an older writer. Never mutate a committed segment.
-		if len(history) == 0 || !history[len(history)-1].MatchesWatermark(prev.EvaluatedAt) {
-			return history
-		}
-		history = slices.Clone(history)
-		history[len(history)-1].Watermark = new(at.UnixMicro())
-		return history
-	}
 	segment := AssessmentSegment{FirstAt: at, LastAt: at, Watermark: new(at.UnixMicro()), Count: 1, Kind: kind, Action: action}
 	segment.classify(verdict, basis)
 	if n := len(history); n > 0 {
@@ -149,10 +140,6 @@ func RecordAssessment(prev LineState, at time.Time, kind EventKind, verdict Verd
 }
 
 func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
-	// A cache pass below TrialCacheTurns cannot qualify an ongoing trial for release.
-	if s.Kind == EventTrial && b.Cache != nil && verdict == VerdictPass && b.Cache.Turns < TrialCacheTurns && s.Action == "" {
-		verdict = VerdictUnknown
-	}
 	switch verdict {
 	case VerdictPass:
 		s.Reason = ReasonWithin
@@ -169,8 +156,8 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 		case b.Cache != nil:
 			cache := b.Cache
 			need := CacheMinTurns
-			if cache.Ratio < cache.MinRatio && cacheDeficitAtLeast(cache.Ratio, cache.MinRatio, .20) {
-				need = cacheMinLowTurns
+			if cache.Ratio < cache.MinRatio && cacheDeficitAtLeast(cache.Ratio, cache.MinRatio, cacheDeepDeficit) {
+				need = cacheDeepMinTurns
 			}
 			if s.Kind == EventTrial && cache.Ratio >= cache.MinRatio {
 				need = TrialCacheTurns
@@ -221,7 +208,7 @@ func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence) {
 	for _, name := range e.Causes {
 		i := assessmentCauseIndex(name)
 		def := assessmentCauses[i]
-		if i >= 11 { // Only the first eleven persisted causes belong to TTFT.
+		if def.line != DimensionTTFO {
 			s.Causes |= 1 << otherCauseIndex
 			continue
 		}
