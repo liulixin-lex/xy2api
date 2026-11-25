@@ -40,6 +40,13 @@
       }
     }
   },
+  "reach": [
+    {
+      "model": "model-a",
+      "cache": {"ok": 2, "n": 3},
+      "first_output": {"ok": 1, "n": 3}
+    }
+  ],
   "changed": [
     {
       "account_id": 1,
