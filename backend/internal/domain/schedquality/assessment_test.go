@@ -369,13 +369,21 @@ func TestAssessmentWatermarkTolerance(t *testing.T) {
 func TestAssessmentCacheTrialNeedsFortyTurns(t *testing.T) {
 	for _, turns := range []int{25, 40} {
 		b := Basis{Line: DimensionCache, Cache: &CacheAssessment{Turns: turns, MinRatio: .8, Ratio: .8, Verdict: VerdictPass}}
-		s := RecordAssessment(LineState{Trial: true}, machineNow, EventTrial, VerdictPass, "", b)[0]
+		prev := LineState{LineKey: LineKey{Line: DimensionCache}, Trial: true,
+			Epoch: machineNow.Add(-15 * time.Minute), TrialUntil: machineNow.Add(45 * time.Minute)}
+		next, action := Step(prev, EventTrial, VerdictPass, b, machineNow)
+		require.Len(t, next.LastAssessment, 1)
+		s := next.LastAssessment[0]
 		if turns < 40 {
+			require.Empty(t, action)
+			require.True(t, next.Trial)
 			require.Equal(t, ReasonTrialOpen, s.Reason)
 			require.Equal(t, []string{cacheTurnsShort}, s.CauseNames())
 			require.Equal(t, new(float64(turns)), s.Have)
 			require.Equal(t, new(40), s.Need)
 		} else {
+			require.Equal(t, ActionTrialPass, action)
+			require.False(t, next.Trial)
 			require.Equal(t, ReasonWithin, s.Reason)
 			require.Empty(t, s.CauseNames())
 			require.Nil(t, s.Need)

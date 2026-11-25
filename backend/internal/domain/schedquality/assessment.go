@@ -149,10 +149,6 @@ func RecordAssessment(prev LineState, at time.Time, kind EventKind, verdict Verd
 }
 
 func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
-	// A cache pass below TrialCacheTurns cannot qualify an ongoing trial for release.
-	if s.Kind == EventTrial && b.Cache != nil && verdict == VerdictPass && b.Cache.Turns < TrialCacheTurns && s.Action == "" {
-		verdict = VerdictUnknown
-	}
 	switch verdict {
 	case VerdictPass:
 		s.Reason = ReasonWithin
