@@ -57,7 +57,9 @@ func (b *schedPerfReachBuilder) add(f SchedPerfFact) {
 		key := schedPerfReachSessionKey{f.Group, f.Session}
 		s := b.sessions[key]
 		s.cache = s.cache || cache
-		s.bound = max(s.bound, bound)
+		if bound > s.bound {
+			s.bound = bound
+		}
 		b.sessions[key] = s
 	}
 }
@@ -72,8 +74,8 @@ func (b *schedPerfReachBuilder) freeze() schedPerfReach {
 		// suffice to tell exactly when at least two sessions remain eligible.
 		if s.bound > highest {
 			b.row.secondSessionBound, highest = highest, s.bound
-		} else {
-			b.row.secondSessionBound = max(b.row.secondSessionBound, s.bound)
+		} else if s.bound > b.row.secondSessionBound {
+			b.row.secondSessionBound = s.bound
 		}
 	}
 	slices.Sort(b.row.outputs)
