@@ -33,7 +33,7 @@ type SchedAdminAccountSummaryCache struct {
 	Turns int      `json:"turns"`
 }
 type SchedAdminRear struct {
-	LineDetails []SchedAdminRearLine     `json:"line_details,omitempty"`
+	LineDetails []SchedAdminLineDetail   `json:"line_details,omitempty"`
 	Level       int                      `json:"level"`
 	UntilLine   schedquality.Dimension   `json:"until_line"`
 	GroupID     int64                    `json:"group_id"`
@@ -44,7 +44,7 @@ type SchedAdminRear struct {
 	Effective   bool                     `json:"effective"`
 }
 type SchedAdminTrial struct {
-	LineDetails    []SchedAdminTrialLine  `json:"line_details,omitempty"`
+	LineDetails    []SchedAdminLineDetail `json:"line_details,omitempty"`
 	Level          int                    `json:"level"`
 	UntilLine      schedquality.Dimension `json:"until_line"`
 	TrialStartedAt *string                `json:"trial_started_at"`
@@ -52,15 +52,12 @@ type SchedAdminTrial struct {
 	Model          string                 `json:"model"`
 	Until          string                 `json:"until"`
 }
-type SchedAdminRearLine struct {
-	Line  schedquality.Dimension `json:"line"`
-	Until string                 `json:"until"`
-	Basis *SchedAdminBasis       `json:"basis,omitempty"`
-}
-type SchedAdminTrialLine struct {
+type SchedAdminLineDetail struct {
 	Line     schedquality.Dimension `json:"line"`
+	Identity string                 `json:"identity"`
 	Until    string                 `json:"until"`
-	LastEval *SchedAdminLastEval    `json:"last_eval"`
+	Basis    *SchedAdminBasis       `json:"basis,omitempty"`
+	LastEval *SchedAdminLastEval    `json:"last_eval,omitempty"`
 }
 type SchedAdminAccountSummary struct {
 	AccountID   int64                           `json:"account_id"`
