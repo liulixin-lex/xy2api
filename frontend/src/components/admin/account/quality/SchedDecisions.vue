@@ -77,8 +77,8 @@
  * older pages. A line with evidence is a button: it grows open to the figures the decision was taken on (SchedEvidence),
  * once for the groups that share them and apart, with their pills and own ends, where they differ; and why a trial
  * ended without a verdict. Another account starts over; a quality change made from the page loads the first page again.
- * Records of the previous rules (no line, or a rule version other than the one in force, or none) read
- * "旧规则 · <action>", as they always did otherwise. A trial that ends under the rules in force at its deadline reads
+ * Records of the previous rules (a rule version other than the one in force, or none) read "旧规则 · <action>", as
+ * they always did otherwise; a record without a line keeps its muted look whatever its version. A trial that ends under the rules in force at its deadline reads
  * 到期回正常 (with why it was not released sooner under it); one that passed or failed reads by its action as before.
  */
 import { computed, reactive, ref, useId, watch } from 'vue'
@@ -213,8 +213,11 @@ function toggle(key: string) {
   else shown.add(key)
 }
 
-/** Of the previous rules: no line (before lines were kept), or a basis of another rule version (or none). */
-const previousRules = (entry: MergedDecision) => !entry.line || entry.items[0].basis?.rule_version !== SCHED_RULE_VERSION
+/**
+ * Of the previous rules: a basis of another rule version than the one in force, or none (records from before lines
+ * and evidence were kept have none). Decided by the version alone: a 4.0 reset or relax without a line is not old.
+ */
+const previousRules = (entry: MergedDecision) => entry.items[0].basis?.rule_version !== SCHED_RULE_VERSION
 
 /**
  * The action in words (其他 for one the copy does not know); records of the previous rules say so first. Under the rules
