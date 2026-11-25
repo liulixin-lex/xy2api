@@ -126,6 +126,9 @@ func deleteSchedAccountLines(ctx context.Context, tx *sql.Tx, accountID int64, a
 				return nil, nil, err
 			}
 		}
+		// Retain the prior evidence, but this administrative decision belongs to
+		// the currently running rule, not the rule which admitted the old row.
+		basis.RuleVersion = schedquality.RuleVersion
 		decisions = append(decisions, schedquality.Decision{At: at, Key: key, Action: "reset", Basis: basis})
 	}
 	return groups, decisions, rows.Err()

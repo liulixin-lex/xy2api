@@ -33,7 +33,8 @@ func TestSchedQualityResetDoesNotRepublishDiagnostics(t *testing.T) {
 	require.Equal(t, q.ActionTrial, action)
 	require.True(t, trial.Basis.MissingDeadline)
 	require.True(t, trial.Trial)
-	require.Equal(t, at.Add(120*time.Minute), trial.TrialUntil)
+	require.Equal(t, at.Add(q.TrialDuration), trial.TrialUntil)
+	trial.Basis.RuleVersion = "legacy-rule"
 	encoded, err := json.Marshal(trial.Basis)
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `INSERT INTO sched_line_states VALUES($1,$2,$3,$4,$5,$6,$7)`, trial.AccountID, trial.Model, trial.GroupID, trial.Line, trial.Identity, trial.Trial, string(encoded))
@@ -55,4 +56,8 @@ func TestSchedQualityResetDoesNotRepublishDiagnostics(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &recorded))
 	require.True(t, recorded.MissingDeadline)
 	require.True(t, recorded.HistoryMissing)
+	require.Equal(t, q.RuleVersion, recorded.RuleVersion)
+	var version string
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT rule_version FROM sched_decisions WHERE account_id=1 AND action='reset'").Scan(&version))
+	require.Equal(t, q.RuleVersion, version)
 }
