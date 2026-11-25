@@ -77,15 +77,16 @@ type SchedAdminAccountSummary struct {
 	Exemptions  []SchedAdminExemption           `json:"exemptions"`
 }
 type SchedAdminAccountDetail struct {
-	Account       SchedAdminAccountDetailAccount      `json:"account"`
-	At            string                              `json:"at"`
-	Stale         bool                                `json:"stale"`
-	GlobalEnabled bool                                `json:"global_enabled"`
-	Stop          *SchedAdminStop                     `json:"stop"`
-	ResetAt       *string                             `json:"reset_at"`
-	Groups        []SchedAdminAccountDetailGroups     `json:"groups"`
-	AutoStates    []SchedAdminAccountDetailAutoStates `json:"auto_states"`
-	Exemptions    []SchedAdminExemption               `json:"exemptions"`
+	CurrentRuleVersion string                              `json:"current_rule_version"`
+	Account            SchedAdminAccountDetailAccount      `json:"account"`
+	At                 string                              `json:"at"`
+	Stale              bool                                `json:"stale"`
+	GlobalEnabled      bool                                `json:"global_enabled"`
+	Stop               *SchedAdminStop                     `json:"stop"`
+	ResetAt            *string                             `json:"reset_at"`
+	Groups             []SchedAdminAccountDetailGroups     `json:"groups"`
+	AutoStates         []SchedAdminAccountDetailAutoStates `json:"auto_states"`
+	Exemptions         []SchedAdminExemption               `json:"exemptions"`
 }
 type SchedAdminAccountDetailAccount struct {
 	ID          int64   `json:"id"`

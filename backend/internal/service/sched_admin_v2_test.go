@@ -58,6 +58,7 @@ func TestSchedAdminV2DetailJSONEvidence(t *testing.T) {
 	out, err := s.Detail(context.Background(), 1)
 	require.NoError(t, err)
 	raw := schedAdminJSON(t, out)
+	require.Equal(t, schedquality.RuleVersion, raw["current_rule_version"])
 	groups := raw["groups"].([]any)
 	model := groups[0].(map[string]any)["by_model"].([]any)[0].(map[string]any)
 	require.ElementsMatch(t, []string{"model", "placement", "exempt", "lines"}, schedAdminJSONKeys(model))

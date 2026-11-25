@@ -276,7 +276,7 @@ func (s *SchedAdminService) AccountFilter(ctx context.Context, quality string) (
 	return out.attention.Filter(quality, out.normal), nil
 }
 func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAccountDetail, error) {
-	out := SchedAdminAccountDetail{Groups: []SchedAdminAccountDetailGroups{}, AutoStates: []SchedAdminAccountDetailAutoStates{}, Exemptions: []SchedAdminExemption{}}
+	out := SchedAdminAccountDetail{CurrentRuleVersion: schedquality.RuleVersion, Groups: []SchedAdminAccountDetailGroups{}, AutoStates: []SchedAdminAccountDetailAutoStates{}, Exemptions: []SchedAdminExemption{}}
 	a, err := s.account(ctx, id)
 	if err != nil {
 		return out, err
