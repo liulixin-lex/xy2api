@@ -233,7 +233,9 @@ func TestEngineRuleChangesAtomicRejudgeAndConflict(t *testing.T) {
 				require.Equal(t, 1, r.Admissions)
 				require.Equal(t, f.now, r.Epoch)
 				require.Equal(t, f.now, r.Entry)
-				require.NotNil(t, r.Basis.TTFT.PRel, "the cleared rear peer must supply usable evidence")
+				require.Nil(t, r.Basis.TTFT.PRel, "relative evidence is retired")
+				require.Equal(t, .001, r.Basis.TTFT.PriorMu, "group prior still includes the fast account")
+				require.Equal(t, new(p.Confidence), r.Basis.TTFT.Confidence)
 				var actions []q.Action
 				for _, d := range f.store.Decisions[decisionCount:] {
 					if d.Key == r.LineKey {
