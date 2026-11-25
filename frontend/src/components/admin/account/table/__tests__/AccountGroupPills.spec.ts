@@ -221,14 +221,14 @@ describe('AccountGroupPills', () => {
     const rear = mountPills(2, baseQuality({ group_status: statuses({ 2: 'rear' }), rear: [rearItem] }))
     const card = cardOf(rear.findAll('[data-test="group-pill-dot"]')[1]) as TipCard
     expect(card.rows).toEqual([
-      ['Astra', 'admin.schedQuality.dim.ttfo', { text: '67.5 / 20', tone: 'back' }, rearText(ttfoEnd)],
-      ['', 'admin.schedQuality.dim.cache', { text: '76.2 / 86', tone: 'back' }, rearText(cacheEnd)]
+      ['Astra', 'admin.schedQuality.panel.col.ttfo', { text: '67.5 / 20', tone: 'back' }, rearText(ttfoEnd)],
+      ['', 'admin.schedQuality.panel.col.cache', { text: '76.2 / 86', tone: 'back' }, rearText(cacheEnd)]
     ])
     expect(JSON.stringify(card)).not.toMatch(/level|档/)
     // One width for every card of lines, at the back or on trial: the widest reading, assessment and stay.
     expect(card.sizer).toEqual([
       '',
-      'admin.schedQuality.dim.ttfo\nadmin.schedQuality.dim.error\nadmin.schedQuality.dim.cache',
+      'admin.schedQuality.panel.col.ttfo\nadmin.schedQuality.panel.col.error\nadmin.schedQuality.panel.col.cache',
       [
         '100.0 / 99.9', 'admin.schedQuality.verdict.pass', 'admin.schedQuality.verdict.unknown', tk('admin.schedQuality.panel.lacks', { have: 99, need: 99 }),
         ...['samples', 'sessions', 'slowSessions', 'turns', 'lowSessions'].map((unit) => tk(`admin.schedQuality.panel.lacksUnit.${unit}`, { have: 99, need: 99 }))
@@ -237,7 +237,7 @@ describe('AccountGroupPills', () => {
     ])
     // A line whose record kept no basis: its name and time only, no reading made up.
     const bare = mountPills(1, baseQuality({ group_status: statuses({ 1: 'rear' }), rear: [{ ...back(1, 'gpt-5', ['error'], ttfoEnd), line_details: [{ line: 'error', identity: 'rear', until: ttfoEnd }] }] }))
-    expect((cardOf(bare.get('[data-test="group-pill-dot"]')) as TipCard).rows).toEqual([['gpt-5', 'admin.schedQuality.dim.error', '', rearText(ttfoEnd)]])
+    expect((cardOf(bare.get('[data-test="group-pill-dot"]')) as TipCard).rows).toEqual([['gpt-5', 'admin.schedQuality.panel.col.error', '', rearText(ttfoEnd)]])
 
     // A model with one line at the back and another on trial is one rear item listing both, each by its own identity
     // (not guessed from what the record holds), each with its own time.
@@ -254,9 +254,9 @@ describe('AccountGroupPills', () => {
       }]
     }))
     expect((cardOf(mixed.get('[data-test="group-pill-dot"]')) as TipCard).rows).toEqual([
-      ['gpt-5', 'admin.schedQuality.dim.ttfo', { text: '67.5 / 20', tone: 'back' }, rearText(ttfoEnd)],
-      ['', 'admin.schedQuality.dim.cache', { text: tk('admin.schedQuality.panel.lacksUnit.turns', { have: 39, need: 40 }), tone: 'info' }, tk('admin.schedQuality.stay.trialEnd', { time: formatShortTime(mixedTrialEnd) })],
-      ['', 'admin.schedQuality.dim.error', '', tk('admin.schedQuality.stay.trialEnd', { time: formatShortTime(mixedTrialEnd) })]
+      ['gpt-5', 'admin.schedQuality.panel.col.ttfo', { text: '67.5 / 20', tone: 'back' }, rearText(ttfoEnd)],
+      ['', 'admin.schedQuality.panel.col.cache', { text: tk('admin.schedQuality.panel.lacksUnit.turns', { have: 39, need: 40 }), tone: 'info' }, tk('admin.schedQuality.stay.trialEnd', { time: formatShortTime(mixedTrialEnd) })],
+      ['', 'admin.schedQuality.panel.col.error', '', tk('admin.schedQuality.stay.trialEnd', { time: formatShortTime(mixedTrialEnd) })]
     ])
 
     const passEnd = inMinutes(40)
@@ -272,8 +272,8 @@ describe('AccountGroupPills', () => {
     const trialCard = cardOf(trial.get('[data-test="group-pill-dot"]')) as TipCard
     const by = (until: string) => tk('admin.schedQuality.stay.trialEnd', { time: formatShortTime(until) })
     expect(trialCard.rows).toEqual([
-      ['gpt-5', 'admin.schedQuality.dim.ttfo', { text: 'admin.schedQuality.verdict.pass', tone: 'ok' }, by(passEnd)],
-      ['', 'admin.schedQuality.dim.cache', { text: tk('admin.schedQuality.panel.lacksUnit.turns', { have: 12, need: 40 }), tone: 'info' }, by(shortEnd)]
+      ['gpt-5', 'admin.schedQuality.panel.col.ttfo', { text: 'admin.schedQuality.verdict.pass', tone: 'ok' }, by(passEnd)],
+      ['', 'admin.schedQuality.panel.col.cache', { text: tk('admin.schedQuality.panel.lacksUnit.turns', { have: 12, need: 40 }), tone: 'info' }, by(shortEnd)]
     ])
     // A line without its identity (the first answers with details) takes its item's kind.
     expect(trialCard.sizer).toEqual(card.sizer)
@@ -299,8 +299,8 @@ describe('AccountGroupPills', () => {
     const a = { ...back(1, 'gpt-b', ['ttfo'], rearEnd), line_details: [ttfoRear] }
     const b = { ...onTrial(1, 'gpt-a', 'cache', inMinutes(-10), trialEnd), line_details: [cacheTrial] }
     const both = [
-      ['gpt-a', 'admin.schedQuality.dim.cache', lacks, by(trialEnd)],
-      ['gpt-b', 'admin.schedQuality.dim.ttfo', reading, rearText(rearEnd)]
+      ['gpt-a', 'admin.schedQuality.panel.col.cache', lacks, by(trialEnd)],
+      ['gpt-b', 'admin.schedQuality.panel.col.ttfo', reading, rearText(rearEnd)]
     ]
     expect(rowsOf({ rear: [a], trial: [b] })).toEqual(both)
     // A at the back with one of its lines on trial, B only on trial.
@@ -308,7 +308,7 @@ describe('AccountGroupPills', () => {
     expect(rowsOf({ rear: [aMixed], trial: [b] })).toEqual([
       both[0],
       both[1],
-      ['', 'admin.schedQuality.dim.error', pass, by(trialEnd)]
+      ['', 'admin.schedQuality.panel.col.error', pass, by(trialEnd)]
     ])
     // Only on trial: the trial's models alone.
     expect(rowsOf({ rear: [], trial: [b] })).toEqual([both[0]])

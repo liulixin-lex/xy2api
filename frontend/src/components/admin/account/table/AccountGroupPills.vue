@@ -211,6 +211,8 @@ const restWorst = computed(() => {
 })
 
 const lineName = (dim: BackendDim) => t(`admin.schedQuality.dim.${dim}`)
+/** A line on its own row of the card, named as the panel's column it sits in (首字慢: the reading is a share). */
+const colName = (dim: BackendDim) => t(`admin.schedQuality.panel.col.${dim}`)
 const reasonCell = (lines: BackendDim[]): TipCell => ({ text: lines.map((line) => t(`admin.accounts.table.dimReasons.${line}`)).join('、'), tone: 'back' })
 /** "15:30 复核": the review of the line at the back that ends last. */
 const rearEnd = (item: BackendRear) => rearStay(t, item.until)
@@ -230,10 +232,10 @@ const namedEnd = (line: unknown, stay: string) => {
 function lineRow(model: string, detail: BackendLineDetail, identity: 'rear' | 'trial'): (string | TipCell)[] {
   if (identity === 'rear') {
     const reading = basisReading(detail.basis)
-    return [model, lineName(detail.line), reading ? { text: reading, tone: 'back' } : '', rearStay(t, detail.until)]
+    return [model, colName(detail.line), reading ? { text: reading, tone: 'back' } : '', rearStay(t, detail.until)]
   }
   const note = detail.last_eval ? trialNote(detail.last_eval, detail.line, t) : null
-  return [model, lineName(detail.line), note && note.text !== DASH ? { text: note.text, tone: note.pass ? 'ok' : 'info' } : '', trialEndBy(detail.until)]
+  return [model, colName(detail.line), note && note.text !== DASH ? { text: note.text, tone: note.pass ? 'ok' : 'info' } : '', trialEndBy(detail.until)]
 }
 
 /**
@@ -267,7 +269,7 @@ const trialEndBy = (until: string) => t('admin.schedQuality.stay.trialEnd', { ti
  * assessment, the review and the trial's end at their widest clock (digits are of one width).
  */
 function lineSizer(): string[] {
-  const names = (['ttfo', 'error', 'cache'] as const).map(lineName)
+  const names = (['ttfo', 'error', 'cache'] as const).map(colName)
   const lacks = [null, ...LACK_UNITS].map((unit) => lacksText(t, unit, 99, 99))
   const notes = ['100.0 / 99.9', t('admin.schedQuality.verdict.pass'), t('admin.schedQuality.verdict.unknown'), ...lacks]
   const stays = [t('admin.schedQuality.stay.rear', { time: '00:00' }), t('admin.schedQuality.stay.trialEnd', { time: '00:00' })]
