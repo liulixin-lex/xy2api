@@ -89,6 +89,23 @@ func TestStepCacheConfirmationPath(t *testing.T) {
 	}
 }
 
+func TestStepCacheUnrecognizedPathRequiresAdjacentFailures(t *testing.T) {
+	for _, path := range []string{"", "future-path", "pair"} {
+		t.Run(path, func(t *testing.T) {
+			basis := Basis{Line: DimensionCache, Cache: &CacheAssessment{Path: path, Verdict: VerdictFail}}
+			pending, action := Step(machineState(DimensionCache), EventRegular, VerdictFail, basis, machineNow)
+			if action != "" || pending.Identity == IdentityRear || pending.PendingAt != machineNow {
+				t.Fatalf("unrecognized path must wait for confirmation: %+v / %s", pending, action)
+			}
+			at := machineNow.Add(5 * time.Minute)
+			confirmed, action := Step(pending, EventRegular, VerdictFail, basis, at)
+			if action != ActionEnter || confirmed.Identity != IdentityRear || !confirmed.Until.Equal(at.Add(60*time.Minute)) {
+				t.Fatalf("adjacent failure must confirm: %+v / %s", confirmed, action)
+			}
+		})
+	}
+}
+
 func TestStepCooldownAndReview(t *testing.T) {
 	s, action := machineStep(machineState(DimensionTTFO), EventRegular, VerdictFail, machineNow)
 	if action != ActionEnter || s.Level != 0 || s.Admissions != 1 || s.Until.Sub(machineNow) != RearDuration {
