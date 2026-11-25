@@ -340,7 +340,7 @@ func schedAdminLine[E any](v schedquality.LineView, verdict schedquality.Verdict
 	return SchedAdminLine[E]{Basis: basis, LastEval: last, SampleCounts: counts, Identity: schedAdminIdentity(v), Level: v.Level, Until: schedAdminTime(v.Until), TrialUntil: schedAdminTime(v.TrialUntil), TrialStartedAt: schedAdminTime(v.TrialStartedAt), Verdict: verdict.String(), Evidence: e, SourceGroups: append([]int64{}, groups...)}
 }
 func schedAdminErrorEvidence(e schedquality.ErrorAssessment) SchedAdminErrorEvidence {
-	return SchedAdminErrorEvidence{RecoveryOverLimit: e.RecoveryOverLimit, Limit: e.Limit, Clear: e.Clear, Failed: e.Failed, Unknown: e.Unknown, Padded: e.Padded, LowerFail: e.LowerFail, LowerPass: e.LowerPass}
+	return SchedAdminErrorEvidence{WindowFrom: schedAdminTime(e.WindowFrom), WindowTo: schedAdminTime(e.WindowTo), RecoveryOverLimit: e.RecoveryOverLimit, Limit: e.Limit, Clear: e.Clear, Failed: e.Failed, Unknown: e.Unknown, Padded: e.Padded, LowerFail: e.LowerFail, LowerPass: e.LowerPass}
 }
 func schedAdminCacheEvidence(e schedquality.CacheAssessment) SchedAdminCacheEvidence {
 	return SchedAdminCacheEvidence{Path: e.Path, LowSessions10: e.LowSessions10, WindowFrom: schedAdminTime(e.WindowFrom), WindowTo: schedAdminTime(e.WindowTo), MinRatio: e.MinRatio, Turns: e.Turns, Ratio: e.Ratio, Sessions: e.Sessions, LowSessions: e.LowSessions}

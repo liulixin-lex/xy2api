@@ -12,6 +12,7 @@ const (
 	ruleBMinSessions     = 3
 	ruleBMinSlowSessions = 2
 	RuleBHalfLife        = 30 * time.Minute
+	RuleBWindow          = 8 * RuleBHalfLife
 	RuleBPriorStrength   = 5.0
 )
 
@@ -99,7 +100,7 @@ func (s RuleBSample) Eligible(now, cut time.Time) bool {
 	return s.Stream && (!s.SwitchedAccount || ownerTimeout) &&
 		(s.TTFOMs > 0 || s.Outcome == OutcomeTimeout) &&
 		s.StartedAt.After(cut) && !s.AvailableAt.Before(cut) &&
-		!s.AvailableAt.Before(now.Add(-8*RuleBHalfLife)) && !s.AvailableAt.After(now)
+		!s.AvailableAt.Before(now.Add(-RuleBWindow)) && !s.AvailableAt.After(now)
 }
 
 // RuleBScope identifies an account/model and its target group. Evidence for the
@@ -159,6 +160,7 @@ const (
 // RuleBResult is an assessment, not a scheduling identity.
 // UnknownReasons contains the applicable absolute-evidence gates only.
 type RuleBResult struct {
+	WindowFrom, WindowTo                       time.Time
 	SamplesLocal, SamplesTotal                 int
 	NLocal                                     float64
 	State                                      RuleBState
@@ -239,6 +241,7 @@ func EvaluateRuleB(in RuleBInput, p RuleBParams) (RuleBResult, error) {
 
 func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult, error) {
 	r := RuleBResult{State: RuleBUnknown, Tolerance: p.Tolerance, Confidence: p.Confidence}
+	r.WindowFrom, r.WindowTo = in.Now.Add(-RuleBWindow), in.Now
 	if err := p.Validate(); err != nil {
 		return r, err
 	}

@@ -106,6 +106,8 @@ type SchedAdminAccountDetailGroups struct {
 
 // Evidence DTOs deliberately omit assessment internals (verdict and token totals).
 type SchedAdminErrorEvidence struct {
+	WindowFrom        *string `json:"window_from,omitempty"`
+	WindowTo          *string `json:"window_to,omitempty"`
 	RecoveryOverLimit bool    `json:"recovery_over_limit,omitempty"`
 	Limit             float64 `json:"limit"`
 	Clear             int     `json:"clear"`
