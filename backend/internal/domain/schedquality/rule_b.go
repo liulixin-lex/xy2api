@@ -139,6 +139,8 @@ const (
 
 type RuleBUnknownReason string
 
+// Retired peer causes remain named for decoding persisted assessment history.
+// New assessments never emit them.
 const (
 	RuleBNoPeers                  RuleBUnknownReason = "no_peers"
 	RuleBAllPeersRear             RuleBUnknownReason = "all_peers_rear"

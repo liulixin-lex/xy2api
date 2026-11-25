@@ -185,8 +185,8 @@ func TestAssessmentLineOutcomes(t *testing.T) {
 		have    float64
 		need    int
 	}{
-		{"cache-turns", cache(CacheAssessment{Turns: 12, MinRatio: .8, Ratio: .79, LowSessions: 1}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheTurnsShort, cacheLowSessionsShort}, 12, 20},
-		{"cache-low-sessions", cache(CacheAssessment{Turns: 22, MinRatio: .8, LowSessions: 1}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheLowSessionsShort}, 0, 1},
+		{"cache-turns", cache(CacheAssessment{Turns: 12, MinRatio: .8, Ratio: .79, LowSessions: 1, LowSessions10: new(0)}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheTurnsShort, cacheLowSessionsShort}, 12, 20},
+		{"cache-low-sessions", cache(CacheAssessment{Turns: 22, MinRatio: .8, LowSessions: 1, LowSessions10: new(0)}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheLowSessionsShort}, 0, 1},
 		{"clear", errLine(ErrorAssessment{Clear: 13, LowerPass: .1, Limit: .05}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{errorClearShort, errorBoundsUnconfirmed}, 13, 50},
 		{"bounds", errLine(ErrorAssessment{Clear: 50, LowerPass: .07, Limit: .05}), EventRegular, VerdictUnknown, "", ReasonWithin, []string{errorBoundsUnconfirmed}, 0, 0},
 		{"recovery-blocked", recovery, EventReview, VerdictUnknown, ActionTrial, ReasonPending, []string{errorRecoveryOverLimit}, 0, 0},

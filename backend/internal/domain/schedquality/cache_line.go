@@ -19,7 +19,7 @@ type CacheAssessment struct {
 	Turns         int       `json:"turns"`
 	Sessions      int       `json:"sessions"`
 	LowSessions   int       `json:"low_sessions"`
-	LowSessions10 int       `json:"low_sessions_10"`
+	LowSessions10 *int      `json:"low_sessions_10"`
 	Path          string    `json:"path,omitempty"`
 	WindowFrom    time.Time `json:"window_from,omitzero"`
 	WindowTo      time.Time `json:"window_to,omitzero"`
@@ -39,7 +39,7 @@ func AssessCache(samples []AttemptSample, minRatio float64, cut, now time.Time) 
 
 // AssessCacheForGroup counts only continuation turns with usable token evidence.
 func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now time.Time, groupID int64) (CacheAssessment, int) {
-	out := CacheAssessment{MinRatio: minRatio, WindowFrom: now.Add(-CacheWindow), WindowTo: now}
+	out := CacheAssessment{LowSessions10: new(0), MinRatio: minRatio, WindowFrom: now.Add(-CacheWindow), WindowTo: now}
 	local := 0
 	type session struct {
 		group int64
@@ -80,7 +80,7 @@ func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now tim
 		if float64(tally.read)/float64(tally.input) < minRatio {
 			out.LowSessions++
 			if tally.turns >= cacheMinLowTurns {
-				out.LowSessions10++
+				*out.LowSessions10++
 			}
 		}
 	}
@@ -89,7 +89,7 @@ func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now tim
 	}
 	if out.Turns >= CacheMinTurns && out.Ratio >= minRatio {
 		out.Verdict = VerdictPass
-	} else if out.Ratio < minRatio && out.LowSessions10 > 0 {
+	} else if out.Ratio < minRatio && *out.LowSessions10 > 0 {
 		switch {
 		case out.Turns >= CacheMinTurns:
 			out.Verdict, out.Path = VerdictFail, "pair"

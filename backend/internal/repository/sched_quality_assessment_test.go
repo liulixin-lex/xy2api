@@ -54,7 +54,7 @@ func TestSchedAssessmentMigrationAndRestart(t *testing.T) {
 		}
 	}
 	eval := func(prev q.LineState, now time.Time, turns int) q.LineState {
-		b := q.Basis{Line: q.DimensionCache, Cache: &q.CacheAssessment{Turns: turns, LowSessions: 1, MinRatio: .8, Ratio: .5}}
+		b := q.Basis{Line: q.DimensionCache, Cache: &q.CacheAssessment{Turns: turns, LowSessions: 1, LowSessions10: new(0), MinRatio: .8, Ratio: .79}}
 		next, _ := q.Step(prev, q.EventRegular, q.VerdictUnknown, b, now)
 		return next
 	}

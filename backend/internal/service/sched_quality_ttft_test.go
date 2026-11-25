@@ -355,3 +355,77 @@ func TestTTFTEvidenceWindowNanosecondBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func TestEngineRuleBGroupPriorUsesEventTimeAndKeepsSettings(t *testing.T) {
+	f := newQualityFixture(t)
+	ctx := context.Background()
+	key := q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionTTFO}
+	var outcomes []q.Verdict
+	for _, peerSlow := range []bool{false, true} {
+		rows := engineSamples(40, f.now, false)
+		for i := range rows {
+			a := &rows[i]
+			a.AccountID = 1
+			a.SessionKey = fmt.Sprintf("s%d", i%3)
+			a.StartedAt, a.FinishedAt, a.InsertedAt = f.now.Add(-time.Second), f.now, f.now
+			ms := 100
+			if i >= 20 {
+				a.AccountID = 2
+			}
+			if i < 6 || (i >= 20 && peerSlow) {
+				ms = 2000
+			}
+			a.TTFOMs = &ms
+		}
+		// Another source group and evidence not yet visible must not alter the prior.
+		foreign, future := rows[20], rows[20]
+		foreign.AttemptID, foreign.GroupID = "foreign", 20
+		future.AttemptID, future.InsertedAt = "future", f.now.Add(time.Second)
+		opposite := 2000
+		if peerSlow {
+			opposite = 100
+		}
+		foreign.TTFOMs, future.TTFOMs = &opposite, &opposite
+		f.e.window.samples = map[SchedAccountModel][]q.AttemptSample{
+			{AccountID: 1, Model: key.Model}: rows[:20],
+			{AccountID: 2, Model: key.Model}: append(rows[20:], foreign, future),
+		}
+		f.e.window.indexGroups()
+		d, err := f.e.inputs(ctx, f.now, f.e.window.samples)
+		require.NoError(t, err)
+		// A peer reset does not filter the unchanged group-prior input path.
+		verdict, basis := f.e.assessLine(d, q.LineState{LineKey: key}, q.EventRegular, f.now, map[int64]time.Time{2: f.now})
+		outcomes = append(outcomes, verdict)
+		prior := .001
+		if peerSlow {
+			prior = .999
+		}
+		require.Equal(t, prior, basis.TTFT.PriorMu)
+		require.Equal(t, new(.2), basis.TTFT.Tolerance)
+		require.Equal(t, new(.8), basis.TTFT.Confidence)
+		require.Nil(t, basis.TTFT.PRel)
+		require.Nil(t, basis.TTFT.U)
+		f.e.rule.Params.Tolerance, f.e.rule.Params.Confidence = .3, .9
+		require.Equal(t, new(.2), basis.TTFT.Tolerance, "old evidence must not follow later settings")
+		require.Equal(t, new(.8), basis.TTFT.Confidence)
+		f.e.rule.Params = q.DefaultRuleBParams()
+	}
+	require.Equal(t, []q.Verdict{q.VerdictUnknown, q.VerdictFail}, outcomes)
+}
+
+func TestEnginePeerMarginSaveDoesNotRejudge(t *testing.T) {
+	f := newQualityFixture(t)
+	f.badTTFT()
+	f.cycle()
+	before := append([]q.LineState(nil), f.store.Rows...)
+	decisions := len(f.store.Decisions)
+	params := q.DefaultRuleBParams()
+	params.PeerMargin = .77
+	result, err := f.e.UpdateTTFTRule(context.Background(), 0, params)
+	require.NoError(t, err)
+	require.Equal(t, q.RuleBUnchanged, result.Change)
+	require.Zero(t, result.Cleared)
+	require.Equal(t, params, f.store.Rule.Params)
+	require.Equal(t, before, f.store.Rows)
+	require.Len(t, f.store.Decisions, decisions)
+}

@@ -2,7 +2,7 @@ package schedquality
 
 import "time"
 
-const RuleVersion = "3.1"
+const RuleVersion = "4.0"
 
 // TTFTEvidence is the stable, flat representation stored in decision/state JSON
 // and returned by the API. RuleBResult remains the in-memory assessment.
@@ -14,8 +14,8 @@ type TTFTEvidence struct {
 	X            float64              `json:"x"`
 	S            int                  `json:"s"`
 	D            int                  `json:"d"`
-	Tolerance    *float64             `json:"tolerance"`
-	Confidence   *float64             `json:"confidence"`
+	Tolerance    *float64             `json:"tolerance,omitempty"`
+	Confidence   *float64             `json:"confidence,omitempty"`
 	PriorMu      float64              `json:"prior_mu"`
 	PeerNu       float64              `json:"peer_nu,omitempty"`
 	PAbs         float64              `json:"p_abs"`

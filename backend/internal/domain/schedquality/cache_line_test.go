@@ -51,7 +51,7 @@ func TestAssessCacheTurnsAndSessions(t *testing.T) {
 			rows[i].CacheReadTokens = machineInt(9)
 		}
 	}
-	if got := AssessCache(rows, .8, time.Time{}, machineNow); got.LowSessions != 1 || got.LowSessions10 != 1 || got.Verdict != VerdictFail {
+	if got := AssessCache(rows, .8, time.Time{}, machineNow); got.LowSessions != 1 || *got.LowSessions10 != 1 || got.Verdict != VerdictFail {
 		t.Fatalf("single low session: %+v", got)
 	}
 }
@@ -193,7 +193,7 @@ func TestAssessCacheQualifiedLowSessionAndPaths(t *testing.T) {
 				rows[i].InputTokens, rows[i].CacheReadTokens = machineInt(100-tc.read), machineInt(tc.read)
 			}
 			got := AssessCache(rows, .8, time.Time{}, machineNow)
-			if got.Verdict != tc.want || got.Path != tc.path || got.LowSessions10 != tc.low10 {
+			if got.Verdict != tc.want || got.Path != tc.path || *got.LowSessions10 != tc.low10 {
 				t.Fatalf("assessment: %+v", got)
 			}
 			if !got.WindowFrom.Equal(machineNow.Add(-CacheWindow)) || !got.WindowTo.Equal(machineNow) {
@@ -216,7 +216,7 @@ func TestAssessCacheLowSessionUsesOwnTokenRatio(t *testing.T) {
 	rows[0].InputTokens, rows[0].CacheReadTokens = machineInt(10), machineInt(990)
 	rows[19].InputTokens = machineInt(10000)
 	got := AssessCache(rows, .8, time.Time{}, machineNow)
-	if got.Ratio >= .8 || got.LowSessions10 != 0 || got.Verdict != VerdictUnknown {
+	if got.Ratio >= .8 || *got.LowSessions10 != 0 || got.Verdict != VerdictUnknown {
 		t.Fatalf("a long session with high token ratio must not count as low: %+v", got)
 	}
 }

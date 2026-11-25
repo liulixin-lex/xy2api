@@ -103,11 +103,15 @@ type SchedAdminErrorEvidence struct {
 	LowerPass         float64 `json:"lower_pass"`
 }
 type SchedAdminCacheEvidence struct {
-	MinRatio    float64 `json:"min_ratio"`
-	Turns       int     `json:"turns"`
-	Ratio       float64 `json:"ratio"`
-	Sessions    int     `json:"sessions"`
-	LowSessions int     `json:"low_sessions"`
+	Path          string  `json:"path,omitempty"`
+	LowSessions10 *int    `json:"low_sessions_10,omitempty"`
+	WindowFrom    *string `json:"window_from,omitempty"`
+	WindowTo      *string `json:"window_to,omitempty"`
+	MinRatio      float64 `json:"min_ratio"`
+	Turns         int     `json:"turns"`
+	Ratio         float64 `json:"ratio"`
+	Sessions      int     `json:"sessions"`
+	LowSessions   int     `json:"low_sessions"`
 }
 type SchedAdminLastEval struct {
 	At     string                        `json:"at"`

@@ -85,3 +85,25 @@ func TestDomainZeroTimesJSONRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestCacheEvidenceMissingIsNotMeasuredZero(t *testing.T) {
+	var old CacheAssessment
+	if err := json.Unmarshal([]byte("{}"), &old); err != nil {
+		t.Fatal(err)
+	}
+	if old.LowSessions10 != nil {
+		t.Fatal("historical missing count fabricated")
+	}
+	current := AssessCache(nil, .8, machineNow, machineNow)
+	if current.LowSessions10 == nil || *current.LowSessions10 != 0 {
+		t.Fatal("measured zero not retained")
+	}
+	data, err := json.Marshal(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored CacheAssessment
+	if err = json.Unmarshal(data, &restored); err != nil || !reflect.DeepEqual(current, restored) {
+		t.Fatalf("roundtrip: %+v / %v", restored, err)
+	}
+}

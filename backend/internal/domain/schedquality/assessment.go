@@ -60,6 +60,7 @@ const otherCauseIndex = 16
 
 // Append only: indexes are persisted bit positions, not gate priorities.
 // Rule B and the assessment summary use the same names and classifications.
+// Retired peer gates keep their persisted slots but no longer have predicates.
 var assessmentCauses = [...]assessmentCause{
 	{RuleBNoPeers, ReasonPeerShort, nil},
 	{RuleBAllPeersRear, ReasonPeerShort, nil},
@@ -177,8 +178,8 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 			if cache.Turns < need {
 				s.addCause(cacheTurnsShort, float64(cache.Turns), need)
 			}
-			if cache.Turns > 0 && cache.Ratio < cache.MinRatio && cache.LowSessions10 == 0 {
-				s.addCause(cacheLowSessionsShort, float64(cache.LowSessions10), 1)
+			if cache.Turns > 0 && cache.Ratio < cache.MinRatio && cache.LowSessions10 != nil && *cache.LowSessions10 == 0 {
+				s.addCause(cacheLowSessionsShort, float64(*cache.LowSessions10), 1)
 			}
 		case b.Error != nil:
 			errLine := b.Error
@@ -221,7 +222,7 @@ func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence, peerKnown float64) {
 	for _, name := range e.Causes {
 		i := assessmentCauseIndex(name)
 		def := assessmentCauses[i]
-		if i == otherCauseIndex {
+		if i >= 11 { // Only the first eleven persisted causes belong to TTFT.
 			s.Causes |= 1 << otherCauseIndex
 			continue
 		}
