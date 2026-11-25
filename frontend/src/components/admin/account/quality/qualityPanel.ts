@@ -240,7 +240,8 @@ const lineEvidence = (basis: BackendBasis) => (basis.line === 'ttfo' ? basis.ttf
 /**
  * When the evidence of a decision was taken, "13:05–13:15" in local time: from the later of its cut (where the evidence
  * started over) and its window's start, to its window's end. Only from what the record holds: without its window (older
- * records, and the lines that do not keep it) null, never a window worked out here.
+ * records, and the lines that do not keep it), or with a start at or after its end, null; never a window worked out or
+ * its ends swapped here.
  */
 export function basisPeriod(basis: BackendBasis | null | undefined): string | null {
   const evidence = basis ? lineEvidence(basis) : undefined
@@ -248,11 +249,14 @@ export function basisPeriod(basis: BackendBasis | null | undefined): string | nu
   const to = evidence?.window_to ? Date.parse(evidence.window_to) : Number.NaN
   if (!Number.isFinite(from) || !Number.isFinite(to)) return null
   const cut = basis?.cut ? Date.parse(basis.cut) : Number.NaN
+  const start = Number.isFinite(cut) ? Math.max(cut, from) : from
+  // A start at or after the end (a cut past the window, an odd record) has no period to show: nothing is swapped.
+  if (start >= to) return null
   const clock = (ms: number) => {
     const date = new Date(ms)
     return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
   }
-  return `${clock(Number.isFinite(cut) ? Math.max(cut, from) : from)}–${clock(to)}`
+  return `${clock(start)}–${clock(to)}`
 }
 
 /** A figure of a basis: its label (admin.schedQuality.evidence.<label>) and its value. */

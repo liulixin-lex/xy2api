@@ -174,6 +174,12 @@ describe('decision figures', () => {
     expect(basisPeriod(basis('cache', { cut: local(13, 5), cache: cacheEvidence({ window_from: local(12, 45) }) }))).toBeNull()
     expect(basisPeriod(basis('error', { cut: local(13, 5), error: errorEvidence({ window_to: local(13, 15) }) }))).toBeNull()
     expect(basisPeriod(null)).toBeNull()
+    // Astra review of fe, suggestion: a cut at or after the window's end is no period, never a reversed one.
+    expect(basisPeriod(basis('cache', { cut: local(13, 20), cache: cacheEvidence(windowed) }))).toBeNull()
+    expect(basisPeriod(basis('cache', { cut: local(13, 15), cache: cacheEvidence(windowed) }))).toBeNull()
+    // Across midnight it reads as usual.
+    const overnight = { window_from: new Date(2026, 10, 25, 23, 45).toISOString(), window_to: new Date(2026, 10, 26, 0, 15).toISOString() }
+    expect(basisPeriod(basis('cache', { cache: cacheEvidence(overnight) }))).toBe('23:45–00:15')
   })
 
   it('puts the period, the reading and the units counted together; what a record lacks is left out', () => {
