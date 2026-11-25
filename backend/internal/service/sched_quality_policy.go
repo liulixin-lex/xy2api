@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"slices"
 	"time"
@@ -20,7 +21,7 @@ func ValidateSchedQualityPolicy(p schedquality.Policy) error {
 		return infraerrors.BadRequest("INVALID_SCHED_POLICY", "max_error_rate must be finite and no greater than 1")
 	}
 	if p.MaxErrorRate < schedquality.ErrorRateFloor {
-		return infraerrors.BadRequest("SCHED_ERROR_RATE_TOO_LOW", "max_error_rate must be at least 0.01")
+		return infraerrors.BadRequest("SCHED_ERROR_RATE_TOO_LOW", fmt.Sprintf("max_error_rate must be at least %g", schedquality.ErrorRateFloor))
 	}
 	if !valid(p.MinCacheRatio, 0, 1) {
 		return infraerrors.BadRequest("INVALID_SCHED_POLICY", "min_cache_ratio must be between 0 and 1")
