@@ -3,7 +3,11 @@
     <!-- When the evidence was taken, then what it read against the line, as the panel's cell and the list's card read it. -->
     <div v-if="figures.period || figures.reading" class="ev__row" data-qp-evidence-measure>
       <dt v-if="figures.period" data-qp-evidence-period>{{ figures.period }}</dt>
-      <dd v-if="figures.reading" class="ev__main" :class="`is-${tone}`" data-qp-evidence-reading>{{ figures.reading }}</dd>
+      <!-- The reading under the panel's column name (首字慢: a share, not seconds), as on the dot's card. -->
+      <template v-if="figures.reading">
+        <dt data-qp-evidence-line>{{ t(`admin.schedQuality.panel.col.${basis.line}`) }}</dt>
+        <dd class="ev__main" :class="`is-${tone}`" data-qp-evidence-reading>{{ figures.reading }}</dd>
+      </template>
     </div>
     <div v-if="figures.samples.length" class="ev__row" data-qp-evidence-samples>
       <template v-for="item in figures.samples" :key="item.label">
@@ -16,9 +20,9 @@
 
 <script setup lang="ts">
 /**
- * What one decision was taken on (basisFigures): when its evidence was taken, what it read against its line in the
- * action's colour ("13:05–13:15  76.2 / 86", the same text as the panel's cell and the list's card), then the units
- * counted. No sentences; the full record stays with the backend.
+ * What one decision was taken on (basisFigures): when its evidence was taken, then the line by the panel's column name
+ * and what it read against it in the action's colour ("13:05–13:15  缓存  76.2 / 86", the same reading as the panel's
+ * cell and the list's card), then the units counted. No sentences; the full record stays with the backend.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
