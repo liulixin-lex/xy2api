@@ -3,6 +3,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -342,8 +343,15 @@ func TestOpenAINewSessionDispatchLogFailureDoesNotChangeSelection(t *testing.T) 
 		slog.SetDefault(slog.New(handler))
 		if !handler.Enabled(context.Background(), slog.LevelInfo) {
 			ctx, req := context.Background(), OpenAIAccountScheduleRequest{}
-			require.Nil(t, newOpenAINewSessionOutcome(ctx, req))
-			require.Zero(t, testing.AllocsPerRun(10, func() { newOpenAINewSessionOutcome(ctx, req) }))
+			o := newOpenAINewSessionOutcome(ctx, req)
+			candidates := []*Account{{ID: 1}}
+			require.Zero(t, testing.AllocsPerRun(10, func() {
+				o.beginPool()
+				o.recordFilterStats(openAISelectionFilterStats{pool: 1}, candidates)
+				o.recordFilterExclusion(2, "model_not_supported")
+			}))
+			require.Nil(t, o.pool)
+			require.Equal(t, 1, o.eligible)
 		}
 		f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
 		selected, err := selectOrdinaryNewSessionForTest(t, f, context.Background(), "ordinary", nil, false)
@@ -352,4 +360,187 @@ func TestOpenAINewSessionDispatchLogFailureDoesNotChangeSelection(t *testing.T) 
 		selected.ReleaseFunc()
 	}
 	require.Positive(t, writer.attempts)
+}
+
+type dispatchClockStepView struct {
+	schedquality.View
+	bump func()
+}
+
+func (v dispatchClockStepView) StateOf(group, account int64, model string) schedquality.StateView {
+	if account == 1 {
+		v.bump()
+	}
+	return v.View.StateOf(group, account, model)
+}
+
+func TestOpenAINewSessionLogUsesSortSnapshotAfterSelection(t *testing.T) {
+	for _, level := range []slog.Level{slog.LevelWarn, slog.LevelInfo} {
+		t.Run(level.String(), func(t *testing.T) {
+			var logs bytes.Buffer
+			old := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: level})))
+			t.Cleanup(func() { slog.SetDefault(old) })
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 1), selectionFixtureAccount(3, 2))
+			f.view.States[fakeSchedViewKey{7, 1, "m"}] = schedquality.StateView{Cache: schedquality.LineView{Identity: schedquality.IdentityRear}}
+			f.view.States[fakeSchedViewKey{7, 2, "m"}] = schedquality.StateView{TTFO: schedquality.LineView{Identity: schedquality.IdentityRear}}
+			f.loads.loadMap = map[int64]*AccountLoadInfo{1: {LoadRate: 100}}
+			start := f.view.At().Add(schedquality.ViewMaxAge - time.Millisecond)
+			now := start
+			f.svc.selectionBoard.now = func() time.Time { return now }
+			f.svc.selectionBoard.view = func() schedquality.View {
+				return dispatchClockStepView{f.view, func() {
+					require.Equal(t, []int64{3}, f.attempts, "log-only StateOf must run after slot acquisition")
+					now = now.Add(2 * time.Millisecond)
+				}}
+			}
+			selected, err := selectOrdinaryNewSessionForTest(t, f, context.Background(), "ordinary", nil, false)
+			require.NoError(t, err)
+			require.Equal(t, int64(3), selected.Account.ID)
+			require.True(t, selected.Acquired)
+			require.Equal(t, []int64{3}, f.attempts)
+			require.Empty(t, f.releases)
+			selected.ReleaseFunc()
+			require.Equal(t, []int64{3}, f.releases)
+			events := selectionNewSessionEvents(t, logs.String())
+			if level == slog.LevelWarn {
+				require.Empty(t, events)
+				require.Equal(t, start, now)
+				return
+			}
+			require.Equal(t, start.Add(2*time.Millisecond), now)
+			require.Len(t, events, 1)
+			rows := requireNewSessionLists(t, events[0], 3)
+			require.Equal(t, newSessionCandidateLog{AccountID: 1, Placement: "rear", Rank: 3,
+				Lines: map[string]string{"cache": "rear"}, Skip: []string{"load_full"}}, rows[2])
+		})
+	}
+}
+
+func TestOpenAINewSessionLogLevelRestoredDuringSelection(t *testing.T) {
+	var level slog.LevelVar
+	level.Set(slog.LevelWarn)
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: &level})))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+	f.loads.acquireResults = map[int64]bool{1: false, 2: true}
+	f.loads.after = func(id int64) {
+		if id == 2 {
+			level.Set(slog.LevelInfo)
+		}
+	}
+	selected, err := selectOrdinaryNewSessionForTest(t, f, context.Background(), "ordinary", nil, false)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), selected.Account.ID)
+	selected.ReleaseFunc()
+	require.Equal(t, []int64{1, 2}, f.attempts)
+	require.Equal(t, []int64{2}, f.releases)
+	events := selectionNewSessionEvents(t, logs.String())
+	require.Len(t, events, 1)
+	event := events[0]
+	require.Equal(t, float64(2), event["selected_account_id"])
+	require.Equal(t, float64(2), event["eligible_candidate_count"])
+	require.Equal(t, float64(2), event["front_or_trial_with_seat_count"])
+	require.Equal(t, float64(1), event["slot_unavailable_skipped_count"])
+	for _, key := range []string{"pool_rounds", "candidates", "excluded"} {
+		require.Contains(t, event, key)
+		require.Nil(t, event[key])
+	}
+	require.NotContains(t, event, "rescue_attempted")
+	require.NotContains(t, event, "rescue")
+}
+
+type panicDispatchLogWriter struct{ attempts int }
+
+func (w *panicDispatchLogWriter) Write(p []byte) (int, error) {
+	if bytes.Contains(p, []byte(`"msg":"sched_quality.new_session"`)) {
+		w.attempts++
+		panic("dispatch writer panic")
+	}
+	return len(p), nil
+}
+
+func TestOpenAINewSessionLogPanicPreservesSlotHandoff(t *testing.T) {
+	for _, cause := range []string{"writer", "list assembly"} {
+		t.Run(cause, func(t *testing.T) {
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2))
+			writer := &panicDispatchLogWriter{}
+			old := slog.Default()
+			if cause == "writer" {
+				slog.SetDefault(slog.New(slog.NewJSONHandler(writer, nil)))
+			} else {
+				slog.SetDefault(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+				f.loads.loadMap = map[int64]*AccountLoadInfo{1: {LoadRate: 100}}
+				f.svc.selectionBoard.view = func() schedquality.View {
+					return dispatchClockStepView{f.view, func() { panic("dispatch list panic") }}
+				}
+			}
+			t.Cleanup(func() { slog.SetDefault(old) })
+			count := func() int64 {
+				for _, metric := range resilience.Snapshot(time.Hour) {
+					if metric.Name == "sched_quality_new_session_log_panic" {
+						return metric.Count
+					}
+				}
+				return 0
+			}
+			before := count()
+			selected, err := selectOrdinaryNewSessionForTest(t, f, context.Background(), "ordinary", nil, false)
+			require.NoError(t, err)
+			require.True(t, selected.Acquired)
+			id := int64(1)
+			if cause == "writer" {
+				require.Equal(t, 1, writer.attempts)
+			} else {
+				id = 2
+			}
+			require.Equal(t, id, selected.Account.ID)
+			require.Equal(t, []int64{id}, f.attempts)
+			require.Empty(t, f.releases)
+			selected.ReleaseFunc()
+			selected.ReleaseFunc()
+			require.Equal(t, []int64{id}, f.releases)
+			require.Equal(t, before+1, count())
+		})
+	}
+}
+
+func TestOpenAINewSessionTrialSeatLossReordersDispatchList(t *testing.T) {
+	for _, wait := range []bool{false, true} {
+		name := "immediate"
+		if wait {
+			name = "wait"
+		}
+		t.Run(name, func(t *testing.T) {
+			logs := captureSelectionNewSessionLog(t)
+			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 2), selectionFixtureAccount(3, 3))
+			leases := newSelectionTrialLeaseFake()
+			selectionSetTrial(f, 1, leases)
+			leases.lose[1] = true
+			var attempts, releases []int64
+			if wait {
+				f.loads.loadMap = map[int64]*AccountLoadInfo{1: {LoadRate: 100}, 2: {LoadRate: 100}, 3: {LoadRate: 100}}
+			} else {
+				attempts, releases = []int64{1, 2}, []int64{1, 2}
+			}
+			selected, err := selectOrdinaryNewSessionForTest(t, f, context.Background(), "ordinary", nil, false)
+			require.NoError(t, err)
+			require.Equal(t, int64(2), selected.Account.ID)
+			require.Equal(t, !wait, selected.Acquired)
+			if selected.ReleaseFunc != nil {
+				selected.ReleaseFunc()
+			}
+			require.Equal(t, attempts, f.attempts)
+			require.Equal(t, releases, f.releases)
+			events := selectionNewSessionEvents(t, logs.String())
+			require.Len(t, events, 1)
+			require.Equal(t, float64(1), events[0]["trial_full_count"])
+			rows := requireNewSessionLists(t, events[0], 2)
+			require.Len(t, rows, 3)
+			require.Equal(t, []int64{2, 3, 1}, []int64{rows[0].AccountID, rows[1].AccountID, rows[2].AccountID})
+			require.Equal(t, "trial_full", rows[2].Placement)
+		})
+	}
 }

@@ -1229,7 +1229,6 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (selection *AccountSelectionResult, selectionErr error) {
-	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
 	newSessionLogState, _ := ctx.Value(openAINewSessionLogStateKey{}).(*openAINewSessionLogState)
 	standalone := newSessionLogState == nil
 	firstSelection := standalone && resilience.StateFrom(ctx).BeginAccountSelection()
@@ -1238,6 +1237,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		newSessionLogState = &openAINewSessionLogState{}
 		defer func() { newSessionLogState.log(ctx, selection, selectionErr) }()
 	}
+	defer func() { s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection) }()
 	ctx, excludedIDs = s.mergeStickyChangeExclusions(ctx, groupID, sessionHash, excludedIDs)
 	if NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx) {
 		s.prepareOpenAIStickyChange(ctx, groupID, sessionHash)

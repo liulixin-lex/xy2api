@@ -62,12 +62,7 @@ func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accoun
 		return openAICollabSelectionLess(keys[accounts[i].ID], keys[accounts[j].ID], hint)
 	})
 	s.orderCollabSelection(ctx, accounts, keys, req.RequireCompact)
-	if outcome := req.newSessionOutcome; outcome != nil {
-		outcome.pass++
-		for i, account := range accounts {
-			outcome.recordRank(account.ID, i)
-		}
-	}
+	req.newSessionOutcome.recordSort(accounts, view, now, request.ManualOnly)
 }
 
 // selectionCandidates is shared by new placement and owner migration. Compact
@@ -197,9 +192,6 @@ func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts 
 				outcome.loadFull[a.ID] = struct{}{}
 				if row, ok := outcome.pool[a.ID]; ok {
 					row.loadFull = true
-					if row.position == "" {
-						row.position, row.state = s.capacityCandidatePosition(ctx, req, a)
-					}
 					outcome.pool[a.ID] = row
 				}
 			}
@@ -207,33 +199,6 @@ func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts 
 		}
 	}
 	return available
-}
-
-// Load-full candidates may never enter a sort. Read their quality view but do
-// not query a trial seat that selection itself did not need.
-func (s *OpenAIGatewayService) capacityCandidatePosition(ctx context.Context, req OpenAIAccountScheduleRequest, a *Account) (string, schedquality.StateView) {
-	view, now := s.selectionView(), s.selectionNow()
-	group := derefGroupID(req.GroupID)
-	state := selectionState(view, group, a, req.RequestedModel)
-	auto := !openAISelectionManualOnly(ctx) && now.Sub(view.At()) <= schedquality.ViewMaxAge && view.GlobalEnabled() && view.GroupEnabled(group)
-	switch state.Placement(auto, now) {
-	case schedquality.PlaceRear:
-		return "rear", state
-	case schedquality.PlaceTrial:
-		trial, _ := ctx.Value(selectionTrialContextKey{}).(*selectionTrial)
-		if trial != nil {
-			room := trial.rooms[SchedAccountModel{AccountID: a.ID, Model: OpenAIAttemptModel(a, req.RequestedModel)}]
-			if room.known {
-				if room.available {
-					return "trial_with_seat", state
-				}
-				return "trial_full", state
-			}
-		}
-		return "trial_unknown", state
-	default:
-		return "front", state
-	}
 }
 
 // Inspect the counterfactual candidate through normal admission and current

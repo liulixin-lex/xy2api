@@ -120,7 +120,7 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	if len(cands) == 0 {
 		return nil
 	}
-	if outcome := req.newSessionOutcome; outcome != nil {
+	if outcome := req.newSessionOutcome; outcome != nil && outcome.captureDetails {
 		outcome.rescueAttempted = true
 		defer func() {
 			if selected != nil && selected.Account != nil {

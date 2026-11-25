@@ -4,16 +4,14 @@ package service
 
 import (
 	"context"
-	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
-	"github.com/stretchr/testify/require"
-	"io"
-	"log"
-	"log/slog"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	q "github.com/liulixin-lex/xy2api/internal/domain/schedquality"
+	"github.com/stretchr/testify/require"
 )
 
 func reviewFrom(site string) bool {
@@ -30,48 +28,19 @@ func reviewFrom(site string) bool {
 	}
 }
 
-type reviewSlog struct {
-	slog.Handler
-	on func(string)
-}
-
-func (h reviewSlog) Handle(ctx context.Context, r slog.Record) error {
-	h.on(r.Message)
-	return h.Handler.Handle(ctx, r)
-}
-func reviewOnLog(t *testing.T, fn func(string)) {
-	old := slog.Default()
-	writer := log.Writer()
-	slog.SetDefault(slog.New(reviewSlog{slog.NewJSONHandler(io.Discard, nil), fn}))
-	t.Cleanup(func() { slog.SetDefault(old); log.SetOutput(writer) })
-}
-
 func TestSelectionPanicDuringReturn(t *testing.T) {
-	for _, site := range []string{"trial-finish", "new-session-log"} {
-		t.Run(site, func(t *testing.T) {
-			f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
-			leases := newSelectionTrialLeaseFake()
-			selectionSetTrial(f, 1, leases)
-			if site == "trial-finish" {
-				f.svc.selectionBoard.view = func() q.View {
-					if reviewFrom("(*selectionTrial).finish") {
-						panic("return")
-					}
-					return f.view
-				}
-			} else {
-				reviewOnLog(t, func(msg string) {
-					if msg == "sched_quality.new_session" {
-						panic("return")
-					}
-				})
-			}
-			require.PanicsWithValue(t, "return", func() { _, _ = selectOrdinaryNewSessionForTest(t, f, selectionReviewContext(), "turn", nil, true) })
-			t.Logf("acquires=%v releases=%v reservations=%d", f.attempts, f.releases, len(leases.held))
-			require.Equal(t, []int64{1}, f.releases)
-			require.Empty(t, leases.held)
-		})
+	f := newSelectionRuntimeFixture(t, selectionFixtureAccount(1, 1))
+	leases := newSelectionTrialLeaseFake()
+	selectionSetTrial(f, 1, leases)
+	f.svc.selectionBoard.view = func() q.View {
+		if reviewFrom("(*selectionTrial).finish") {
+			panic("return")
+		}
+		return f.view
 	}
+	require.PanicsWithValue(t, "return", func() { _, _ = selectOrdinaryNewSessionForTest(t, f, selectionReviewContext(), "turn", nil, true) })
+	require.Equal(t, []int64{1}, f.releases)
+	require.Empty(t, leases.held)
 }
 
 type reviewWSStore struct {

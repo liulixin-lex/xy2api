@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sort"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/domain/schedquality"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -22,7 +23,7 @@ type newSessionCandidate struct {
 }
 
 type newSessionPoolCandidate struct {
-	id                        int64
+	account                   *Account
 	position                  string
 	state                     schedquality.StateView
 	pass, order               int
@@ -56,17 +57,18 @@ type openAINewSessionOutcome struct {
 	candidates                map[int64]newSessionCandidate
 	loadFull, slotUnavailable map[int64]struct{}
 
+	captureDetails   bool
 	poolRounds, pass int
 	pool             map[int64]newSessionPoolCandidate
 	excluded         []newSessionExclusion
+	sortView         schedquality.View
+	sortAt           time.Time
+	sortManualOnly   bool
 	rescueAttempted  bool
 	rescue           *newSessionRescueLog
 }
 
 func newOpenAINewSessionOutcome(ctx context.Context, req OpenAIAccountScheduleRequest) *openAINewSessionOutcome {
-	if !slog.Default().Enabled(ctx, slog.LevelInfo) {
-		return nil
-	}
 	entry := string(req.RequiredCapability)
 	if in, ok := ctx.Value(openAITierInputKey{}).(openAITierInput); ok {
 		switch in.protocol {
@@ -87,13 +89,25 @@ func newOpenAINewSessionOutcome(ctx context.Context, req OpenAIAccountScheduleRe
 	return &openAINewSessionOutcome{
 		requestID: resilience.StateFrom(ctx).GatewayRequestID(), request: req, entry: entry,
 		candidates: make(map[int64]newSessionCandidate), loadFull: make(map[int64]struct{}), slotUnavailable: make(map[int64]struct{}),
+		captureDetails: newSessionDetailsEnabled(ctx),
 	}
+}
+
+func countNewSessionLogPanic() {
+	if recover() != nil {
+		resilience.Count("sched_quality_new_session_log_panic", 0, 0, "")
+	}
+}
+
+func newSessionDetailsEnabled(ctx context.Context) bool {
+	defer countNewSessionLogPanic()
+	return slog.Default().Enabled(ctx, slog.LevelInfo)
 }
 
 // The new fields describe the latest ordinary pool. Existing diagnostics
 // continue to accumulate across retries and rescue.
 func (o *openAINewSessionOutcome) beginPool() {
-	if o == nil {
+	if o == nil || !o.captureDetails {
 		return
 	}
 	o.poolRounds++
@@ -103,10 +117,11 @@ func (o *openAINewSessionOutcome) beginPool() {
 	}
 	o.excluded = o.excluded[:0]
 	o.pass = 0
+	o.sortView = nil
 }
 
 func (o *openAINewSessionOutcome) recordFilterExclusion(id int64, reason string) {
-	if o == nil {
+	if o == nil || !o.captureDetails {
 		return
 	}
 	switch reason {
@@ -129,8 +144,10 @@ func (o *openAINewSessionOutcome) recordFilterStats(stats openAISelectionFilterS
 	}
 	eligible := len(candidates)
 	o.stats, o.eligible = stats, eligible
-	for _, a := range candidates {
-		o.pool[a.ID] = newSessionPoolCandidate{id: a.ID}
+	if o.captureDetails {
+		for _, a := range candidates {
+			o.pool[a.ID] = newSessionPoolCandidate{account: a}
+		}
 	}
 	o.noCandidateReason = ""
 	if eligible != 0 {
@@ -193,12 +210,19 @@ func (o *openAINewSessionOutcome) recordCandidate(request selectionRequest, a *A
 	o.candidates[a.ID] = c
 }
 
-func (o *openAINewSessionOutcome) recordRank(id int64, order int) {
-	if c, ok := o.pool[id]; ok {
-		observed := o.candidates[id]
-		c.position, c.state = observed.position, observed.state
-		c.pass, c.order = o.pass, order
-		o.pool[id] = c
+func (o *openAINewSessionOutcome) recordSort(accounts []*Account, view schedquality.View, now time.Time, manualOnly bool) {
+	if o == nil || o.pool == nil {
+		return
+	}
+	o.sortView, o.sortAt, o.sortManualOnly = view, now, manualOnly
+	o.pass++
+	for order, a := range accounts {
+		if c, ok := o.pool[a.ID]; ok {
+			observed := o.candidates[a.ID]
+			c.position, c.state = observed.position, observed.state
+			c.pass, c.order = o.pass, order
+			o.pool[a.ID] = c
+		}
 	}
 }
 
@@ -237,8 +261,8 @@ func (o *openAINewSessionOutcome) candidateList(selected int64) []newSessionCand
 	// Keep the scheduler's observed order for the rest; capacity-only rows trail it.
 	sort.Slice(ordered, func(i, j int) bool {
 		a, b := ordered[i], ordered[j]
-		if (a.id == selected) != (b.id == selected) {
-			return a.id == selected
+		if (a.account.ID == selected) != (b.account.ID == selected) {
+			return a.account.ID == selected
 		}
 		if a.pass != b.pass {
 			return a.pass > b.pass
@@ -246,11 +270,14 @@ func (o *openAINewSessionOutcome) candidateList(selected int64) []newSessionCand
 		if a.order != b.order {
 			return a.order < b.order
 		}
-		return a.id < b.id
+		return a.account.ID < b.account.ID
 	})
 	list := make([]newSessionCandidateLog, 0, len(ordered))
 	for i, c := range ordered {
-		item := newSessionCandidateLog{AccountID: c.id, Placement: c.position, Rank: i + 1, Lines: newSessionCandidateLines(c.state)}
+		if c.pass == 0 {
+			c.position, c.state = o.unsortedCandidatePosition(c.account)
+		}
+		item := newSessionCandidateLog{AccountID: c.account.ID, Placement: c.position, Rank: i + 1, Lines: newSessionCandidateLines(c.state)}
 		if c.loadFull {
 			item.Skip = append(item.Skip, "load_full")
 		}
@@ -262,7 +289,25 @@ func (o *openAINewSessionOutcome) candidateList(selected int64) []newSessionCand
 	return list
 }
 
+// Unsorted accounts were never checked for a trial seat. Use the ordinary sort's
+// snapshot after dispatch, without fetching a fresh view or consulting a clock.
+func (o *openAINewSessionOutcome) unsortedCandidatePosition(a *Account) (string, schedquality.StateView) {
+	view, now := o.sortView, o.sortAt
+	group := derefGroupID(o.request.GroupID)
+	state := selectionState(view, group, a, o.request.RequestedModel)
+	auto := view != nil && !o.sortManualOnly && now.Sub(view.At()) <= schedquality.ViewMaxAge && view.GlobalEnabled() && view.GroupEnabled(group)
+	switch state.Placement(auto, now) {
+	case schedquality.PlaceRear:
+		return "rear", state
+	case schedquality.PlaceTrial:
+		return "trial_unknown", state
+	default:
+		return "front", state
+	}
+}
+
 func (s *openAINewSessionLogState) log(ctx context.Context, selection *AccountSelectionResult, err error) {
+	defer countNewSessionLogPanic()
 	o := s.outcome
 	if o == nil || !slog.Default().Enabled(ctx, slog.LevelInfo) {
 		return
@@ -332,6 +377,10 @@ func (s *openAINewSessionLogState) log(ctx context.Context, selection *AccountSe
 		}
 	}
 	excluded := o.excluded
+	var poolRounds any
+	if o.captureDetails {
+		poolRounds = o.poolRounds
+	}
 	if o.poolRounds > 0 && excluded == nil {
 		excluded = []newSessionExclusion{}
 	}
@@ -348,7 +397,7 @@ func (s *openAINewSessionLogState) log(ctx context.Context, selection *AccountSe
 		"filtered_model_not_supported_count", o.stats.reasons["model_not_supported"], "filtered_profit_floor_count", o.stats.reasons[openAIProfitFilterReasonFloor],
 		"filtered_profit_ceiling_count", o.stats.reasons[openAIProfitFilterReasonThreshold], "filtered_profit_invalid_rate_count", o.stats.reasons[openAIProfitFilterReasonInvalidAccountRate],
 		"load_full_skipped_count", len(o.loadFull), "slot_unavailable_skipped_count", len(o.slotUnavailable), "no_candidate_reason", reason,
-		"pool_rounds", o.poolRounds, "candidates", o.candidateList(selectedAccountID), "excluded", excluded,
+		"pool_rounds", poolRounds, "candidates", o.candidateList(selectedAccountID), "excluded", excluded,
 	}
 	if o.rescueAttempted {
 		fields = append(fields, "rescue_attempted", true)
