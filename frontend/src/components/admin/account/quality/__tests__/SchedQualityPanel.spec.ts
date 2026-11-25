@@ -540,11 +540,11 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
     mount(Panel, { attachTo: document.body })
     await openOn(7, { groupId: 53, model: 'gpt-b' })
-    // At the rear: under it the rear line's step (level 1 is 第 2 档) and when it is reviewed, a clock time; one line
-    // holds it there, so it is not named (its amber figure shows which).
+    // At the rear: under it when the rear line is reviewed, a clock time, and no step (its level 1 is not shown); one
+    // line holds it there, so it is not named (its amber figure shows which).
     expect(place(53)).toBe('admin.schedQuality.placement.rear')
-    expect(stay(53)).toBe('admin.schedQuality.stay.rear:{"level":2,"time":"12:20"}')
-    expect(trigger(53)!.getAttribute('aria-label')).toBe('晨星组 admin.schedQuality.placement.rear admin.schedQuality.stay.rear:{"level":2,"time":"12:20"}')
+    expect(stay(53)).toBe('admin.schedQuality.stay.rear:{"time":"12:20"}')
+    expect(trigger(53)!.getAttribute('aria-label')).toBe('晨星组 admin.schedQuality.placement.rear admin.schedQuality.stay.rear:{"time":"12:20"}')
     expect(stay(54)).toBeNull()
     expect(cells(53)).toEqual([
       ['requests', '463', 'is-plain', null],
@@ -785,6 +785,93 @@ describe('SchedQualityPanel decision records', () => {
     await flushPromises()
     expect(api.accountDecisions).toHaveBeenLastCalledWith(7, { limit: 50, beforeId: undefined })
     expect(entries()).toEqual(['91', '90', '87', '86', '85', '84'])
+  })
+
+  // Plan item 18: records of another rule version than 4.0 (or none) are the previous rules'; under 4.0 a trial's end
+  // reads by why it ended. Around the switch one minute may hold both versions, or two ends: each is its own line.
+  it('titles each record by its rule version and, under 4.0, a trial\'s end by its release reason; mixed records stay apart', async () => {
+    atLocalNoon()
+    const at = inMinutes(-1)
+    const old = (patch: Parameters<typeof basis>[1] = {}) => basis('ttfo', { rule_version: '3.1', ...patch })
+    const ended = (reason: string) => basis('ttfo', { kind: 'trial', release_reason: reason, samples_local: 0, trial_seats: 'full' })
+    api.accountDecisions.mockResolvedValueOnce([
+      record(90, { at, group_id: 53 }),
+      record(89, { at, group_id: 54, basis: old() }),
+      record(80, { at: inMinutes(-10), group_id: 53, action: 'trial_pass', until: null, basis: ended('good') }),
+      record(79, { at: inMinutes(-10), group_id: 54, action: 'trial_timeout', until: null, basis: ended('deadline') }),
+      record(70, { at: inMinutes(-20), action: 'trial_fail', until: inMinutes(40), basis: ended('fail') }),
+      record(60, { at: inMinutes(-30), action: 'trial_timeout', until: null, basis: old({ kind: 'trial', release_reason: 'deadline', samples_local: 0, trial_seats: 'full' }) }),
+      record(50, { at: inMinutes(-40), action: 'clear', until: null, basis: old({ kind: 'clock' }) }),
+      record(40, { at: inMinutes(-50), action: 'renew', basis: null })
+    ])
+    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: (id: number) => ({ name: id === 53 ? '晨星组' : '北辰组' }), model: 'gpt-b' } })
+    await flushPromises()
+    document.querySelector<HTMLElement>('[data-qp-decisions-more]')!.click()
+    await flushPromises()
+    expect(entries()).toEqual(['90', '89', '80', '79', '70', '60', '50', '40'])
+    const what = (id: number) => entry(id).querySelector('.drow__what')!
+    const legacy = (action: string) => `admin.schedQuality.decisions.legacy:${JSON.stringify({ action: `admin.schedQuality.decisions.action.${action}` })}`
+    expect([90, 89, 80, 79, 70, 60, 50, 40].map((id) => what(id).textContent)).toEqual([
+      'admin.schedQuality.decisions.action.enter',
+      legacy('enter'),
+      'admin.schedQuality.decisions.action.trial_pass',
+      'admin.schedQuality.decisions.deadline',
+      'admin.schedQuality.decisions.action.trial_fail',
+      // The previous rules' end at the deadline is their trial without a verdict, not 到期回正常; their level clear too.
+      legacy('trial_timeout'),
+      legacy('clear'),
+      // A line without a basis has no version: the previous rules'.
+      legacy('renew')
+    ])
+    // Each record of the mixed minutes names only its own group.
+    expect([90, 89, 80, 79].map((id) => entry(id).querySelector('.drow__groups')!.getAttribute('title'))).toEqual(['晨星组', '北辰组', '晨星组', '北辰组'])
+    // A record of the previous rules with a line keeps its colour and evidence, as before.
+    expect([...what(89).classList]).toContain('drow__what--rear')
+    expect(entry(89).querySelector('button')).not.toBeNull()
+    // At its deadline under 4.0 the line under it still says why it was not released sooner.
+    const J = 'admin.schedQuality.decisions.timeout.joiner'
+    expect(document.querySelector('[data-qp-trial-timeout="79"]')!.textContent).toBe(
+      `admin.schedQuality.decisions.timeout.line:${JSON.stringify({ reasons: `admin.schedQuality.decisions.timeout.noTraffic${J}admin.schedQuality.decisions.timeout.seats.full` })}`
+    )
+  })
+
+  // Astra review of fe-min, suggestion 2: one minute, one action, three groups with a 4.0 end at the deadline, a 4.0 end
+  // for a reason the copy does not know, and a 3.1 end at the deadline: three lines, each titled, grouped and opened on
+  // its own. Only a trial's end is named by its reason; any other action reads by itself.
+  it('titles same-action records of one minute by their own version and reason, each with its group and why', async () => {
+    atLocalNoon()
+    const at = inMinutes(-1)
+    const ended = (rule_version: string, release_reason: string, samples_local: number, trial_seats: 'full' | 'not_observed') =>
+      ({ action: 'trial_timeout', until: null, basis: basis('ttfo', { rule_version, kind: 'trial', release_reason, samples_local, trial_seats }) })
+    api.accountDecisions.mockResolvedValueOnce([
+      record(90, { at, group_id: 53, ...ended('4.0', 'deadline', 0, 'full') }),
+      record(89, { at, group_id: 54, ...ended('4.0', 'later', 0, 'not_observed') }),
+      record(88, { at, group_id: 55, ...ended('3.1', 'deadline', 0, 'full') }),
+      record(80, { at: inMinutes(-10), action: 'renew', basis: basis('ttfo', { release_reason: 'deadline' }) })
+    ])
+    const names: Record<number, string> = { 53: '晨星组', 54: '北辰组', 55: '次元组' }
+    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: (id: number) => ({ name: names[id] }), model: 'gpt-b' } })
+    await flushPromises()
+    expect(entries()).toEqual(['90', '89', '88', '80'])
+    expect([90, 89, 88, 80].map((id) => entry(id).querySelector('.drow__what')!.textContent)).toEqual([
+      'admin.schedQuality.decisions.deadline',
+      'admin.schedQuality.decisions.action.trial_timeout',
+      'admin.schedQuality.decisions.legacy:{"action":"admin.schedQuality.decisions.action.trial_timeout"}',
+      'admin.schedQuality.decisions.action.renew'
+    ])
+    expect([90, 89, 88].map((id) => entry(id).querySelector('.drow__groups')!.getAttribute('title'))).toEqual(['晨星组', '北辰组', '次元组'])
+    const J = 'admin.schedQuality.decisions.timeout.joiner'
+    const why = (seats: string) =>
+      `admin.schedQuality.decisions.timeout.line:${JSON.stringify({ reasons: `admin.schedQuality.decisions.timeout.noTraffic${J}admin.schedQuality.decisions.timeout.seats.${seats}` })}`
+    for (const [id, seats] of [[90, 'full'], [89, 'not_observed'], [88, 'full']] as const) {
+      const line = entry(id).querySelector<HTMLElement>('.drow__line')!
+      line.click()
+      await flushPromises()
+      expect(line.getAttribute('aria-expanded')).toBe('true')
+      expect(entry(id).querySelectorAll('[data-qp-trial-timeout]')).toHaveLength(1)
+      expect(entry(id).querySelector(`[data-qp-trial-timeout="${id}"]`)!.textContent).toBe(why(seats))
+      expect(entry(id).querySelector('.drow__group')).toBeNull()
+    }
   })
 
   // Astra 2: records merged by the minute shown keep their own ends and evidence, to the second, when opened.

@@ -327,8 +327,8 @@ export function reasonLong(latest: BackendLastEval, t: Translate, te: HasKey): s
   return text
 }
 
-/** A line's stay at the rear (its step and review) or on trial (its start and latest end); empty otherwise. */
+/** A line's stay at the rear (its review) or on trial (its start and latest end); empty otherwise. */
 export function lineStayText(line: BackendPerfLine, t: Translate): string {
-  if (line.identity === 'rear') return rearStay(t, line.level, line.until)
+  if (line.identity === 'rear') return rearStay(t, line.until)
   return line.identity === 'trial' ? trialStay(t, line.trial_started_at, line.until) : ''
 }

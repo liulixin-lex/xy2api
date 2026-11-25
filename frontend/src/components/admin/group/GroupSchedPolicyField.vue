@@ -80,13 +80,13 @@ import { vTip } from '@/utils/tip'
 // turns, and says what saving does: a relaxed line is cleared and judged again at once; a tightened one keeps the
 // identities, later assessments use the new threshold. After a save that relaxed lines, a toast says how many line
 // states were cleared.
-// The ranges below are the ones the backend accepts now: first output any positive number, errors from 5 %.
+// The ranges below are the ones the backend accepts now: first output any positive number, errors from 1 %.
 const TAKEOVER_VALUES: SchedTakeoverIdleSeconds[] = [-1, 0, 300, 900, 1800]
 /** Typing pauses this long before the preview is asked for. */
 const PREVIEW_DELAY_MS = 400
 const PREVIEW_NAMES = 12
-/** The backend rejects an error limit below 5 % (SCHED_ERROR_RATE_TOO_LOW). */
-const MIN_ERROR_PCT = 5
+/** The backend rejects an error limit below 1 % (SCHED_ERROR_RATE_TOO_LOW). */
+const MIN_ERROR_PCT = 1
 
 const props = defineProps<{ groupId: number }>()
 const { t, te } = useI18n()

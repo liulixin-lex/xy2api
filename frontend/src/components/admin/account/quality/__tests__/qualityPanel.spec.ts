@@ -81,18 +81,13 @@ describe('quality panel place', () => {
     }
   })
 
-  // Astra review of fe, 1: 0..4 are 第 1–5 档; anything else (missing from an older answer) is not made into a step.
-  it.each(['zh', 'en'] as const)('%s: shows the steps 1 to 5 for levels 0 to 4, and a dash for any other level with the review time kept', (locale) => {
+  // Plan item 18: the rules have no steps; a rear stay is only when it is reviewed, and a missing end is a dash.
+  it.each(['zh', 'en'] as const)('%s: shows a rear stay as its review time only, a dash when the end is missing', (locale) => {
     const { t } = createI18n({ legacy: false, locale, messages: { zh, en } }).global
     const until = '2026-11-19T10:40:00Z'
-    const step = (level: string) => (locale === 'zh' ? `第\u00a0${level}\u00a0档` : `step\u00a0${level}`)
-    for (let level = 0; level <= 4; level++) expect(rearStay(t, level, until)).toContain(step(String(level + 1)))
-    for (const level of [undefined, null, -1, 5, 1.5, Number.NaN]) {
-      const shown = rearStay(t, level, until)
-      expect(shown).toContain(step('—'))
-      expect(shown).toContain(formatShortTime(until))
-      expect(shown).not.toMatch(/NaN|undefined|null/)
-    }
+    const review = (time: string) => (locale === 'zh' ? `${time}\u00a0复核` : `review\u00a0${time}`)
+    expect(rearStay(t, until)).toBe(review(formatShortTime(until)))
+    for (const missing of [null, undefined, '']) expect(rearStay(t, missing)).toBe(review('—'))
   })
 
   it('takes the trial that ends last, whatever its start: three lines on trial from three starts', () => {
@@ -127,6 +122,13 @@ describe('decision figures', () => {
     })
     // No line drawn from the front peers: the peers' own share.
     expect(basisFigures(basis('ttfo', { ttft: ttfoEvidence({ n: 40, k: 9, z: null, prior_mu: 0.146 }) })).measure![1]).toEqual({ label: 'peers', value: '14.6%' })
+    // A rule 4.0 record: no peer comparison (no peer_nu, p_rel, u, z), the tolerance and confidence it was taken with;
+    // its cache evidence carries the path and the low sessions of 10 turns. The figures read as before.
+    const { peer_nu: _nu, ...absolute } = ttfoEvidence({ n: 40, k: 9, p_rel: null, u: null, z: null, prior_mu: 0.146, tolerance: 0.2, confidence: 0.8 })
+    expect(basisFigures(basis('ttfo', { ttft: absolute })).measure).toEqual([{ label: 'over', params: { s: 10 }, value: '22.5%' }, { label: 'peers', value: '14.6%' }])
+    expect(basisFigures(basis('cache', { cache: cacheEvidence({ ratio: 0.6, min_ratio: 0.85, path: 'single5', low_sessions_10: 1, window_from: '2026-11-25T10:00:00Z', window_to: '2026-11-25T10:30:00Z' }) })).measure).toEqual([
+      { label: 'hit', value: '60.0%' }, { label: 'min', value: '85%' }
+    ])
     expect(basisFigures(basis('error', { error: errorEvidence({ failed: 6, padded: 80, limit: 0.025 }) })).measure).toEqual([
       { label: 'failed', value: '7.5%' }, { label: 'limit', value: '2.5%' }
     ])
@@ -162,6 +164,22 @@ describe('decision records', () => {
     ])
     // Another end is another entry.
     expect(mergeDecisions([record(2), record(1, { group_id: 2, until: '2026-11-16T11:25:00Z' })])).toHaveLength(2)
+  })
+
+  // Plan item 18: an entry is titled from its first record, so around the switch to 4.0 records of another rule version,
+  // or that ended a trial for another reason, are another entry even in the same minute.
+  it('keeps records of another rule version or another release reason apart in the same minute', () => {
+    const ended = (rule_version: string, release_reason?: string) => ({ action: 'trial_timeout', until: null, basis: basis('ttfo', { rule_version, release_reason }) })
+    const merged = mergeDecisions([
+      record(7, { group_id: 1, ...ended('4.0', 'deadline') }),
+      record(6, { group_id: 2, ...ended('4.0', 'deadline') }),
+      record(5, { group_id: 3, ...ended('3.1', 'deadline') }),
+      record(4, { group_id: 4, ...ended('3.1', 'no_samples') }),
+      record(3, { group_id: 5, ...ended('4.0', 'good') }),
+      record(2, { group_id: 6, ...ended('4.0') }),
+      record(1, { group_id: 7, action: 'trial_timeout', until: null, basis: null })
+    ])
+    expect(merged.map((entry) => entry.items.map((item) => item.id))).toEqual([[7, 6], [5], [4], [3], [2], [1]])
   })
 
   // Astra 2: ends within the minute shown merge, and each record keeps its own end (and so its evidence).

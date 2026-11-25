@@ -45,7 +45,7 @@ describe('AccountGroupPills with an older answer', () => {
     const rear = [{ group_id: 1, model: 'm', lines: ['ttfo', 'error'], until_line: missing, until: at(40), level: missing, exempt: false, effective: true }] as Quality['rear']
     const value = card({ group_status: { 1: 'rear' }, rear })
     noKeys(value)
-    expect(value.rows).toEqual([['m', { text: `${reasons.ttfo}、${reasons.error}`, tone: 'back' }, `第${NBSP}—${NBSP}档 · ${formatShortTime(at(40))}${NBSP}复核`]])
+    expect(value.rows).toEqual([['m', { text: `${reasons.ttfo}、${reasons.error}`, tone: 'back' }, `${formatShortTime(at(40))}${NBSP}复核`]])
   })
 
   it('marks the line of an old trial unknown and keeps its end', () => {
@@ -58,13 +58,13 @@ describe('AccountGroupPills with an older answer', () => {
     const rear = [{ group_id: 9, model: 'm', lines: ['cache'], until: at(40), exempt: false, effective: true }] as Quality['rear']
     const value = card({ group_status: { 9: 'rear' }, rear }, true)
     noKeys(value)
-    expect(value.rows![0][2]).toBe(`第${NBSP}—${NBSP}档 · ${formatShortTime(at(40))}${NBSP}复核`)
+    expect(value.rows![0][2]).toBe(`${formatShortTime(at(40))}${NBSP}复核`)
   })
 
   it.each(['', null, undefined])('finds the model that ends last under "+N" when another has until=%s, before or after it', (until) => {
     const unknownEnd = { group_id: 9, model: 'a', lines: ['ttfo'], until_line: 'ttfo', until, level: 0, exempt: false, effective: true }
     const known = { group_id: 9, model: 'b', lines: ['error'], until_line: 'error', until: at(180), level: 4, exempt: false, effective: true }
-    const shown = `${zh.admin.schedQuality.dim.error} · 第${NBSP}5${NBSP}档 · ${formatShortTime(at(180))}${NBSP}复核`
+    const shown = `${zh.admin.schedQuality.dim.error} · ${formatShortTime(at(180))}${NBSP}复核`
     for (const rear of [[unknownEnd, known], [known, unknownEnd]] as Quality['rear'][]) {
       const value = card({ group_status: { 9: 'rear' }, rear }, true)
       expect(value.rows![0]).toEqual(['G9', expect.anything(), shown])

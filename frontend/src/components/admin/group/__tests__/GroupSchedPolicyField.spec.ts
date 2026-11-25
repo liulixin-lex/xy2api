@@ -91,6 +91,15 @@ describe('GroupSchedPolicyField', () => {
       expected_version: 64,
       policy: { enabled: false, ttft_seconds: 10, max_error_rate: 0.06234, min_cache_ratio: 0.88, takeover_idle_seconds: 0 }
     })
+
+    // The lowest error limit, 1 %, is saved as the ratio 0.01.
+    api.updateGroupPolicy.mockResolvedValueOnce({ ...p, version: 65 })
+    await error(w).setValue('1')
+    expect(await save(w)).toBe(true)
+    expect(api.updateGroupPolicy).toHaveBeenLastCalledWith(53, {
+      expected_version: 64,
+      policy: { enabled: false, ttft_seconds: 10, max_error_rate: 0.01, min_cache_ratio: 0.88, takeover_idle_seconds: 0 }
+    })
   })
 
   it('shows 失败 without reload on a save error other than 409, and clears it on the next good save', async () => {
@@ -106,7 +115,7 @@ describe('GroupSchedPolicyField', () => {
     expect(w.find('[data-sq-policy-failed]').exists()).toBe(false)
   })
 
-  it('marks values the backend rejects without text (first output 0, errors under 5 %, cache over 100 %), asks no preview and blocks saving', async () => {
+  it('marks values the backend rejects without text (first output 0, errors under 1 %, cache over 100 %), asks no preview and blocks saving', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const w = await mountField()
     await ttft(w).setValue('0')
@@ -114,9 +123,12 @@ describe('GroupSchedPolicyField', () => {
     expect(ttft(w).classes()).toContain('input-error')
     await ttft(w).setValue('600.5')
     expect(ttft(w).attributes('aria-invalid')).toBe('false')
-    await error(w).setValue('4.9')
-    expect(error(w).attributes('aria-invalid')).toBe('true')
-    expect(error(w).attributes('min')).toBe('5')
+    // The floor is 1 %: 0.9 is refused, 1 and the old floor's neighbour 4.9 are not.
+    for (const [value, invalid] of [['1', 'false'], ['4.9', 'false'], ['0.9', 'true']]) {
+      await error(w).setValue(value)
+      expect(error(w).attributes('aria-invalid')).toBe(invalid)
+    }
+    expect(error(w).attributes('min')).toBe('1')
     await cache(w).setValue('101')
     expect(cache(w).attributes('aria-invalid')).toBe('true')
     expect((w.vm as unknown as { valid: boolean }).valid).toBe(false)

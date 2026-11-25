@@ -18,8 +18,8 @@ const VALUES: Record<string, string[]> = {
   ],
   'admin.schedQuality.evidence': ['over', 'bar', 'peers', 'failed', 'limit', 'hit', 'min', 'samples', 'local'],
   'admin.schedQuality.decisions.timeout.seats': ['full', 'not_observed', 'unknown'],
-  'admin.schedQuality.ttftRule': ['confidence', 'tolerance', 'peer_margin', 'confidenceHint', 'toleranceHint', 'peer_marginHint'],
-  'admin.schedQuality.ttftRule.legal': ['confidence', 'tolerance', 'peer_margin'],
+  'admin.schedQuality.ttftRule': ['confidence', 'tolerance', 'confidenceHint', 'toleranceHint'],
+  'admin.schedQuality.ttftRule.legal': ['confidence', 'tolerance'],
   'admin.schedQuality.reject': ['profit_floor'],
   'admin.schedQuality.kind': ['capability_marked']
 }
@@ -81,6 +81,18 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
     expect(new Set(words).size).toBe(1)
   })
 
+  // Plan item 18: the rules in force do not compare with peers; the first-output settings say nothing of them.
+  it('keeps peers out of the first-output settings', () => {
+    const texts: string[] = []
+    const walk = (node: unknown) => {
+      if (typeof node === 'string') texts.push(node)
+      else if (node && typeof node === 'object') Object.values(node).forEach(walk)
+    }
+    walk(lookup(messages, 'admin.schedQuality.ttftRule'))
+    expect(texts.filter((text) => /同伴|前排|peer|front accounts/i.test(text))).toEqual([])
+    expect(lookup(messages, 'admin.schedQuality.ttftRule.peer_margin')).toBeUndefined()
+  })
+
   it('puts the first-output limit into its figure label', () => {
     expect(String(lookup(messages, 'admin.schedQuality.evidence.over'))).toContain('{s}')
   })
@@ -97,6 +109,16 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
       ])
     }
   })
+})
+
+// Plan item 18: three sentences follow the rules in force: no steps to restart from, the cache line enters on one
+// assessment when 5 points or more short, and "within" no longer means "not worse than the group's others".
+it('follows the rules in force in the relax warning, the trial note and the within reason', () => {
+  const text = (messages: unknown, key: string) => String(lookup(messages, `admin.schedQuality.${key}`))
+  expect([zh, en].map((messages) => /档|step/.test(text(messages, 'ttftRule.confirmMessage')))).toEqual([false, false])
+  expect(text(zh, 'policy.trialNote')).toContain('报错线和缓存线（差不到 5 个百分点时）要连续两次不达标才进后排')
+  expect(text(en, 'policy.trialNote')).toContain('the error and cache lines (the cache line when less than 5 points short) need two below-standard assessments in a row')
+  expect([zh, en].map((messages) => /其他号|other accounts/.test(text(messages, 'noAction.long.within')))).toEqual([false, false])
 })
 
 // Final review suggestion 5: one apostrophe in the English copy.
