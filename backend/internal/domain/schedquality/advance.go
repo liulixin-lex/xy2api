@@ -104,7 +104,7 @@ func Step(prev LineState, kind EventKind, v Verdict, basis Basis, at time.Time) 
 				v = VerdictUnknown
 			}
 			switch {
-			case v == VerdictPass && !s.TrialUntil.IsZero() && !at.Before(s.Epoch.Add(TrialMinimum)):
+			case v == VerdictPass && !at.Before(s.Epoch.Add(TrialMinimum)):
 				releaseTrial(&s, &basis, at, "good")
 				action = ActionTrialPass
 			case !at.Before(s.TrialUntil):

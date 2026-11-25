@@ -168,6 +168,63 @@ func TestRecoveryMissingDeadlineRepairedOnce(t *testing.T) {
 	}
 }
 
+func TestRecoveryMissingTrialDeadlinePreservesExitOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		age    time.Duration
+		read   int
+		action q.Action
+		reason string
+	}{
+		{"passing at fifteen minutes", 15 * time.Minute, 95, q.ActionTrialPass, "good"},
+		{"failing at fifteen minutes", 15 * time.Minute, 20, q.ActionTrialFail, "fail"},
+		{"passing before fifteen minutes", 15*time.Minute - time.Second, 95, q.ActionTrialTimeout, "deadline"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newQualityFixture(t)
+			at := f.now.Add(-10 * time.Second)
+			legacyRecoveryRow(f, true, at.Add(-tc.age), time.Time{})
+			f.store.Rows[0].Line = q.DimensionCache
+			f.store.Rows[0].Basis.Line = q.DimensionCache
+			// First turn establishes the session; forty completed turns follow.
+			for i := range 41 {
+				finished := at.Add(time.Duration(i-41) * 5 * time.Second)
+				sample := engineSamples(1, finished, false)[0]
+				sample.RequestID = sample.AttemptID
+				sample.SessionKey = "missing-deadline-cache"
+				sample.InsertedAt = finished
+				sample.InputTokens = new(100 - tc.read)
+				sample.CacheReadTokens = new(tc.read)
+				sample.CacheCreationTokens = new(0)
+				f.ledger.Rows = append(f.ledger.Rows, sample)
+			}
+			f.cycle()
+			require.Len(t, f.store.Decisions, 1)
+			decision := f.store.Decisions[0]
+			require.Equal(t, at, decision.At)
+			require.Equal(t, tc.action, decision.Action)
+			require.Equal(t, tc.reason, decision.Basis.ReleaseReason)
+			require.True(t, decision.Basis.MissingDeadline)
+			require.NotNil(t, decision.Basis.Cache)
+			require.Equal(t, 40, decision.Basis.Cache.Turns)
+			got := f.line(q.DimensionCache)
+			require.Equal(t, at, got.Epoch)
+			require.False(t, got.Trial)
+			require.True(t, got.TrialUntil.IsZero())
+			if tc.action == q.ActionTrialFail {
+				require.Equal(t, q.VerdictFail, decision.Basis.Cache.Verdict)
+				require.Equal(t, q.IdentityRear, got.Identity)
+				require.Equal(t, at.Add(60*time.Minute), got.Until)
+			} else {
+				require.Equal(t, q.VerdictPass, decision.Basis.Cache.Verdict)
+				require.Equal(t, q.IdentityUnknown, got.Identity)
+				require.True(t, got.Until.IsZero())
+			}
+			restartRecoveryTwice(t, f)
+		})
+	}
+}
+
 // These corrupt rows cannot occur in a valid transaction. Preserve the existing
 // watermark policy: replay may use evidence visible after the old deadline.
 // Deployment must reject such rows rather than treating this as historical replay.
