@@ -71,7 +71,7 @@ func (s *SchedQualityEngineService) publishPerformance(ctx context.Context, w *s
 	if !w.readyLogged {
 		w.readyLogged = true
 		slog.InfoContext(ctx, "sched_quality.performance_ready",
-			"snapshot_at", snapshot.at, "from", snapshot.from,
+			"component", "sched_quality", "snapshot_at", snapshot.at, "from", snapshot.from,
 			"rows", len(w.facts), "load_ms", time.Since(w.loadStarted).Milliseconds())
 	}
 	return nil

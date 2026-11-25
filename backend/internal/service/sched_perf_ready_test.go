@@ -12,12 +12,51 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liulixin-lex/xy2api/internal/pkg/logger"
 	"github.com/stretchr/testify/require"
 )
 
 type perfReadyLedger struct {
 	perfReadStub
 	fail string
+}
+
+func TestSchedPerfReadyReachesSystemLogInsert(t *testing.T) {
+	previous := slog.Default()
+	require.NoError(t, logger.Init(logger.InitOptions{Level: "info", Format: "json",
+		ServiceName: "perf-ready-test", Environment: "test", Output: logger.OutputOptions{ToStdout: true}}))
+	t.Cleanup(func() {
+		logger.SetSink(nil)
+		slog.SetDefault(previous)
+	})
+	var saved []*OpsInsertSystemLogInput
+	sink := NewOpsSystemLogSink(&opsRepoMock{BatchInsertSystemLogsFn: func(_ context.Context, rows []*OpsInsertSystemLogInput) (int64, error) {
+		saved = append(saved, rows...)
+		return int64(len(rows)), nil
+	}})
+	defer sink.Stop()
+	logger.SetSink(sink)
+	ledger := perfReadStub{page: func(_, _ time.Time, after SchedAttemptCursor, _ bool) ([]SchedPerfFact, SchedAttemptCursor, bool, error) {
+		return nil, after, true, nil
+	}}
+	engine := NewSchedQualityEngineService(nil, ledger, nil, func() time.Time { return perfAt }, nil)
+	store := &schedPerfStore{}
+	require.NoError(t, engine.publishPerformance(t.Context(), store, perfAt))
+	require.NoError(t, engine.publishPerformance(t.Context(), store, perfAt))
+	slog.InfoContext(t.Context(), "perf-ready-ordinary-info")
+
+	require.Len(t, sink.queue, 1)
+	count, err := sink.flushBatch(t.Context(), []*logger.LogEvent{<-sink.queue})
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Len(t, saved, 1)
+	require.Equal(t, "sched_quality.performance_ready", saved[0].Message)
+	require.Equal(t, "sched_quality", saved[0].Component)
+	require.Equal(t, "info", saved[0].Level)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal([]byte(saved[0].ExtraJSON), &fields))
+	require.Equal(t, perfAt.Format(time.RFC3339Nano), fields["snapshot_at"])
+	require.Equal(t, perfAt.Add(-schedPerfWindow).Format(time.RFC3339Nano), fields["from"])
 }
 
 func (l *perfReadyLedger) LoadPerfConfig(ctx context.Context) (map[int64]SchedPolicyRecord, map[int64]time.Time, error) {
