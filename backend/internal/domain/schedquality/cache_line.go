@@ -6,10 +6,13 @@ import (
 )
 
 const (
-	CacheWindow      = 30 * time.Minute
-	cacheMinLowTurns = 10
-	CacheMinTurns    = 20
-	ContinuationGap  = 5 * time.Minute
+	CacheWindow             = 30 * time.Minute
+	cacheLowSessionMinTurns = 10
+	cacheDeepMinTurns       = 10
+	cacheSingleDeficit      = .05
+	cacheDeepDeficit        = .20
+	CacheMinTurns           = 20
+	ContinuationGap         = 5 * time.Minute
 )
 
 // Cache failure paths recorded in decision evidence.
@@ -86,7 +89,7 @@ func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now tim
 	for _, tally := range sessions {
 		if float64(tally.read)/float64(tally.input) < minRatio {
 			out.LowSessions++
-			if tally.turns >= cacheMinLowTurns {
+			if tally.turns >= cacheLowSessionMinTurns {
 				*out.LowSessions10++
 			}
 		}
@@ -100,10 +103,10 @@ func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now tim
 		switch {
 		case out.Turns >= CacheMinTurns:
 			out.Verdict, out.Path = VerdictFail, CachePathPair
-			if cacheDeficitAtLeast(out.Ratio, minRatio, .05) {
+			if cacheDeficitAtLeast(out.Ratio, minRatio, cacheSingleDeficit) {
 				out.Path = CachePathSingle5
 			}
-		case out.Turns >= cacheMinLowTurns && cacheDeficitAtLeast(out.Ratio, minRatio, .20):
+		case out.Turns >= cacheDeepMinTurns && cacheDeficitAtLeast(out.Ratio, minRatio, cacheDeepDeficit):
 			out.Verdict, out.Path = VerdictFail, CachePathDeep10
 		}
 	}
