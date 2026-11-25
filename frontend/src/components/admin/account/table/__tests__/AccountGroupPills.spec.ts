@@ -233,8 +233,7 @@ describe('AccountGroupPills', () => {
         '100.0 / 99.9', 'admin.schedQuality.verdict.pass', 'admin.schedQuality.verdict.unknown', tk('admin.schedQuality.panel.lacks', { have: 99, need: 99 }),
         ...['samples', 'sessions', 'slowSessions', 'turns', 'lowSessions'].map((unit) => tk(`admin.schedQuality.panel.lacksUnit.${unit}`, { have: 99, need: 99 }))
       ].join('\n'),
-      // The times at their widest: with the date, as a stay across midnight writes them.
-      [tk('admin.schedQuality.stay.rear', { time: '00-00 00:00' }), tk('admin.schedQuality.stay.trialEnd', { time: '00-00 00:00' })].join('\n')
+      [tk('admin.schedQuality.stay.rear', { time: '00:00' }), tk('admin.schedQuality.stay.trialEnd', { time: '00:00' })].join('\n')
     ])
     // A line whose record kept no basis: its name and time only, no reading made up.
     const bare = mountPills(1, baseQuality({ group_status: statuses({ 1: 'rear' }), rear: [{ ...back(1, 'gpt-5', ['error'], ttfoEnd), line_details: [{ line: 'error', identity: 'rear', until: ttfoEnd }] }] }))
