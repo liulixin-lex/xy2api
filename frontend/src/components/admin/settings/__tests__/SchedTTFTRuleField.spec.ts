@@ -55,16 +55,15 @@ beforeEach(() => {
 })
 
 describe('ttft rule helpers', () => {
-  it('accepts only 50 < confidence < 100, 0 < tolerance < 100 and 0 ≤ margin < 100 (percent), never empty or non-numbers', () => {
+  it('accepts only 50 < confidence < 100 and 0 < tolerance < 100 (percent), never empty or non-numbers', () => {
     expect(['50', '50.01', '99.99', '100', ''].map((v) => ttftRuleInputValid('confidence', v))).toEqual([false, true, true, false, false])
     expect(['0', '0.1', '99.9', '100', 'x'].map((v) => ttftRuleInputValid('tolerance', v))).toEqual([false, true, true, false, false])
-    expect(['-1', '0', '99', '100', ' '].map((v) => ttftRuleInputValid('peer_margin', v))).toEqual([false, true, true, false, false])
   })
 
   it('calls any value up a relaxation, any down a tightening, both mixed', () => {
     const saved = { confidence: 0.8, tolerance: 0.2, peer_margin: 0.05 }
     expect(ttftRuleChange(saved, { ...saved })).toBe('none')
-    expect(ttftRuleChange(saved, { ...saved, peer_margin: 0.1 })).toBe('relax')
+    expect(ttftRuleChange(saved, { ...saved, confidence: 0.9 })).toBe('relax')
     expect(ttftRuleChange(saved, { ...saved, confidence: 0.9, tolerance: 0.25 })).toBe('relax')
     expect(ttftRuleChange(saved, { ...saved, tolerance: 0.15 })).toBe('tighten')
     expect(ttftRuleChange(saved, { ...saved, confidence: 0.9, tolerance: 0.15 })).toBe('mixed')
@@ -72,12 +71,14 @@ describe('ttft rule helpers', () => {
 })
 
 describe('SchedTTFTRuleField', () => {
-  it('shows the three values as percent and points, the defaults, and saves nothing when untouched', async () => {
+  // Plan item 18: the rules in force do not compare with peers, so the margin over them is not shown.
+  it('shows confidence and tolerance as percent and their defaults, no margin over the peers, and saves nothing when untouched', async () => {
     const w = await mountField()
-    expect(['confidence', 'tolerance', 'peer_margin'].map((field) => (input(w, field).element as HTMLInputElement).value)).toEqual(['80', '20', '5'])
-    expect(row(w, 'peer_margin').text()).toContain('admin.schedQuality.ttftRule.unit.points')
-    expect(row(w, 'confidence').text()).toContain('admin.schedQuality.ttftRule.unit.percent')
-    expect(w.get('[data-sq-ttft-defaults]').text()).toBe('admin.schedQuality.ttftRule.defaults:{"confidence":"80","tolerance":"20","peer_margin":"5"}')
+    expect(w.findAll('[data-sq-ttft-field]').map((el) => el.attributes('data-sq-ttft-field'))).toEqual(['confidence', 'tolerance'])
+    expect(['confidence', 'tolerance'].map((field) => (input(w, field).element as HTMLInputElement).value)).toEqual(['80', '20'])
+    expect(row(w, 'tolerance').text()).toContain('admin.schedQuality.ttftRule.unit.percent')
+    expect(w.text()).not.toContain('peer_margin')
+    expect(w.get('[data-sq-ttft-defaults]').text()).toBe('admin.schedQuality.ttftRule.defaults:{"confidence":"80","tolerance":"20"}')
     expect(await vm(w).save()).toBe(true)
     expect(api.updateTTFTRule).not.toHaveBeenCalled()
   })
@@ -97,9 +98,6 @@ describe('SchedTTFTRuleField', () => {
     expect(row(w, 'confidence').get('[data-sq-ttft-outside]').text()).toBe('admin.schedQuality.ttftRule.outside:{"range":"admin.schedQuality.ttftRule.range.percent:{\\"min\\":\\"80\\",\\"max\\":\\"95\\"}"}')
     await input(w, 'confidence').setValue('95')
     expect(row(w, 'confidence').find('[data-sq-ttft-outside]').exists()).toBe(false)
-    await input(w, 'peer_margin').setValue('0')
-    expect(vm(w).valid).toBe(true)
-    expect(row(w, 'peer_margin').get('[data-sq-ttft-outside]').text()).toContain('range.points')
   })
 
   it('never holds up the settings page when the rule did not load: valid, nothing to save, a retry', async () => {
@@ -114,12 +112,13 @@ describe('SchedTTFTRuleField', () => {
     expect((input(w, 'confidence').element as HTMLInputElement).value).toBe('80')
   })
 
-  it('saves a pure tightening at once, as ratios with the version', async () => {
+  it('saves a pure tightening at once, as ratios with the version, and the margin over the peers as loaded', async () => {
+    api.getTTFTRule.mockResolvedValueOnce(rule({ peer_margin: 0.07 }))
     const w = await mountField()
     await input(w, 'tolerance').setValue('15')
     expect(await vm(w).save()).toBe(true)
     expect(w.find('[data-test="confirm"]').exists()).toBe(false)
-    expect(api.updateTTFTRule).toHaveBeenCalledWith({ expected_version: 4, confidence: 0.8, tolerance: 0.15, peer_margin: 0.05 })
+    expect(api.updateTTFTRule).toHaveBeenCalledWith({ expected_version: 4, confidence: 0.8, tolerance: 0.15, peer_margin: 0.07 })
   })
 
   for (const [kind, edit] of [['relaxation', { confidence: '90' }], ['mixed change', { confidence: '90', tolerance: '15' }]] as const) {
@@ -188,7 +187,7 @@ describe('SchedTTFTRuleField', () => {
     const saving = vm(w).save()
     await flushPromises()
     expect(api.updateTTFTRule).toHaveBeenCalledWith({ expected_version: 4, confidence: 0.8, tolerance: 0.15, peer_margin: 0.05 })
-    expect(['confidence', 'tolerance', 'peer_margin'].map((field) => (input(w, field).element as HTMLInputElement).disabled)).toEqual([true, true, true])
+    expect(['confidence', 'tolerance'].map((field) => (input(w, field).element as HTMLInputElement).disabled)).toEqual([true, true])
     answer({ ...rule({ tolerance: 0.15 }), version: 5, change: 'tighten', cleared: 0 })
     expect(await saving).toBe(true)
     await flushPromises()
@@ -198,22 +197,22 @@ describe('SchedTTFTRuleField', () => {
 
   it('keeps the loaded defaults and replayed ranges when the save answer leaves them out, and says what a relaxation cleared', async () => {
     const w = await mountField()
-    await input(w, 'peer_margin').setValue('10')
-    api.updateTTFTRule.mockResolvedValueOnce({ version: 5, confidence: 0.8, tolerance: 0.2, peer_margin: 0.1, change: 'relax', cleared: 12 })
+    await input(w, 'confidence').setValue('90')
+    api.updateTTFTRule.mockResolvedValueOnce({ version: 5, confidence: 0.9, tolerance: 0.2, peer_margin: 0.1, change: 'relax', cleared: 12 })
     const saving = vm(w).save()
     await flushPromises()
     await w.get('[data-test="ok"]').trigger('click')
     expect(await saving).toBe(true)
     await flushPromises()
-    expect((input(w, 'peer_margin').element as HTMLInputElement).value).toBe('10')
-    expect(w.get('[data-sq-ttft-defaults]').text()).toContain('"peer_margin":"5"')
-    expect(row(w, 'peer_margin').find('[data-sq-ttft-outside]').exists()).toBe(false)
+    expect((input(w, 'confidence').element as HTMLInputElement).value).toBe('90')
+    expect(w.get('[data-sq-ttft-defaults]').text()).toContain('"confidence":"80"')
+    expect(row(w, 'confidence').find('[data-sq-ttft-outside]').exists()).toBe(false)
     expect(toast.showInfo).toHaveBeenCalledWith('admin.schedQuality.ttftRule.savedRelaxed:{"n":12}', 6000)
 
-    // The next save goes with the new version; a tightening says nothing more.
+    // The next save goes with the new version and the margin the answer carried; a tightening says nothing more.
     await input(w, 'tolerance').setValue('15')
     expect(await vm(w).save()).toBe(true)
-    expect(api.updateTTFTRule).toHaveBeenLastCalledWith({ expected_version: 5, confidence: 0.8, tolerance: 0.15, peer_margin: 0.1 })
+    expect(api.updateTTFTRule).toHaveBeenLastCalledWith({ expected_version: 5, confidence: 0.9, tolerance: 0.15, peer_margin: 0.1 })
     expect(toast.showInfo).toHaveBeenCalledTimes(1)
   })
 

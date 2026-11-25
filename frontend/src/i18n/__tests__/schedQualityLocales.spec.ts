@@ -18,8 +18,8 @@ const VALUES: Record<string, string[]> = {
   ],
   'admin.schedQuality.evidence': ['over', 'bar', 'peers', 'failed', 'limit', 'hit', 'min', 'samples', 'local'],
   'admin.schedQuality.decisions.timeout.seats': ['full', 'not_observed', 'unknown'],
-  'admin.schedQuality.ttftRule': ['confidence', 'tolerance', 'peer_margin', 'confidenceHint', 'toleranceHint', 'peer_marginHint'],
-  'admin.schedQuality.ttftRule.legal': ['confidence', 'tolerance', 'peer_margin'],
+  'admin.schedQuality.ttftRule': ['confidence', 'tolerance', 'confidenceHint', 'toleranceHint'],
+  'admin.schedQuality.ttftRule.legal': ['confidence', 'tolerance'],
   'admin.schedQuality.reject': ['profit_floor'],
   'admin.schedQuality.kind': ['capability_marked']
 }
@@ -79,6 +79,18 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
       'admin.schedQuality.identity.rear', 'admin.schedQuality.placement.rear', 'admin.schedQuality.layer.rear'
     ].map((key) => lookup(messages, key))
     expect(new Set(words).size).toBe(1)
+  })
+
+  // Plan item 18: the rules in force do not compare with peers; the first-output settings say nothing of them.
+  it('keeps peers out of the first-output settings', () => {
+    const texts: string[] = []
+    const walk = (node: unknown) => {
+      if (typeof node === 'string') texts.push(node)
+      else if (node && typeof node === 'object') Object.values(node).forEach(walk)
+    }
+    walk(lookup(messages, 'admin.schedQuality.ttftRule'))
+    expect(texts.filter((text) => /同伴|前排|peer|front accounts/i.test(text))).toEqual([])
+    expect(lookup(messages, 'admin.schedQuality.ttftRule.peer_margin')).toBeUndefined()
   })
 
   it('puts the first-output limit into its figure label', () => {
