@@ -4,8 +4,6 @@
 
 ## [Unreleased]
 
-- 长期表现快照在系统时钟轻微回调时也会按整点更新，首次装载较慢时及时追上当前统计窗口。
-
 - 客户端未带会话标识时，GPT-6.2 请求也会获得稳定的 `prompt_cache_key`，`/v1/messages` 仍发送完整历史，见 [OpenAI 模型支持](docs/platforms/openai.md#模型支持gpt-62-sol-与-gpt-62-astra)。
 - GPT-6.2 的 `none`、`minimal` 推理强度在 API Key 账号的 HTTP 请求中改按 `low` 发送，在 OAuth 账号与 WebSocket 中改为本地拒绝；带工具的请求不再分给明确不支持 Responses 的账号，部分协议转换路径不再发送 `temperature`、`top_p`。
 - GPT-6.2 在价格目录缺失或名称带推理后缀时不再按其它模型家族计价，带供应商前缀时会匹配渠道价格；目录已有精确 6.2 价格时扣费不变。
@@ -44,6 +42,7 @@
 - 判定时间线展开时写出取证的时间段；三条线的判定依据都带上取证窗口的起止（`window_from`、`window_to`），旧记录没有的不显示。
 - 管理接口只增不改：门槛预览返回 `reach[]`；账号质量详情和长期表现的逐线数据带 `basis`（只有后排的线有），详情顶层带 `current_rule_version`；账号列表摘要的 `rear[]`、`trial[]` 每项带 `line_details[]`（受限的线越多，列表摘要越大，每条约多 350 字节）。
 - 协议转换的换号重发（`openai_conversion_retry`，带网关请求号）和长期表现首次装载完成（`sched_quality.performance_ready`）两条日志进入系统日志，可在运维监控里按 `sched_quality` 组件查到。
+- 修复：长期表现快照每 5 分钟整点更新一版（质量面板的 12 小时表现和上面的够得着都读它），个别整点会被整版跳过，那 5 分钟里看到的数据比应有的旧一版，而且没有日志——系统时钟被校时调慢、后台在整点前不到几毫秒醒来时，会把上一版重发一遍再直接排到再下一个整点。现在系统时钟真的到了整点才发布下一版；首次装载超过 5 分钟时也不再多等一个周期才追上当前时刻。0.6.14 及更早的版本都有这个问题。
 - [分组质量门槛](docs/guides/group-quality-gate.md)、[调度](docs/guides/scheduling.md)和[观测](docs/guides/gateway-resilience-observability.md)三份指南按规则 4.0 重写：判定标准汇成一张表，写明后排的账号还会接到哪些请求、升级和回退时状态怎么走、派发日志怎么读。
 
 ## [0.6.14] - 2026-11-22
