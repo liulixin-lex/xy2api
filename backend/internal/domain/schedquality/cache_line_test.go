@@ -3,6 +3,7 @@
 package schedquality
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -217,5 +218,38 @@ func TestAssessCacheLowSessionUsesOwnTokenRatio(t *testing.T) {
 	got := AssessCache(rows, .8, time.Time{}, machineNow)
 	if got.Ratio >= .8 || got.LowSessions10 != 0 || got.Verdict != VerdictUnknown {
 		t.Fatalf("a long session with high token ratio must not count as low: %+v", got)
+	}
+}
+
+func TestAssessCachePercentagePointBoundaries(t *testing.T) {
+	for _, floorPct := range []int{70, 80, 86} {
+		for _, deficitPct := range []int{5, 20} {
+			for _, extraRead := range []int{-1, 0, 1} {
+				t.Run(fmt.Sprintf("floor%d/deficit%d/read%+d", floorPct, deficitPct, extraRead), func(t *testing.T) {
+					n := 20
+					path := "single5"
+					if deficitPct == 20 {
+						n, path = 10, "deep10"
+					}
+					rows := machineSamples(n)
+					for i := range rows {
+						read := (floorPct-deficitPct)*10000000 + extraRead
+						rows[i].SessionKey = "one"
+						rows[i].InputTokens, rows[i].CacheReadTokens = machineInt(1000000000-read), machineInt(read)
+					}
+					got := AssessCache(rows, float64(floorPct)/100, time.Time{}, machineNow)
+					want := VerdictFail
+					if extraRead > 0 {
+						path = "pair"
+						if deficitPct == 20 {
+							want, path = VerdictUnknown, ""
+						}
+					}
+					if got.Verdict != want || got.Path != path {
+						t.Fatalf("assessment: %+v", got)
+					}
+				})
+			}
+		}
 	}
 }

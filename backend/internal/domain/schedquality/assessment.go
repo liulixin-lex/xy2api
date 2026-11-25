@@ -169,7 +169,7 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 		case b.Cache != nil:
 			cache := b.Cache
 			need := CacheMinTurns
-			if cache.Ratio < cache.MinRatio && cache.Ratio <= cache.MinRatio-.20 {
+			if cache.Ratio < cache.MinRatio && cacheDeficitAtLeast(cache.Ratio, cache.MinRatio, .20) {
 				need = cacheMinLowTurns
 			}
 			if s.Kind == EventTrial && cache.Ratio >= cache.MinRatio {

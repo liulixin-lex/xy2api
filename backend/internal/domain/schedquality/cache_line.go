@@ -93,10 +93,10 @@ func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now tim
 		switch {
 		case out.Turns >= CacheMinTurns:
 			out.Verdict, out.Path = VerdictFail, "pair"
-			if out.Ratio <= minRatio-.05 {
+			if cacheDeficitAtLeast(out.Ratio, minRatio, .05) {
 				out.Path = "single5"
 			}
-		case out.Turns >= cacheMinLowTurns && out.Ratio <= minRatio-.20:
+		case out.Turns >= cacheMinLowTurns && cacheDeficitAtLeast(out.Ratio, minRatio, .20):
 			out.Verdict, out.Path = VerdictFail, "deep10"
 		}
 	}
@@ -150,4 +150,10 @@ func completedAttempts(samples []AttemptSample, cut, from, now time.Time) []Atte
 		rows = append(rows, s)
 	}
 	return rows
+}
+
+// Allow only rounding noise in percentage-point boundaries (e.g. .7-.05).
+// This tolerance is far below the precision of configured percentages.
+func cacheDeficitAtLeast(ratio, floor, deficit float64) bool {
+	return floor-ratio >= deficit-1e-12
 }
