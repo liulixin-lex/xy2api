@@ -83,6 +83,7 @@ func (s *SchedObservabilityService) summary(ctx context.Context) {
 	w := s.window
 	s.window = schedObsWindow{}
 	s.mu.Unlock()
+	// Rule 4.0 no longer clears levels; keep "clear" for consumers of the old log schema.
 	slog.InfoContext(ctx, "sched_quality.summary", "component", "sched_quality",
 		"cycles", w.cycles, "cycles_failed", w.cyclesFailed, "cycle_ms_max", w.cycleMSMax,
 		"cooled", w.cooled, "released", w.released, "trial", w.trial, "relax", w.relax, "clear", 0)
