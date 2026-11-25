@@ -314,6 +314,24 @@ describe('GroupSchedPolicyField', () => {
     expect([relaxedNow(w), dimmed(w)]).toEqual([[], true])
   })
 
+  // Opus review of fe, suggestion 6: a relaxing value, then an invalid one in the same field (76 → 101): nothing is
+  // asked, the mark goes and the counts dim.
+  it('drops the relax mark and dims the counts when the field turns invalid after relaxing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const w = await mountField()
+    await settle()
+    api.previewGroupPolicy.mockResolvedValueOnce(preview({ relaxed_lines: ['cache'] }))
+    await cache(w).setValue('76')
+    await settle()
+    expect(w.findAll('[data-sq-relaxed]').map((el) => el.attributes('data-sq-relaxed'))).toEqual(['cache'])
+    const asked = api.previewGroupPolicy.mock.calls.length
+    await cache(w).setValue('101')
+    await settle()
+    expect(api.previewGroupPolicy).toHaveBeenCalledTimes(asked)
+    expect(w.find('[data-sq-relaxed]').exists()).toBe(false)
+    expect(['ttfo', 'cache'].map((line) => w.get(`[data-sq-reach="${line}"]`).classes().includes('opacity-60'))).toEqual([true, true])
+  })
+
   // Round 3 (plan item 9): what the saved error limit takes to judge a line bad, by the backend's numbers.
   it('explains the saved error limit with the backend\'s examples, not the typed value, until a save answers with new ones', async () => {
     const w = await mountField()
