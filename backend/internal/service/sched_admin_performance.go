@@ -49,14 +49,15 @@ type schedPerfLine struct {
 	Identity string              `json:"identity"`
 	Until    *string             `json:"until"`
 	LastEval *SchedAdminLastEval `json:"last_eval"`
+	Basis    *SchedAdminBasis    `json:"basis,omitempty"`
 }
 
-func perfLine(v q.LineView, counts q.SampleCounts, last *SchedAdminLastEval) schedPerfLine {
+func perfLine(v q.LineView, counts q.SampleCounts, last *SchedAdminLastEval, basis *SchedAdminBasis) schedPerfLine {
 	until := v.Until
 	if v.Trial {
 		until = v.TrialUntil
 	}
-	return schedPerfLine{Level: v.Level, TrialStartedAt: schedAdminTime(v.TrialStartedAt), Identity: schedAdminIdentity(v), Until: schedAdminTime(until), SampleCounts: counts, LastEval: last}
+	return schedPerfLine{Level: v.Level, TrialStartedAt: schedAdminTime(v.TrialStartedAt), Identity: schedAdminIdentity(v), Until: schedAdminTime(until), SampleCounts: counts, LastEval: last, Basis: basis}
 }
 
 func (s *SchedQualitySnapshot) performanceLines(key schedQualityKey) schedPerfLines {
@@ -70,9 +71,9 @@ func (s *SchedQualitySnapshot) performanceLines(key schedQualityKey) schedPerfLi
 		row = rows[i]
 	}
 	return schedPerfLines{
-		TTFO:  perfLine(row.View.TTFO, row.TTFTSamples, row.TTFTLastEval),
-		Error: perfLine(row.View.Error, row.ErrorSamples, row.ErrorLastEval),
-		Cache: perfLine(row.View.Cache, row.CacheSamples, row.CacheLastEval),
+		TTFO:  perfLine(row.View.TTFO, row.TTFTSamples, row.TTFTLastEval, row.TTFTBasis),
+		Error: perfLine(row.View.Error, row.ErrorSamples, row.ErrorLastEval, row.ErrorBasis),
+		Cache: perfLine(row.View.Cache, row.CacheSamples, row.CacheLastEval, row.CacheBasis),
 	}
 }
 

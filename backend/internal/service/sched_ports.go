@@ -150,6 +150,7 @@ type SchedPolicyChange struct {
 	Lines     map[schedquality.Dimension]schedquality.Verdict
 }
 type SchedGroupRow struct {
+	TTFTBasis, ErrorBasis, CacheBasis          *SchedAdminBasis
 	TTFTLastEval, ErrorLastEval, CacheLastEval *SchedAdminLastEval
 	TTFTSamples, ErrorSamples, CacheSamples    schedquality.SampleCounts
 	GroupID                                    int64

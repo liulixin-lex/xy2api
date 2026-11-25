@@ -33,22 +33,31 @@ type SchedAdminAccountSummaryCache struct {
 	Turns int      `json:"turns"`
 }
 type SchedAdminRear struct {
-	Level     int                      `json:"level"`
-	UntilLine schedquality.Dimension   `json:"until_line"`
-	GroupID   int64                    `json:"group_id"`
-	Model     string                   `json:"model"`
-	Lines     []schedquality.Dimension `json:"lines"`
-	Until     string                   `json:"until"`
-	Exempt    bool                     `json:"exempt"`
-	Effective bool                     `json:"effective"`
+	LineDetails []SchedAdminLineDetail   `json:"line_details,omitempty"`
+	Level       int                      `json:"level"`
+	UntilLine   schedquality.Dimension   `json:"until_line"`
+	GroupID     int64                    `json:"group_id"`
+	Model       string                   `json:"model"`
+	Lines       []schedquality.Dimension `json:"lines"`
+	Until       string                   `json:"until"`
+	Exempt      bool                     `json:"exempt"`
+	Effective   bool                     `json:"effective"`
 }
 type SchedAdminTrial struct {
+	LineDetails    []SchedAdminLineDetail `json:"line_details,omitempty"`
 	Level          int                    `json:"level"`
 	UntilLine      schedquality.Dimension `json:"until_line"`
 	TrialStartedAt *string                `json:"trial_started_at"`
 	GroupID        int64                  `json:"group_id"`
 	Model          string                 `json:"model"`
 	Until          string                 `json:"until"`
+}
+type SchedAdminLineDetail struct {
+	Line     schedquality.Dimension `json:"line"`
+	Identity string                 `json:"identity"`
+	Until    string                 `json:"until"`
+	Basis    *SchedAdminBasis       `json:"basis,omitempty"`
+	LastEval *SchedAdminLastEval    `json:"last_eval,omitempty"`
 }
 type SchedAdminAccountSummary struct {
 	AccountID   int64                           `json:"account_id"`
@@ -65,15 +74,16 @@ type SchedAdminAccountSummary struct {
 	Exemptions  []SchedAdminExemption           `json:"exemptions"`
 }
 type SchedAdminAccountDetail struct {
-	Account       SchedAdminAccountDetailAccount      `json:"account"`
-	At            string                              `json:"at"`
-	Stale         bool                                `json:"stale"`
-	GlobalEnabled bool                                `json:"global_enabled"`
-	Stop          *SchedAdminStop                     `json:"stop"`
-	ResetAt       *string                             `json:"reset_at"`
-	Groups        []SchedAdminAccountDetailGroups     `json:"groups"`
-	AutoStates    []SchedAdminAccountDetailAutoStates `json:"auto_states"`
-	Exemptions    []SchedAdminExemption               `json:"exemptions"`
+	CurrentRuleVersion string                              `json:"current_rule_version"`
+	Account            SchedAdminAccountDetailAccount      `json:"account"`
+	At                 string                              `json:"at"`
+	Stale              bool                                `json:"stale"`
+	GlobalEnabled      bool                                `json:"global_enabled"`
+	Stop               *SchedAdminStop                     `json:"stop"`
+	ResetAt            *string                             `json:"reset_at"`
+	Groups             []SchedAdminAccountDetailGroups     `json:"groups"`
+	AutoStates         []SchedAdminAccountDetailAutoStates `json:"auto_states"`
+	Exemptions         []SchedAdminExemption               `json:"exemptions"`
 }
 type SchedAdminAccountDetailAccount struct {
 	ID          int64   `json:"id"`
@@ -93,6 +103,8 @@ type SchedAdminAccountDetailGroups struct {
 
 // Evidence DTOs deliberately omit assessment internals (verdict and token totals).
 type SchedAdminErrorEvidence struct {
+	WindowFrom        *string `json:"window_from,omitempty"`
+	WindowTo          *string `json:"window_to,omitempty"`
 	RecoveryOverLimit bool    `json:"recovery_over_limit,omitempty"`
 	Limit             float64 `json:"limit"`
 	Clear             int     `json:"clear"`
@@ -143,6 +155,7 @@ func SchedAdminLastEvalFromState(r schedquality.LineState) *SchedAdminLastEval {
 }
 
 type SchedAdminLine[E any] struct {
+	Basis    *SchedAdminBasis    `json:"basis,omitempty"`
 	LastEval *SchedAdminLastEval `json:"last_eval"`
 	schedquality.SampleCounts
 	Identity       string  `json:"identity"`

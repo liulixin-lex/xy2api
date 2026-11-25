@@ -7,6 +7,8 @@ const RuleVersion = "4.0"
 // TTFTEvidence is the stable, flat representation stored in decision/state JSON
 // and returned by the API. RuleBResult remains the in-memory assessment.
 type TTFTEvidence struct {
+	WindowFrom   time.Time            `json:"window_from,omitzero"`
+	WindowTo     time.Time            `json:"window_to,omitzero"`
 	NLocal       *float64             `json:"n_local"`
 	LimitSeconds float64              `json:"limit_s"`
 	N            float64              `json:"n"`
@@ -29,6 +31,7 @@ type TTFTEvidence struct {
 // Relative-comparison fields remain empty; historical values still decode unchanged.
 func NewTTFTEvidence(result RuleBResult, limitSeconds float64) *TTFTEvidence {
 	e := &TTFTEvidence{
+		WindowFrom: result.WindowFrom, WindowTo: result.WindowTo,
 		LimitSeconds: limitSeconds,
 		NLocal:       new(result.NLocal),
 		N:            result.Counts.N, K: result.Counts.K, X: result.Counts.X,

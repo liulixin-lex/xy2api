@@ -120,7 +120,7 @@ func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualityS
 			rear := schedRearLines(r.View)
 			if len(rear) > 0 {
 				line, dimension := schedAdminDeadlineLine(r.View, false)
-				out.Rear = append(out.Rear, SchedAdminRear{Level: line.Level, UntilLine: dimension, GroupID: r.GroupID, Model: r.Model, Lines: append([]schedquality.Dimension{}, rear...), Until: schedAdminStamp(line.Until), Exempt: exempt, Effective: !exempt && effective})
+				out.Rear = append(out.Rear, SchedAdminRear{Level: line.Level, UntilLine: dimension, GroupID: r.GroupID, Model: r.Model, Lines: append([]schedquality.Dimension{}, rear...), Until: schedAdminStamp(line.Until), Exempt: exempt, Effective: !exempt && effective, LineDetails: schedAdminLineDetails(r)})
 			}
 			if r.View.Error.Identity == schedquality.IdentityRear {
 				out.Error.Red = true
@@ -128,7 +128,7 @@ func (s *SchedAdminService) accountSummary(ctx context.Context, p *SchedQualityS
 			if len(rear) == 0 && !exempt && effective {
 				line, dimension := schedAdminDeadlineLine(r.View, true)
 				if !line.TrialUntil.IsZero() {
-					out.Trial = append(out.Trial, SchedAdminTrial{GroupID: r.GroupID, Model: r.Model, Until: schedAdminStamp(line.TrialUntil), Level: line.Level, UntilLine: dimension, TrialStartedAt: schedAdminTime(line.TrialStartedAt)})
+					out.Trial = append(out.Trial, SchedAdminTrial{GroupID: r.GroupID, Model: r.Model, Until: schedAdminStamp(line.TrialUntil), Level: line.Level, UntilLine: dimension, TrialStartedAt: schedAdminTime(line.TrialStartedAt), LineDetails: schedAdminLineDetails(r)})
 				}
 			}
 		}
@@ -276,7 +276,7 @@ func (s *SchedAdminService) AccountFilter(ctx context.Context, quality string) (
 	return out.attention.Filter(quality, out.normal), nil
 }
 func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAccountDetail, error) {
-	out := SchedAdminAccountDetail{Groups: []SchedAdminAccountDetailGroups{}, AutoStates: []SchedAdminAccountDetailAutoStates{}, Exemptions: []SchedAdminExemption{}}
+	out := SchedAdminAccountDetail{CurrentRuleVersion: schedquality.RuleVersion, Groups: []SchedAdminAccountDetailGroups{}, AutoStates: []SchedAdminAccountDetailAutoStates{}, Exemptions: []SchedAdminExemption{}}
 	a, err := s.account(ctx, id)
 	if err != nil {
 		return out, err
@@ -336,11 +336,11 @@ func schedAdminIdentity(v schedquality.LineView) string {
 	}
 	return "unknown"
 }
-func schedAdminLine[E any](v schedquality.LineView, verdict schedquality.Verdict, e E, groups []int64, counts schedquality.SampleCounts, last *SchedAdminLastEval) SchedAdminLine[E] {
-	return SchedAdminLine[E]{LastEval: last, SampleCounts: counts, Identity: schedAdminIdentity(v), Level: v.Level, Until: schedAdminTime(v.Until), TrialUntil: schedAdminTime(v.TrialUntil), TrialStartedAt: schedAdminTime(v.TrialStartedAt), Verdict: verdict.String(), Evidence: e, SourceGroups: append([]int64{}, groups...)}
+func schedAdminLine[E any](v schedquality.LineView, verdict schedquality.Verdict, e E, groups []int64, counts schedquality.SampleCounts, last *SchedAdminLastEval, basis *SchedAdminBasis) SchedAdminLine[E] {
+	return SchedAdminLine[E]{Basis: basis, LastEval: last, SampleCounts: counts, Identity: schedAdminIdentity(v), Level: v.Level, Until: schedAdminTime(v.Until), TrialUntil: schedAdminTime(v.TrialUntil), TrialStartedAt: schedAdminTime(v.TrialStartedAt), Verdict: verdict.String(), Evidence: e, SourceGroups: append([]int64{}, groups...)}
 }
 func schedAdminErrorEvidence(e schedquality.ErrorAssessment) SchedAdminErrorEvidence {
-	return SchedAdminErrorEvidence{RecoveryOverLimit: e.RecoveryOverLimit, Limit: e.Limit, Clear: e.Clear, Failed: e.Failed, Unknown: e.Unknown, Padded: e.Padded, LowerFail: e.LowerFail, LowerPass: e.LowerPass}
+	return SchedAdminErrorEvidence{WindowFrom: schedAdminTime(e.WindowFrom), WindowTo: schedAdminTime(e.WindowTo), RecoveryOverLimit: e.RecoveryOverLimit, Limit: e.Limit, Clear: e.Clear, Failed: e.Failed, Unknown: e.Unknown, Padded: e.Padded, LowerFail: e.LowerFail, LowerPass: e.LowerPass}
 }
 func schedAdminCacheEvidence(e schedquality.CacheAssessment) SchedAdminCacheEvidence {
 	return SchedAdminCacheEvidence{Path: e.Path, LowSessions10: e.LowSessions10, WindowFrom: schedAdminTime(e.WindowFrom), WindowTo: schedAdminTime(e.WindowTo), MinRatio: e.MinRatio, Turns: e.Turns, Ratio: e.Ratio, Sessions: e.Sessions, LowSessions: e.LowSessions}
@@ -362,9 +362,9 @@ func SchedAdminGroupModel(r SchedGroupRow, exempt bool) SchedAdminAccountDetailG
 	ttft := r.TTFT
 	ttft.Causes = append([]schedquality.RuleBUnknownReason{}, ttft.Causes...)
 	return SchedAdminAccountDetailGroupsByModel{Model: r.Model, Placement: placement, Exempt: exempt, Lines: SchedAdminLines{
-		TTFO:  schedAdminLine(r.View.TTFO, r.TTFTVerdict, ttft, r.TTFTSourceGroups, r.TTFTSamples, r.TTFTLastEval),
-		Error: schedAdminLine(r.View.Error, r.Error.Verdict, schedAdminErrorEvidence(r.Error), r.Error.SourceGroups, r.ErrorSamples, r.ErrorLastEval),
-		Cache: schedAdminLine(r.View.Cache, r.Cache.Verdict, schedAdminCacheEvidence(r.Cache), r.Cache.SourceGroups, r.CacheSamples, r.CacheLastEval)}}
+		TTFO:  schedAdminLine(r.View.TTFO, r.TTFTVerdict, ttft, r.TTFTSourceGroups, r.TTFTSamples, r.TTFTLastEval, r.TTFTBasis),
+		Error: schedAdminLine(r.View.Error, r.Error.Verdict, schedAdminErrorEvidence(r.Error), r.Error.SourceGroups, r.ErrorSamples, r.ErrorLastEval, r.ErrorBasis),
+		Cache: schedAdminLine(r.View.Cache, r.Cache.Verdict, schedAdminCacheEvidence(r.Cache), r.Cache.SourceGroups, r.CacheSamples, r.CacheLastEval, r.CacheBasis)}}
 }
 
 // Composite rear ends when the last rear line expires; a concurrent trial does not extend it.
@@ -384,4 +384,25 @@ func schedAdminDeadlineLine(v schedquality.StateView, trial bool) (schedquality.
 		}
 	}
 	return chosen, dimension
+}
+
+// Both composites expose every restricted line in TTFO/error/cache order.
+func schedAdminLineDetails(r SchedGroupRow) []SchedAdminLineDetail {
+	var details []SchedAdminLineDetail
+	bases := [...]*SchedAdminBasis{r.TTFTBasis, r.ErrorBasis, r.CacheBasis}
+	evals := [...]*SchedAdminLastEval{r.TTFTLastEval, r.ErrorLastEval, r.CacheLastEval}
+	for i, line := range [...]schedquality.LineView{r.View.TTFO, r.View.Error, r.View.Cache} {
+		identity := schedAdminIdentity(line)
+		d := SchedAdminLineDetail{Line: schedquality.Lines[i], Identity: identity}
+		switch identity {
+		case "rear":
+			d.Until, d.Basis = schedAdminStamp(line.Until), bases[i]
+		case "trial":
+			d.Until, d.LastEval = schedAdminStamp(line.TrialUntil), evals[i]
+		default:
+			continue
+		}
+		details = append(details, d)
+	}
+	return details
 }
