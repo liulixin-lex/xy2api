@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -18,13 +19,25 @@ type perfTickLedger struct {
 	loads  int
 	at     time.Time
 	ticks  []time.Time
+	calls  []time.Time
+	fail   bool
 }
 
-func (l *perfTickLedger) PerfDatabaseTime(context.Context) (time.Time, error) {
+func (l *perfTickLedger) PerfDatabaseTime(ctx context.Context) (time.Time, error) {
+	l.calls = append(l.calls, l.now())
 	if l.loads < len(l.delays) {
-		time.Sleep(l.delays[l.loads])
+		timer := time.NewTimer(l.delays[l.loads])
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return time.Time{}, ctx.Err()
+		case <-timer.C:
+		}
 	}
 	l.loads++
+	if l.fail {
+		return time.Time{}, errors.New("fixture ledger unavailable")
+	}
 	return l.now(), nil
 }
 
@@ -42,6 +55,9 @@ func TestSchedPerfTickPublication(t *testing.T) {
 		nextTick   time.Duration
 	}{
 		{"early_wake", -time.Millisecond, []time.Duration{2 * time.Millisecond, 2 * time.Millisecond}, 181*time.Second + 4*time.Millisecond, schedPerfTick},
+		{"early_wake_nanosecond", -time.Nanosecond, []time.Duration{2 * time.Nanosecond, 2 * time.Nanosecond}, 181*time.Second + 4*time.Nanosecond, schedPerfTick},
+		{"early_wake_second", -time.Second, []time.Duration{2 * time.Second, 2 * time.Second}, 184 * time.Second, schedPerfTick},
+		{"exact_boundary", 0, nil, 181 * time.Second, schedPerfTick},
 		{"short_publication", 0, []time.Duration{2 * time.Second, 2 * time.Second}, 184 * time.Second, schedPerfTick},
 		{"slow_start_one_period", 0, []time.Duration{6 * time.Minute}, 6*time.Minute + time.Millisecond, schedPerfTick},
 		{"slow_start_multiple_periods", 0, []time.Duration{16 * time.Minute}, 16*time.Minute + time.Millisecond, 3 * schedPerfTick},
@@ -110,4 +126,86 @@ func TestSchedPerfTickCancelDuringEarlyWait(t *testing.T) {
 		<-done
 		require.Nil(t, engine.PerformanceSnapshot())
 	})
+}
+
+func TestSchedPerfTickFailureWaitsForNextBoundary(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		base := time.Now()
+		now := func() time.Time { return perfAt.Add(119*time.Second + time.Since(base)) }
+		ledger := &perfTickLedger{now: now, fail: true}
+		ledger.page = func(_, at time.Time, c SchedAttemptCursor, _ bool) ([]SchedPerfFact, SchedAttemptCursor, bool, error) {
+			ledger.at = at
+			return nil, c, true, nil
+		}
+		engine := NewSchedQualityEngineService(nil, ledger, nil, now, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan struct{})
+		go func() { defer close(done); engine.runPerformance(ctx) }()
+		synctest.Wait()
+		time.Sleep(181*time.Second - time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, []time.Time{perfAt.Add(119 * time.Second)}, ledger.calls)
+		require.Empty(t, ledger.ticks)
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		require.Len(t, ledger.calls, 2)
+		require.False(t, engine.PerformanceSnapshot().complete)
+		ledger.fail = false
+		time.Sleep(schedPerfTick - time.Nanosecond)
+		synctest.Wait()
+		require.Len(t, ledger.calls, 2, "quick failure cannot retry within its tick")
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		require.Equal(t, []time.Time{perfAt.Add(119 * time.Second), perfAt.Add(schedPerfTick), perfAt.Add(2 * schedPerfTick)}, ledger.calls)
+		require.Equal(t, []time.Time{perfAt.Add(2 * schedPerfTick)}, ledger.ticks)
+		require.Equal(t, perfAt.Add(2*schedPerfTick), engine.PerformanceSnapshot().at)
+		require.True(t, engine.PerformanceSnapshot().complete)
+		t.Logf("attempts=%v published=%v", ledger.calls, ledger.ticks)
+		cancel()
+		<-done
+		require.Nil(t, engine.PerformanceSnapshot())
+	})
+}
+
+func TestSchedPerfTickSustainedSlowLoads(t *testing.T) {
+	for _, tt := range []struct {
+		delay     time.Duration
+		published []time.Duration
+	}{
+		{301 * time.Second, []time.Duration{0, schedPerfTick, 2 * schedPerfTick}},
+		{16 * time.Minute, []time.Duration{0, 3 * schedPerfTick, 6 * schedPerfTick}},
+	} {
+		t.Run(tt.delay.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				base := time.Now()
+				now := func() time.Time { return perfAt.Add(119*time.Second + time.Since(base)) }
+				ledger := &perfTickLedger{now: now, delays: []time.Duration{tt.delay, tt.delay, tt.delay, tt.delay}}
+				ledger.page = func(_, at time.Time, c SchedAttemptCursor, _ bool) ([]SchedPerfFact, SchedAttemptCursor, bool, error) {
+					ledger.at = at
+					return nil, c, true, nil
+				}
+				engine := NewSchedQualityEngineService(nil, ledger, nil, now, nil)
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				done := make(chan struct{})
+				go func() { defer close(done); engine.runPerformance(ctx) }()
+				synctest.Wait()
+				time.Sleep(3 * tt.delay)
+				synctest.Wait()
+				var want []time.Time
+				for _, d := range tt.published {
+					want = append(want, perfAt.Add(d))
+				}
+				require.Equal(t, want, ledger.ticks)
+				require.Equal(t, want[len(want)-1], engine.PerformanceSnapshot().at)
+				require.Equal(t, []time.Time{perfAt.Add(119 * time.Second), perfAt.Add(119*time.Second + tt.delay), perfAt.Add(119*time.Second + 2*tt.delay), now()}, ledger.calls, "each load starts only when the previous load finishes")
+				t.Logf("delay=%s attempts=%v published=%v", tt.delay, ledger.calls, ledger.ticks)
+				cancel()
+				<-done
+				require.Equal(t, 3*tt.delay, time.Since(base), "cancel interrupts the fourth slow load")
+				require.Nil(t, engine.PerformanceSnapshot())
+			})
+		})
+	}
 }
