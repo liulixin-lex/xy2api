@@ -149,6 +149,7 @@ describe('decision figures', () => {
     // Without its window (older records): no period, even with a cut; never a window worked out here.
     expect(basisPeriod(basis('ttfo', { cut: local(13, 5) }))).toBeNull()
     expect(basisPeriod(basis('cache', { cut: local(13, 5), cache: cacheEvidence({ window_from: local(12, 45) }) }))).toBeNull()
+    expect(basisPeriod(basis('error', { cut: local(13, 5), error: errorEvidence({ window_to: local(13, 15) }) }))).toBeNull()
     expect(basisPeriod(null)).toBeNull()
   })
 
