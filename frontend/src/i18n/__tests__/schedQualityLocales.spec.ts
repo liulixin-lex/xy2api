@@ -120,6 +120,11 @@ it('follows the rules in force in the relax warning and the within reason', () =
   expect([zh, en].map((messages) => /档|step/.test(text(messages, 'ttftRule.confirmMessage')))).toEqual([false, false])
   expect([zh, en].map((messages) => lookup(messages, 'admin.schedQuality.policy.trialNote'))).toEqual([undefined, undefined])
   expect([zh, en].map((messages) => /其他号|other accounts/.test(text(messages, 'noAction.long.within')))).toEqual([false, false])
+  // Final review of r5d: in reviews and trials a failure share above the limit is no pass (the verdict is unknown, the
+  // line still goes on), not a bar to recovering.
+  expect(text(zh, 'policy.errorTrip')).toMatch(/复核和试用中失败占比高于上限时不判达标。$/)
+  expect(text(en, 'policy.errorTrip')).toMatch(/in reviews and trials a failure share above the limit is no pass\.$/)
+  expect([zh, en].map((messages) => /恢复时|to recover/.test(text(messages, 'policy.errorTrip')))).toEqual([false, false])
 })
 
 // Final review suggestion 5: one apostrophe in the English copy.

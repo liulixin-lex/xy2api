@@ -331,7 +331,7 @@ export default {
       percent: '%',
       column: 'Gate',
       short: '{ttft}s · {error}% · {cache}%',
-      errorTrip: 'With the saved limit of {limit}: {examples} judge the line bad once; going to the rear also takes two bad assessments in a row; to recover, the failure share must not be above the limit.',
+      errorTrip: 'With the saved limit of {limit}: {examples} judge the line bad once; going to the rear also takes two bad assessments in a row; in reviews and trials a failure share above the limit is no pass.',
       errorTripItem: 'at least {failed} failures among {known} clear outcomes',
       errorTripJoiner: ', or ',
       errorTripNone: 'With the saved limit of {limit}, the line is not judged bad within 100 clear outcomes.',
