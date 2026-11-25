@@ -56,7 +56,7 @@ func TestValidatePolicyErrorFloor(t *testing.T) {
 		ttfo, errorRate float64
 		valid           bool
 	}{
-		{"floor", .001, .05, true}, {"unbounded-first-output", 1000, .05, true}, {"too-low-error", 1, .049, false}, {"zero-first-output", 0, .05, false},
+		{"floor", .001, .01, true}, {"below-floor", 1, .009, false}, {"unbounded-first-output", 1000, .05, true}, {"below-old-floor", 1, .049, true}, {"zero-first-output", 0, .05, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateSchedQualityPolicy(q.Policy{TTFTSeconds: tc.ttfo, MaxErrorRate: tc.errorRate, MinCacheRatio: .8, TakeoverIdleSeconds: 900})

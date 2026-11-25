@@ -54,7 +54,7 @@ func TestAssessErrorWilsonBoundaries(t *testing.T) {
 				rows[i].Outcome = OutcomeOther
 				rows[i].Class = ClassUnknown
 			}
-			got := AssessError(rows, nil, 0, time.Time{}, machineNow)
+			got := AssessError(rows, nil, .05, time.Time{}, machineNow)
 			if got.Verdict != tc.want || got.Clear != tc.clear || got.Failed != tc.failed || got.Unknown != tc.unknown ||
 				got.Padded != max(50, len(rows)) || got.Limit != .05 {
 				t.Fatalf("assessment: %+v", got)
@@ -73,7 +73,7 @@ func TestAssessErrorRecoveryBoundaries(t *testing.T) {
 		limit                  float64
 		regular, recovery      Verdict
 	}{
-		{"above-floor", 52, 5, 0, .03, VerdictPass, VerdictUnknown},
+		{"above-floor", 52, 5, 0, .05, VerdictPass, VerdictUnknown},
 		{"equal-to-floor", 100, 5, 0, .05, VerdictPass, VerdictPass},
 		{"equal-to-group-limit", 100, 7, 0, .07, VerdictPass, VerdictPass},
 		{"equal-to-rounded-group-limit", 100, 29, 0, .29, VerdictPass, VerdictPass},
@@ -239,5 +239,23 @@ func TestObserveCountsOnlyAdmittedUnits(t *testing.T) {
 	cache, local := AssessCacheForGroup(turns, .8, time.Time{}, machineNow, 10)
 	if local != 1 || cache.Turns != 3 {
 		t.Fatalf("cache local=%d total=%d", local, cache.Turns)
+	}
+}
+
+func TestAssessErrorOnePercentBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		total, failed int
+		want          Verdict
+	}{{50, 1, VerdictPass}, {50, 2, VerdictFail}, {100, 2, VerdictPass}, {100, 3, VerdictFail}, {1, 1, VerdictUnknown}, {2, 2, VerdictFail}} {
+		t.Run(fmt.Sprintf("%d/%d", tc.failed, tc.total), func(t *testing.T) {
+			rows := machineSamples(tc.total)
+			failSamples(rows, tc.failed)
+			for _, limit := range []float64{.01, 0, .009} {
+				got := AssessError(rows, nil, limit, time.Time{}, machineNow)
+				if got.Verdict != tc.want || got.Limit != .01 || got.Padded != max(50, tc.total) {
+					t.Fatalf("assessment: %+v", got)
+				}
+			}
+		})
 	}
 }

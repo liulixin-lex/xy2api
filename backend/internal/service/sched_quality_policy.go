@@ -19,8 +19,8 @@ func ValidateSchedQualityPolicy(p schedquality.Policy) error {
 	if math.IsNaN(p.MaxErrorRate) || math.IsInf(p.MaxErrorRate, 0) || p.MaxErrorRate > 1 {
 		return infraerrors.BadRequest("INVALID_SCHED_POLICY", "max_error_rate must be finite and no greater than 1")
 	}
-	if p.MaxErrorRate < .05 {
-		return infraerrors.BadRequest("SCHED_ERROR_RATE_TOO_LOW", "max_error_rate must be at least 0.05")
+	if p.MaxErrorRate < schedquality.ErrorRateFloor {
+		return infraerrors.BadRequest("SCHED_ERROR_RATE_TOO_LOW", "max_error_rate must be at least 0.01")
 	}
 	if !valid(p.MinCacheRatio, 0, 1) {
 		return infraerrors.BadRequest("INVALID_SCHED_POLICY", "min_cache_ratio must be between 0 and 1")
