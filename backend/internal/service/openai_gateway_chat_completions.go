@@ -96,6 +96,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	compatPromptCacheTenantIsolated bool,
 	rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	ctx = withXCPAUpstreamPolicy(ctx, account)
 	if c != nil {
 		c.Set(openAIFCOAttemptKey, (*openAIFCOCompatAttempt)(nil))
 	}
@@ -764,6 +765,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 ) (result *OpenAIForwardResult, retErr error) {
+	defer watchXCPAResponseCancellation(c, account, resp)()
 	requestID := resp.Header.Get("x-request-id")
 	outcome := openAICompatBufferedOutcome{}
 	facts := &outcome.facts
@@ -965,6 +967,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	startTime time.Time,
 	requestBodyLen int,
 ) (result *OpenAIForwardResult, retErr error) {
+	defer watchXCPAResponseCancellation(c, account, resp)()
 	facts := OpenAIForwardResult{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
 	var conversionErr error
 	conversionBeforeOutput := false
@@ -1054,6 +1057,13 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		return conversionErr == nil && stagePrelude && c.Request.Context().Err() == nil && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted)
 	}
 	canceledPrelude := func() error {
+		if account.xcpaActiveUpstreamUntimed() && facts.PartialFailure {
+			return nil
+		}
+		if err := xcpaClientCancellation(c, account, false); err != nil {
+			clientDisconnected = true
+			return err
+		}
 		if conversionErr == nil && stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 			return c.Request.Context().Err()
 		}
@@ -1110,11 +1120,11 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
-		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+		streamInterval = openAIActiveStreamInterval(account, time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout)*time.Second)
 	}
 	// xy2api resilience (review G1): check often enough to notice a stall
 	// within 5 s, and apply the text stall threshold after output (§7.5).
-	stallCheckBase := resilienceStallCheckBase(streamInterval)
+	stallCheckBase := openAIActiveStallCheckBase(account, streamInterval)
 	var intervalTicker *time.Ticker
 	if stallCheckBase > 0 {
 		intervalTicker = time.NewTicker(resilienceStallCheckPeriod(stallCheckBase))
@@ -1184,7 +1194,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		if stagePrelude && !clientOutputStarted && terminal.Failure {
 			pendingPrelude.take()
 		}
-		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) && !(account.xcpaActiveUpstreamUntimed() && terminal.Failure) {
 			if err := c.Request.Context().Err(); err != nil {
 				streamNonFailoverErr = err
 				return true
@@ -1464,6 +1474,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}
 
 	handleScanErr := func(err error) {
+		if xcpaClientCancellation(c, account, facts.PartialFailure) != nil {
+			clientDisconnected = true
+			return
+		}
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.FromContext(c.Request.Context()).Warn("openai chat_completions stream: read error",
 				zap.Error(err),

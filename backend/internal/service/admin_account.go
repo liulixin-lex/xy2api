@@ -372,6 +372,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 			input.IQTargets = &patch
 		}
 	}
+	if err := validateXCPAUpstreamExtra(input.Platform, input.Type, input.Extra); err != nil {
+		return nil, err
+	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, fmt.Errorf("normalize duplicate account extra: %w", err)
@@ -572,6 +575,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.operatorAccountCreateRules(ctx, input); err != nil {
 		return nil, err
 	}
+	if err := validateXCPAUpstreamExtra(input.Platform, input.Type, input.Extra); err != nil {
+		return nil, err
+	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -705,6 +711,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		effectiveType := account.Type
 		if input.Type != "" {
 			effectiveType = input.Type
+		}
+		if err := validateXCPAUpstreamExtra(account.Platform, effectiveType, normalizedExtra); err != nil {
+			return nil, err
 		}
 		normalizedExtra, err = normalizeOpenAIAutoResetCreditExtra(account.Platform, effectiveType, account.IsShadow(), normalizedExtra)
 		if err != nil {
@@ -1051,6 +1060,15 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if _, exists := updates[XCPAActiveUpstreamUntimedExtraKey]; exists {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := validateXCPAUpstreamExtra(account.Platform, account.Type, updates); err != nil {
+			return err
+		}
+	}
 	if err := ValidateOpenAIFCOCompatExtra(updates); err != nil {
 		return err
 	}
@@ -1117,6 +1135,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		return nil, err
 	}
 	_, hasFCOCompatUpdate := input.Extra[OpenAIFCOCompatExtraKey]
+	_, hasXCPAUpstreamUpdate := input.Extra[XCPAActiveUpstreamUntimedExtraKey]
 	input.Extra = RedactAnthropicCompatExtra(input.Extra)
 	_, hasCompatUpdate := input.Extra[AnthropicCompatProfileExtraKey]
 	_, hasCompatAdmissionUpdate := input.Extra[AnthropicCompatNewSessionsExtraKey]
@@ -1174,7 +1193,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if input.GroupIDs != nil || compatPreflight || len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.IQTargets != nil || hasFCOCompatUpdate {
+	if input.GroupIDs != nil || compatPreflight || len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.IQTargets != nil || hasFCOCompatUpdate || hasXCPAUpstreamUpdate {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1334,6 +1353,18 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			}
 			maps.Copy(candidate.Credentials, input.Credentials)
 			if _, err := ResolveAnthropicCompatProfile(&candidate); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if _, exists := input.Extra[XCPAActiveUpstreamUntimedExtraKey]; exists {
+		for _, accountID := range input.AccountIDs {
+			account := targetsByID[accountID]
+			if account == nil {
+				return nil, ErrAccountNotFound
+			}
+			if err := validateXCPAUpstreamExtra(account.Platform, account.Type, input.Extra); err != nil {
 				return nil, err
 			}
 		}

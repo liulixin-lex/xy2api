@@ -40,6 +40,7 @@ type anthropicNativeLinePump struct {
 	events        chan anthropicNativeLineEvent
 	done          chan struct{}
 	timer         *time.Timer
+	untimed       bool
 	interval      time.Duration
 	progress      anthropicNativeProgress
 	firstEvent    *openAICompatFirstEvent
@@ -135,6 +136,9 @@ func (p *anthropicNativeLinePump) next() (string, error) {
 }
 
 func (p *anthropicNativeLinePump) remaining() (time.Duration, bool) {
+	if p.untimed {
+		return 0, false
+	}
 	started := p.outputStarted != nil && p.outputStarted()
 	if !started && p.firstEvent != nil && !p.firstEvent.disarmed.Load() {
 		return 0, false

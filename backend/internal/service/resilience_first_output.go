@@ -92,6 +92,9 @@ func resilienceTextBudget(ctx context.Context) *resilience.Budget {
 }
 
 func (s *OpenAIGatewayService) openAIFirstOutputPlanFor(ctx context.Context, accountID int64, model, reasoningEffort string, attemptStart time.Time) (time.Duration, resilience.TimeoutPlan) {
+	if xcpaUntimedForAccount(ctx, accountID) {
+		return 0, resilience.TimeoutPlan{}
+	}
 	b := resilienceTextBudget(ctx)
 	if b == nil {
 		return s.openAIFirstOutputTimeout(reasoningEffort), resilience.TimeoutPlan{}

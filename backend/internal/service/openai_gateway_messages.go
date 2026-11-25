@@ -34,6 +34,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	ctx = withXCPAUpstreamPolicy(ctx, account)
 	ctx, tierAttempt := withOpenAITierAttempt(ctx, body)
 	defer func() {
 		tierAttempt.finish(forwardResult)
@@ -717,6 +718,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 ) (result *OpenAIForwardResult, retErr error) {
+	defer watchXCPAResponseCancellation(c, account, resp)()
 	requestID := resp.Header.Get("x-request-id")
 	outcome := openAICompatBufferedOutcome{}
 	facts := &outcome.facts
@@ -923,6 +925,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	requestID string,
 	outcomes ...*openAICompatBufferedOutcome,
 ) (*apicompat.ResponsesResponse, OpenAIUsage, *apicompat.BufferedResponseAccumulator, error) {
+	defer watchXCPAResponseCancellation(c, account, resp)()
 	facts := OpenAIForwardResult{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
 	defer func() {
 		if len(outcomes) > 0 && outcomes[0] != nil {
@@ -941,7 +944,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
-		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+		streamInterval = openAIActiveStreamInterval(account, time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout)*time.Second)
 	}
 	var timeoutCh <-chan time.Time
 	var timeoutTimer *time.Timer
@@ -1110,6 +1113,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	upstreamModel string,
 	startTime time.Time,
 ) (result *OpenAIForwardResult, retErr error) {
+	defer watchXCPAResponseCancellation(c, account, resp)()
 	facts := OpenAIForwardResult{ResponseFactsKnown: true, UsageSource: "missing", ResponseBodyKind: "sse"}
 	var conversionErr error
 	conversionBeforeOutput := false
@@ -1196,6 +1200,13 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		return conversionErr == nil && stagePrelude && c.Request.Context().Err() == nil && !clientDisconnected && !openAIStreamClientOutputStarted(c, clientOutputStarted)
 	}
 	canceledPrelude := func() error {
+		if account.xcpaActiveUpstreamUntimed() && facts.PartialFailure {
+			return nil
+		}
+		if err := xcpaClientCancellation(c, account, false); err != nil {
+			clientDisconnected = true
+			return err
+		}
 		if conversionErr == nil && stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 			return c.Request.Context().Err()
 		}
@@ -1234,11 +1245,11 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
-		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+		streamInterval = openAIActiveStreamInterval(account, time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout)*time.Second)
 	}
 	// xy2api resilience (review G1): check often enough to notice a stall
 	// within 5 s, and apply the text stall threshold after output (§7.5).
-	stallCheckBase := resilienceStallCheckBase(streamInterval)
+	stallCheckBase := openAIActiveStallCheckBase(account, streamInterval)
 	var intervalTicker *time.Ticker
 	if stallCheckBase > 0 {
 		intervalTicker = time.NewTicker(resilienceStallCheckPeriod(stallCheckBase))
@@ -1315,7 +1326,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		if stagePrelude && !clientOutputStarted && terminal.Failure {
 			pendingPrelude.take()
 		}
-		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+		if stagePrelude && !openAIStreamClientOutputStarted(c, clientOutputStarted) && !(account.xcpaActiveUpstreamUntimed() && terminal.Failure) {
 			if err := c.Request.Context().Err(); err != nil {
 				streamNonFailoverErr = err
 				return true
@@ -1525,6 +1536,10 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 
 	// handleScanErr logs scanner errors if meaningful.
 	handleScanErr := func(err error) {
+		if xcpaClientCancellation(c, account, facts.PartialFailure) != nil {
+			clientDisconnected = true
+			return
+		}
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("openai messages stream: read error",
 				zap.Error(err),

@@ -97,6 +97,8 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (schedResult *openaiStreamingResult, schedErr error) {
+	ctx = withXCPAUpstreamPolicy(ctx, account)
+	defer watchXCPAResponseCancellation(c, account, resp)()
 	usageSource := "missing"
 	responsesObserved := false
 	var currentTerminal, observedTerminal OpenAIResponsesTerminal
@@ -270,7 +272,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
-		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+		streamInterval = openAIActiveStreamInterval(account, time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout)*time.Second)
 	}
 	// Grok: always enforce an upstream-read idle so hung SSE bodies fail over
 	// instead of holding the OAuth slot until the client cancels. Prefer the
@@ -285,7 +287,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	// 仅监控上游数据间隔超时，不被下游写入阻塞影响
 	// xy2api resilience: check often enough to notice a stall within 5 s,
 	// and apply the text stall threshold after output (design §7.5).
-	stallCheckBase := resilienceStallCheckBase(streamInterval)
+	stallCheckBase := openAIActiveStallCheckBase(account, streamInterval)
 	var intervalTicker *time.Ticker
 	if stallCheckBase > 0 {
 		intervalTicker = time.NewTicker(resilienceStallCheckPeriod(stallCheckBase))
@@ -495,6 +497,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		lastDownstreamWriteAt = time.Now()
 	}
 	finalizeStream := func() (*openaiStreamingResult, error) {
+		if err := xcpaClientCancellation(c, account, sawFailedEvent || observedTerminal.Failure); err != nil {
+			clientDisconnected = true
+			return resultWithUsage(), err
+		}
 		responsesObserved = responsesObserved || cleanEOF
 		if finishResponsesFrame != nil {
 			finishResponsesFrame()
@@ -554,6 +560,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		return resultWithUsage(), nil
 	}
 	handleScanErr := func(scanErr error) (*openaiStreamingResult, error, bool) {
+		if err := xcpaClientCancellation(c, account, sawFailedEvent || observedTerminal.Failure); err != nil {
+			clientDisconnected = true
+			return resultWithUsage(), err, true
+		}
 		if scanErr == nil {
 			return nil, nil, false
 		}
@@ -621,6 +631,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", scanErr), true
 	}
 	processResponseLine := func(line string, queueDrained bool) {
+		if err := xcpaClientCancellation(c, account, sawFailedEvent || observedTerminal.Failure); err != nil {
+			clientDisconnected = true
+			streamEarlyErr = err
+			return
+		}
 		if streamEarlyErr != nil {
 			return
 		}

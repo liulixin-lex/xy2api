@@ -42,6 +42,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	body []byte,
 	defaultMappedModel string,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	ctx = withXCPAUpstreamPolicy(ctx, account)
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	opts := m7BridgeConversionOptions(ctx, account)
 	var schedCapture *schedAttemptCapture
@@ -189,6 +190,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	clientToolMapping apicompat.ResponsesClientToolMapping,
 	options ...apicompat.ConversionOptions,
 ) (result *OpenAIForwardResult, retErr error) {
+	defer watchXCPAResponseCancellation(c, account, resp)()
 	opts := m7SelectedConversionOptions(options)
 	requestID := resp.Header.Get("x-request-id")
 
@@ -219,8 +221,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	}()
 
 	// 读间隔上限：上游挂住 SSE 时中止组装（缓冲路径尚未提交响应头，可回 502）。
-	streamInterval := s.anthropicNativeStreamInterval()
+	streamInterval := openAIActiveStreamInterval(account, s.anthropicNativeStreamInterval())
 	pump := newAnthropicNativeLinePump(scanner, streamInterval)
+	pump.untimed = account.xcpaActiveUpstreamUntimed()
 	pump.firstEvent = openAICompatFirstEventOf(resp)
 	defer pump.stop()
 
@@ -462,7 +465,12 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	// WithoutCancel 且 http.Client 无整体 Timeout，无此界限则 scanner.Scan()
 	// 永久阻塞（见 anthropic native pump 文件注释）。
 	streamInterval := s.anthropicNativeStreamInterval()
+	untimed := resp.Request != nil && xcpaUntimedFromContext(resp.Request.Context())
+	if untimed {
+		streamInterval = 0
+	}
 	pump := newAnthropicNativeLinePump(scanner, streamInterval)
+	pump.untimed = untimed
 	pump.firstEvent = openAICompatFirstEventOf(resp)
 	outputStarted := false
 	pump.outputStarted = func() bool { return outputStarted }

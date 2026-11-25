@@ -274,6 +274,10 @@ func ResponsesStreamUnopened(c *gin.Context) bool {
 // resilienceUpstreamContext applies the disconnect rules to a context that
 // was detached from the client.
 func resilienceUpstreamContext(client, detached context.Context) context.Context {
+	if xcpaUntimedFromContext(client) {
+		// Keep caller cancellation after output too; never install a drain timer.
+		return context.WithValue(client, codexTicketClientContextKey{}, client)
+	}
 	return resilience.UpstreamContextOnDisconnect(client, detached)
 }
 

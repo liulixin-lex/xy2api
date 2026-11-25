@@ -37,6 +37,7 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 	body []byte,
 	defaultMappedModel string,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	ctx = withXCPAUpstreamPolicy(ctx, account)
 	ctx = WithFinalReasoningEffortRequest(ctx, body)
 	var schedCapture *schedAttemptCapture
 	defer func() {
@@ -406,10 +407,10 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
-		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+		streamInterval = openAIActiveStreamInterval(account, time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout)*time.Second)
 	}
 	var intervalTicker *time.Ticker
-	if base := resilienceStallCheckBase(streamInterval); base > 0 {
+	if base := openAIActiveStallCheckBase(account, streamInterval); base > 0 {
 		intervalTicker = time.NewTicker(resilienceStallCheckPeriod(base))
 		defer intervalTicker.Stop()
 	}
@@ -449,6 +450,9 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 	var deliveredParser openAICompatSSEFrameParser
 	firstEvent := openAICompatFirstEventOf(resp)
 	progressExpired := func() bool {
+		if account.xcpaActiveUpstreamUntimed() {
+			return false
+		}
 		if !outputStarted && firstEvent != nil && !firstEvent.disarmed.Load() {
 			return false
 		}

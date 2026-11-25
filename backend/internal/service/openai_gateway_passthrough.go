@@ -136,6 +136,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	reqStream bool,
 	startTime time.Time,
 ) (schedResult *OpenAIForwardResult, schedErr error) {
+	ctx = withXCPAUpstreamPolicy(ctx, account)
 	fcoCompat := armOpenAIFCOCompat(ctx, c, account, body, true, 0)
 	defer func() { fcoCompat.completed(ctx, schedResult, schedErr) }()
 	var schedCapture *schedAttemptCapture
@@ -2427,6 +2428,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	mappedModel string,
 	reasoningEffort string,
 ) (schedResult *openaiStreamingResultPassthrough, schedErr error) {
+	ctx = withXCPAUpstreamPolicy(ctx, account)
+	defer watchXCPAResponseCancellation(c, account, resp)()
 	usageSource := "missing"
 	responsesObserved := false
 	var currentTerminal, observedTerminal OpenAIResponsesTerminal
@@ -2662,7 +2665,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 
 	streamInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
-		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+		streamInterval = openAIActiveStreamInterval(account, time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout)*time.Second)
 	}
 	reqCtx := ctx
 	if c != nil && c.Request != nil {
@@ -2710,8 +2713,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// the scanner directly or, with the deadline or stall check, from a read
 	// pump.
 	processResponseLine := func(line string) passthroughLineStep {
+		if err := xcpaClientCancellation(c, account, sawFailedEvent || observedTerminal.Failure); err != nil {
+			clientDisconnected = true
+			return passthroughReturn(resultWithUsage(), err)
+		}
 		lineHasValidOutput := false
-		if guarded && !clientOutputStarted {
+		if guarded && !clientOutputStarted && !(account.xcpaActiveUpstreamUntimed() && observedTerminal.Failure) {
 			if err := reqCtx.Err(); err != nil {
 				return passthroughReturn(resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", err))
 			}
@@ -3197,6 +3204,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	}
 
 	finish := func(scanErr error) (*openaiStreamingResultPassthrough, error) {
+		if err := xcpaClientCancellation(c, account, sawFailedEvent || observedTerminal.Failure); err != nil {
+			clientDisconnected = true
+			return resultWithUsage(), err
+		}
 		responsesObserved = responsesObserved || scanErr == nil
 		if frame, ok := responsesParser.Finish(); ok {
 			responsesEOF = true
@@ -3212,7 +3223,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			terminalEventType = "usage_eof"
 		}
 		ensureResponseFailedTerminal()
-		if guarded && !clientOutputStarted && reqCtx.Err() != nil {
+		if guarded && !clientOutputStarted && reqCtx.Err() != nil && !(account.xcpaActiveUpstreamUntimed() && (sawFailedEvent || observedTerminal.Failure)) {
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: %w", reqCtx.Err())
 		}
 		if err := scanErr; err != nil {
@@ -3281,7 +3292,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	// this goroutine, as in 0.4.4.
 	stallCheckBase := time.Duration(0)
 	if guarded {
-		stallCheckBase = resilienceStallCheckBase(streamInterval)
+		stallCheckBase = openAIActiveStallCheckBase(account, streamInterval)
 	}
 	if !guarded || (firstOutputTimeout <= 0 && stallCheckBase <= 0 && keepaliveInterval <= 0) {
 		for documentScanner.Scan() {

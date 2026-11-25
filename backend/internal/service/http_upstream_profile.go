@@ -9,6 +9,7 @@ type HTTPUpstreamProfile string
 const (
 	HTTPUpstreamProfileDefault       HTTPUpstreamProfile = ""
 	HTTPUpstreamProfileOpenAI        HTTPUpstreamProfile = "openai"
+	HTTPUpstreamProfileXCPAUntimed   HTTPUpstreamProfile = "xcpa_untimed"
 	HTTPUpstreamProfileOpenAIHarvest HTTPUpstreamProfile = "openai_harvest"
 	HTTPUpstreamProfileGrok          HTTPUpstreamProfile = "grok"
 	HTTPUpstreamProfileLongStream    HTTPUpstreamProfile = "long_stream"
@@ -34,12 +35,15 @@ func HTTPUpstreamProfileFromContext(ctx context.Context) HTTPUpstreamProfile {
 	if ctx == nil {
 		return HTTPUpstreamProfileDefault
 	}
+	if xcpaUntimedFromContext(ctx) {
+		return HTTPUpstreamProfileXCPAUntimed
+	}
 	profile, ok := ctx.Value(httpUpstreamProfileContextKey{}).(HTTPUpstreamProfile)
 	if !ok {
 		return HTTPUpstreamProfileDefault
 	}
 	switch profile {
-	case HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileOpenAIHarvest, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream:
+	case HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileXCPAUntimed, HTTPUpstreamProfileOpenAIHarvest, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream:
 		return profile
 	default:
 		return HTTPUpstreamProfileDefault

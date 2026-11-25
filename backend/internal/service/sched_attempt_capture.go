@@ -38,6 +38,7 @@ func (s *OpenAIGatewayService) SetSchedAttemptRecorder(r SchedAttemptRecorder) {
 type schedAttemptCapture struct {
 	firstOutputCancel                   context.CancelFunc // nonblocking cancellation of this guarded HTTP request
 	sendSeq                             atomic.Uint64      // Latest confirmed upstream send on this handle.
+	xcpaUntimed                         bool
 	factsOnly                           bool
 	requestedHTTPConn, repeatedHTTPSend bool
 	mu                                  sync.Mutex
@@ -103,7 +104,7 @@ func (s *OpenAIGatewayService) newSchedAttemptCapture(ctx context.Context, accou
 	if captureStart.IsZero() {
 		captureStart = time.Now()
 	}
-	a := &schedAttemptCapture{factsOnly: factsOnly, allowModel401: account.Type == AccountTypeAPIKey && account.IsOpenAICompatible(), state: st, ctx: ctx, accountID: account.ID, started: captureStart, stream: stream, attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), requestID: st.GatewayRequestID()}
+	a := &schedAttemptCapture{xcpaUntimed: account.xcpaActiveUpstreamUntimed(), factsOnly: factsOnly, allowModel401: account.Type == AccountTypeAPIKey && account.IsOpenAICompatible(), state: st, ctx: ctx, accountID: account.ID, started: captureStart, stream: stream, attempt: schedAttemptNoop{}, outputStart: st.ClientOutputBytes(), requestID: st.GatewayRequestID()}
 	if guard != nil {
 		a.firstOutputCancel = guard.cancel
 	}
@@ -475,6 +476,11 @@ func (a *schedAttemptCapture) finish(result *OpenAIForwardResult, err error) {
 		a.projectedStatus = httpErr.StatusCode
 	}
 	canceled := a.client || a.state.ClientCanceled()
+	// A cancellation says nothing about upstream health. An already observed
+	// provider HTTP/SSE failure still owns this opted-in attempt.
+	if a.xcpaUntimed && a.failure != nil && (a.failure.Source == resilience.SourceStreamEvent || a.failure.Source == resilience.SourceHTTP && a.failure.StatusCode >= 400) {
+		canceled = false
+	}
 	// The reader can prove a complete JSON document despite an SSE header.
 	// Such responses do not require an SSE terminal (status may be omitted).
 	jsonComplete := result != nil && result.ResponseFactsKnown && result.ResponseBodyKind == "json"
@@ -777,6 +783,7 @@ func noteSchedStall(c *gin.Context) {
 	}
 }
 func cancelSchedClient(c *gin.Context) {
+	cancelXCPAResponse(c)
 	if c != nil && c.Request != nil {
 		currentSchedAttempt(c.Request.Context()).cancel()
 	}
