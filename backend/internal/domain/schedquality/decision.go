@@ -52,8 +52,10 @@ func NewSampleCounts(local, total int) SampleCounts {
 
 type Basis struct {
 	// Recovery metadata lives in the existing evidence JSON, never in new state columns.
-	OwnSampleAt60        *bool  `json:"own_sample_at_60,omitempty"`
-	ReleaseReason        string `json:"release_reason,omitempty"` // qualified | no_samples | deadline
+	// OwnSampleAt60 is retained for reading records written before rule 4.0.
+	OwnSampleAt60 *bool `json:"own_sample_at_60,omitempty"`
+	// Rule 4.0 writes fail, good, or deadline. Only older records use qualified or no_samples.
+	ReleaseReason        string `json:"release_reason,omitempty"`
 	TrialDurationSeconds int64  `json:"trial_duration_seconds,omitempty"`
 	HistoryMissing       bool   `json:"history_missing,omitempty"`
 	MissingDeadline      bool   `json:"missing_deadline,omitempty"`
