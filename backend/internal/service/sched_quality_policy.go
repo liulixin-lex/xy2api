@@ -202,7 +202,8 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 		}
 		if relax(k) {
 			relaxed := schedquality.Relaxed(k)
-			// Forget this line's recurrence level, not the group's latest failure.
+			// Rule 4.0 does not read LastRear. Preserve it so 0.6.14 can
+			// apply its quiet-history clearing clock after rollback.
 			relaxed.LastRear = rows[k].LastRear
 			relaxed.LastAssessment = rows[k].LastAssessment
 			rows[k] = relaxed
