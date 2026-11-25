@@ -48,6 +48,27 @@ describe('v-tip cards', () => {
     expect(tip().querySelectorAll('.sq-tip__c.sq-tip__tone--back')).toHaveLength(1)
   })
 
+  // A card of lines keeps one width (the widest case of each column, drawn as an invisible row of no height); without
+  // rows there is nothing to size.
+  it('adds the widest cases of the columns as an invisible last row, and gives back the row gap it adds', () => {
+    content.value = { title: 'g', rows: [['m', '首字', '8.0 / 5', '11:32 复核']], sizer: ['', '首字\n报错', '100.0 / 99.9', '00:00 复核'] }
+    hover(mount(Host, { attachTo: document.body }).element)
+    expect(tip().querySelector('.sq-tip__grid')!.classList.contains('sq-tip__grid--sized')).toBe(true)
+    expect(texts('.sq-tip__sizer')).toEqual(['', '首字\n报错', '100.0 / 99.9', '00:00 复核'])
+    // The rows stay what they were: the sizer cells come after them, in the same columns.
+    expect(texts('.sq-tip__c:not(.sq-tip__sizer)')).toEqual(['m', '首字', '8.0 / 5', '11:32 复核'])
+    expect(texts('.sq-tip__end')).toEqual(['11:32 复核', '00:00 复核'])
+    const file = '../../styles/schedQuality.css'
+    const css = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8')
+    expect(css).toMatch(/\.sq-tip__sizer \{ height: 0; visibility: hidden; white-space: pre; \}/)
+    expect(css).toMatch(/\.sq-tip__grid \{\s+display: grid;\s+gap: 5px 14px;/)
+    expect(css).toMatch(/\.sq-tip__grid--sized \{ margin-bottom: -5px; \}/)
+    document.body.innerHTML = ''
+    content.value = { title: 'g', rows: [], sizer: ['a', 'b'] }
+    hover(mount(Host, { attachTo: document.body }).element)
+    expect(tip().querySelector('.sq-tip__sizer')).toBeNull()
+  })
+
   // The recent status's card (wrapEnd) wraps its notes on a narrow screen; every other card keeps the note whole and
   // lets the label and value give way, as before.
   it('keeps the note column whole by default, and wraps it in what is left only when the card asks (wrapEnd)', () => {

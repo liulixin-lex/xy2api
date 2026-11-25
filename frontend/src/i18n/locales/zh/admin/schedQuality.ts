@@ -39,6 +39,16 @@ export default {
       recoverNone: '没有可恢复的状态：不在后排或试用，也没有可清除的自动状态',
       window: '近 12 小时',
       windowPartial: '近 {hours} 小时',
+      windowSince: '{time} 起',
+      lacks: '{have}\u00a0/\u00a0{need}',
+      // What the have / need of a trial's assessment count (qualityPanel lackUnit); the counts stay together.
+      lacksUnit: {
+        samples: '样本 {have}\u00a0/\u00a0{need}',
+        sessions: '会话 {have}\u00a0/\u00a0{need}',
+        slowSessions: '慢会话 {have}\u00a0/\u00a0{need}',
+        turns: '轮 {have}\u00a0/\u00a0{need}',
+        lowSessions: '低会话 {have}\u00a0/\u00a0{need}',
+      },
       gateOff: '门槛关',
       col: {
         requests: '请求',
@@ -51,8 +61,6 @@ export default {
       },
       ref: {
         ttfo: '同组 {v}',
-        error: '≤ {v}',
-        cache: '≥ {v}',
       },
     },
     col: {
@@ -211,13 +219,6 @@ export default {
       modelSearch: '选择或输入模型名',
     },
     evidence: {
-      over: '超 {s} 秒',
-      bar: '判差线',
-      peers: '同组',
-      failed: '报错',
-      limit: '上限',
-      hit: '命中',
-      min: '下限',
       samples: '样本',
       local: '本组',
       joiner: '、',
@@ -285,6 +286,7 @@ export default {
       rear: '{time}\u00a0复核',
       trial: '{start}\u00a0起 · 最晚\u00a0{end}',
       line: '{line} · {stay}',
+      trialEnd: '最晚\u00a0{time}',
     },
     ttftRule: {
       title: '首字线判定',
@@ -324,10 +326,7 @@ export default {
       takeoverOff: '关',
       takeoverNow: '立即',
       takeoverMin: '{n} 分钟',
-      trial: '试算',
-      trialLine: '按当前证据：达标 {pass} · 未知 {unknown} · 不达标 {fail}',
       trialRelaxed: '放宽：保存后清零重判',
-      trialNote: '试算用当前窗口里的证据，分别按现行门槛和新门槛各评估一次，不是预测身份。放宽的线保存后清零，并按新门槛当场重判；收紧不改变已有身份，之后的评估按新门槛，报错线和缓存线（差不到 5 个百分点时）要连续两次不达标才进后排。',
       savedRelaxed: '{lines}已清零 {n} 个状态，并按新门槛重判',
       seconds: '秒',
       percent: '%',

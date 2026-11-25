@@ -137,8 +137,8 @@ import { iqModelLabel } from '@/components/admin/account/iqCheckPresentation'
 import { usePointerCoarse } from '@/composables/usePointerCoarse'
 import { qualityOpenerKey } from '@/composables/useSchedLayers'
 import type { Account, AdminGroup } from '@/types'
-import type { BackendDim, BackendRear, BackendTrial } from '@/api/admin/schedQualityTypes'
-import { endTime, knownDim, lineStay, rearStay, trialStay } from '@/components/admin/account/quality/qualityPanel'
+import type { BackendDim, BackendLineDetail, BackendRear, BackendTrial } from '@/api/admin/schedQualityTypes'
+import { basisReading, endTime, knownDim, LACK_UNITS, lacksText, lineStay, rearStay, trialNote, trialStay } from '@/components/admin/account/quality/qualityPanel'
 import { anyOverlayOpen, overlaysClosed } from '@/utils/overlayStack'
 import { DASH, kindName } from '@/utils/schedQualityFormat'
 import { hideTip, showTipNow, vTip, type TipCard, type TipCell, type TipContent, type TipTone } from '@/utils/tip'
@@ -211,6 +211,8 @@ const restWorst = computed(() => {
 })
 
 const lineName = (dim: BackendDim) => t(`admin.schedQuality.dim.${dim}`)
+/** A line on its own row of the card, named as the panel's column it sits in (首字慢: the reading is a share). */
+const colName = (dim: BackendDim) => t(`admin.schedQuality.panel.col.${dim}`)
 const reasonCell = (lines: BackendDim[]): TipCell => ({ text: lines.map((line) => t(`admin.accounts.table.dimReasons.${line}`)).join('、'), tone: 'back' })
 /** "15:30 复核": the review of the line at the back that ends last. */
 const rearEnd = (item: BackendRear) => rearStay(t, item.until)
@@ -222,13 +224,56 @@ const namedEnd = (line: unknown, stay: string) => {
   return dim ? lineStay(t, lineName(dim), stay) : stay
 }
 /**
- * A model at the back: its line that ends last with its review on the first row, its other lines at the back
- * under it. An older answer does not say which line that is: the lines are listed together beside the stay.
+ * A restricted line on its own row (the model named on the first of its rows), written by the line's own identity:
+ * at the rear what the decision that put it there read against it ("76.2 / 86", as the panel's cell and the opened
+ * decision show it) and its own review; on trial its latest assessment (达标 in green, what it still lacks, or unknown)
+ * and when it ends at the latest. A line whose record keeps neither has only its name and time.
  */
-function rearRows(item: BackendRear): (string | TipCell)[][] {
-  const last = knownDim(item.until_line)
-  if (!last) return [[iqModelLabel(item.model), reasonCell(item.lines), rearEnd(item)]]
-  return [[iqModelLabel(item.model), reasonCell([last]), rearEnd(item)], ...item.lines.filter((line) => line !== last).map((line) => ['', reasonCell([line]), ''])]
+function lineRow(model: string, detail: BackendLineDetail, identity: 'rear' | 'trial'): (string | TipCell)[] {
+  if (identity === 'rear') {
+    const reading = basisReading(detail.basis)
+    return [model, colName(detail.line), reading ? { text: reading, tone: 'back' } : '', rearStay(t, detail.until)]
+  }
+  const note = detail.last_eval ? trialNote(detail.last_eval, detail.line, t) : null
+  return [model, colName(detail.line), note && note.text !== DASH ? { text: note.text, tone: note.pass ? 'ok' : 'info' } : '', trialEndBy(detail.until)]
+}
+
+/**
+ * A model's rows: a row per restricted line when the answer has them (an item of rear[] lists its lines on trial too;
+ * a line without its identity takes the item's kind). An older answer has no lines of their own: at the back, its line
+ * that ends last with the model's review on the first row and its other lines under it, or the lines together beside
+ * the review when it does not say which; on trial, the line that ends last with its start and latest end.
+ */
+function modelRows(item: BackendRear | BackendTrial, kind: 'rear' | 'trial', own: boolean): (string | TipCell)[][] {
+  const model = iqModelLabel(item.model)
+  if (own && item.line_details) return item.line_details.map((detail, index) => lineRow(index === 0 ? model : '', detail, detail.identity ?? kind))
+  if (kind === 'trial') {
+    const line = knownDim(item.until_line)
+    return [[model, line ? { text: lineName(line), tone: 'info' } : { text: DASH, tone: 'muted' }, trialEnd(item as BackendTrial)]]
+  }
+  const rear = item as BackendRear
+  const last = knownDim(rear.until_line)
+  if (!last) return [[model, reasonCell(rear.lines), rearEnd(rear)]]
+  return [[model, reasonCell([last]), rearEnd(rear)], ...rear.lines.filter((line) => line !== last).map((line) => ['', reasonCell([line]), ''])]
+}
+
+/** Every model of the card has its lines on their own (all rows then have the same columns). */
+const ownLines = (items: (BackendRear | BackendTrial)[]) => items.every((item) => !!item.line_details?.length)
+
+/** "最晚 17:10": when a line's trial ends at the latest. */
+const trialEndBy = (until: string) => t('admin.schedQuality.stay.trialEnd', { time: formatShortTime(until) })
+
+/**
+ * The widest text of each column of a card of lines, so the card keeps one width whatever the figures and times this
+ * time, at the back or on trial alike (the model is as long as its name): every line's name, the widest reading and
+ * assessment, the review and the trial's end at their widest clock (digits are of one width).
+ */
+function lineSizer(): string[] {
+  const names = (['ttfo', 'error', 'cache'] as const).map(colName)
+  const lacks = [null, ...LACK_UNITS].map((unit) => lacksText(t, unit, 99, 99))
+  const notes = ['100.0 / 99.9', t('admin.schedQuality.verdict.pass'), t('admin.schedQuality.verdict.unknown'), ...lacks]
+  const stays = [t('admin.schedQuality.stay.rear', { time: '00:00' }), t('admin.schedQuality.stay.trialEnd', { time: '00:00' })]
+  return ['', names.join('\n'), notes.join('\n'), stays.join('\n')]
 }
 /** The group's model that ends last; one with a known end before any without. */
 const lastOf = <T extends { group_id: number; until?: string | null }>(items: T[], group: AdminGroup) =>
@@ -239,25 +284,22 @@ const exemptionOf = (quality: AccountQualityView, group: AdminGroup) =>
 const exemptEnd = (expiresAt: string | null | undefined) => (expiresAt ? formatShortTime(expiresAt) : t('admin.accounts.table.tip.forever'))
 
 /**
- * The rows of the group's state (12.7): a model at the back on the row of its line that ends last, with why and
- * its review, its other lines at the back under it; a model on trial with its line, start and latest end; the
- * exemption, …
+ * The rows of the group's state (12.7): at the back or on trial a row per restricted line of every restricted model,
+ * the models by name (older answers: a model at the back on the row of its line that ends last with its review, its
+ * other lines under it; a model on trial with its line, start and latest end); the exemption, …
  */
 function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
   const quality = props.quality
   if (!quality) return []
-  if (state === 'back') {
-    return (quality.rear ?? [])
-      .filter((item) => item.group_id === group.id)
-      .flatMap(rearRows)
-  }
-  if (state === 'trial') {
-    return (quality.trial ?? [])
-      .filter((item) => item.group_id === group.id)
-      .map((item) => {
-        const line = knownDim(item.until_line)
-        return [iqModelLabel(item.model), line ? { text: lineName(line), tone: 'info' } : { text: DASH, tone: 'muted' }, trialEnd(item)]
-      })
+  // At the back or on trial: every restricted model of the group, whichever list it came in (a model with one line at
+  // the rear and one on trial comes as a rear item; a model only on trial, beside one at the rear, as a trial item).
+  if (state === 'back' || state === 'trial') {
+    const items = [
+      ...(quality.rear ?? []).filter((item) => item.group_id === group.id).map((item) => ({ item, kind: 'rear' as const })),
+      ...(quality.trial ?? []).filter((item) => item.group_id === group.id).map((item) => ({ item, kind: 'trial' as const }))
+    ].sort((a, b) => (a.item.model < b.item.model ? -1 : a.item.model > b.item.model ? 1 : 0))
+    const own = ownLines(items.map(({ item }) => item))
+    return items.flatMap(({ item, kind }) => modelRows(item, kind, own))
   }
   if (state === 'exempt') {
     const exemption = exemptionOf(quality, group)
@@ -294,10 +336,15 @@ const quietTip = (pill: string, content: () => TipContent) => () => {
   return quiet?.pill === pill && anyOverlayOpen() ? '' : content()
 }
 
-/** The group's card: its full name, its state at the top right and the state's rows; no state without quality data. */
+/**
+ * The group's card: its full name, its state at the top right and the state's rows; no state without quality data. Rows
+ * of lines (at the back or on trial, from an answer with each line's own) are four columns kept at their widest.
+ */
 function pillCard(group: AdminGroup, state: GroupDotState | null): TipCard {
   if (!state) return { title: group.name, chip: { text: t('admin.accounts.table.pillNoQuality'), tone: 'muted' } }
-  return { title: group.name, chip: stateCell(state), rows: stateRows(group, state) }
+  const rows = stateRows(group, state) ?? []
+  const ofLines = (state === 'back' || state === 'trial') && rows[0]?.length === 4
+  return ofLines ? { title: group.name, chip: stateCell(state), rows, sizer: lineSizer() } : { title: group.name, chip: stateCell(state), rows }
 }
 
 /** "+N": a row per folded group, with its dot and state and, at the back or on trial, the line that ends last, or when its exemption ends. */

@@ -83,12 +83,12 @@ export async function updateGroupPolicy(groupId: number, update: SchedGroupPolic
 }
 
 /**
- * What the policy would say on the current evidence: per line the verdicts with the saved and the new thresholds, the
- * keys whose verdict turns, and the lines it relaxes. Same body as the update; nothing is stored.
+ * What unsaved thresholds would do: the lines saving them relaxes, and per model how many accounts reach them. Same body
+ * as the update; nothing is stored. Only the two fields the form reads are kept, each a list even when left out.
  */
 export async function previewGroupPolicy(groupId: number, update: SchedGroupPolicyUpdate, options?: RequestOptions): Promise<BackendPolicyPreview> {
-  const { data } = await apiClient.post<BackendPolicyPreview>(`${base}/groups/${groupId}/policy/preview`, update, { signal: options?.signal })
-  return { relaxed_lines: data.relaxed_lines ?? [], lines: data.lines, changed: data.changed ?? [] }
+  const { data } = await apiClient.post<Partial<BackendPolicyPreview>>(`${base}/groups/${groupId}/policy/preview`, update, { signal: options?.signal })
+  return { relaxed_lines: data.relaxed_lines ?? [], reach: data.reach ?? [] }
 }
 
 /** Groups over all their models: identities of their account × model keys and the users' waits of the last hour. */

@@ -3,10 +3,13 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, withDirectives } from 'vue'
 
 import type { BackendAccountDetail, BackendDecision, BackendGroupModel, BackendPolicy } from '@/api/admin/schedQualityTypes'
-import { basis, groupModel, legacyBasis, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
-import { perfAnswer, perfGroup, perfRow } from '@/__tests__/fixtures/schedQuality/performance'
+import { basis, cacheEvidence, groupModel, legacyBasis, line, ttfoEvidence } from '@/__tests__/fixtures/schedQuality/lines'
+import { lastEval, perfAnswer, perfGroup, perfRow } from '@/__tests__/fixtures/schedQuality/performance'
 import SchedQualityPanel from '../SchedQualityPanel.vue'
 import SchedDecisions from '../SchedDecisions.vue'
+import AccountGroupPills from '@/components/admin/account/table/AccountGroupPills.vue'
+import type { AdminGroup } from '@/types'
+import type { TipCard } from '@/utils/tip'
 import { closeSchedBoard, closeSchedDrawer, markSchedChanged, openSchedDrawer, useSchedLayers } from '@/composables/useSchedLayers'
 import type { LiveTable } from '@/composables/useLiveTable'
 import { withSchedHost } from './schedLayerHost'
@@ -69,7 +72,8 @@ function detail(id = 7): BackendAccountDetail {
       { key: 'iq:gpt-a', kind: 'iq_gate', scope: 'model', model: 'gpt-a', until: inMinutes(5), count: null, shared: 0, clearable: false, why: 'iq_gate' },
       { key: 'iq:gpt-b', kind: 'iq_gate', scope: 'model', model: 'gpt-b', until: inMinutes(42), count: null, shared: 0, clearable: false, why: 'iq_gate' }
     ],
-    exemptions: []
+    exemptions: [],
+    current_rule_version: '4.0'
   }
 }
 
@@ -489,7 +493,7 @@ describe('SchedQualityPanel', () => {
       record(7, { basis: basis('ttfo', { kind: 'trial', samples_local: 0 }) }),
       record(1, { action: 'enter', level: 1, until: inMinutes(20), basis: basis('ttfo') })
     ])
-    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: () => ({ name: '晨星组' }) } })
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, ruleVersion: '4.0', group: () => ({ name: '晨星组' }) } })
     await flushPromises()
     // Eight entries: the newest six first, then the rest.
     await w.get('[data-qp-decisions-more]').trigger('click')
@@ -528,14 +532,25 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
   const cells = (groupId: number) => Array.from(groupRow(groupId).querySelectorAll<HTMLElement>('[data-qp-cell]'), (cell) => [
     cell.dataset.qpCell, cell.firstElementChild!.textContent, [...cell.classList].find((name) => name.startsWith('is-')), cell.querySelector('[data-qp-ref]')?.textContent ?? null
   ])
+  /** The line under a held figure: its text and its colour. */
+  const judged = (groupId: number, col: string) => {
+    const el = groupRow(groupId).querySelector<HTMLElement>(`[data-qp-cell="${col}"] [data-qp-judged]`)
+    return el ? [el.textContent, [...el.classList].find((name) => name.startsWith('is-'))] : null
+  }
+  const dot = (groupId: number) => [...groupRow(groupId).querySelector('.status-dot')!.classList].find((name) => name.startsWith('status-dot--'))
   const place = (groupId: number) => groupRow(groupId).querySelector('[data-test="qp-state"] .gt__place-main')!.textContent!.trim()
   const stay = (groupId: number) => groupRow(groupId).querySelector('[data-qp-stay]')?.textContent ?? null
   const trigger = (groupId: number) => groupRow(groupId).querySelector<HTMLElement>(`[data-qp-place-trigger="${groupId}"]`)
 
-  it('puts each group\'s place and 12-hour figures in one row; a held share shows only what it is measured against', async () => {
+  // Plan item 20: a held line's 12-hour figure is plain and its colour moves to the line under it — at the rear what
+  // put it there against its line, on trial its latest assessment; under any other first-output share, the peers'.
+  it('puts each group\'s place and 12-hour figures in one row; a held line shows what it was judged on under its figure', async () => {
     atLocalNoon()
     const value = detail()
-    value.groups[0].by_model[1].lines.error = line('error', 'trial', { trial_started_at: inMinutes(-70), trial_until: inMinutes(50) })
+    value.groups[0].by_model[1].lines.ttfo.basis = basis('ttfo', { ttft: ttfoEvidence({ n: 24, k: 9, tolerance: 0.17 }) })
+    value.groups[0].by_model[1].lines.error = line('error', 'trial', {
+      trial_started_at: inMinutes(-70), trial_until: inMinutes(50), last_eval: lastEval({ reason: 'trial_open', causes: ['clear_insufficient'], have: 12, need: 40 })
+    })
     api.accountDetail.mockResolvedValue(value)
     api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
     mount(Panel, { attachTo: document.body })
@@ -548,13 +563,21 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     expect(stay(54)).toBeNull()
     expect(cells(53)).toEqual([
       ['requests', '463', 'is-plain', null],
-      ['ttfo', '53.1%', 'is-rear', 'admin.schedQuality.panel.ref.ttfo:{"v":"19.7%"}'],
-      ['error', '2.5%', 'is-trial', 'admin.schedQuality.panel.ref.error:{"v":"5%"}'],
+      ['ttfo', '53.1%', 'is-plain', null],
+      ['error', '2.5%', 'is-plain', null],
       ['cache', '90.0%', 'is-unknown', null]
     ])
+    // The rear line reads against the tolerance its decision was taken with; the share is never with its seconds.
+    expect(judged(53, 'ttfo')).toEqual(['37.5 / 17', 'is-rear'])
+    expect(groupRow(53).querySelector('[data-qp-cell="ttfo"] [data-qp-judged]')!.classList.contains('gt__ref--words')).toBe(false)
+    expect(judged(53, 'error')).toEqual(['admin.schedQuality.panel.lacksUnit.samples:{"have":12,"need":40}', 'is-trial'])
+    expect(judged(53, 'cache')).toBeNull()
     expect(groupRow(53).querySelector('[data-qp-cell="ttfo"]')!.getAttribute('aria-label')).toBe(
-      'admin.schedQuality.panel.col.ttfo 53.1% admin.schedQuality.identity.rear admin.schedQuality.panel.ref.ttfo:{"v":"19.7%"}'
+      'admin.schedQuality.panel.col.ttfo 53.1% admin.schedQuality.identity.rear 37.5 / 17'
     )
+    // An unheld first-output share has the peers' share under it (北辰组's row of gpt-b has no line state: unknown).
+    expect(cells(54)[1]).toEqual(['ttfo', '20.1%', 'is-unknown', 'admin.schedQuality.panel.ref.ttfo:{"v":"19.7%"}'])
+    expect(judged(54, 'ttfo')).toBeNull()
     // No sentence, no legend, no section title: the figures and the place say it.
     expect(document.querySelector('[data-qp-why], [data-qp-legend]')).toBeNull()
     expect(document.querySelector('[data-qp-perf-note]')!.textContent).toBe('admin.schedQuality.panel.window')
@@ -567,6 +590,51 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     await flushPromises()
     expect(cells(53).map(([col, text]) => `${col} ${text}`)).toEqual(['requests 120', 'ttfo 20.1%', 'error 0.0%', 'cache 90.0%'])
     expect(place(53)).toBe('admin.schedQuality.placement.front')
+  })
+
+  // Plan item 20: a front with a passing line has a green dot; one none of whose lines passes, a grey one.
+  it('greys the front dot when none of the lines passes', async () => {
+    const value = detail()
+    value.groups[1].by_model = [groupModel('gpt-a', { ttfo: 'unknown', error: 'unknown', cache: 'unknown' })]
+    api.accountDetail.mockResolvedValue(value)
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { model: 'gpt-a' })
+    expect([place(53), dot(53)]).toEqual(['admin.schedQuality.placement.front', 'status-dot--ok'])
+    expect([place(54), dot(54)]).toEqual(['admin.schedQuality.placement.front', 'status-dot--observe'])
+    // A group without a row for the model has no data: grey too.
+    tab('gpt-b').click()
+    await flushPromises()
+    expect([place(54), dot(54)]).toEqual(['admin.schedQuality.placement.front', 'status-dot--observe'])
+  })
+
+  // Plan item 20: the 12-hour figures start at a recovery within them (the snapshot drops what came before it).
+  it('heads the figures with the recovery time when the account was recovered within their window', async () => {
+    const recovered = (reset: string | null) => {
+      const value = detail()
+      value.reset_at = reset
+      return value
+    }
+    const heading = () => document.querySelector('[data-qp-perf-note]')!.textContent
+    const clock = (iso: string) => {
+      const date = new Date(iso)
+      return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+    }
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
+    mount(Panel, { attachTo: document.body })
+    // Window 00:10–12:10 UTC: a recovery at 09:07 inside it heads the figures; one before it or after the figures were
+    // worked out does not (they are the whole window, or from before the recovery).
+    for (const [reset, expected] of [
+      ['2026-11-19T09:07:00Z', `admin.schedQuality.panel.windowSince:{"time":"${clock('2026-11-19T09:07:00Z')}"}`],
+      ['2026-11-19T00:05:00Z', 'admin.schedQuality.panel.window'],
+      ['2026-11-19T12:15:00Z', 'admin.schedQuality.panel.window'],
+      [null, 'admin.schedQuality.panel.window']
+    ] as const) {
+      api.accountDetail.mockResolvedValue(recovered(reset))
+      closeSchedDrawer()
+      await flushPromises()
+      await openOn(7, { model: 'gpt-b' })
+      expect(heading()).toBe(expected)
+    }
   })
 
   // Astra 1: a group whose gate is now off keeps no figures of an older snapshot that still has its row.
@@ -607,7 +675,41 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     expect(place(53)).toBe('admin.schedQuality.placement.trial')
     expect(stay(53)).toBe('admin.schedQuality.stay.line:{"line":"admin.schedQuality.panel.col.error","stay":"admin.schedQuality.stay.trial:{\\"start\\":\\"11:20\\",\\"end\\":\\"13:20\\"}"}')
     expect(stay(54)).toBe('admin.schedQuality.stay.trial:{"start":"11:55","end":"13:55"}')
-    expect(cells(54).slice(1).map(([col, , tone]) => `${col} ${tone}`)).toEqual(['ttfo is-unknown', 'error is-unknown', 'cache is-trial'])
+    expect(cells(54).slice(1).map(([col, , tone]) => `${col} ${tone}`)).toEqual(['ttfo is-unknown', 'error is-unknown', 'cache is-plain'])
+    // On trial the line under the figure is its latest assessment: before any, a dash in the trial's colour.
+    expect(judged(54, 'cache')).toEqual(['—', 'is-trial'])
+  })
+
+  // Opus review of fe, must 1: a first-output line on trial held up by its sessions (2 of 3) says sessions, not samples.
+  it('names what a trial line still lacks by what held it up', async () => {
+    const value = detail()
+    const [, b] = value.groups[0].by_model
+    b.placement = 'trial'
+    b.lines.ttfo = line('ttfo', 'trial', { trial_until: inMinutes(50), last_eval: lastEval({ reason: 'trial_open', causes: ['sessions_insufficient'], have: 2, need: 3 }) })
+    b.lines.cache = line('cache', 'trial', { trial_until: inMinutes(40), last_eval: lastEval({ reason: 'trial_open', causes: ['turns_insufficient', 'low_sessions_insufficient'], have: 0, need: 1 }) })
+    api.accountDetail.mockResolvedValue(value)
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { groupId: 53, model: 'gpt-b' })
+    expect(judged(53, 'ttfo')).toEqual(['admin.schedQuality.panel.lacksUnit.sessions:{"have":2,"need":3}', 'is-trial'])
+    expect(judged(53, 'cache')).toEqual(['admin.schedQuality.panel.lacksUnit.turns:{"have":0,"need":1}', 'is-trial'])
+  })
+
+  // Plan item 20: a trial whose latest assessment passes reads 达标 in green; never the reading it went on trial with.
+  it('reads a trial line\'s latest assessment under its figure, green when it passes', async () => {
+    const value = detail()
+    const [, b] = value.groups[0].by_model
+    b.placement = 'trial'
+    b.lines.ttfo = line('ttfo', 'trial', { trial_until: inMinutes(50), basis: basis('ttfo', { ttft: ttfoEvidence({ n: 24, k: 9, tolerance: 0.2 }) }), last_eval: lastEval({ reason: 'within', causes: [], have: null, need: null }) })
+    b.lines.cache = line('cache', 'trial', { trial_until: inMinutes(40), last_eval: lastEval({ reason: 'trial_open', causes: ['turns_insufficient'], have: 39, need: 40 }) })
+    api.accountDetail.mockResolvedValue(value)
+    api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { groupId: 53, model: 'gpt-b' })
+    expect(judged(53, 'ttfo')).toEqual(['admin.schedQuality.verdict.pass', 'is-pass'])
+    expect(judged(53, 'cache')).toEqual(['admin.schedQuality.panel.lacksUnit.turns:{"have":39,"need":40}', 'is-trial'])
+    // On a phone a trial's words may wrap; a reading never does (it is one figure against its line).
+    expect(groupRow(53).querySelector('[data-qp-cell="cache"] [data-qp-judged]')!.classList.contains('gt__ref--words')).toBe(true)
   })
 
   it('opens a group\'s exemption at its place, and only the removal of one in force there', async () => {
@@ -729,6 +831,9 @@ describe('SchedQualityPanel decision records', () => {
     id, at: inMinutes(-id * 2), group_id: 53, model: 'gpt-b', line: 'ttfo', action: 'enter', level: 1, until: inMinutes(20), basis: basis('ttfo'), ...patch
   })
   const entries = () => Array.from(document.querySelectorAll<HTMLElement>('[data-qp-decision]'), (el) => el.dataset.qpDecision)
+  /** The decision that put the line at the rear, on that basis. */
+  const record90 = (dim: 'ttfo' | 'cache', value: BackendDecision['basis']): BackendDecision =>
+    ({ id: 90, at: inMinutes(-1), group_id: 53, model: 'gpt-b', line: dim, action: 'enter', level: 0, until: inMinutes(20), basis: value })
   const entry = (id: number) => document.querySelector<HTMLElement>(`[data-qp-decision="${id}"]`)!
 
   it('loads with the panel: one line a record, merged across groups, newest six, then the rest and older pages', async () => {
@@ -766,7 +871,8 @@ describe('SchedQualityPanel decision records', () => {
     // The two groups' evidence is alike: it shows once, without naming the groups again.
     expect(open.querySelectorAll('[data-qp-evidence]')).toHaveLength(1)
     expect(open.querySelector('.drow__group')).toBeNull()
-    expect(Array.from(open.querySelectorAll('[data-qp-evidence-measure] dd'), (el) => el.textContent)).toEqual(['4.9%', '17.0%'])
+    // What it read against its line: this fixture's record has no tolerance kept, so the line is unknown, not made up.
+    expect(Array.from(open.querySelectorAll('[data-qp-evidence-measure] dd'), (el) => el.textContent)).toEqual(['4.9 / —'])
 
     const more = () => document.querySelector<HTMLElement>('[data-qp-decisions-more]')
     more()!.click()
@@ -804,7 +910,7 @@ describe('SchedQualityPanel decision records', () => {
       record(50, { at: inMinutes(-40), action: 'clear', until: null, basis: old({ kind: 'clock' }) }),
       record(40, { at: inMinutes(-50), action: 'renew', basis: null })
     ])
-    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: (id: number) => ({ name: id === 53 ? '晨星组' : '北辰组' }), model: 'gpt-b' } })
+    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, ruleVersion: '4.0', group: (id: number) => ({ name: id === 53 ? '晨星组' : '北辰组' }), model: 'gpt-b' } })
     await flushPromises()
     document.querySelector<HTMLElement>('[data-qp-decisions-more]')!.click()
     await flushPromises()
@@ -835,6 +941,57 @@ describe('SchedQualityPanel decision records', () => {
     )
   })
 
+  // Plan item 20's acceptance line: one line at the rear reads the same in the panel's cell, the list's tip card and the
+  // opened decision — the same basis through the same function — for the cache line and for a first-output line, whose
+  // line is the tolerance its decision was taken with, never written with the seconds.
+  it.each([
+    ['cache', basis('cache', { cache: cacheEvidence({ ratio: 0.762, min_ratio: 0.86 }) }), '76.2 / 86'],
+    ['ttfo', basis('ttfo', { ttft: ttfoEvidence({ limit_s: 8, n: 40, k: 27, tolerance: 0.175 }) }), '67.5 / 17.5'],
+    ['ttfo', basis('ttfo', { rule_version: '3.1', ttft: ttfoEvidence({ limit_s: 8, n: 40, k: 27, z: 0.31 }) }), '67.5 / —']
+  ] as const)('shows the %s line\'s reading as one text in the panel, the list\'s card and the opened decision (%s)', async (dim, record, expected) => {
+    const value = detail()
+    const [, b] = value.groups[0].by_model
+    b.lines.ttfo = line('ttfo', dim === 'ttfo' ? 'rear' : 'pass', dim === 'ttfo' ? { until: inMinutes(20), basis: record } : {})
+    b.lines.cache = line('cache', dim === 'cache' ? 'rear' : 'unknown', dim === 'cache' ? { until: inMinutes(20), basis: record } : {})
+    api.accountDetail.mockResolvedValue(value)
+    api.accountDecisions.mockResolvedValue([record90(dim, record)])
+    api.accountPerformance.mockImplementation(async (id: number) => perfAnswer([perfRow(id, { group_id: 53, model: 'gpt-b' }, { n: 463, slowRate: 0.531 })]))
+    mount(Panel, { attachTo: document.body })
+    await openOn(7, { groupId: 53, model: 'gpt-b' })
+    const panelText = groupRow(53).querySelector(`[data-qp-cell="${dim}"] [data-qp-judged]`)!.textContent
+    entry(90).querySelector<HTMLElement>('.drow__line')!.click()
+    await flushPromises()
+    const decisionText = entry(90).querySelector('[data-qp-evidence-reading]')!.textContent
+    const pills = mount(AccountGroupPills, {
+      props: {
+        account: { id: 7, name: 'acc-7' } as never,
+        groups: [{ id: 53, name: '晨星组', platform: 'openai', status: 'active' } as AdminGroup],
+        quality: {
+          group_status: { 53: 'rear' }, stop: null, trial: [], exemptions: [],
+          rear: [{ group_id: 53, model: 'gpt-b', lines: [dim], until_line: dim, until: inMinutes(20), level: 0, exempt: false, effective: true, line_details: [{ line: dim, identity: 'rear', until: inMinutes(20), basis: record }] }]
+        }
+      }
+    })
+    const tip = (pills.get('[data-test="group-pill-dot"]').element as HTMLElement & { __tipText: () => TipCard }).__tipText()
+    const cardText = (tip.rows![0][2] as { text: string }).text
+    expect([panelText, cardText, decisionText]).toEqual([expected, expected, expected])
+    // Never the seconds of the limit (8 s) beside the share.
+    expect(cardText).not.toMatch(/秒|\d\s?s\b/)
+  })
+
+  // Plan item 20: the version in force is the detail's current_rule_version, handed to the decisions by the panel.
+  it('reads the rule version in force from the account\'s detail', async () => {
+    const later = detail()
+    later.current_rule_version = '4.1'
+    api.accountDetail.mockResolvedValue(later)
+    api.accountDecisions.mockResolvedValue([record(90, { at: inMinutes(-1), basis: basis('ttfo') })])
+    mount(Panel, { attachTo: document.body })
+    await openOn()
+    expect(entry(90).querySelector('.drow__what')!.textContent).toBe(
+      'admin.schedQuality.decisions.legacy:{"action":"admin.schedQuality.decisions.action.enter"}'
+    )
+  })
+
   // Astra review of fe-min, suggestion 2: one minute, one action, three groups with a 4.0 end at the deadline, a 4.0 end
   // for a reason the copy does not know, and a 3.1 end at the deadline: three lines, each titled, grouped and opened on
   // its own. Only a trial's end is named by its reason; any other action reads by itself.
@@ -850,7 +1007,7 @@ describe('SchedQualityPanel decision records', () => {
       record(80, { at: inMinutes(-10), action: 'renew', basis: basis('ttfo', { release_reason: 'deadline' }) })
     ])
     const names: Record<number, string> = { 53: '晨星组', 54: '北辰组', 55: '次元组' }
-    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: (id: number) => ({ name: names[id] }), model: 'gpt-b' } })
+    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, ruleVersion: '4.0', group: (id: number) => ({ name: names[id] }), model: 'gpt-b' } })
     await flushPromises()
     expect(entries()).toEqual(['90', '89', '88', '80'])
     expect([90, 89, 88, 80].map((id) => entry(id).querySelector('.drow__what')!.textContent)).toEqual([
@@ -883,7 +1040,7 @@ describe('SchedQualityPanel decision records', () => {
       record(90, { at, group_id: 53, until: end(1), basis: basis('ttfo', { samples_local: 4 }) }),
       record(89, { at, group_id: 54, until: end(59), basis: basis('ttfo', { samples_local: 9 }) })
     ])
-    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: (id: number) => ({ name: id === 53 ? '晨星组' : '北辰组' }) } })
+    mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, ruleVersion: '4.0', group: (id: number) => ({ name: id === 53 ? '晨星组' : '北辰组' }) } })
     await flushPromises()
     expect(entries()).toEqual(['90'])
     // Evidence that differs between groups shows apart, each with its group and its own end to the second.
@@ -903,7 +1060,7 @@ describe('SchedQualityPanel decision records', () => {
       .mockResolvedValueOnce(Array.from({ length: 50 }, (_, i) => record(60 - i)))
       .mockRejectedValueOnce(new Error('down'))
       .mockResolvedValueOnce([record(61, { action: 'reset', until: null }), record(60)])
-    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, group: () => ({ name: '晨星组' }) } })
+    const w = mount(SchedDecisions, { attachTo: document.body, props: { accountId: 7, ruleVersion: '4.0', group: () => ({ name: '晨星组' }) } })
     await flushPromises()
     await markSchedChanged()
     await flushPromises()
