@@ -62,6 +62,7 @@ func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accoun
 		return openAICollabSelectionLess(keys[accounts[i].ID], keys[accounts[j].ID], hint)
 	})
 	s.orderCollabSelection(ctx, accounts, keys, req.RequireCompact)
+	req.newSessionOutcome.recordSort(accounts, view, now, request.ManualOnly)
 }
 
 // selectionCandidates is shared by new placement and owner migration. Compact
@@ -83,10 +84,12 @@ func (s *OpenAIGatewayService) selectionCandidates(ctx context.Context, req Open
 		}
 		if reason := openAICompatibleAccountEligibilityFailureReason(ctx, a, req.Platform, req.RequestedModel, false, req.RequiredCapability, s); reason != "" {
 			stats.exclude(reason)
+			req.newSessionOutcome.recordFilterExclusion(a.ID, reason)
 			continue
 		}
 		if ok, reason := s.isAccountRequestCompatibleReason(ctx, a, req); !ok {
 			stats.exclude(reason)
+			req.newSessionOutcome.recordFilterExclusion(a.ID, reason)
 			continue
 		}
 		if !s.isAccountTransportCompatible(a, req.RequiredTransport) {
@@ -176,10 +179,7 @@ func selectionLoadRequests(accounts []*Account) []AccountWithConcurrency {
 }
 
 func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts []*Account, loads map[int64]*AccountLoadInfo) []*Account {
-	var outcome *openAINewSessionOutcome
-	if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
-		outcome = req.newSessionOutcome
-	}
+	req, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
 	if resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
 	}
@@ -188,7 +188,13 @@ func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts 
 		if load := loads[a.ID]; load == nil || load.LoadRate < 100 {
 			available = append(available, a)
 		} else {
-			outcome.markLoadFull(a.ID)
+			if outcome := req.newSessionOutcome; outcome != nil {
+				outcome.loadFull[a.ID] = struct{}{}
+				if row, ok := outcome.pool[a.ID]; ok {
+					row.loadFull = true
+					outcome.pool[a.ID] = row
+				}
+			}
 			observeSelectionFailure(ctx, a.ID, "concurrency_full", nil)
 		}
 	}
