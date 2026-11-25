@@ -281,20 +281,22 @@ const exemptionOf = (quality: AccountQualityView, group: AdminGroup) =>
 const exemptEnd = (expiresAt: string | null | undefined) => (expiresAt ? formatShortTime(expiresAt) : t('admin.accounts.table.tip.forever'))
 
 /**
- * The rows of the group's state (12.7): a model at the back on the row of its line that ends last, with why and
- * its review, its other lines at the back under it; a model on trial with its line, start and latest end; the
- * exemption, …
+ * The rows of the group's state (12.7): at the back or on trial a row per restricted line of every restricted model,
+ * the models by name (older answers: a model at the back on the row of its line that ends last with its review, its
+ * other lines under it; a model on trial with its line, start and latest end); the exemption, …
  */
 function stateRows(group: AdminGroup, state: GroupDotState): TipCard['rows'] {
   const quality = props.quality
   if (!quality) return []
-  if (state === 'back') {
-    const items = (quality.rear ?? []).filter((item) => item.group_id === group.id)
-    return items.flatMap((item) => modelRows(item, 'rear', ownLines(items)))
-  }
-  if (state === 'trial') {
-    const items = (quality.trial ?? []).filter((item) => item.group_id === group.id)
-    return items.flatMap((item) => modelRows(item, 'trial', ownLines(items)))
+  // At the back or on trial: every restricted model of the group, whichever list it came in (a model with one line at
+  // the rear and one on trial comes as a rear item; a model only on trial, beside one at the rear, as a trial item).
+  if (state === 'back' || state === 'trial') {
+    const items = [
+      ...(quality.rear ?? []).filter((item) => item.group_id === group.id).map((item) => ({ item, kind: 'rear' as const })),
+      ...(quality.trial ?? []).filter((item) => item.group_id === group.id).map((item) => ({ item, kind: 'trial' as const }))
+    ].sort((a, b) => (a.item.model < b.item.model ? -1 : a.item.model > b.item.model ? 1 : 0))
+    const own = ownLines(items.map(({ item }) => item))
+    return items.flatMap(({ item, kind }) => modelRows(item, kind, own))
   }
   if (state === 'exempt') {
     const exemption = exemptionOf(quality, group)
