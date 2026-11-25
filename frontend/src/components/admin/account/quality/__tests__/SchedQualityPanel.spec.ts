@@ -686,13 +686,18 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     const [, b] = value.groups[0].by_model
     b.placement = 'trial'
     b.lines.ttfo = line('ttfo', 'trial', { trial_until: inMinutes(50), last_eval: lastEval({ reason: 'trial_open', causes: ['sessions_insufficient'], have: 2, need: 3 }) })
-    b.lines.cache = line('cache', 'trial', { trial_until: inMinutes(40), last_eval: lastEval({ reason: 'trial_open', causes: ['turns_insufficient', 'low_sessions_insufficient'], have: 0, need: 1 }) })
+    // Short of both turns and low sessions, the backend keeps the turns' pair (as it answers: 19 of 20 turns).
+    b.lines.cache = line('cache', 'trial', { trial_until: inMinutes(40), last_eval: lastEval({ reason: 'trial_open', causes: ['turns_insufficient', 'low_sessions_insufficient'], have: 19, need: 20 }) })
+    // Short of low sessions only: 0 of 1.
+    value.groups[1].by_model = [groupModel('gpt-b', { cache: 'trial' })]
+    Object.assign(value.groups[1].by_model[0].lines.cache, { trial_until: inMinutes(40), last_eval: lastEval({ reason: 'trial_open', causes: ['low_sessions_insufficient'], have: 0, need: 1 }) })
     api.accountDetail.mockResolvedValue(value)
     api.accountPerformance.mockImplementation(async (id: number) => perfOf(id))
     mount(Panel, { attachTo: document.body })
     await openOn(7, { groupId: 53, model: 'gpt-b' })
     expect(judged(53, 'ttfo')).toEqual(['admin.schedQuality.panel.lacksUnit.sessions:{"have":2,"need":3}', 'is-trial'])
-    expect(judged(53, 'cache')).toEqual(['admin.schedQuality.panel.lacksUnit.turns:{"have":0,"need":1}', 'is-trial'])
+    expect(judged(53, 'cache')).toEqual(['admin.schedQuality.panel.lacksUnit.turns:{"have":19,"need":20}', 'is-trial'])
+    expect(judged(54, 'cache')).toEqual(['admin.schedQuality.panel.lacksUnit.lowSessions:{"have":0,"need":1}', 'is-trial'])
   })
 
   // Plan item 20: a trial whose latest assessment passes reads 达标 in green; never the reading it went on trial with.
