@@ -84,11 +84,12 @@ export async function updateGroupPolicy(groupId: number, update: SchedGroupPolic
 
 /**
  * What the policy would say on the current evidence: per line the verdicts with the saved and the new thresholds, the
- * keys whose verdict turns, and the lines it relaxes. Same body as the update; nothing is stored.
+ * keys whose verdict turns, the lines it relaxes, and per model how many accounts reach its thresholds. Same body as
+ * the update; nothing is stored.
  */
 export async function previewGroupPolicy(groupId: number, update: SchedGroupPolicyUpdate, options?: RequestOptions): Promise<BackendPolicyPreview> {
   const { data } = await apiClient.post<BackendPolicyPreview>(`${base}/groups/${groupId}/policy/preview`, update, { signal: options?.signal })
-  return { relaxed_lines: data.relaxed_lines ?? [], lines: data.lines, changed: data.changed ?? [] }
+  return { relaxed_lines: data.relaxed_lines ?? [], lines: data.lines, changed: data.changed ?? [], reach: data.reach ?? [] }
 }
 
 /** Groups over all their models: identities of their account × model keys and the users' waits of the last hour. */
