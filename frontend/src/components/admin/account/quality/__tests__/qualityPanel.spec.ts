@@ -149,6 +149,9 @@ describe('decision figures', () => {
     expect([error(501, 10000), error(499, 10000), error(500, 10000)]).toEqual(['5.1 / 5', '4.9 / 5', '5.0 / 5'])
     // Away from the line: rounded as usual (76.66 is 76.7, not cut to 76.6), no extra decimals.
     expect([cache(0.7666, 0.86), cache(0.9149, 0.86), ttfo(27, 40)]).toEqual(['76.7 / 86', '91.5 / 86', '67.5 / 20'])
+    // Opus review of fe, suggestion 1: the failure share is over the padded count the rule judges on (missing outcomes
+    // up to 50 count as successes), not over the clear outcomes: 6 of 30 clear is 6 / 50.
+    expect(basisReading(basis('error', { error: errorEvidence({ clear: 30, unknown: 0, padded: 50, failed: 6, limit: 0.05 }) }))).toBe('12.0 / 5')
     // A line set to two decimals is shown so; equal to it, the reading reads the same.
     expect(basisReading(basis('error', { error: errorEvidence({ failed: 225, padded: 10000, limit: 0.0225 }) }))).toBe('2.25 / 2.25')
     expect(basisReading(basis('error', { error: errorEvidence({ failed: 226, padded: 10000, limit: 0.0225 }) }))).toBe('2.3 / 2.25')
