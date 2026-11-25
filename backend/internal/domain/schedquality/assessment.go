@@ -52,6 +52,7 @@ type ruleBReasonInput struct {
 type assessmentCause struct {
 	name   RuleBUnknownReason
 	reason AssessmentReason
+	line   Dimension // Owning line; independent of the persisted bit position.
 	// Rule B emits this cause when the predicate holds on an unknown verdict.
 	ruleB func(ruleBReasonInput) bool
 }
@@ -62,23 +63,23 @@ const otherCauseIndex = 16
 // Rule B and the assessment summary use the same names and classifications.
 // Retired peer gates keep their persisted slots but no longer have predicates.
 var assessmentCauses = [...]assessmentCause{
-	{RuleBNoPeers, ReasonPeerShort, nil},
-	{RuleBAllPeersRear, ReasonPeerShort, nil},
-	{RuleBPeerKnownInsufficient, ReasonPeerShort, nil},
-	{RuleBNoSamples, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.N == 0 }},
-	{RuleBMassInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.N < ruleBMinMass-ruleBMassRounding }},
-	{RuleBSessionsInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.S < ruleBMinSessions }},
-	{RuleBSlowSessionsInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.D < ruleBMinSlowSessions }},
-	{RuleBAbsoluteUnconfirmed, ReasonWithin, func(g ruleBReasonInput) bool { return !g.Absolute }},
-	{RuleBRelativeUnconfirmed, ReasonWithin, nil},
-	{RuleBWorstMeanAboveTolerance, ReasonWithin, func(g ruleBReasonInput) bool { return g.WorstMean > g.tolerance }},
-	{RuleBRelativeVeto, ReasonWithin, nil},
-	{cacheTurnsShort, ReasonOwnShort, nil},
-	{cacheLowSessionsShort, ReasonOwnShort, nil},
-	{errorClearShort, ReasonOwnShort, nil},
-	{errorBoundsUnconfirmed, ReasonWithin, nil},
-	{errorRecoveryOverLimit, ReasonPending, nil},
-	otherCauseIndex: {"other", ReasonOther, nil},
+	{RuleBNoPeers, ReasonPeerShort, DimensionTTFO, nil},
+	{RuleBAllPeersRear, ReasonPeerShort, DimensionTTFO, nil},
+	{RuleBPeerKnownInsufficient, ReasonPeerShort, DimensionTTFO, nil},
+	{RuleBNoSamples, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.N == 0 }},
+	{RuleBMassInsufficient, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.N < ruleBMinMass-ruleBMassRounding }},
+	{RuleBSessionsInsufficient, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.S < ruleBMinSessions }},
+	{RuleBSlowSessionsInsufficient, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.D < ruleBMinSlowSessions }},
+	{RuleBAbsoluteUnconfirmed, ReasonWithin, DimensionTTFO, func(g ruleBReasonInput) bool { return !g.Absolute }},
+	{RuleBRelativeUnconfirmed, ReasonWithin, DimensionTTFO, nil},
+	{RuleBWorstMeanAboveTolerance, ReasonWithin, DimensionTTFO, func(g ruleBReasonInput) bool { return g.WorstMean > g.tolerance }},
+	{RuleBRelativeVeto, ReasonWithin, DimensionTTFO, nil},
+	{cacheTurnsShort, ReasonOwnShort, DimensionCache, nil},
+	{cacheLowSessionsShort, ReasonOwnShort, DimensionCache, nil},
+	{errorClearShort, ReasonOwnShort, DimensionError, nil},
+	{errorBoundsUnconfirmed, ReasonWithin, DimensionError, nil},
+	{errorRecoveryOverLimit, ReasonPending, DimensionError, nil},
+	otherCauseIndex: {"other", ReasonOther, "", nil},
 }
 
 func assessmentCauseIndex(name RuleBUnknownReason) int {
@@ -217,7 +218,7 @@ func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence) {
 	for _, name := range e.Causes {
 		i := assessmentCauseIndex(name)
 		def := assessmentCauses[i]
-		if i >= 11 { // Only the first eleven persisted causes belong to TTFT.
+		if def.line != DimensionTTFO {
 			s.Causes |= 1 << otherCauseIndex
 			continue
 		}

@@ -86,8 +86,8 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 	require.ElementsMatch(t, declared, tested)
 	require.LessOrEqual(t, len(assessmentCauses), 32)
 	var registered []string
-	for i, def := range assessmentCauses {
-		if i < 11 {
+	for _, def := range assessmentCauses {
+		if def.line == DimensionTTFO {
 			registered = append(registered, string(def.name))
 		}
 	}
