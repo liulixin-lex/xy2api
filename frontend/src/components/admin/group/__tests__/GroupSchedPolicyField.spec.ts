@@ -23,6 +23,10 @@ const preview = (over: Partial<BackendPolicyPreview> = {}): BackendPolicyPreview
     cache: { now: { pass: 2, unknown: 2, fail: 0 }, after: { pass: 2, unknown: 2, fail: 0 } }
   },
   changed: [{ account_id: 7, name: 'acc-07', model: 'gpt-6.1-sol', line: 'ttfo', from: 'pass', to: 'fail' }],
+  reach: [
+    { model: 'gpt-6.1-sol', cache: { ok: 5, n: 8 }, first_output: { ok: 3, n: 8 } },
+    { model: 'gpt-6.2-astra', cache: { ok: 0, n: 0 }, first_output: { ok: 4, n: 8 } }
+  ],
   ...over
 })
 
@@ -30,8 +34,13 @@ const ttft = (w: ReturnType<typeof mount>) => w.get('input[id^="sq-ttft-"]')
 const error = (w: ReturnType<typeof mount>) => w.get('input[id^="sq-err-"]')
 const cache = (w: ReturnType<typeof mount>) => w.get('input[id^="sq-cache-"]')
 const save = (w: ReturnType<typeof mount>) => (w.vm as unknown as { save: () => Promise<boolean> }).save()
-const trial = (w: ReturnType<typeof mount>) => w.find('[data-sq-trial]')
-const counts = (w: ReturnType<typeof mount>) => ['ttfo', 'error', 'cache'].map((line) => w.get(`[data-sq-trial="${line}"]`).text())
+/** Each model's count under the input of a line, with its colour: [model, "ok / n", amber | plain | grey]. */
+const reachOf = (w: ReturnType<typeof mount>, line: 'ttfo' | 'cache') =>
+  w.findAll(`[data-sq-reach="${line}"] [data-sq-reach-model]`).map((item) => {
+    const [name, count] = item.findAll('span')
+    const tone = count.classes().includes('text-amber-700') ? 'amber' : count.classes().includes('text-gray-400') ? 'grey' : 'plain'
+    return [name.text(), count.text(), tone]
+  })
 
 async function mountField() {
   const w = mount(GroupSchedPolicyField, { props: { groupId: 53 }, global: { stubs: { Select: true } } })
@@ -60,9 +69,7 @@ describe('GroupSchedPolicyField', () => {
     expect((error(w).element as HTMLInputElement).value).toBe('5')
     expect((cache(w).element as HTMLInputElement).value).toBe('90')
     expect(w.find('[data-sq-class-limits]').exists()).toBe(false)
-    expect(trial(w).exists()).toBe(false)
     expect(api.groupBoard).not.toHaveBeenCalled()
-    expect(api.previewGroupPolicy).not.toHaveBeenCalled()
   })
 
   it('keeps the API precision of untouched thresholds: 0.875 round-trips and an unchanged block sends no PUT', async () => {
@@ -134,91 +141,85 @@ describe('GroupSchedPolicyField', () => {
     expect((w.vm as unknown as { valid: boolean }).valid).toBe(false)
     expect(await save(w)).toBe(false)
     await settle()
-    expect(trial(w).exists()).toBe(false)
     expect(api.previewGroupPolicy).not.toHaveBeenCalled()
     expect(api.updateGroupPolicy).not.toHaveBeenCalled()
     expect(w.text()).not.toMatch(/[。.]$/)
   })
 
-  it('asks the server preview after a typing pause and shows each line\'s verdicts now → after and the keys that turn', async () => {
+  // Plan item 19: before any change, the saved thresholds' reach shows under the first-output limit and the cache
+  // minimum, each model with "ok / n"; then it follows the values typed, asked once after the typing pause.
+  it('shows each model\'s reach under its input on opening, then follows the typed values after a pause', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const w = await mountField()
-    await ttft(w).setValue('9')
-    await ttft(w).setValue('8')
-    // Still typing: nothing asked yet, the row waits with a skeleton.
+    // Before the first answer: a skeleton where the counts go, nothing asked yet.
+    expect(w.get('[data-sq-reach="ttfo"]').find('.skeleton').exists()).toBe(true)
     expect(api.previewGroupPolicy).not.toHaveBeenCalled()
-    expect(trial(w).find('.skeleton').exists()).toBe(true)
     await settle()
-    // Only the last value is asked for, with the saved version.
     expect(api.previewGroupPolicy).toHaveBeenCalledTimes(1)
-    expect(api.previewGroupPolicy).toHaveBeenCalledWith(53, {
+    expect(api.previewGroupPolicy).toHaveBeenLastCalledWith(53, {
       expected_version: 63,
-      policy: { enabled: true, ttft_seconds: 8, max_error_rate: 0.05, min_cache_ratio: 0.9, takeover_idle_seconds: 0 }
+      policy: { enabled: true, ttft_seconds: 10, max_error_rate: 0.05, min_cache_ratio: 0.9, takeover_idle_seconds: 0 }
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
-    expect(counts(w)).toEqual([
-      'admin.schedQuality.dim.ttfoadmin.schedQuality.policy.trialLine:{"pass":"3→2","unknown":"1→1","fail":"0→1"}',
-      'admin.schedQuality.dim.erroradmin.schedQuality.policy.trialLine:{"pass":"4→4","unknown":"0→0","fail":"0→0"}',
-      'admin.schedQuality.dim.cacheadmin.schedQuality.policy.trialLine:{"pass":"2→2","unknown":"2→2","fail":"0→0"}'
-    ])
-    expect(w.get('[data-sq-trial-names]').text()).toBe('acc-07')
-    // What saving does: relaxing clears and re-judges, tightening keeps identities.
-    expect(w.get('[data-sq-trial-note]').text()).toBe('admin.schedQuality.policy.trialNote')
-    expect(w.find('[data-sq-trial-relaxed]').exists()).toBe(false)
+    // Fewer than half amber, half plain; a model without any account with enough samples is a grey dash, not 0 / 0.
+    expect(reachOf(w, 'ttfo')).toEqual([['gpt-6.1-sol', '3 / 8', 'amber'], ['gpt-6.2-astra', '4 / 8', 'plain']])
+    expect(reachOf(w, 'cache')).toEqual([['gpt-6.1-sol', '5 / 8', 'plain'], ['gpt-6.2-astra', '—', 'grey']])
+    // No labels, no sentence: the row sits under its own input. The previous preview is gone.
+    expect(w.find('[data-sq-reach="error"]').exists()).toBe(false)
+    expect(w.find('[data-sq-trial], [data-sq-trial-note], [data-sq-trial-names]').exists()).toBe(false)
+    expect(w.find('[data-sq-relaxed]').exists()).toBe(false)
 
-    // Back to the saved value: the row goes and nothing more is asked.
-    await ttft(w).setValue('10')
+    // The cache minimum lowered from 90 to 80: asked once for the last value, and the counts change with it.
+    api.previewGroupPolicy.mockResolvedValueOnce(preview({ reach: [{ model: 'gpt-6.1-sol', cache: { ok: 7, n: 8 }, first_output: { ok: 3, n: 8 } }] }))
+    await cache(w).setValue('85')
+    await cache(w).setValue('80')
     await settle()
-    expect(trial(w).exists()).toBe(false)
-    expect(api.previewGroupPolicy).toHaveBeenCalledTimes(1)
+    expect(api.previewGroupPolicy).toHaveBeenCalledTimes(2)
+    expect(api.previewGroupPolicy.mock.calls[1][1].policy.min_cache_ratio).toBe(0.8)
+    expect(reachOf(w, 'cache')).toEqual([['gpt-6.1-sol', '7 / 8', 'plain']])
+
+    // An answer without counts (the 12-hour figures still loading): a dash, the row kept.
+    api.previewGroupPolicy.mockResolvedValueOnce(preview({ reach: [] }))
+    await ttft(w).setValue('8')
+    await settle()
+    expect(reachOf(w, 'ttfo')).toEqual([])
+    expect(w.get('[data-sq-reach="ttfo"]').text()).toBe('—')
   })
 
-  it('drops a preview answer that a later edit replaced, shows 失败 for a failed one, and lists at most 12 names', async () => {
+  it('drops an answer a later edit replaced, dims the last counts while invalid, and shows 失败 for a failed one', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const w = await mountField()
+    await settle()
     let release: (value: BackendPolicyPreview) => void = () => {}
     api.previewGroupPolicy.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
-    const w = await mountField()
-    await cache(w).setValue('95')
+    await ttft(w).setValue('12.5')
     await settle()
-    const first = api.previewGroupPolicy.mock.calls[0][2].signal as AbortSignal
+    const slow = api.previewGroupPolicy.mock.calls[1][2].signal as AbortSignal
+    // Waiting for it, the last counts stay, dimmed.
+    expect(w.get('[data-sq-reach="ttfo"]').classes()).toContain('opacity-60')
 
-    const many = Array.from({ length: 14 }, (_, i) => ({ account_id: i + 1, name: `acc-${i + 1}`, model: 'gpt-6.1-sol', line: 'cache' as const, from: 'pass' as const, to: 'fail' as const }))
-    api.previewGroupPolicy.mockResolvedValueOnce(preview({ changed: many }))
-    await cache(w).setValue('96')
-    expect(first.aborted).toBe(true)
+    api.previewGroupPolicy.mockResolvedValueOnce(preview({ reach: [{ model: 'gpt-6.1-sol', cache: { ok: 5, n: 8 }, first_output: { ok: 6, n: 8 } }] }))
+    await ttft(w).setValue('13')
+    expect(slow.aborted).toBe(true)
     await settle()
-    release(preview({ lines: { ...preview().lines, ttfo: { now: { pass: 9, unknown: 9, fail: 9 }, after: { pass: 9, unknown: 9, fail: 9 } } } }))
+    expect(reachOf(w, 'ttfo')).toEqual([['gpt-6.1-sol', '6 / 8', 'plain']])
+    // The replaced request answers late: its counts do not cover the newer ones.
+    release(preview({ reach: [{ model: 'gpt-6.1-sol', cache: { ok: 1, n: 8 }, first_output: { ok: 1, n: 8 } }] }))
     await flushPromises()
-    expect(counts(w)[0]).toContain('"pass":"3→2"')
-    const names = w.findAll('[data-sq-trial-names] > span').map((el) => el.text())
-    expect(names).toHaveLength(13)
-    expect(names.slice(-1)).toEqual(['admin.schedQuality.more:{"n":2}'])
+    expect(reachOf(w, 'ttfo')).toEqual([['gpt-6.1-sol', '6 / 8', 'plain']])
+    expect(w.get('[data-sq-reach="ttfo"]').classes()).not.toContain('opacity-60')
+
+    // An invalid value asks nothing; the last counts stay, dimmed.
+    await ttft(w).setValue('0')
+    await settle()
+    expect(api.previewGroupPolicy).toHaveBeenCalledTimes(3)
+    expect(reachOf(w, 'ttfo')).toEqual([['gpt-6.1-sol', '6 / 8', 'plain']])
+    expect(w.get('[data-sq-reach="ttfo"]').classes()).toContain('opacity-60')
 
     api.previewGroupPolicy.mockRejectedValueOnce({ status: 500 })
-    await cache(w).setValue('97')
+    await ttft(w).setValue('14')
     await settle()
-    expect(w.get('[data-sq-trial-failed]').text()).toBe('admin.schedQuality.result.failed')
-  })
-
-  it('lists an account with several models changing once, naming the models, with every change in the tip', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    api.previewGroupPolicy.mockResolvedValueOnce(preview({
-      changed: [
-        { account_id: 1, name: 'acc-01', model: 'gpt-a', line: 'ttfo', from: 'pass', to: 'fail' },
-        { account_id: 2, name: 'acc-02', model: 'gpt-a', line: 'ttfo', from: 'pass', to: 'fail' },
-        { account_id: 1, name: 'acc-01', model: 'gpt-b', line: 'ttfo', from: 'unknown', to: 'fail' },
-        { account_id: 1, name: 'acc-01', model: 'gpt-a', line: 'error', from: 'pass', to: 'unknown' }
-      ]
-    }))
-    const w = await mountField()
-    await ttft(w).setValue('8')
-    await settle()
-    const spans = w.findAll('[data-sq-trial-names] > span')
-    expect(spans.map((el) => el.text())).toEqual(['acc-01 · gpt-aadmin.schedQuality.evidence.joinergpt-b', 'acc-02'])
-    expect((spans[0].element as HTMLElement & { __tipText?: string }).__tipText).toBe([
-      'gpt-a · admin.schedQuality.dim.ttfo · admin.schedQuality.verdict.pass → admin.schedQuality.verdict.fail',
-      'gpt-b · admin.schedQuality.dim.ttfo · admin.schedQuality.verdict.unknown → admin.schedQuality.verdict.fail',
-      'gpt-a · admin.schedQuality.dim.error · admin.schedQuality.verdict.pass → admin.schedQuality.verdict.unknown'
-    ].join('\n'))
+    expect(w.get('[data-sq-reach="ttfo"] [data-sq-reach-failed]').text()).toBe('admin.schedQuality.result.failed')
+    expect(w.get('[data-sq-reach="cache"] [data-sq-reach-failed]').text()).toBe('admin.schedQuality.result.failed')
   })
 
   it('saves with the version, and on a conflict shows failed + reload, which reads the server values back', async () => {
@@ -247,16 +248,20 @@ describe('GroupSchedPolicyField', () => {
     }))
   })
 
-  it('marks the lines saving relaxes, a line missing from the answer as "—", and tells the result of a relaxing save', async () => {
+  // What saving does stays beside the field whose new value relaxes its line (a consequence, not a note).
+  it('marks beside its field each line saving relaxes, only while the form differs, and tells the result of a relaxing save', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    const { cache: _missing, ...lines } = preview().lines
-    api.previewGroupPolicy.mockResolvedValueOnce({ ...preview({ relaxed_lines: ['ttfo'] }), lines })
+    // An answer for unchanged values never marks a line, whatever it says.
+    api.previewGroupPolicy.mockResolvedValueOnce(preview({ relaxed_lines: ['cache'] }))
     const w = await mountField()
+    await settle()
+    expect(w.find('[data-sq-relaxed]').exists()).toBe(false)
+    api.previewGroupPolicy.mockResolvedValueOnce(preview({ relaxed_lines: ['ttfo', 'error'] }))
     await ttft(w).setValue('12')
     await settle()
-    expect(w.get('[data-sq-trial="ttfo"]').find('[data-sq-trial-relaxed]').exists()).toBe(true)
-    expect(w.get('[data-sq-trial="error"]').find('[data-sq-trial-relaxed]').exists()).toBe(false)
-    expect(w.get('[data-sq-trial="cache"]').text()).toContain('"pass":"—"')
+    expect(w.findAll('[data-sq-relaxed]').map((el) => [el.attributes('data-sq-relaxed'), el.text()])).toEqual([
+      ['ttfo', 'admin.schedQuality.policy.trialRelaxed'], ['error', 'admin.schedQuality.policy.trialRelaxed']
+    ])
 
     api.updateGroupPolicy.mockResolvedValueOnce({ ...policy(), version: 64, relaxed_lines: ['ttfo'], cleared: 7 })
     expect(await save(w)).toBe(true)

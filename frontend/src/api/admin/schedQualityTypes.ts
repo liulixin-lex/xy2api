@@ -456,6 +456,19 @@ export interface BackendPolicyPreview {
   lines: Record<BackendDim, { now: BackendVerdictCounts; after: BackendVerdictCounts }>
   /** At most 50. */
   changed: { account_id: number; name: string; model: string; line: BackendDim; from: BackendVerdict; to: BackendVerdict }[]
+  /**
+   * Per model, of the group's member accounts with enough samples of their own over the last 12 hours (every group's
+   * requests, none before the account's recovery): how many (n) and how many of them reach the thresholds in the form
+   * (ok). The cache by its minimum; the first output by its limit and the tolerance in the settings. A description of
+   * the 12 hours, not a forecast of verdicts. Empty while the 12-hour figures load; absent from an older backend.
+   */
+  reach?: BackendPolicyReach[]
+}
+
+export interface BackendPolicyReach {
+  model: string
+  cache: { ok: number; n: number }
+  first_output: { ok: number; n: number }
 }
 
 // ---- POST /groups/summary ----

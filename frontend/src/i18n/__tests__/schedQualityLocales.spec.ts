@@ -113,13 +113,12 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
   })
 })
 
-// Plan item 18: three sentences follow the rules in force: no steps to restart from, the cache line enters on one
-// assessment when 5 points or more short, and "within" no longer means "not worse than the group's others".
-it('follows the rules in force in the relax warning, the trial note and the within reason', () => {
+// Plan item 18: the sentences follow the rules in force: no steps to restart from, and "within" no longer means "not
+// worse than the group's others". (The trial note item 18 also changed went with the preview in item 19.)
+it('follows the rules in force in the relax warning and the within reason', () => {
   const text = (messages: unknown, key: string) => String(lookup(messages, `admin.schedQuality.${key}`))
   expect([zh, en].map((messages) => /档|step/.test(text(messages, 'ttftRule.confirmMessage')))).toEqual([false, false])
-  expect(text(zh, 'policy.trialNote')).toContain('报错线和缓存线（差不到 5 个百分点时）要连续两次不达标才进后排')
-  expect(text(en, 'policy.trialNote')).toContain('the error and cache lines (the cache line when less than 5 points short) need two below-standard assessments in a row')
+  expect([zh, en].map((messages) => lookup(messages, 'admin.schedQuality.policy.trialNote'))).toEqual([undefined, undefined])
   expect([zh, en].map((messages) => /其他号|other accounts/.test(text(messages, 'noAction.long.within')))).toEqual([false, false])
 })
 
