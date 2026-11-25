@@ -40,7 +40,7 @@ export default {
       window: '近 12 小时',
       windowPartial: '近 {hours} 小时',
       windowSince: '{time} 起',
-      lacks: '样本 {have} / {need}',
+      lacks: '样本 {have}\u00a0/\u00a0{need}',
       gateOff: '门槛关',
       col: {
         requests: '请求',

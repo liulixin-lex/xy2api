@@ -569,6 +569,7 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     ])
     // The rear line reads against the tolerance its decision was taken with; the share is never with its seconds.
     expect(judged(53, 'ttfo')).toEqual(['37.5 / 17', 'is-rear'])
+    expect(groupRow(53).querySelector('[data-qp-cell="ttfo"] [data-qp-judged]')!.classList.contains('gt__ref--words')).toBe(false)
     expect(judged(53, 'error')).toEqual(['admin.schedQuality.panel.lacks:{"have":12,"need":40}', 'is-trial'])
     expect(judged(53, 'cache')).toBeNull()
     expect(groupRow(53).querySelector('[data-qp-cell="ttfo"]')!.getAttribute('aria-label')).toBe(
@@ -692,6 +693,8 @@ describe('SchedQualityPanel groups table with the last 12 hours', () => {
     await openOn(7, { groupId: 53, model: 'gpt-b' })
     expect(judged(53, 'ttfo')).toEqual(['admin.schedQuality.verdict.pass', 'is-pass'])
     expect(judged(53, 'cache')).toEqual(['admin.schedQuality.panel.lacks:{"have":39,"need":40}', 'is-trial'])
+    // On a phone a trial's words may wrap; a reading never does (it is one figure against its line).
+    expect(groupRow(53).querySelector('[data-qp-cell="cache"] [data-qp-judged]')!.classList.contains('gt__ref--words')).toBe(true)
   })
 
   it('opens a group\'s exemption at its place, and only the removal of one in force there', async () => {

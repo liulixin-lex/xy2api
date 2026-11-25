@@ -74,7 +74,7 @@
         :data-identity="cell.identity"
       >
         <span>{{ cell.text }}</span>
-        <span v-if="cell.judged" class="gt__ref" :class="`is-${cell.judged.tone}`" data-qp-judged>{{ cell.judged.text }}</span>
+        <span v-if="cell.judged" class="gt__ref" :class="[`is-${cell.judged.tone}`, { 'gt__ref--words': cell.judged.words }]" data-qp-judged>{{ cell.judged.text }}</span>
         <span v-else-if="cell.reference" class="gt__ref" data-qp-ref>{{ cell.reference }}</span>
       </span>
     </div>
@@ -200,11 +200,11 @@ const rows = computed(() => {
       // The line that holds the place has its colour on the line under its 12-hour figure, even without one (its
       // evidence may be other groups'): what put it at the rear, or how its trial stands.
       const held = identity === 'rear' || identity === 'trial'
-      let judged: { text: string; tone: 'rear' | 'trial' | 'pass' } | null = null
-      if (identity === 'rear') judged = { text: basisReading(line?.basis) ?? DASH, tone: 'rear' }
+      let judged: { text: string; tone: 'rear' | 'trial' | 'pass'; words: boolean } | null = null
+      if (identity === 'rear') judged = { text: basisReading(line?.basis) ?? DASH, tone: 'rear', words: false }
       else if (identity === 'trial') {
         const note = trialNote(line?.last_eval, t)
-        judged = { text: note.text, tone: note.pass ? 'pass' : 'trial' }
+        judged = { text: note.text, tone: note.pass ? 'pass' : 'trial', words: true }
       }
       const reference = !held && col === 'ttfo' && value !== null ? peers : null
       const verdict = identity === 'plain' ? '' : schedWord('identity', identity, t, te)
@@ -377,9 +377,12 @@ const rows = computed(() => {
   outline: 2px solid theme('colors.primary.500');
   outline-offset: 1px;
 }
+/* A figure's column keeps its width whatever the line under it says: a longer one runs out to the left, into the gap
+   and the empty second line of the column before it, never pushing the column's figures to the right. */
 .gt__n {
   display: grid;
-  justify-items: end;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: unsafe end;
   text-align: right;
   white-space: nowrap;
 }
@@ -421,11 +424,15 @@ const rows = computed(() => {
   color: var(--color-text-muted);
 }
 
-/* A phone: narrower figures, so the place keeps its words. */
+/* A phone: narrower figures, so the place keeps its words; a trial's assessment there wraps at its words (the counts
+   held together) rather than run into the next column's line. */
 @media (max-width: 439px) {
   .gt__row {
     grid-template-columns: minmax(0, 1fr) repeat(4, 50px);
     column-gap: 6px;
+  }
+  .gt__ref--words {
+    white-space: normal;
   }
 }
 /* Touch: the place reaches 40px high with an invisible area inside its row. */

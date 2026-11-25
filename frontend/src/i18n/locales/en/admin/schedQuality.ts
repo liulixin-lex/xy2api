@@ -40,7 +40,7 @@ export default {
       window: 'Last 12 h',
       windowPartial: 'Last {hours} h',
       windowSince: 'Since {time}',
-      lacks: 'samples {have} / {need}',
+      lacks: '{have}\u00a0of\u00a0{need}',
       gateOff: 'Gate off',
       col: {
         requests: 'Reqs',
