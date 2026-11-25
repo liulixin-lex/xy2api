@@ -31,12 +31,17 @@ const publicSettings = {
 
 // Login that answers with a step-up challenge (RT r3 R12). The login button is disabled while the request runs,
 // so the TOTP dialog opens with no focused opener; cancelling it must still bring focus back to the login button.
+// The test answers the login itself, once it has seen the button disabled. A timer cannot hold the request open:
+// flushPromises' setImmediate, queued while the test resumes in Node's check phase, waits for the next loop turn,
+// whose timers run first, so on a loaded machine the login's timer ran first and the button was enabled again.
+const STEP_UP = { requires_2fa: true, temp_token: 't', user_email_masked: 'a***@x.test' }
+let answerLogin: (response: unknown) => void = () => {}
 enableAutoUnmount(afterEach)
 beforeEach(() => {
   document.body.innerHTML = '<div id="app"></div>'
   document.body.className = ''
   getPublicSettingsMock.mockReset().mockResolvedValue(publicSettings)
-  loginMock.mockReset().mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ requires_2fa: true, temp_token: 't', user_email_masked: 'a***@x.test' }), 10)))
+  loginMock.mockReset().mockImplementation(() => new Promise((resolve) => { answerLogin = resolve }))
 })
 
 async function fillForm() {
@@ -64,9 +69,11 @@ async function fillForm() {
 
 async function challenge(button: HTMLButtonElement) {
   await flushPromises()
+  expect(loginMock).toHaveBeenCalledTimes(1)
   expect(button.disabled).toBe(true)
   // A browser moves focus off the login button while it is disabled; jsdom does not.
   ;(document.activeElement as HTMLElement | null)?.blur()
+  answerLogin(STEP_UP)
   await new Promise((resolve) => setTimeout(resolve, 20))
   await flushPromises()
   const firstCell = document.querySelector<HTMLInputElement>('[role="dialog"] input[maxlength="1"]')!
