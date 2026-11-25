@@ -320,6 +320,11 @@ export interface BackendBasis extends BackendSampleCounts {
   cache?: BackendCacheEvidence
   /** Only on trial_timeout; null or absent on other decisions and on records before it was kept. */
   trial_seats?: BackendTrialSeats | null
+  /**
+   * Why a trial ended: fail (back to the rear), good (passed after 15 minutes), deadline (back to normal at its end);
+   * the previous rules wrote qualified | no_samples | deadline. Absent on other decisions.
+   */
+  release_reason?: string | null
 }
 
 /** A change of a line's identity. Records of the previous rules have an empty line and no basis. */

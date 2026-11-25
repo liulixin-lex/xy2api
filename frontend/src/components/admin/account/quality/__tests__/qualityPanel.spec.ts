@@ -159,6 +159,22 @@ describe('decision records', () => {
     expect(mergeDecisions([record(2), record(1, { group_id: 2, until: '2026-11-16T11:25:00Z' })])).toHaveLength(2)
   })
 
+  // Plan item 18: an entry is titled from its first record, so around the switch to 4.0 records of another rule version,
+  // or that ended a trial for another reason, are another entry even in the same minute.
+  it('keeps records of another rule version or another release reason apart in the same minute', () => {
+    const ended = (rule_version: string, release_reason?: string) => ({ action: 'trial_timeout', until: null, basis: basis('ttfo', { rule_version, release_reason }) })
+    const merged = mergeDecisions([
+      record(7, { group_id: 1, ...ended('4.0', 'deadline') }),
+      record(6, { group_id: 2, ...ended('4.0', 'deadline') }),
+      record(5, { group_id: 3, ...ended('3.1', 'deadline') }),
+      record(4, { group_id: 4, ...ended('3.1', 'no_samples') }),
+      record(3, { group_id: 5, ...ended('4.0', 'good') }),
+      record(2, { group_id: 6, ...ended('4.0') }),
+      record(1, { group_id: 7, action: 'trial_timeout', until: null, basis: null })
+    ])
+    expect(merged.map((entry) => entry.items.map((item) => item.id))).toEqual([[7, 6], [5], [4], [3], [2], [1]])
+  })
+
   // Astra 2: ends within the minute shown merge, and each record keeps its own end (and so its evidence).
   it('keeps each record\'s own end when ends share the minute shown', () => {
     const merged = mergeDecisions([record(2, { until: '2026-11-16T11:05:01Z' }), record(1, { group_id: 2, until: '2026-11-16T11:05:59Z' })])

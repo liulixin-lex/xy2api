@@ -77,7 +77,9 @@
  * older pages. A line with evidence is a button: it grows open to the figures the decision was taken on (SchedEvidence),
  * once for the groups that share them and apart, with their pills and own ends, where they differ; and why a trial
  * ended without a verdict. Another account starts over; a quality change made from the page loads the first page again.
- * Records of the previous rules have no evidence and read "旧规则 · <action>".
+ * Records of the previous rules (no line, or a rule version other than the one in force, or none) read
+ * "旧规则 · <action>", as they always did otherwise. A trial that ends under the rules in force at its deadline reads
+ * 到期回正常 (with why it was not released sooner under it); one that passed or failed reads by its action as before.
  */
 import { computed, reactive, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -87,7 +89,7 @@ import schedQualityAPI from '@/api/admin/schedQuality'
 import type { BackendDecision } from '@/api/admin/schedQualityTypes'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
 import { trackSchedReload, useSchedLayers } from '@/composables/useSchedLayers'
-import { schedWord } from '@/utils/schedQualityFormat'
+import { SCHED_RULE_VERSION, schedWord } from '@/utils/schedQualityFormat'
 import SchedEvidence from './SchedEvidence.vue'
 import { basisFigures, evidenceCauses, mergeDecisions, type MergedDecision } from './qualityPanel'
 
@@ -211,10 +213,18 @@ function toggle(key: string) {
   else shown.add(key)
 }
 
-/** The action in words (其他 for one the copy does not know); records of the previous rules (no line) say so first. */
+/** Of the previous rules: no line (before lines were kept), or a basis of another rule version (or none). */
+const previousRules = (entry: MergedDecision) => !entry.line || entry.items[0].basis?.rule_version !== SCHED_RULE_VERSION
+
+/**
+ * The action in words (其他 for one the copy does not know); records of the previous rules say so first. Under the rules
+ * in force a trial that reached its deadline reads 到期回正常; the other ends read by their action (good is 试用达标,
+ * fail 试用不达标). An entry's records share the rule version and the release reason (mergeDecisions).
+ */
 function actionWord(entry: MergedDecision): string {
   const word = schedWord('decisions.action', entry.action, t, te)
-  return entry.line ? word : t('admin.schedQuality.decisions.legacy', { action: word })
+  if (previousRules(entry)) return t('admin.schedQuality.decisions.legacy', { action: word })
+  return entry.items[0].basis?.release_reason === 'deadline' ? t('admin.schedQuality.decisions.deadline') : word
 }
 
 const tone = (entry: MergedDecision) => (!entry.line ? 'muted' : BAD.has(entry.action) ? 'rear' : GOOD.has(entry.action) ? 'pass' : entry.action === 'trial' ? 'trial' : 'muted')

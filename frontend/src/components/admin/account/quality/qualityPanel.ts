@@ -108,7 +108,6 @@ export interface MergedDecision {
   action: string
   model: string
   line: BackendDim | ''
-  level: number
   until: string | null
   /** Group ids, each once, in record order. */
   groups: number[]
@@ -119,17 +118,21 @@ export interface MergedDecision {
 const minuteOf = (time: string | null) => (time ? Math.floor(Date.parse(time) / 60_000) : '')
 
 /**
- * The decision list as read: records of the same minute, action, model, line and end minute (as shown) are one entry
- * listing their groups (the engine judges a model's line in every group of the account at once). Every record stays in
- * the entry with its own end and evidence. Newest first, as given.
+ * The decision list as read: records of the same minute, action, model, line, end minute (as shown), rule version and
+ * release reason are one entry listing their groups (the engine judges a model's line in every group of the account at
+ * once). The entry's title is read from its first record, so records of another rule version (around a switch) or that
+ * ended a trial for another reason are another entry. Every record stays in the entry with its own end and evidence.
+ * Newest first, as given.
  */
 export function mergeDecisions(items: BackendDecision[]): MergedDecision[] {
   const out = new Map<string, MergedDecision>()
   for (const item of items) {
-    const key = [minuteOf(item.at), item.action, item.model, item.line, minuteOf(item.until)].join('|')
+    const key = JSON.stringify([
+      minuteOf(item.at), item.action, item.model, item.line, minuteOf(item.until), item.basis?.rule_version ?? '', item.basis?.release_reason ?? ''
+    ])
     const entry = out.get(key)
     if (!entry) {
-      out.set(key, { key, at: item.at, action: item.action, model: item.model, line: item.line, level: item.level, until: item.until, groups: [item.group_id], items: [item] })
+      out.set(key, { key, at: item.at, action: item.action, model: item.model, line: item.line, until: item.until, groups: [item.group_id], items: [item] })
       continue
     }
     entry.items.push(item)

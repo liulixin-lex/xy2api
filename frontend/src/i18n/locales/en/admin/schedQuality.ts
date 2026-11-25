@@ -268,6 +268,7 @@ export default {
         relax: 'Relaxed, judged again',
         clear: 'Level cleared',
       },
+      deadline: 'Back to normal at the deadline',
     },
     verdict: {
       pass: 'Pass',

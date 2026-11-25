@@ -268,6 +268,7 @@ export default {
         relax: '放宽重判',
         clear: '级别清零',
       },
+      deadline: '到期回正常',
     },
     verdict: {
       pass: '达标',

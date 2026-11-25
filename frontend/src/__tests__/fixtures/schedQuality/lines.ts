@@ -61,7 +61,7 @@ export function groupModel(model: string, identities: Partial<Record<BackendDim,
 /** A decision's basis (GET …/accounts/:id/decisions) with this group's and all the counted units of its line. */
 export function basis(dim: BackendDim, patch: Partial<BackendBasis> = {}): BackendBasis {
   const evidence = { ttfo: { ttft: ttfoEvidence() }, error: { error: errorEvidence() }, cache: { cache: cacheEvidence() } }[dim]
-  return { rule_version: '3.0', line: dim, kind: 'regular', threshold: 0.05, source_groups: [53], ...evidence, ...SAMPLES[dim], ...patch }
+  return { rule_version: '4.0', line: dim, kind: 'regular', threshold: 0.05, source_groups: [53], ...evidence, ...SAMPLES[dim], ...patch }
 }
 
 /** An older decision's basis: written before the counts, n_local and trial_seats were kept (the fields absent). */
