@@ -127,37 +127,32 @@ func TestSchedAssessmentDTOAcrossRawWatermarkOffsets(t *testing.T) {
 
 func TestSchedAssessmentPolicySaveKeepsHistory(t *testing.T) {
 	f := newQualityFixture(t)
-	f.badTTFT()
+	f.ledger.Rows = errorRecoverySamples(20, 20, f.now.Add(-30*time.Second))
 	f.cycle()
-	before := f.line(q.DimensionTTFO)
-	require.Equal(t, q.ActionEnter, before.LastAssessment[0].Action)
+	f.now = f.now.Add(q.RegularInterval)
+	f.cycle()
+	before := f.line(q.DimensionError)
+	require.Equal(t, q.ActionEnter, before.LastAssessment[len(before.LastAssessment)-1].Action)
 	f.now = before.Until.Add(10 * time.Second)
 	f.cycle()
-	before = f.line(q.DimensionTTFO)
-	require.Len(t, before.LastAssessment, 2)
-	require.Equal(t, q.ActionTrial, before.LastAssessment[1].Action)
+	before = f.line(q.DimensionError)
+	require.Len(t, before.LastAssessment, 3)
+	require.Equal(t, q.ActionTrial, before.LastAssessment[2].Action)
 	f.now = f.now.Add(2 * time.Second)
-	// The fixed rear period is an hour; replenish evidence before the explicit
-	// policy reassessment instead of relying on the expired 20-minute fixture.
-	oldSamples := len(f.ledger.Rows)
-	f.badTTFT()
-	for i := oldSamples; i < len(f.ledger.Rows); i++ {
-		f.ledger.Rows[i].AttemptID = "fresh-" + f.ledger.Rows[i].AttemptID
-		f.ledger.Rows[i].RequestID = f.ledger.Rows[i].AttemptID
-		f.ledger.Rows[i].InsertedAt = f.ledger.Rows[i].FinishedAt
-	}
+	// This batch is visible to the explicit rejudge, after the periodic horizon.
+	f.ledger.Rows = append(f.ledger.Rows, errorRecoverySamples(52, 0, f.now.Add(-time.Second))...)
 	policy := f.store.Policies[10].Policy
-	policy.TTFTSeconds = 100
+	policy.MaxErrorRate = .1
 	_, err := f.e.UpdatePolicy(t.Context(), 10, 0, policy)
 	require.NoError(t, err)
-	after := f.line(q.DimensionTTFO)
-	require.Len(t, after.LastAssessment, 3)
-	require.Equal(t, before.LastAssessment, after.LastAssessment[:2])
-	seg := after.LastAssessment[2]
+	after := f.line(q.DimensionError)
+	require.Len(t, after.LastAssessment, 4)
+	require.Equal(t, before.LastAssessment, after.LastAssessment[:3])
+	seg := after.LastAssessment[3]
 	require.Equal(t, q.EventRegular, seg.Kind)
 	require.Equal(t, q.ReasonWithin, seg.Reason)
 	want := &SchedAdminLastEval{At: f.now.Format(time.RFC3339Nano), Since: f.now.Format(time.RFC3339Nano), Count: 1, Reason: q.ReasonWithin, Causes: []string{}}
 	require.Equal(t, want, SchedAdminLastEvalFromState(after))
-	published := SchedAdminGroupModel(f.e.Snapshot().RowsForAccount(1)[0], false).Lines.TTFO.LastEval
+	published := SchedAdminGroupModel(f.e.Snapshot().RowsForAccount(1)[0], false).Lines.Error.LastEval
 	require.Equal(t, want, published)
 }
