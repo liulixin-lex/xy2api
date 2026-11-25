@@ -400,6 +400,25 @@ func TestRuleBAbsoluteAndGoodBoundaries(t *testing.T) {
 	}
 }
 
+func TestRuleBBadTakesPrecedenceOverGood(t *testing.T) {
+	in := ruleBTestInput(20, 0, false)
+	for i := range in.Samples {
+		if i < 18 {
+			in.Samples[i].TTFOMs = 11000
+			in.Samples[i].SessionKey = fmt.Sprint(i % 2)
+		} else {
+			in.Samples[i].SessionKey = "fast"
+		}
+	}
+	got := evaluateRuleBTest(t, in, RuleBParams{Tolerance: .74, Confidence: .51})
+	if got.Counts != (RuleBCounts{N: 20, K: 18, S: 3, D: 2}) || got.Prior != .1 || !got.Absolute || !got.GoodBase {
+		t.Fatalf("fixture must qualify for both verdicts: %+v", got)
+	}
+	if got.State != RuleBBad {
+		t.Fatalf("bad must take precedence: state=%v p_abs=%.17g worst_mean=%.17g", got.State, got.AbsoluteProbability, got.WorstMean)
+	}
+}
+
 func TestRuleBPriorsPosteriorsAndPurity(t *testing.T) {
 	in := ruleBTestInput(19, 20, true)
 	before := in
