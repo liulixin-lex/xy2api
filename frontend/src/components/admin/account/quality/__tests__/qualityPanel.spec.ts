@@ -137,6 +137,26 @@ describe('decision figures', () => {
     expect(basisReading(basis('cache', { cache: undefined }))).toBeNull()
   })
 
+  // Astra review of fe, must 1: rounding never puts a reading on its line or across it. Below stays below (a cache
+  // line falls short only below its minimum), above stays above (errors and first output fail only above theirs),
+  // equal stays equal; a reading away from its line keeps its usual figure.
+  it('keeps a reading on its own side of the line when rounded, and its usual figure away from the line', () => {
+    const cache = (ratio: number, min = 0.8) => basisReading(basis('cache', { cache: cacheEvidence({ ratio, min_ratio: min }) }))
+    const ttfo = (k: number, n: number) => basisReading(basis('ttfo', { ttft: ttfoEvidence({ k, n, tolerance: 0.2 }) }))
+    const error = (failed: number, padded: number) => basisReading(basis('error', { error: errorEvidence({ failed, padded, limit: 0.05 }) }))
+    expect([cache(0.7999), cache(0.80001), cache(0.8)]).toEqual(['79.9 / 80', '80.1 / 80', '80.0 / 80'])
+    expect([ttfo(501, 2500), ttfo(499, 2500), ttfo(500, 2500)]).toEqual(['20.1 / 20', '19.9 / 20', '20.0 / 20'])
+    expect([error(501, 10000), error(499, 10000), error(500, 10000)]).toEqual(['5.1 / 5', '4.9 / 5', '5.0 / 5'])
+    // Away from the line: rounded as usual (76.66 is 76.7, not cut to 76.6), no extra decimals.
+    expect([cache(0.7666, 0.86), cache(0.9149, 0.86), ttfo(27, 40)]).toEqual(['76.7 / 86', '91.5 / 86', '67.5 / 20'])
+    // A line set to two decimals is shown so; equal to it, the reading reads the same.
+    expect(basisReading(basis('error', { error: errorEvidence({ failed: 225, padded: 10000, limit: 0.0225 }) }))).toBe('2.25 / 2.25')
+    expect(basisReading(basis('error', { error: errorEvidence({ failed: 226, padded: 10000, limit: 0.0225 }) }))).toBe('2.3 / 2.25')
+    // A line finer than its usual figure: rounded away from it first, then with the decimals that keep them apart.
+    expect(cache(0.071994, 0.071996)).toBe('7.1 / 7.2')
+    expect(cache(0.071998, 0.071996)).toBe('7.1998 / 7.1996')
+  })
+
   it('dates the evidence from the later of its cut and its window\'s start to the window\'s end, only from the record', () => {
     const local = (h: number, m: number) => new Date(2026, 10, 25, h, m).toISOString()
     const windowed = { window_from: local(12, 45), window_to: local(13, 15) }

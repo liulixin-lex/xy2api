@@ -178,30 +178,60 @@ export const allGroupsExemption = (detail: Pick<BackendAccountDetail, 'exemption
 const pad2 = (n: number) => String(n).padStart(2, '0')
 /** A share as a figure without its sign, one decimal: 0.7623 → "76.2". */
 const shareFigure = (ratio: number) => (ratio * 100).toFixed(1)
-/** A threshold as set, without its sign: 0.86 → "86", 0.025 → "2.5". */
-const limitFigure = (ratio: number) => String(Number((ratio * 100).toFixed(1)))
+/** A threshold as set, without its sign, to two decimals at most: 0.86 → "86", 0.0225 → "2.25". */
+const limitFigure = (ratio: number, digits = 2) => String(Number((ratio * 100).toFixed(digits)))
+
+/**
+ * A share against its line as the two figures shown, on the same side of each other as the numbers they stand for:
+ * below stays below, above stays above, equal stays equal. The share has one decimal, rounded as usual; only when that
+ * would put it on the line or across it (0.7999 against 0.8 reads 80.0) is it rounded away from the line instead
+ * (79.9), and with more decimals if that is still not enough (the line then shown as finely). Nothing about the verdict
+ * is assumed: the side is the numbers' own, the one each line's rule compares (a share equal to its line is on it).
+ */
+function shareAgainst(share: number, line: number): [string, string] {
+  const side = Math.sign(share - line)
+  const shown = (digits: number, away: boolean) => {
+    const scale = 10 ** digits
+    const raw = share * 100 * scale
+    const units = !away || side === 0 ? Math.round(raw) : side < 0 ? Math.floor(raw) : Math.ceil(raw)
+    return (units / scale).toFixed(digits)
+  }
+  const tries: [number, boolean][] = [[1, false], [1, true], [2, true], [3, true], [4, true]]
+  for (const [digits, away] of tries) {
+    const figure = shown(digits, away)
+    const bar = limitFigure(line, Math.max(2, digits))
+    if (Math.sign(Number(figure) - Number(bar)) === side) return [figure, bar]
+  }
+  return [String(share * 100), String(line * 100)]
+}
 
 /**
  * What a decision read against the line it was judged by — "76.2 / 86" — the one text the panel's cell, the list's tip
  * card and the opened decision all show for it. First output: the share of the samples over the group's limit against
  * the tolerance that decision was taken with (a dash on records from before it was kept: never today's setting);
  * errors: the failure share against the limit; cache: the hit ratio against the minimum. A share with nothing counted
- * is a dash. Null when there is no basis or it has no evidence of its own line.
+ * is a dash. The two figures are on the same side of each other as the numbers (shareAgainst): a cache reading below its
+ * minimum never reads as on it. Null when there is no basis or it has no evidence of its own line.
  */
 export function basisReading(basis: BackendBasis | null | undefined): string | null {
   if (!basis) return null
-  let reading: [string, string] | null = null
+  let pair: [number | null, number | null] | null = null
   if (basis.line === 'ttfo' && basis.ttft) {
     const e = basis.ttft
-    reading = [e.n > 0 ? shareFigure(e.k / e.n) : DASH, e.tolerance != null ? limitFigure(e.tolerance) : DASH]
+    pair = [e.n > 0 ? e.k / e.n : null, e.tolerance ?? null]
   } else if (basis.line === 'error' && basis.error) {
     const e = basis.error
-    reading = [e.padded > 0 ? shareFigure(e.failed / e.padded) : DASH, limitFigure(e.limit)]
+    pair = [e.padded > 0 ? e.failed / e.padded : null, e.limit]
   } else if (basis.line === 'cache' && basis.cache) {
     const e = basis.cache
-    reading = [e.turns > 0 ? shareFigure(e.ratio) : DASH, limitFigure(e.min_ratio)]
+    pair = [e.turns > 0 ? e.ratio : null, e.min_ratio]
   }
-  return reading && `${reading[0]} / ${reading[1]}`
+  if (!pair) return null
+  const [share, line] = pair
+  const reading: [string, string] = share !== null && line !== null
+    ? shareAgainst(share, line)
+    : [share !== null ? shareFigure(share) : DASH, line !== null ? limitFigure(line) : DASH]
+  return `${reading[0]} / ${reading[1]}`
 }
 
 /** The evidence of a basis's own line, whichever line it is. */
