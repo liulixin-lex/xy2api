@@ -96,11 +96,15 @@ type RuleBSample struct {
 
 // Eligible reports whether this attempt belongs in the Rule B evidence window.
 func (s RuleBSample) Eligible(now, cut time.Time) bool {
+	return s.eligible(now.Add(-RuleBWindow), now, cut)
+}
+
+func (s RuleBSample) eligible(from, to, cut time.Time) bool {
 	ownerTimeout := s.CaptureVersion >= FullTierTimeoutCaptureVersion && s.Warm && s.FullTierFirstOutputTimeout && s.Outcome == OutcomeTimeout
 	return s.Stream && (!s.SwitchedAccount || ownerTimeout) &&
 		(s.TTFOMs > 0 || s.Outcome == OutcomeTimeout) &&
 		s.StartedAt.After(cut) && !s.AvailableAt.Before(cut) &&
-		!s.AvailableAt.Before(now.Add(-RuleBWindow)) && !s.AvailableAt.After(now)
+		!s.AvailableAt.Before(from) && !s.AvailableAt.After(to)
 }
 
 // RuleBScope identifies an account/model and its target group. Evidence for the
@@ -172,10 +176,10 @@ type RuleBResult struct {
 	UnknownReasons                             []RuleBUnknownReason
 }
 
-// CountRuleBEvidence counts an account/model across source groups. Both available
-// window endpoints and the started-at cutoff are inclusive.
+// CountRuleBEvidence counts an account/model across source groups. The available-at
+// window is inclusive; the started-at cutoff is strict.
 func CountRuleBEvidence(samples []RuleBSample, scope RuleBScope, now, cut time.Time, limitSeconds float64) RuleBCounts {
-	return countAccountRuleB(samples, scope, now, cut, limitSeconds).RuleBCounts
+	return countAccountRuleB(samples, scope, now.Add(-RuleBWindow), now, cut, limitSeconds).RuleBCounts
 }
 
 type ruleBWindow struct {
@@ -184,13 +188,13 @@ type ruleBWindow struct {
 	nLocal       float64
 }
 
-func countAccountRuleB(samples []RuleBSample, scope RuleBScope, now, cut time.Time, limitSeconds float64) ruleBWindow {
-	return countRuleB(samples, scope.GroupID, now, cut, limitSeconds, func(s RuleBSample) bool {
+func countAccountRuleB(samples []RuleBSample, scope RuleBScope, from, to, cut time.Time, limitSeconds float64) ruleBWindow {
+	return countRuleB(samples, scope.GroupID, from, to, cut, limitSeconds, func(s RuleBSample) bool {
 		return s.AccountID == scope.AccountID && s.Model == scope.Model
 	})
 }
 
-func countRuleB(samples []RuleBSample, groupID int64, now, cut time.Time, limitSeconds float64, include func(RuleBSample) bool) ruleBWindow {
+func countRuleB(samples []RuleBSample, groupID int64, from, to, cut time.Time, limitSeconds float64, include func(RuleBSample) bool) ruleBWindow {
 	var out ruleBWindow
 	type session struct {
 		group int64
@@ -198,10 +202,10 @@ func countRuleB(samples []RuleBSample, groupID int64, now, cut time.Time, limitS
 	}
 	sessions, slowSessions := make(map[session]bool), make(map[session]bool)
 	for _, s := range samples {
-		if !include(s) || !s.Eligible(now, cut) {
+		if !include(s) || !s.eligible(from, to, cut) {
 			continue
 		}
-		weight := math.Exp2(-float64(now.Sub(s.AvailableAt)) / float64(RuleBHalfLife))
+		weight := math.Exp2(-float64(to.Sub(s.AvailableAt)) / float64(RuleBHalfLife))
 		out.N += weight
 		out.total++
 		if s.GroupID == groupID {
@@ -248,13 +252,13 @@ func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult
 	if in.LimitSeconds <= 0 || math.IsNaN(in.LimitSeconds) || math.IsInf(in.LimitSeconds, 0) {
 		return r, fmt.Errorf("rule B limit_seconds: must be finite and positive")
 	}
-	window := countAccountRuleB(in.Samples, in.Scope, in.Now, in.Cut, in.LimitSeconds)
+	window := countAccountRuleB(in.Samples, in.Scope, r.WindowFrom, r.WindowTo, in.Cut, in.LimitSeconds)
 	r.Counts = window.RuleBCounts
 	r.SamplesLocal, r.SamplesTotal, r.NLocal = window.local, window.total, window.nLocal
-	r.PriorGroupCounts = countRuleB(in.GroupSamples, in.Scope.GroupID, in.Now, time.Time{}, in.LimitSeconds, func(s RuleBSample) bool {
+	r.PriorGroupCounts = countRuleB(in.GroupSamples, in.Scope.GroupID, r.WindowFrom, r.WindowTo, time.Time{}, in.LimitSeconds, func(s RuleBSample) bool {
 		return s.GroupID == in.Scope.GroupID && s.Model == in.Scope.Model
 	}).RuleBCounts
-	r.PriorLocalCounts = countRuleB(in.GroupSamples, in.Scope.GroupID, in.Now, time.Time{}, in.LimitSeconds, func(s RuleBSample) bool {
+	r.PriorLocalCounts = countRuleB(in.GroupSamples, in.Scope.GroupID, r.WindowFrom, r.WindowTo, time.Time{}, in.LimitSeconds, func(s RuleBSample) bool {
 		return s.GroupID == in.Scope.GroupID && s.Model == in.Scope.Model && s.AccountID == in.Scope.AccountID
 	}).RuleBCounts
 	g, local, own := r.PriorGroupCounts, r.PriorLocalCounts, r.Counts
