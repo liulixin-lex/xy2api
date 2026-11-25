@@ -108,6 +108,9 @@ func TestRuleBVectors(t *testing.T) {
 	}
 	// Retain the frozen reference's own evidence, prior and absolute posterior.
 	// Its relative gates and final verdicts describe the retired rule.
+	sameFinite := func(got, want float64) bool {
+		return !math.IsNaN(got) && !math.IsInf(got, 0) && math.Abs(got-want) <= 1e-8
+	}
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			in := RuleBInput{Scope: tc.Scope, Now: ruleBFixtureTime(tc.Now), Cut: ruleBFixtureTime(tc.Cut), LimitSeconds: tc.LimitSeconds,
@@ -115,12 +118,12 @@ func TestRuleBVectors(t *testing.T) {
 			got := evaluateRuleBTest(t, in, tc.Params)
 			want := tc.Expected
 			for _, pair := range [][2]RuleBCounts{{got.Counts, want.Counts}, {got.PriorGroupCounts, want.PriorGroupCounts}, {got.PriorLocalCounts, want.PriorLocalCounts}} {
-				if math.Abs(pair[0].N-pair[1].N) > 1e-8 || math.Abs(pair[0].K-pair[1].K) > 1e-8 || math.Abs(pair[0].X-pair[1].X) > 1e-8 || pair[0].S != pair[1].S || pair[0].D != pair[1].D {
+				if !sameFinite(pair[0].N, pair[1].N) || !sameFinite(pair[0].K, pair[1].K) || !sameFinite(pair[0].X, pair[1].X) || pair[0].S != pair[1].S || pair[0].D != pair[1].D {
 					t.Fatalf("counts: %+v", pair)
 				}
 			}
 			for _, pair := range [][2]float64{{got.Prior, want.Prior}, {got.A, want.A}, {got.B, want.B}, {got.AbsoluteProbability, want.AbsoluteProbability}, {got.WorstMean, want.WorstMean}} {
-				if math.Abs(pair[0]-pair[1]) > 1e-8 {
+				if !sameFinite(pair[0], pair[1]) {
 					t.Fatalf("posterior: %v", pair)
 				}
 			}
@@ -132,6 +135,9 @@ func TestRuleBVectors(t *testing.T) {
 			}
 			if got.State != state || got.Absolute != want.Absolute || got.GoodBase != want.GoodBase {
 				t.Fatalf("absolute verdict: %+v", got)
+			}
+			if (got.State == RuleBUnknown) != (len(got.UnknownReasons) > 0) {
+				t.Fatalf("verdict %v and causes %v disagree", got.State, got.UnknownReasons)
 			}
 		})
 	}
@@ -344,7 +350,7 @@ func TestRuleBAbsoluteAndGoodBoundaries(t *testing.T) {
 		state  RuleBState
 		reason RuleBUnknownReason
 	}{
-		{"no-peers-good", func(*RuleBInput) {}, RuleBGood, ""},
+		{"mass-exactly-20", func(*RuleBInput) {}, RuleBGood, ""},
 		{"no-peers-bad", func(in *RuleBInput) {
 			for i := range in.Samples {
 				in.Samples[i].TTFOMs = 11000
@@ -352,9 +358,10 @@ func TestRuleBAbsoluteAndGoodBoundaries(t *testing.T) {
 		}, RuleBBad, ""},
 		{"no-samples", func(in *RuleBInput) { in.Samples = nil }, RuleBUnknown, RuleBNoSamples},
 		{"mass-19", func(in *RuleBInput) { in.Samples = in.Samples[:19] }, RuleBUnknown, RuleBMassInsufficient},
-		{"mass-rounding", func(in *RuleBInput) {
-			in.Samples[0].AvailableAt = in.Now.Add(time.Duration(float64(RuleBHalfLife) * math.Log2(1-5e-9)))
-		}, RuleBGood, ""},
+		{"mass-13-microseconds-short", func(in *RuleBInput) {
+			in.Samples[0].AvailableAt = in.Now.Add(-13 * time.Microsecond)
+			in.Samples[0].StartedAt = in.Samples[0].AvailableAt
+		}, RuleBUnknown, RuleBMassInsufficient},
 		{"mass-below-tolerance", func(in *RuleBInput) {
 			in.Samples[0].AvailableAt = in.Now.Add(time.Duration(float64(RuleBHalfLife) * math.Log2(1-2e-8)))
 		}, RuleBUnknown, RuleBMassInsufficient},

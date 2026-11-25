@@ -8,6 +8,7 @@ import (
 
 const (
 	ruleBMinMass         = 20
+	ruleBMassRounding    = 1e-12 // Allow rounding when adding discounted weights near 20.
 	ruleBMinSessions     = 3
 	ruleBMinSlowSessions = 2
 	RuleBHalfLife        = 30 * time.Minute
@@ -265,7 +266,7 @@ func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult
 	// Compare the CDF itself, not the rounded/reconstructed tail probability.
 	r.Absolute = absoluteCDF <= 1-p.Confidence
 	r.WorstMean = (own.K + own.X + r.Prior*RuleBPriorStrength) / (own.N + RuleBPriorStrength)
-	r.GoodBase = own.N >= ruleBMinMass-1e-8 && own.S >= ruleBMinSessions && r.WorstMean <= p.Tolerance
+	r.GoodBase = own.N >= ruleBMinMass-ruleBMassRounding && own.S >= ruleBMinSessions && r.WorstMean <= p.Tolerance
 	switch {
 	case r.Absolute && own.D >= ruleBMinSlowSessions:
 		r.State = RuleBBad
