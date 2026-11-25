@@ -145,8 +145,10 @@ func TestSchedQualityResetDropsPriorActionFields(t *testing.T) {
 		require.NoError(t, decoder.Decode(&record))
 		require.Equal(t, "sched_quality.state", record["msg"])
 		require.Equal(t, "reset", record["action"])
-		require.NotContains(t, record, "release_reason")
-		require.NotContains(t, record, "trial_duration_seconds")
+		require.Contains(t, record, "release_reason")
+		require.Equal(t, "", record["release_reason"])
+		require.Contains(t, record, "trial_duration_seconds")
+		require.Equal(t, float64(0), record["trial_duration_seconds"])
 		count++
 	}
 	require.Equal(t, 3, count)
