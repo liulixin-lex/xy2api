@@ -433,8 +433,8 @@ func (r *schedAdminHandlerAccounts) SchedAdminAccountIDs(context.Context) ([]int
 func (schedAdminHandlerGroups) GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64, error) {
 	return []int64{1}, nil
 }
-func (e *schedAdminHandlerEngine) PreviewPolicy(context.Context, int64, schedquality.Policy) ([]service.SchedPolicyChange, error) {
-	return []service.SchedPolicyChange{}, nil
+func (e *schedAdminHandlerEngine) PreviewPolicy(context.Context, int64, schedquality.Policy) ([]service.SchedPolicyChange, schedquality.RuleBParams, error) {
+	return []service.SchedPolicyChange{}, schedquality.DefaultRuleBParams(), nil
 }
 
 type schedAdminHandlerUsage struct{}

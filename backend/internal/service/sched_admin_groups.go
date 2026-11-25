@@ -205,11 +205,11 @@ func (s *SchedAdminService) PreviewPolicy(ctx context.Context, g, version int64,
 		return out, ErrSchedPolicyConflict
 	}
 	out.RelaxedLines = append(out.RelaxedLines, relaxedPolicyLines(current.Policy, policy)...)
-	currentAssessments, err := s.d.Engine.PreviewPolicy(ctx, g, current.Policy)
+	currentAssessments, _, err := s.d.Engine.PreviewPolicy(ctx, g, current.Policy)
 	if err != nil {
 		return out, err
 	}
-	changes, err := s.d.Engine.PreviewPolicy(ctx, g, policy)
+	changes, rule, err := s.d.Engine.PreviewPolicy(ctx, g, policy)
 	if err != nil {
 		return out, err
 	}
@@ -262,11 +262,7 @@ func (s *SchedAdminService) PreviewPolicy(ctx context.Context, g, version int64,
 		out.Changed = out.Changed[:50]
 	}
 	if perf := s.d.Engine.PerformanceSnapshot(); perf.Usable(s.d.Now()) && len(perf.reach) != 0 && len(names) != 0 {
-		rule, err := s.d.Engine.TTFTRule(ctx)
-		if err != nil {
-			return out, err
-		}
-		out.Reach = perf.policyReach(names, s.snapshot().ResetAt, policy, rule.Params.Tolerance)
+		out.Reach = perf.policyReach(names, s.snapshot().ResetAt, policy, rule.Tolerance)
 	}
 	return out, nil
 }

@@ -26,12 +26,13 @@ type schedAdminGroupMembers struct {
 func (g schedAdminGroupMembers) GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64, error) {
 	return g.ids, nil
 }
-func (e *schedAdminEngine) PreviewPolicy(_ context.Context, _ int64, p schedquality.Policy) ([]SchedPolicyChange, error) {
+func (e *schedAdminEngine) PreviewPolicy(_ context.Context, _ int64, p schedquality.Policy) ([]SchedPolicyChange, schedquality.RuleBParams, error) {
 	e.previewCalls = append(e.previewCalls, p)
 	if e.preview != nil {
-		return e.preview(p)
+		changes, err := e.preview(p)
+		return changes, e.rule.Params, err
 	}
-	return e.changes, nil
+	return e.changes, e.rule.Params, nil
 }
 func (r *schedAdminAccounts) SchedAdminDecisions(context.Context, int64, int, int64) ([]SchedAdminDecision, error) {
 	return []SchedAdminDecision{}, nil
