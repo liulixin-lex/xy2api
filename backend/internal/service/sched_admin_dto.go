@@ -295,6 +295,16 @@ type SchedAdminPolicyPreview struct {
 	RelaxedLines []schedquality.Dimension                         `json:"relaxed_lines"`
 	Lines        map[schedquality.Dimension]SchedAdminPreviewLine `json:"lines"`
 	Changed      []SchedAdminPolicyChange                         `json:"changed"`
+	Reach        []SchedAdminPolicyReach                          `json:"reach"`
+}
+type SchedAdminPolicyReach struct {
+	Model       string               `json:"model"`
+	Cache       SchedAdminReachCount `json:"cache"`
+	FirstOutput SchedAdminReachCount `json:"first_output"`
+}
+type SchedAdminReachCount struct {
+	OK int `json:"ok"`
+	N  int `json:"n"`
 }
 type SchedAdminPolicyChange struct {
 	AccountID int64                  `json:"account_id"`

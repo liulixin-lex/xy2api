@@ -174,9 +174,13 @@ const conversionSuccessStream = "data: " + `{"type":"response.completed","respon
 type conversionRetryLogs struct {
 	mu      sync.Mutex
 	entries []*logger.LogEvent
+	ops     *service.OpsSystemLogSink
 }
 
 func (s *conversionRetryLogs) WriteLogEvent(e *logger.LogEvent) {
+	if s.ops != nil {
+		s.ops.WriteLogEvent(e)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e.Message == "openai_conversion_retry" || e.Message == "upstream_conversion_failed" || e.Message == "billing.usage_task_panic" {
@@ -193,6 +197,16 @@ func (s *conversionRetryLogs) events(name string) []map[string]any {
 		}
 	}
 	return result
+}
+
+type conversionRetrySystemLogRepo struct {
+	service.OpsRepository
+	saved []*service.OpsInsertSystemLogInput
+}
+
+func (r *conversionRetrySystemLogRepo) BatchInsertSystemLogs(_ context.Context, rows []*service.OpsInsertSystemLogInput) (int64, error) {
+	r.saved = append(r.saved, rows...)
+	return int64(len(rows)), nil
 }
 
 type conversionAttemptRecorder struct{ rows []service.SchedAttemptFinish }
@@ -217,6 +231,12 @@ func TestChatConversionRetryEndToEnd(t *testing.T) {
 		for _, scenario := range []string{"success", "functions", "tool_prefix", "second_conflict", "second_http_error", "second_protocol_fallback", "after_output", "heartbeat", "no_candidate", "candidate_protocol", "budget_limit", "same_account_repair", "cancel_before_retry", "cancel_second"} {
 			t.Run(fmt.Sprintf("stream=%t/%s", stream, scenario), func(t *testing.T) {
 				sink := &conversionRetryLogs{}
+				var systemLogs conversionRetrySystemLogRepo
+				if stream && scenario == "success" {
+					sink.ops = service.NewOpsSystemLogSink(&systemLogs)
+					sink.ops.Start()
+					t.Cleanup(sink.ops.Stop)
+				}
 				logger.SetSink(sink)
 				t.Cleanup(func() { logger.SetSink(nil) })
 				upstream := &conversionRetryUpstream{responses: []string{conversionConflictStream(false), conversionSuccessStream}}
@@ -345,6 +365,28 @@ func TestChatConversionRetryEndToEnd(t *testing.T) {
 				require.Empty(t, sink.events("billing.usage_task_panic"))
 				events := sink.events("openai_conversion_retry")
 				require.Len(t, events, 1)
+				if sink.ops != nil {
+					logger.L().Info("conversion-retry-ordinary-info")
+					sink.ops.Stop() // Drain the real sink before inspecting the insert rows.
+					var retry []*service.OpsInsertSystemLogInput
+					for _, row := range systemLogs.saved {
+						switch row.Message {
+						case "openai_conversion_retry":
+							retry = append(retry, row)
+						case "conversion-retry-ordinary-info":
+							t.Fatal("ordinary Info reached the system log insert")
+						}
+					}
+					require.Len(t, retry, 1)
+					require.Equal(t, "sched_quality", retry[0].Component)
+					require.Equal(t, "info", retry[0].Level)
+					requestID := resilience.StateFrom(c.Request.Context()).GatewayRequestID()
+					require.NotEmpty(t, requestID)
+					require.Equal(t, requestID, gjson.Get(retry[0].ExtraJSON, "gateway_request_id").String())
+					require.True(t, gjson.Get(retry[0].ExtraJSON, "retried").Bool())
+					require.Equal(t, "success", gjson.Get(retry[0].ExtraJSON, "result").String())
+					require.Nil(t, retry[0].UserID)
+				}
 				if scenario == "tool_prefix" && stream {
 					require.Equal(t, "output_started", events[0]["skip_reason"])
 					require.Contains(t, rec.Body.String(), "fixture_stale_name")
