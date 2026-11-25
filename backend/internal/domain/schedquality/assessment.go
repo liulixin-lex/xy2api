@@ -149,8 +149,8 @@ func RecordAssessment(prev LineState, at time.Time, kind EventKind, verdict Verd
 }
 
 func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
-	// A cache pass below 40 turns cannot qualify an ongoing trial for release.
-	if s.Kind == EventTrial && b.Cache != nil && verdict == VerdictPass && b.Cache.Turns < 40 && s.Action == "" {
+	// A cache pass below TrialCacheTurns cannot qualify an ongoing trial for release.
+	if s.Kind == EventTrial && b.Cache != nil && verdict == VerdictPass && b.Cache.Turns < TrialCacheTurns && s.Action == "" {
 		verdict = VerdictUnknown
 	}
 	switch verdict {
@@ -173,7 +173,7 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 				need = cacheMinLowTurns
 			}
 			if s.Kind == EventTrial && cache.Ratio >= cache.MinRatio {
-				need = 40
+				need = TrialCacheTurns
 			}
 			if cache.Turns < need {
 				s.addCause(cacheTurnsShort, float64(cache.Turns), need)

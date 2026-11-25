@@ -124,7 +124,7 @@ func Step(prev LineState, kind EventKind, v Verdict, basis Basis, at time.Time) 
 }
 
 func singleCacheConfirmation(line Dimension, cache *CacheAssessment) bool {
-	return line == DimensionCache && cache != nil && (cache.Path == "single5" || cache.Path == "deep10")
+	return line == DimensionCache && cache != nil && (cache.Path == CachePathSingle5 || cache.Path == CachePathDeep10)
 }
 
 func enterRear(s *LineState, at time.Time) {
