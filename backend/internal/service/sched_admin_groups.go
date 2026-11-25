@@ -179,7 +179,7 @@ func (s *SchedAdminService) loadGroupLast60(ctx context.Context, ids []int64, fl
 }
 
 func (s *SchedAdminService) PreviewPolicy(ctx context.Context, g, version int64, policy schedquality.Policy) (SchedAdminPolicyPreview, error) {
-	out := SchedAdminPolicyPreview{RelaxedLines: []schedquality.Dimension{}, Lines: map[schedquality.Dimension]SchedAdminPreviewLine{}, Changed: []SchedAdminPolicyChange{}}
+	out := SchedAdminPolicyPreview{RelaxedLines: []schedquality.Dimension{}, Lines: map[schedquality.Dimension]SchedAdminPreviewLine{}, Changed: []SchedAdminPolicyChange{}, Reach: []SchedAdminPolicyReach{}}
 	dims := []schedquality.Dimension{schedquality.DimensionTTFO, schedquality.DimensionError, schedquality.DimensionCache}
 	for _, d := range dims {
 		out.Lines[d] = SchedAdminPreviewLine{}
@@ -260,6 +260,13 @@ func (s *SchedAdminService) PreviewPolicy(ctx context.Context, g, version int64,
 	})
 	if len(out.Changed) > 50 {
 		out.Changed = out.Changed[:50]
+	}
+	if perf := s.d.Engine.PerformanceSnapshot(); perf.Usable(s.d.Now()) && len(perf.reach) != 0 && len(names) != 0 {
+		rule, err := s.d.Engine.TTFTRule(ctx)
+		if err != nil {
+			return out, err
+		}
+		out.Reach = perf.policyReach(names, s.snapshot().ResetAt, policy, rule.Params.Tolerance)
 	}
 	return out, nil
 }
