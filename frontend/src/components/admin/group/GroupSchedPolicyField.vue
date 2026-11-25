@@ -183,7 +183,13 @@ const changed = computed(() => {
 // form (reach), and which lines saving would relax. Only the latest request counts: a new one aborts the one before,
 // and an answer that is no longer the latest is dropped. While a field is invalid nothing is asked and the last answer
 // stays dimmed.
-const preview = reactive({ state: 'idle' as 'idle' | 'loading' | 'loaded' | 'failed', value: null as BackendPolicyPreview | null })
+const preview = reactive({
+  state: 'idle' as 'idle' | 'loading' | 'loaded' | 'failed',
+  value: null as BackendPolicyPreview | null,
+  /** What the answer shown was asked for: the group, the saved version and the policy in the form then. */
+  key: ''
+})
+const previewKey = (groupId: number, version: number, policy: BackendPolicy) => JSON.stringify([groupId, version, policy])
 let previewTimer: ReturnType<typeof setTimeout> | null = null
 let previewController: AbortController | null = null
 let previewSeq = 0
@@ -203,6 +209,7 @@ async function runPreview(groupId: number, version: number, policy: BackendPolic
     const value = await schedQualityAPI.previewGroupPolicy(groupId, { expected_version: version, policy }, { signal: controller.signal })
     if (seq !== previewSeq) return
     preview.value = value
+    preview.key = previewKey(groupId, version, policy)
     preview.state = 'loaded'
   } catch {
     if (seq !== previewSeq) return
@@ -213,7 +220,7 @@ async function runPreview(groupId: number, version: number, policy: BackendPolic
 }
 watch(() => props.groupId, () => {
   stopPreview()
-  Object.assign(preview, { state: 'idle', value: null })
+  Object.assign(preview, { state: 'idle', value: null, key: '' })
 })
 watch([isValid, current], ([ok]) => {
   stopPreview()
@@ -229,8 +236,19 @@ watch([isValid, current], ([ok]) => {
 })
 onScopeDispose(stopPreview)
 
-/** Lines saving the form would relax (cleared and judged again at once): only while the form differs from the saved. */
-const relaxed = computed(() => new Set<BackendDim>(changed.value ? preview.value?.relaxed_lines ?? [] : []))
+/**
+ * The answer shown is for the form as it is now: asked for these very values on this saved version, and nothing newer
+ * since (no edit waiting for its pause, no request out, no failure).
+ */
+const fresh = computed(() =>
+  preview.state === 'loaded' && !!record.value && preview.key === previewKey(props.groupId, record.value.version, current.value)
+)
+/**
+ * Lines saving the form would relax (cleared and judged again at once): only from an answer for the values in the form
+ * now and while they differ from the saved. While a newer answer is awaited, or it failed, none is shown: a wrong
+ * consequence of saving is worse than none.
+ */
+const relaxed = computed(() => new Set<BackendDim>(fresh.value && changed.value ? preview.value?.relaxed_lines ?? [] : []))
 
 type ReachTone = 'ok' | 'low' | 'none'
 const REACH_TONES: Record<ReachTone, string> = {
@@ -255,10 +273,10 @@ const reach = computed(() => {
   const state = preview.state === 'failed' ? 'failed' : !preview.value ? 'waiting' : items.length ? 'shown' : 'none'
   return { state, ttfo: state === 'shown' ? of((item) => item.first_output) : [], cache: state === 'shown' ? of((item) => item.cache) : [] }
 })
-/** The row under an input: wrapped items in the input's column, dimmed while a newer answer is awaited. */
+/** The row under an input: wrapped items in the input's column, dimmed whenever they are not for the values in the form. */
 const reachClass = computed(() => [
   'col-start-2 -mt-2 flex max-w-[520px] flex-wrap gap-x-4 gap-y-1 text-xs',
-  { 'opacity-60': preview.value !== null && (preview.state === 'loading' || !isValid.value) }
+  { 'opacity-60': preview.value !== null && !fresh.value }
 ])
 
 /** Saves the policy when it changed. Returns false when it was not saved (invalid, conflict, failure). */

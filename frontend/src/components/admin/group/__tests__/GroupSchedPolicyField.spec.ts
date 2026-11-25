@@ -274,6 +274,46 @@ describe('GroupSchedPolicyField', () => {
     expect(toast.showInfo).toHaveBeenCalledTimes(1)
   })
 
+  // Astra review of fe, must 2: the relax mark is the consequence of saving the values in the form now. An answer for
+  // other values (a pause still running, a request out, a failed one, a save since) never marks a line; the counts it
+  // brought stay dimmed meanwhile.
+  it('marks a relaxed line only from the answer for the values in the form now', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const relaxedNow = (w: ReturnType<typeof mount>) => w.findAll('[data-sq-relaxed]').map((el) => el.attributes('data-sq-relaxed'))
+    const dimmed = (w: ReturnType<typeof mount>) => w.get('[data-sq-reach="ttfo"]').classes().includes('opacity-60')
+    const w = await mountField()
+    await settle()
+    api.previewGroupPolicy.mockResolvedValueOnce(preview({ relaxed_lines: ['ttfo'] }))
+    await ttft(w).setValue('12')
+    await settle()
+    expect([relaxedNow(w), dimmed(w)]).toEqual([['ttfo'], false])
+
+    // 12 → 8 and its preview fails: the mark of 12 goes, it is not the consequence of saving 8.
+    api.previewGroupPolicy.mockRejectedValueOnce({ status: 500 })
+    await ttft(w).setValue('8')
+    // Already while the pause runs.
+    expect([relaxedNow(w), dimmed(w)]).toEqual([[], true])
+    await settle()
+    expect(relaxedNow(w)).toEqual([])
+    expect(w.get('[data-sq-reach="ttfo"] [data-sq-reach-failed]').exists()).toBe(true)
+
+    // 8 → 12 again, its answer still out: nothing marked until it comes, then the mark of 12.
+    let release: (value: BackendPolicyPreview) => void = () => {}
+    api.previewGroupPolicy.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+    await ttft(w).setValue('12')
+    await settle()
+    expect([relaxedNow(w), dimmed(w)]).toEqual([[], true])
+    release(preview({ relaxed_lines: ['ttfo'] }))
+    await flushPromises()
+    expect([relaxedNow(w), dimmed(w)]).toEqual([['ttfo'], false])
+
+    // Saved at 12 (a new version): the answer was for the old saved values; the form no longer differs either.
+    api.updateGroupPolicy.mockResolvedValueOnce({ ...policy(), version: 64, policy: { ...policy().policy, ttft_seconds: 12 }, relaxed_lines: ['ttfo'], cleared: 1 })
+    expect(await save(w)).toBe(true)
+    await flushPromises()
+    expect([relaxedNow(w), dimmed(w)]).toEqual([[], true])
+  })
+
   // Round 3 (plan item 9): what the saved error limit takes to judge a line bad, by the backend's numbers.
   it('explains the saved error limit with the backend\'s examples, not the typed value, until a save answers with new ones', async () => {
     const w = await mountField()
