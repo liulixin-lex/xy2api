@@ -373,7 +373,7 @@ export interface BackendGroupPolicy {
   group_id: number
   version: number
   policy: BackendPolicy
-  /** The error limit in force: the group's or 5 %, whichever is larger. */
+  /** The error limit in force: the group's or 1 %, whichever is larger. */
   effective_max_error_rate: number
   /**
    * With the limit in force: the fewest failures among `known` clear outcomes (50, 100) that judge the line bad once.
