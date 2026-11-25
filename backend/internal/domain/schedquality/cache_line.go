@@ -12,6 +12,13 @@ const (
 	ContinuationGap  = 5 * time.Minute
 )
 
+// Cache failure paths recorded in decision evidence.
+const (
+	CachePathPair    = "pair"
+	CachePathSingle5 = "single5"
+	CachePathDeep10  = "deep10"
+)
+
 type CacheAssessment struct {
 	Verdict       Verdict   `json:"verdict"`
 	MinRatio      float64   `json:"min_ratio"`
@@ -92,12 +99,12 @@ func AssessCacheForGroup(samples []AttemptSample, minRatio float64, cut, now tim
 	} else if out.Ratio < minRatio && *out.LowSessions10 > 0 {
 		switch {
 		case out.Turns >= CacheMinTurns:
-			out.Verdict, out.Path = VerdictFail, "pair"
+			out.Verdict, out.Path = VerdictFail, CachePathPair
 			if cacheDeficitAtLeast(out.Ratio, minRatio, .05) {
-				out.Path = "single5"
+				out.Path = CachePathSingle5
 			}
 		case out.Turns >= cacheMinLowTurns && cacheDeficitAtLeast(out.Ratio, minRatio, .20):
-			out.Verdict, out.Path = VerdictFail, "deep10"
+			out.Verdict, out.Path = VerdictFail, CachePathDeep10
 		}
 	}
 	sort.Slice(bad, func(i, j int) bool { return newerRequest(bad[i], bad[j]) })
@@ -152,8 +159,10 @@ func completedAttempts(samples []AttemptSample, cut, from, now time.Time) []Atte
 	return rows
 }
 
-// Allow only rounding noise in percentage-point boundaries (e.g. .7-.05).
-// This tolerance is far below the precision of configured percentages.
+// At magnitude at most 1, float64 division, subtraction and rounding each
+// decimal threshold contribute at most half an ulp each. Four units of 2^-52
+// cover these steps and any rounding of the integer token totals on conversion.
 func cacheDeficitAtLeast(ratio, floor, deficit float64) bool {
-	return floor-ratio >= deficit-1e-12
+	const rounding = 4 * 0x1p-52
+	return floor-ratio >= deficit-rounding
 }

@@ -274,3 +274,26 @@ func TestAssessCacheTwoShortLowSessionsDoNotFailAtTwentyTurns(t *testing.T) {
 		t.Fatalf("two six-turn low sessions are insufficient even with twenty total turns: %+v", got)
 	}
 }
+
+func TestAssessCacheDeficitJustBelowBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		turns, read int
+		verdict     Verdict
+		path        string
+	}{
+		{20, 65, VerdictFail, "pair"},
+		{10, 50, VerdictUnknown, ""},
+	} {
+		t.Run(fmt.Sprint(tc.turns), func(t *testing.T) {
+			rows := machineSamples(tc.turns)
+			for i := range rows {
+				rows[i].SessionKey = "one"
+				rows[i].InputTokens, rows[i].CacheReadTokens = machineInt(100-tc.read), machineInt(tc.read)
+			}
+			got := AssessCache(rows, .6999999999995, time.Time{}, machineNow)
+			if got.Verdict != tc.verdict || got.Path != tc.path {
+				t.Fatalf("assessment: %+v", got)
+			}
+		})
+	}
+}
