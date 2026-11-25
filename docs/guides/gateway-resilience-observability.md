@@ -170,7 +170,7 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 | `sched_quality.attempt_finished` | 成功 Debug，其余 Info | 尝试收尾；请求、尝试 ID、分类、状态来源、终态及实际输出字节，见下文 |
 | `sched_quality.policy_changed` | Info | 保存分组门槛或全局首字规则；`operator_id`、`old`、`new`、`affected_lines`、`cleared`，分组门槛另有 `group_id` |
 | `sched_quality.cleanup` | Info；失败 Error | 清理真正执行时；`kind=ledger` 为超过 7 天的尝试，`kind=decisions` 为超过 30 天的判定；含 `rows`，尝试清理另有 `duration_ms`，失败有 `error`；`ledger` 可按组件筛，`decisions` 成功仅标准输出，失败按事件名找 |
-| `sched_quality.cycle` | Warn / Error | 引擎周期超过 5 秒时 Warn，含 `duration_ms`，每 5 分钟最多一次；周期失败为 Error，含 `error`，不带组件，按事件名找 |
+| `sched_quality.cycle` | Warn / Error | 引擎周期超过 5 秒时 Warn，带 `component=sched_quality`，含 `duration_ms`，每 5 分钟最多一次；周期失败为 Error，含 `error`，不带组件，按事件名找 |
 | `sched_quality.view_stale` | Warn | 质量视图超过 60 秒未更新，暂停自动分层；含 `view_at`、`view_version`，最多每分钟一次 |
 | `sched_quality.ttft_assessment` | Warn | 首字评估计算失败，保持未知；`account_id`、`model`、`group_id`、`error` |
 | `sched_quality.delivery_capture_mismatch` | Warn | 请求已交付，但单次发送的质量采样为失败；`request_id`、`sends`、`sample_error_class`，不把这次交付误标为救回 |
@@ -191,12 +191,12 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 
 `summary` 的 `cycles` 是引擎每 5 秒的工作周期，正常每 5 分钟约 60 次；与每 5 分钟一次的普通质量判定不同。`cooled` 计进入后排、续期、试用失败；`released` 计试用放回；`trial` 计进入试用；`relax` 计门槛放宽写入的动作；`clear` 保留这个键，现在恒为 0。只统计提交成功的动作，回滚的重评不发布也不计数；管理员手动恢复不计入这些计数。
 
-**`sched_quality.state`** 的 `at` 是逻辑判定时刻，`rule_version` 当前为 `4.0`；用 `account_id`、`model`、`group_id`、`line` 定位线，`line` 为 `ttfo`、`error` 或 `cache`。`action` 取 `enter`、`renew`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`reset`、`relax`，见 [判定记录](group-quality-gate.md#判定记录)；旧日志还可见 `release`、`clear`。管理员重置提交后，原先在后排或试用的线各记一条 `reset`。`level` 规则 4.0 写 0；旧日志的 0–4 对应 20、40、80、160、240 分钟。`until` 在进入后排、续期、试用失败时写后排期限，进入试用时写试用期限，其余为零值。
+**`sched_quality.state`** 的 `at` 是逻辑判定时刻，`rule_version` 当前为 `4.0`；用 `account_id`、`model`、`group_id`、`line` 定位线，`line` 为 `ttfo`、`error` 或 `cache`。`action` 取 `enter`、`renew`、`trial`、`trial_pass`、`trial_fail`、`trial_timeout`、`reset`、`relax`，见 [判定记录](group-quality-gate.md#判定记录)；旧日志还可见 `release`、`clear`。管理员重置提交后，原先在后排或试用的线各记一条 `reset`。`level` 规则 4.0 写 0；旧日志的 0–4 对应 20、40、80、160、240 分钟。`until` 在进入后排、续期、试用失败时写后排期限，进入试用时写试用期限，其余为零值。统计试用结束时先按 `action` 限定为 `trial_fail`、`trial_pass`、`trial_timeout`，再看下表两项；异常迟到的复核可能不经 `trial` 直接记 `trial_timeout`，见 [判定记录](group-quality-gate.md#判定记录)。
 
 | 字段 | 含义 |
 |---|---|
-| `release_reason` | 试用结束时写：`fail`（不达标回后排）、`good`（满 15 分钟且达标）、`deadline`（到截止）；旧日志还有 `qualified`、`no_samples`；其余动作为空串 |
-| `trial_duration_seconds` | 试用结束时的实际试用秒数，其余为 0。到截止结束时通常为 3600；升级前开始的试用可能是 7200 |
+| `release_reason` | 试用结束的动作（`trial_fail`、`trial_pass`、`trial_timeout`）上写：`fail`（不达标回后排）、`good`（满 15 分钟且达标）、`deadline`（到截止）；旧日志还有 `qualified`、`no_samples`。其余动作为空串，`reset` 也是 |
+| `trial_duration_seconds` | 试用结束的动作上写实际试用秒数，其余动作为 0。到截止结束时通常为 3600；升级前开始的试用可能是 7200 |
 | `history_missing` | 是否缺少这次评估所需的历史 |
 | `basis` | 门槛、证据来源和逐线证据，也含结束原因、试用时长和缺历史标记；缺期限时另有 `missing_deadline`，为 `true`。缓存线的 `path`、`low_sessions_10`、`window_from`、`window_to` 和首字线的 `tolerance`、`confidence` 见 [判定记录](group-quality-gate.md#判定记录)；`own_sample_at_60` 只在旧日志里 |
 | `attempt_ids` | 相关尝试 ID，最多 50 个 |
@@ -261,17 +261,17 @@ OpenAI 质量判定、选号、换号与尝试收尾使用以下事件。事件�
 
 | 字段 | 含义 |
 |---|---|
-| `pool_rounds` | 这次派发成功读到普通候选池的次数。成员读取失败、命中无号缓存时为 0；为 `null` 表示这次没有采集名单（派发开始时 Info 日志没开） |
-| `candidates` | 最后一次读到的普通候选池里通过初筛的号，取并发检查之前的集合。每项 `account_id`、`placement`、`rank`，以及可省略的 `lines`、`skip`。没读到池为 `null`，读到空池为 `[]` |
+| `pool_rounds` | 这次派发成功读到普通候选池的次数。还没成功读过普通池时为 0（如成员读取失败、命中无号缓存）；成功读过之后重读失败，保留最后一次成功的次数和名单，`no_candidate_reason` 仍可能是 `candidate_read_failed`。为 `null` 表示这次没有采集名单（派发开始时 Info 日志没开） |
+| `candidates` | 最后一次成功读到的普通候选池里通过初筛的号，取并发检查之前的集合。每项 `account_id`、`placement`、`rank`，以及可省略的 `lines`、`skip`。没读到池为 `null`，读到空池为 `[]` |
 | `placement` | 取值同 `selected_quality_position`；没查过试用名额的试用号记 `trial_unknown` |
 | `lines` | 这个号处于后排或试用的线：键 `ttfo`、`error`、`cache`，值 `rear` 或 `trial`，一个号可以一条在后排、一条在试用。按状态记，豁免生效或质量分层暂停时也照记 |
 | `rank` | 普通派发选中的号为 1；其余参加过排序的号按最后一次参加的那一轮从新到旧、轮内次序排；从没参加排序的号（如一开始就被负载挡下）按账号编号排在最后。不是第一次比较时的名次 |
 | `skip` | 因容量被跳过的原因：`load_full`、`slot_unavailable`，可以都有。被跳过的号仍在名单里，后来也可能又参加排序、甚至被选中 |
 | `excluded` | 初筛时被 `model`（模型不支持）、`profit_floor`、`profit_ceiling`、`profit_invalid_account_rate` 筛掉的号，每项 `account_id`、`reason`。别的筛选原因不在这里，它不是完整的淘汰名单 |
 | `rescue_attempted` | 兜底路径实际排过序时为 `true`，否则省略 |
-| `rescue` | 兜底选中的号：`account_id`、`placement`；不并进 `candidates`。兜底排过序但没抢到号位时，只有 `rescue_attempted` |
+| `rescue` | 兜底返回的号：`account_id`、`placement`；可能已经拿到槽，也可能只是等待目标。不并进 `candidates`。兜底排过序、但没有返回号（连等待目标也没有）时，只有 `rescue_attempted` |
 
-**名单和原有计数怎么对。** 原有计数会跨普通候选池的重读累计，兜底也会更新它们；名单只是最后一次普通候选池的快照。所以下面的关系只在 `pool_rounds` 为 1、并且没有 `rescue_attempted` 的派发上成立：`candidates` 的个数等于 `eligible_candidate_count`；各 `placement` 的个数不小于对应的位置计数（`front_or_trial_with_seat_count` 是 `front` 加 `trial_with_seat`），多出来的是没参加过排序的号；`excluded` 各原因的个数等于对应的 `filtered_*_count`；带某种 `skip` 的账号数等于对应的 `*_skipped_count`。其余派发只核对名单本身：名次连续、没有重复账号、选中的号名次为 1 或者在 `rescue` 里。核对和统计以名单为准，原有计数留着和旧日志接得上。
+**名单和原有计数怎么对。** 原有计数分两类：`candidate_pool_count`、`eligible_candidate_count` 和四个 `filtered_*_count` 是最后一次普通初筛的值；四个位置计数和两个 `*_skipped_count` 跨普通候选池的重读按账号去重累计，兜底的排序和抢槽也会计进去。名单只是最后一次成功读到的普通候选池的快照。所以下面的关系只在 `pool_rounds` 为 1、并且没有 `rescue_attempted` 的派发上成立：`candidates` 的个数等于 `eligible_candidate_count`；各 `placement` 的个数不小于对应的位置计数（`front_or_trial_with_seat_count` 是 `front` 加 `trial_with_seat`），多出来的是没参加过排序的号；`excluded` 各原因的个数等于对应的 `filtered_*_count`；带某种 `skip` 的账号数等于对应的 `*_skipped_count`。其余派发只核对名单本身：名次连续、没有重复账号、选中的号名次为 1 或者在 `rescue` 里。核对和统计以名单为准，原有计数留着和旧日志接得上。
 
 上线后要分开数的三个量，不能互相代替：
 
