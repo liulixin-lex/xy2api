@@ -81,6 +81,12 @@ describe.each([['zh', zh], ['en', en]] as const)('quality gate copy (%s)', (_loc
     expect(new Set(words).size).toBe(1)
   })
 
+  // Rule 4.0 was replayed on the defaults only: the note names that one value and takes the percent sign once.
+  it('names the one replayed value of a first-output setting', () => {
+    const text = String(lookup(messages, 'admin.schedQuality.ttftRule.outsidePoint'))
+    expect([text.includes('{value}%'), /–|-/.test(text)]).toEqual([true, false])
+  })
+
   // Plan item 18: the rules in force do not compare with peers; the first-output settings say nothing of them.
   it('keeps peers out of the first-output settings', () => {
     const texts: string[] = []

@@ -100,6 +100,20 @@ describe('SchedTTFTRuleField', () => {
     expect(row(w, 'confidence').find('[data-sq-ttft-outside]').exists()).toBe(false)
   })
 
+  // Rule 4.0 was replayed on its defaults only: the API gives each range as one value. The value itself gets no note;
+  // any other names that one value, never a span like "20%–20%".
+  it('names the one replayed value when the range is a single value, and notes nothing at it', async () => {
+    api.getTTFTRule.mockResolvedValueOnce(rule({ replayed: { confidence: [0.8, 0.8], tolerance: [0.2, 0.2], peer_margin: [0.05, 0.15] } }))
+    const w = await mountField()
+    expect(w.find('[data-sq-ttft-outside]').exists()).toBe(false)
+    await input(w, 'tolerance').setValue('25')
+    expect(row(w, 'tolerance').get('[data-sq-ttft-outside]').text()).toBe('admin.schedQuality.ttftRule.outsidePoint:{"value":"20"}')
+    await input(w, 'confidence').setValue('90')
+    expect(row(w, 'confidence').get('[data-sq-ttft-outside]').text()).toBe('admin.schedQuality.ttftRule.outsidePoint:{"value":"80"}')
+    await input(w, 'tolerance').setValue('20')
+    expect(row(w, 'tolerance').find('[data-sq-ttft-outside]').exists()).toBe(false)
+  })
+
   it('never holds up the settings page when the rule did not load: valid, nothing to save, a retry', async () => {
     api.getTTFTRule.mockRejectedValueOnce(new Error('down'))
     const w = await mountField()

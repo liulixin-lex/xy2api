@@ -523,7 +523,10 @@ export type SchedTTFTRuleField = keyof SchedTTFTRuleValues
 export interface BackendTTFTRule extends SchedTTFTRuleValues {
   version: number
   defaults: SchedTTFTRuleValues
-  /** The range each setting was replayed over; outside it there is no data behind the setting. */
+  /**
+   * The range each setting was replayed over; outside it there is no data behind the setting. One value when only it
+   * was replayed (rule 4.0: the defaults).
+   */
   replayed: Record<SchedTTFTRuleField, [number, number]>
 }
 

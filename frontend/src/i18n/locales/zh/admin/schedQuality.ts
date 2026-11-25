@@ -304,6 +304,7 @@ export default {
         percent: '{min}%–{max}%',
       },
       outside: '超出回放范围（{range}），没有数据支持',
+      outsidePoint: '只回放过 {value}%，这个值没有数据支持',
       defaults: '默认：把握 {confidence}%，容忍 {tolerance}%。调高任何一个数都会让账号更不容易进后排，保存时清零重判；调低只影响之后的判定，已有的后排和试用不变。',
       savedRelaxed: '首字线已清零 {n} 个状态，并按新设置重判',
       invalidOnSave: '首字线判定的数不合法，设置没有保存',
