@@ -62,6 +62,12 @@ func (s *OpenAIGatewayService) sortSelectionAccounts(ctx context.Context, accoun
 		return openAICollabSelectionLess(keys[accounts[i].ID], keys[accounts[j].ID], hint)
 	})
 	s.orderCollabSelection(ctx, accounts, keys, req.RequireCompact)
+	if outcome := req.newSessionOutcome; outcome != nil {
+		outcome.pass++
+		for i, account := range accounts {
+			outcome.recordRank(account.ID, i)
+		}
+	}
 }
 
 // selectionCandidates is shared by new placement and owner migration. Compact
@@ -83,10 +89,12 @@ func (s *OpenAIGatewayService) selectionCandidates(ctx context.Context, req Open
 		}
 		if reason := openAICompatibleAccountEligibilityFailureReason(ctx, a, req.Platform, req.RequestedModel, false, req.RequiredCapability, s); reason != "" {
 			stats.exclude(reason)
+			req.newSessionOutcome.recordFilterExclusion(a.ID, reason)
 			continue
 		}
 		if ok, reason := s.isAccountRequestCompatibleReason(ctx, a, req); !ok {
 			stats.exclude(reason)
+			req.newSessionOutcome.recordFilterExclusion(a.ID, reason)
 			continue
 		}
 		if !s.isAccountTransportCompatible(a, req.RequiredTransport) {
@@ -176,10 +184,7 @@ func selectionLoadRequests(accounts []*Account) []AccountWithConcurrency {
 }
 
 func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts []*Account, loads map[int64]*AccountLoadInfo) []*Account {
-	var outcome *openAINewSessionOutcome
-	if req, ok := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
-		outcome = req.newSessionOutcome
-	}
+	req, _ := ctx.Value(openAISelectionRequestKey{}).(OpenAIAccountScheduleRequest)
 	if resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
 		s.selectionFullMarks.observe(accounts, loads, s.selectionNow())
 	}
@@ -188,11 +193,47 @@ func (s *OpenAIGatewayService) selectionAvailable(ctx context.Context, accounts 
 		if load := loads[a.ID]; load == nil || load.LoadRate < 100 {
 			available = append(available, a)
 		} else {
-			outcome.markLoadFull(a.ID)
+			if outcome := req.newSessionOutcome; outcome != nil {
+				outcome.loadFull[a.ID] = struct{}{}
+				if row, ok := outcome.pool[a.ID]; ok {
+					row.loadFull = true
+					if row.position == "" {
+						row.position, row.state = s.capacityCandidatePosition(ctx, req, a)
+					}
+					outcome.pool[a.ID] = row
+				}
+			}
 			observeSelectionFailure(ctx, a.ID, "concurrency_full", nil)
 		}
 	}
 	return available
+}
+
+// Load-full candidates may never enter a sort. Read their quality view but do
+// not query a trial seat that selection itself did not need.
+func (s *OpenAIGatewayService) capacityCandidatePosition(ctx context.Context, req OpenAIAccountScheduleRequest, a *Account) (string, schedquality.StateView) {
+	view, now := s.selectionView(), s.selectionNow()
+	group := derefGroupID(req.GroupID)
+	state := selectionState(view, group, a, req.RequestedModel)
+	auto := !openAISelectionManualOnly(ctx) && now.Sub(view.At()) <= schedquality.ViewMaxAge && view.GlobalEnabled() && view.GroupEnabled(group)
+	switch state.Placement(auto, now) {
+	case schedquality.PlaceRear:
+		return "rear", state
+	case schedquality.PlaceTrial:
+		trial, _ := ctx.Value(selectionTrialContextKey{}).(*selectionTrial)
+		if trial != nil {
+			room := trial.rooms[SchedAccountModel{AccountID: a.ID, Model: OpenAIAttemptModel(a, req.RequestedModel)}]
+			if room.known {
+				if room.available {
+					return "trial_with_seat", state
+				}
+				return "trial_full", state
+			}
+		}
+		return "trial_unknown", state
+	default:
+		return "front", state
+	}
 }
 
 // Inspect the counterfactual candidate through normal admission and current

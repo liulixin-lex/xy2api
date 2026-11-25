@@ -1419,8 +1419,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 		return nil, err
 	}
+	newSessionLogState.outcome.beginPool()
 	candidates, stats := s.selectionCandidates(ctx, req, accounts)
-	newSessionLogState.outcome.recordFilterStats(stats, len(candidates))
+	newSessionLogState.outcome.recordFilterStats(stats, candidates)
 	if len(candidates) == 0 {
 		return nil, noAvailableOpenAISelectionError(requestedModel, false, stats.summary(""), stats.capabilityOnly())
 	}
@@ -1443,7 +1444,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			checked[fresh.ID] = fresh
 			slot, err := s.acquireSelectionSlot(ctx, fresh, req.candidateConstraint)
 			if err != nil || slot == nil || !slot.Acquired {
-				newSessionLogState.outcome.markSlotUnavailable(fresh.ID)
+				newSessionLogState.outcome.markOrdinarySlotUnavailable(fresh.ID)
 				continue
 			}
 			selected, retryTrial, err := s.finishSelectionSlot(ctx, req, fresh, slot, trial, loads)
