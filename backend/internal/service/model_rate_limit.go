@@ -101,6 +101,8 @@ func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod
 	}
 	keys := []string{modelKey}
 	switch a.Platform {
+	case PlatformGemini:
+		keys = append(keys, GeminiAccountCooldownScope)
 	case PlatformAntigravity:
 		if isAntigravityGeminiModel(modelKey) && modelKey != antigravityGeminiModelRateLimitKey {
 			keys = append(keys, antigravityGeminiModelRateLimitKey)
@@ -226,6 +228,9 @@ func antigravityModelRateLimitKeys(model string) []string {
 }
 
 func (a *Account) modelRateLimitResetAt(scope string) *time.Time {
+	if a != nil && a.Platform == PlatformGemini && geminiCooldownLimitObsolete(a, scope) {
+		return nil
+	}
 	if a == nil || a.Extra == nil || scope == "" {
 		return nil
 	}
@@ -244,6 +249,11 @@ func (a *Account) modelRateLimitResetAt(scope string) *time.Time {
 	resetAt, err := time.Parse(time.RFC3339, resetAtRaw)
 	if err != nil {
 		return nil
+	}
+	if a.Platform == PlatformGemini {
+		if state, ok := geminiCooldownState(a, scope); ok && geminiCooldownLimitMatches(a, scope, state) && state.LeaseUntil.After(resetAt) {
+			resetAt = state.LeaseUntil
+		}
 	}
 	return &resetAt
 }

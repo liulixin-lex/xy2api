@@ -1932,6 +1932,7 @@ export default {
                   }
                 },      // Gemini specific (platform-wide)
       gemini: {
+        thirdPartyKey: 'Third-party API key',
         helpButton: 'Help',
         helpDialog: {
           title: 'Gemini Usage Guide',

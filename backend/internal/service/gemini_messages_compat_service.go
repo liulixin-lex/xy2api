@@ -648,6 +648,15 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	}()
 
 	originalModel := req.Model
+	ctx = withGeminiRetryObservation(ctx)
+	streamErrorsBefore := len(GetOpsStreamErrors(c))
+	finishRecovery, recoveryErr := s.beginGeminiRecovery(ctx, account, originalModel, true)
+	if recoveryErr != nil {
+		return nil, recoveryErr
+	}
+	defer func() {
+		finishRecovery(retErr == nil && result != nil && len(GetOpsStreamErrors(c)) == streamErrorsBefore)
+	}()
 	mappedModel := req.Model
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(req.Model)
@@ -957,12 +966,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				}
 				break
 			}
-			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries) {
-				if resp.StatusCode == 429 {
-					// Mark the response that will actually be retried once so concurrent
-					// requests avoid the account without penalizing the final response twice.
-					s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, originalModel)
-				}
+			if geminiRetryFits(attemptGuard.ctx, account, resp.Header, respBody) && attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries) {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
@@ -991,7 +995,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				})
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				if !sleepGeminiBackoffCtx(attemptGuard.ctx, attempt) {
+				if !sleepGeminiRetryCtx(attemptGuard.ctx, account, attempt) {
 					return nil, context.Cause(attemptGuard.ctx)
 				}
 				continue
@@ -1220,7 +1224,7 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 	return strings.Contains(msg, "thought_signature") || strings.Contains(msg, "signature")
 }
 
-func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (_ *ForwardResult, retErr error) {
+func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (result *ForwardResult, retErr error) {
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
@@ -1259,6 +1263,15 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 	}
 
+	ctx = withGeminiRetryObservation(ctx)
+	streamErrorsBefore := len(GetOpsStreamErrors(c))
+	finishRecovery, recoveryErr := s.beginGeminiRecovery(ctx, account, originalModel, action != "countTokens")
+	if recoveryErr != nil {
+		return nil, recoveryErr
+	}
+	defer func() {
+		finishRecovery(retErr == nil && result != nil && len(GetOpsStreamErrors(c)) == streamErrorsBefore)
+	}()
 	mappedModel := originalModel
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(originalModel)
@@ -1480,10 +1493,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				}
 				break
 			}
-			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries) {
-				if resp.StatusCode == 429 {
-					s.handleGeminiUpstreamErrorForAction(ctx, account, resp.StatusCode, resp.Header, respBody, action != "countTokens", originalModel)
-				}
+			if geminiRetryFits(attemptGuard.ctx, account, resp.Header, respBody) && attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries) {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
@@ -1512,7 +1522,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				})
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				if !sleepGeminiBackoffCtx(attemptGuard.ctx, attempt) {
+				if !sleepGeminiRetryCtx(attemptGuard.ctx, account, attempt) {
 					return nil, context.Cause(attemptGuard.ctx)
 				}
 				continue
@@ -3427,6 +3437,14 @@ func (s *GeminiMessagesCompatService) handleGeminiUpstreamErrorForAction(ctx con
 	// 池模式账号不写账号级限流：账号留在池内，由 failover / 同号重试消化 429。
 	// 自定义错误码优先级高于池模式，开启后仍按其命中结果标记。
 	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
+		return
+	}
+
+	if account.IsGeminiThirdPartyAPIKey() {
+		if result.Category == resilience.CategoryClientError || result.Category == resilience.CategoryUpstreamRequestRestriction {
+			return
+		}
+		s.handleGeminiRelay429(ctx, account, headers, body, firstRequestedModel(requestedModel))
 		return
 	}
 

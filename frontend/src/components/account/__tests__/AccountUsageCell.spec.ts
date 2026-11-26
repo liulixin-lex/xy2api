@@ -1695,6 +1695,17 @@ describe('AccountUsageCell', () => {
 		expect(wrapper.text().trim()).toBe('-')
   })
 
+  it('第三方 Gemini Key 不展示旧 AI Studio 模拟配额', async () => {
+    const wrapper = mountCell({ props: { account: makeAccount({
+      platform: 'gemini', type: 'apikey',
+      credentials: { base_url: 'https://relay.example.com', tier_id: 'aistudio_free' }
+    }) } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.accounts.gemini.thirdPartyKey')
+    expect(wrapper.text()).not.toContain('admin.accounts.gemini.tier.aiStudio.free')
+    expect(wrapper.find('.cursor-help').exists()).toBe(false)
+  })
+
   it('Vertex 账号会在 Gemini 用量窗口里展示 today stats 徽章', async () => {
 		const wrapper = mountCell({
 		  props: {

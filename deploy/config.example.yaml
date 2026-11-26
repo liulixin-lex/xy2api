@@ -1275,6 +1275,9 @@ gemini:
     # 可选的权限范围（空格分隔）。留空则根据 oauth_type 自动选择。
     scopes: ""
   quota:
+    # Third-party Gemini API keys and Vertex skip simulated quotas.
+    # 第三方 API Key 的未知 429 复用后台 429 兜底冷却设置（建议 10 秒），明确上游期限优先。
+    # 详见 docs/platforms/gemini.md；无需新增 YAML 配置。
     # Optional: local quota simulation for Gemini Code Assist (local billing).
     # 可选：Gemini Code Assist 本地配额模拟（本地计费）。
     # These values are used for UI progress + precheck scheduling, not official Google quotas.

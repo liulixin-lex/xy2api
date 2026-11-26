@@ -527,6 +527,9 @@ func ClassifyFailoverError(e *UpstreamFailoverError) resilience.Result {
 		}
 		return result
 	}
+	if e.Reason == GeminiRecoveryPendingReason {
+		return resilience.Result{Category: resilience.CategoryTransient, Reason: string(GeminiRecoveryPendingReason)}
+	}
 	if e.IsCredentialFailure() {
 		return resilience.Result{Category: resilience.CategoryAuth, Reason: "credential_failure"}
 	}

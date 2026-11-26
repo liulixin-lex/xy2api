@@ -112,6 +112,9 @@ export default {
       affected: 'Affected',
     },
     kind: {
+      gemini_rate_limit: 'Gemini rate limit',
+      gemini_account_concurrency: 'Gemini concurrency limit',
+      gemini_recovery: 'Gemini recovery in progress',
       quality: 'Quality state',
       rate_limit: 'Rate limit',
       overload: 'Overload',

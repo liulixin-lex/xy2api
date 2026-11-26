@@ -845,6 +845,10 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 
 func buildSchedulerMetadataAccount(account service.Account) service.Account {
 	extra := filterSchedulerExtra(account.Extra)
+	var proxyID *int64
+	if account.Platform == service.PlatformGemini {
+		proxyID = account.ProxyID
+	}
 	if summary := service.CodexTicketSchedulingSummary(&account, time.Now()); summary != nil {
 		if extra == nil {
 			extra = make(map[string]any)
@@ -853,6 +857,7 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 	}
 	return service.Account{
 		ID:                      account.ID,
+		ProxyID:                 proxyID,
 		Name:                    account.Name,
 		Platform:                account.Platform,
 		Type:                    account.Type,
@@ -877,7 +882,7 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		QuotaDimension:          account.QuotaDimension,
 		AccountGroups:           filterSchedulerAccountGroups(account.AccountGroups),
 		GroupIDs:                filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
-		Credentials:             filterSchedulerCredentials(account.Credentials),
+		Credentials:             filterSchedulerCredentials(account.Credentials, account.Platform),
 		Extra:                   extra,
 	}
 }
@@ -938,13 +943,16 @@ func filterSchedulerGroupIDs(groupIDs []int64, accountGroups []service.AccountGr
 	return filtered
 }
 
-func filterSchedulerCredentials(credentials map[string]any) map[string]any {
+func filterSchedulerCredentials(credentials map[string]any, platform string) map[string]any {
 	if len(credentials) == 0 {
 		return nil
 	}
 	// Candidate-list admission evaluates the account override before hydrating
 	// the full account. Dropping it silently falls back to the platform threshold.
 	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold"}
+	if platform == service.PlatformGemini {
+		keys = append(keys, "base_url", "tier_id", "pool_mode", "custom_error_codes_enabled", "custom_error_codes")
+	}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {
@@ -1034,6 +1042,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		service.OpenAIAutoResetCredit7dThresholdExtraKey,
 		service.OpenAIAutoResetCreditStateExtraKey,
 		"model_rate_limits",
+		service.GeminiCooldownExtraKey,
 		service.UpstreamBillingProbeExtraKey,
 		service.GrokMediaEligibleExtraKey,
 		"grok_billing_snapshot",

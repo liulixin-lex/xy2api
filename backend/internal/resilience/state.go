@@ -16,6 +16,7 @@ import (
 // update it through the request context. All methods are nil-safe so code
 // paths without a state (internal calls, tests) keep the 0.3.0 behaviour.
 type RequestState struct {
+	geminiBare429Account  int64
 	collabParent          *RequestState
 	collabSettings        atomic.Pointer[Settings]
 	collab                *CollabRequestState
@@ -1055,4 +1056,18 @@ func (s *RequestState) LastResortSessionLimited() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lastResortSessionLimited
+}
+
+// ClaimGeminiBare429Cooldown bounds persistent penalties for one ambiguous request.
+func (s *RequestState) ClaimGeminiBare429Cooldown(accountID int64) bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.geminiBare429Account != 0 && s.geminiBare429Account != accountID {
+		return false
+	}
+	s.geminiBare429Account = accountID
+	return true
 }

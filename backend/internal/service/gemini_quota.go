@@ -370,6 +370,9 @@ func geminiCooldownForTier(tierID string) time.Duration {
 }
 
 func geminiQuotaTierKeyForAccount(account *Account) string {
+	if account.IsGeminiThirdPartyAPIKey() || account != nil && account.IsVertexServiceAccount() {
+		return ""
+	}
 	if account == nil || account.Platform != PlatformGemini {
 		return ""
 	}
@@ -440,9 +443,9 @@ func geminiDailyResetTime(now time.Time) time.Time {
 	loc := geminiQuotaLocation()
 	localNow := now.In(loc)
 	start := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, loc)
-	reset := start.Add(24 * time.Hour)
+	reset := start.AddDate(0, 0, 1)
 	if !reset.After(localNow) {
-		reset = reset.Add(24 * time.Hour)
+		reset = reset.AddDate(0, 0, 1)
 	}
 	return reset
 }

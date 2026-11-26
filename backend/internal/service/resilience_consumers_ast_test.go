@@ -116,9 +116,10 @@ func sortedCallsiteKeys(callsites map[string]int) []string {
 func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 	want := map[string]map[string]int{
 		"CanAttempt": {
-			"internal/handler/failover_loop.go:FailoverState.HandleSelectionExhausted":                          2,
-			"internal/handler/failover_loop.go:FailoverState.HandleFailoverError":                               1,
-			"internal/handler/resilience_budget.go:resilienceAttemptFailed":                                     3,
+			"internal/handler/failover_loop.go:FailoverState.HandleSelectionExhausted": 2,
+			"internal/handler/failover_loop.go:FailoverState.HandleFailoverError":      1,
+			// Gemini recovery contention checks the existing budget without recording an upstream attempt.
+			"internal/handler/resilience_budget.go:resilienceAttemptFailed":                                     4,
 			"internal/handler/resilience_recovery_outcome.go:recordSelectionExhausted":                          1,
 			"internal/handler/openai_queue_reselection.go:canTryOpenAIQueueReselection":                         1,
 			"internal/service/openai_conversion_retry.go:openAIConversionRetryError":                            1,
@@ -140,6 +141,8 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 			"internal/service/gemini_messages_compat_service.go:geminiInPlaceRetryAllowed": 1,
 		},
 		"AdmissionRemaining": {
+			// Explicit upstream hints must fit in admission slack, preserving the real retry boundary.
+			"internal/service/gemini_cooldown.go:geminiRetryFits":             1,
 			"internal/handler/resilience_budget.go:resilienceSlotWaitTimeout": 1,
 			"internal/resilience/budget.go:Budget.ClampWaitWithTimer":         1,
 		},

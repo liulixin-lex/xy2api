@@ -13,7 +13,7 @@ func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 		"plan_type":     "plus",
 		"access_token":  "secret-access-token",
 		"refresh_token": "secret-refresh-token",
-	})
+	}, service.PlatformOpenAI)
 
 	require.Equal(t, "plus", filtered["plan_type"])
 	require.NotContains(t, filtered, "access_token")

@@ -87,6 +87,9 @@ func (s *SchedAdminService) autoStates(ctx context.Context, a *Account, now time
 	if limits, ok := a.Extra["model_rate_limits"].(map[string]any); ok {
 		for key, v := range limits {
 			until := schedAdminLimitUntil(v)
+			if a.Platform == PlatformGemini {
+				until = a.modelRateLimitResetAt(key)
+			}
 			iq := strings.HasPrefix(key, "iq:")
 			if !iq && (until == nil || !now.Before(*until)) {
 				continue
@@ -95,7 +98,17 @@ func (s *SchedAdminService) autoStates(ctx context.Context, a *Account, now time
 			if iq {
 				kind, why, stateKey = "iq_gate", "iq_gate", key
 			}
-			out = append(out, SchedAutoState{Key: stateKey, Kind: kind, Scope: "model", Model: strings.TrimPrefix(key, "iq:"), Until: until, Clearable: !iq, Why: why})
+			scope, model := "model", strings.TrimPrefix(key, "iq:")
+			if state, ok := geminiCooldownState(a, key); ok && geminiCooldownLimitMatches(a, key, state) {
+				why = "gemini_" + state.Reason
+				if state.LeaseUntil.After(now) {
+					why = "gemini_recovery"
+				}
+				if key == GeminiAccountCooldownScope {
+					scope, model = "account", ""
+				}
+			}
+			out = append(out, SchedAutoState{Key: stateKey, Kind: kind, Scope: scope, Model: model, Until: until, Clearable: !iq, Why: why})
 		}
 	}
 	if s.d.Transient != nil {

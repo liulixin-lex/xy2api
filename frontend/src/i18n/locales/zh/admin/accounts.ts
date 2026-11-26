@@ -2024,6 +2024,7 @@ export default {
       },
       // Gemini specific (platform-wide)
       gemini: {
+        thirdPartyKey: '第三方 API Key',
         helpButton: '使用帮助',
         helpDialog: {
           title: 'Gemini 使用指南',

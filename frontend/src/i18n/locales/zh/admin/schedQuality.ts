@@ -113,6 +113,9 @@ export default {
       affected: '影响账号',
     },
     kind: {
+      gemini_rate_limit: 'Gemini 限流',
+      gemini_account_concurrency: 'Gemini 并发限流',
+      gemini_recovery: 'Gemini 恢复试探中',
       quality: '质量状态',
       rate_limit: '限流',
       overload: '过载',

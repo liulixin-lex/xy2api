@@ -72,7 +72,7 @@
             <section v-if="detail.auto_states.length" class="qp-section" data-qp-section="auto" :aria-label="t('admin.schedQuality.drawer.autoStates')">
               <div class="alist">
                 <div v-for="item in detail.auto_states" :key="item.key" class="arow" :data-qp-auto="item.key">
-                  <span class="arow__k">{{ kindName(item.kind, t, te) }}</span>
+                  <span class="arow__k">{{ item.why?.startsWith('gemini_') && te(`admin.schedQuality.kind.${item.why}`) ? t(`admin.schedQuality.kind.${item.why}`) : kindName(item.kind, t, te) }}</span>
                   <span class="arow__m">{{ scopeLabel(item) }}</span>
                   <span class="arow__t">{{ autoValue(item) }}</span>
                   <span class="arow__a">
