@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [0.6.15] - 2026-11-26
+
+本版把调度质量门槛换成规则 4.0：质量明显变差的账号更快移到后排，没有新的不达标时最迟 120 分钟回到正常，代价是进后排的次数和“读数已回到线内仍受限”的时间都会变多；管理端把每次判定用的读数摆出来，改分组门槛前就看得到每个模型有几个号够得着。同时带来 GPT-6.2 Sol / Astra 的支持、默认关闭的 Codex 协作恢复、长期表现快照偶尔跳过一版的修复（0.6.14 及更早都有），以及 `gorilla/websocket` 的安全更新。数据库迁移 2 个（324、325，来自协作恢复，只加可空列和放宽约束）；质量状态不迁移。回退到 0.6.14 只切程序，见[升级与回退](docs/deployment/upgrade.md#0615-升级与回退规则-40)。
+
 - 客户端未带会话标识时，GPT-6.2 请求也会获得稳定的 `prompt_cache_key`，`/v1/messages` 仍发送完整历史，见 [OpenAI 模型支持](docs/platforms/openai.md#模型支持gpt-62-sol-与-gpt-62-astra)。
 - GPT-6.2 的 `none`、`minimal` 推理强度在 API Key 账号的 HTTP 请求中改按 `low` 发送，在 OAuth 账号与 WebSocket 中改为本地拒绝；带工具的请求不再分给明确不支持 Responses 的账号，部分协议转换路径不再发送 `temperature`、`top_p`。
 - GPT-6.2 在价格目录缺失或名称带推理后缀时不再按其它模型家族计价，带供应商前缀时会匹配渠道价格；目录已有精确 6.2 价格时扣费不变。
@@ -2597,7 +2601,8 @@ XY2API 首个独立版本：基于 Sub2API 0.1.184 的代码建立独立的仓�
 - 切换前备份数据库和 Redis；不要让新旧实例长时间同时运行迁移或后台写任务。
 - 切换步骤与兼容边界见 [品牌与迁移兼容边界](https://github.com/liulixin-lex/xy2api/blob/v0.0.1/docs/BRANDING_AND_MIGRATION_COMPATIBILITY.md)。
 
-[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.14...HEAD
+[Unreleased]: https://github.com/liulixin-lex/xy2api/compare/v0.6.15...HEAD
+[0.6.15]: https://github.com/liulixin-lex/xy2api/compare/v0.6.14...v0.6.15
 [0.6.14]: https://github.com/liulixin-lex/xy2api/compare/v0.6.13...v0.6.14
 [0.6.13]: https://github.com/liulixin-lex/xy2api/compare/v0.6.12...v0.6.13
 [0.6.12]: https://github.com/liulixin-lex/xy2api/compare/v0.6.11...v0.6.12
