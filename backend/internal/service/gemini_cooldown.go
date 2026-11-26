@@ -291,6 +291,7 @@ func (s *GeminiMessagesCompatService) beginGeminiRecovery(ctx context.Context, a
 	done := make(chan struct{})
 	var stopOnce sync.Once
 	go func() {
+		defer resilience.RecoverCollabWorker()
 		defer close(done)
 		ticker := time.NewTicker(geminiRecoveryLeaseDuration / 3)
 		defer ticker.Stop()
