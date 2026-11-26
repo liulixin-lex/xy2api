@@ -128,7 +128,7 @@
             />
 
 
-            <SchedDecisions :account-id="detail.account.id" :group="pillOf" :model="tab" />
+            <SchedDecisions :account-id="detail.account.id" :group="pillOf" :model="tab" :rule-version="detail.current_rule_version ?? null" />
           </template>
         </div>
       </aside>

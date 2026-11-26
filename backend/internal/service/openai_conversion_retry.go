@@ -62,7 +62,8 @@ func openAIConversionRetryError(c *gin.Context, resp *http.Response, account *Ac
 	}
 	reason := ""
 	safe, marked := c.Request.Context().Value(requestReplaySafetyContextKey{}).(bool)
-	budget := resilience.StateFrom(c.Request.Context()).Budget()
+	requestState := resilience.StateFrom(c.Request.Context())
+	budget := requestState.Budget()
 	protected, _ := c.Request.Context().Value(openAITransferProtectedKey{}).(bool)
 	_, guardian := openAIGuardianParentAffinityFromContext(c.Request.Context())
 	switch {
@@ -95,7 +96,7 @@ func openAIConversionRetryError(c *gin.Context, resp *http.Response, account *Ac
 		if reason == "client_canceled" {
 			result = "canceled"
 		}
-		state.log(false, reason, result)
+		state.log(requestState.GatewayRequestID(), false, reason, result)
 		return nil
 	}
 	return state.failure
@@ -161,7 +162,7 @@ func WriteOpenAIConversionRetryFailure(c *gin.Context, failure *UpstreamFailover
 		return
 	}
 	if c.Request.Context().Err() != nil || GatewayDeliveryFailed(c) {
-		state.log(false, "client_canceled", "canceled")
+		state.log(resilience.StateFrom(c.Request.Context()).GatewayRequestID(), false, "client_canceled", "canceled")
 		return
 	}
 	if reason == "no_candidate" {
@@ -173,7 +174,7 @@ func WriteOpenAIConversionRetryFailure(c *gin.Context, failure *UpstreamFailover
 		}
 	}
 	writeUpstreamConversionError(c, &http.Response{StatusCode: failure.StatusCode}, "responses", PreOutputProtocolChat, "server_error", state.param, state.message, failure.cause)
-	state.log(false, reason, "not_retried")
+	state.log(resilience.StateFrom(c.Request.Context()).GatewayRequestID(), false, reason, "not_retried")
 }
 
 // CompleteOpenAIConversionRetry records the only replay's outcome after the
@@ -206,15 +207,18 @@ func CompleteOpenAIConversionRetry(c *gin.Context, result *OpenAIForwardResult, 
 			reason = "client_canceled"
 		}
 	}
-	state.log(state.resent, reason, outcome)
+	state.log(resilience.StateFrom(c.Request.Context()).GatewayRequestID(), state.resent, reason, outcome)
 }
 
-func (state *openAIConversionRetryState) log(retried bool, reason, result string) {
+func (state *openAIConversionRetryState) log(requestID string, retried bool, reason, result string) {
 	if state.logged {
 		return
 	}
 	state.logged = true
-	fields := []zap.Field{zap.Bool("retried", retried), zap.String("skip_reason", reason), zap.String("result", result), zap.Int("upstream_status", state.failure.StatusCode)}
+	fields := []zap.Field{
+		zap.String("component", "sched_quality"), zap.String("gateway_request_id", requestID),
+		zap.Bool("retried", retried), zap.String("skip_reason", reason), zap.String("result", result), zap.Int("upstream_status", state.failure.StatusCode),
+	}
 	var conversion *apicompat.UpstreamConversionError
 	if errors.As(state.failure, &conversion) {
 		diagnostic := conversion.Diagnostic()

@@ -114,8 +114,13 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 			lv.TrialStartedAt = r.Epoch
 		}
 		verdict, basis := s.assessLine(d, r, q.EventRegular, d.now, resets)
+		var rearBasis *SchedAdminBasis
+		if r.Identity == q.IdentityRear && !r.Trial && r.Basis != nil {
+			rearBasis = SchedAdminDecisionBasis(*r.Basis)
+		}
 		switch key.Line {
 		case q.DimensionTTFO:
+			row.TTFTBasis = rearBasis
 			row.TTFTLastEval = SchedAdminLastEvalFromState(r)
 			row.TTFTSamples = basis.SampleCounts
 			row.View.TTFO = lv
@@ -125,6 +130,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 				row.TTFT = *basis.TTFT
 			}
 		case q.DimensionError:
+			row.ErrorBasis = rearBasis
 			row.ErrorLastEval = SchedAdminLastEvalFromState(r)
 			row.ErrorSamples = basis.SampleCounts
 			row.View.Error = lv
@@ -132,6 +138,7 @@ func (s *SchedQualityEngineService) publish(d *schedQualityData, states []q.Line
 				row.Error = *basis.Error
 			}
 		case q.DimensionCache:
+			row.CacheBasis = rearBasis
 			row.CacheLastEval = SchedAdminLastEvalFromState(r)
 			row.CacheSamples = basis.SampleCounts
 			row.View.Cache = lv

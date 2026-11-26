@@ -1,10 +1,13 @@
 <template>
   <dl class="ev" :data-qp-evidence="basis.line">
-    <div v-if="figures.measure" class="ev__row" data-qp-evidence-measure>
-      <dt>{{ label(figures.measure[0]) }}</dt>
-      <dd class="ev__main" :class="`is-${tone}`">{{ figures.measure[0].value }}</dd>
-      <dt>{{ label(figures.measure[1]) }}</dt>
-      <dd>{{ figures.measure[1].value }}</dd>
+    <!-- When the evidence was taken, then what it read against the line, as the panel's cell and the list's card read it. -->
+    <div v-if="figures.period || figures.reading" class="ev__row" data-qp-evidence-measure>
+      <dt v-if="figures.period" data-qp-evidence-period>{{ figures.period }}</dt>
+      <!-- The reading under the panel's column name (首字慢: a share, not seconds), as on the dot's card. -->
+      <template v-if="figures.reading">
+        <dt data-qp-evidence-line>{{ t(`admin.schedQuality.panel.col.${basis.line}`) }}</dt>
+        <dd class="ev__main" :class="`is-${tone}`" data-qp-evidence-reading>{{ figures.reading }}</dd>
+      </template>
     </div>
     <div v-if="figures.samples.length" class="ev__row" data-qp-evidence-samples>
       <template v-for="item in figures.samples" :key="item.label">
@@ -17,9 +20,9 @@
 
 <script setup lang="ts">
 /**
- * What one decision was taken on, as figures against their measure (basisFigures): the figure in the action's colour,
- * then what it was measured against, then the units counted. Short labels, no sentences; the full record stays with
- * the backend.
+ * What one decision was taken on (basisFigures): when its evidence was taken, then the line by the panel's column name
+ * and what it read against it in the action's colour ("13:05–13:15  缓存  76.2 / 86", the same reading as the panel's
+ * cell and the list's card), then the units counted. No sentences; the full record stays with the backend.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -34,7 +37,7 @@ const props = defineProps<{
 const { t } = useI18n()
 
 const figures = computed(() => basisFigures(props.basis))
-const label = (item: BasisFigure) => t(`admin.schedQuality.evidence.${item.label}`, item.params ?? {})
+const label = (item: BasisFigure) => t(`admin.schedQuality.evidence.${item.label}`)
 </script>
 
 <style scoped>

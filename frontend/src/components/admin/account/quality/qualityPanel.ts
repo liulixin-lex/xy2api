@@ -15,10 +15,11 @@ import type {
   BackendDim,
   BackendEvidenceOf,
   BackendGroupModel,
+  BackendLastEval,
   BackendLine
 } from '@/api/admin/schedQualityTypes'
 import { formatShortTime } from '@/components/admin/account/table/accountTime'
-import { SCHED_DIMS } from '@/utils/schedQualityFormat'
+import { DASH, SCHED_DIMS } from '@/utils/schedQualityFormat'
 
 export type PanelPlace = 'stopped' | 'exempt' | 'rear' | 'trial' | 'front'
 
@@ -174,42 +175,161 @@ export const allGroupsExemption = (detail: Pick<BackendAccountDetail, 'exemption
 
 // ---- Evidence ----
 
-const pct = (ratio: number) => `${(ratio * 100).toFixed(1)}%`
-/** A threshold as set: 0.05 → "5%", 0.025 → "2.5%". */
-const limitPct = (ratio: number) => `${Number((ratio * 100).toFixed(1))}%`
+const pad2 = (n: number) => String(n).padStart(2, '0')
+/** A share as a figure without its sign, one decimal: 0.7623 → "76.2". */
+const shareFigure = (ratio: number) => (ratio * 100).toFixed(1)
+/** A threshold as set, without its sign, to two decimals at most: 0.86 → "86", 0.0225 → "2.25". */
+const limitFigure = (ratio: number, digits = 2) => String(Number((ratio * 100).toFixed(digits)))
 
-/** A figure of a basis: its label (admin.schedQuality.evidence.<label>, with `params`) and its value. */
+/**
+ * A share against its line as the two figures shown, on the same side of each other as the numbers they stand for:
+ * below stays below, above stays above, equal stays equal. The share has one decimal, rounded as usual; only when that
+ * would put it on the line or across it (0.7999 against 0.8 reads 80.0) is it rounded away from the line instead
+ * (79.9), and with more decimals if that is still not enough (the line then shown as finely). Nothing about the verdict
+ * is assumed: the side is the numbers' own, the one each line's rule compares (a share equal to its line is on it).
+ */
+function shareAgainst(share: number, line: number): [string, string] {
+  const side = Math.sign(share - line)
+  const shown = (digits: number, away: boolean) => {
+    const scale = 10 ** digits
+    const raw = share * 100 * scale
+    const units = !away || side === 0 ? Math.round(raw) : side < 0 ? Math.floor(raw) : Math.ceil(raw)
+    return (units / scale).toFixed(digits)
+  }
+  const tries: [number, boolean][] = [[1, false], [1, true], [2, true], [3, true], [4, true]]
+  for (const [digits, away] of tries) {
+    const figure = shown(digits, away)
+    const bar = limitFigure(line, Math.max(2, digits))
+    if (Math.sign(Number(figure) - Number(bar)) === side) return [figure, bar]
+  }
+  return [String(share * 100), String(line * 100)]
+}
+
+/**
+ * What a decision read against the line it was judged by — "76.2 / 86" — the one text the panel's cell, the list's tip
+ * card and the opened decision all show for it. First output: the share of the samples over the group's limit against
+ * the tolerance that decision was taken with (a dash on records from before it was kept: never today's setting);
+ * errors: the failure share against the limit; cache: the hit ratio against the minimum. A share with nothing counted
+ * is a dash. The two figures are on the same side of each other as the numbers (shareAgainst): a cache reading below its
+ * minimum never reads as on it. Null when there is no basis or it has no evidence of its own line.
+ */
+export function basisReading(basis: BackendBasis | null | undefined): string | null {
+  if (!basis) return null
+  let pair: [number | null, number | null] | null = null
+  if (basis.line === 'ttfo' && basis.ttft) {
+    const e = basis.ttft
+    pair = [e.n > 0 ? e.k / e.n : null, e.tolerance ?? null]
+  } else if (basis.line === 'error' && basis.error) {
+    const e = basis.error
+    pair = [e.padded > 0 ? e.failed / e.padded : null, e.limit]
+  } else if (basis.line === 'cache' && basis.cache) {
+    const e = basis.cache
+    pair = [e.turns > 0 ? e.ratio : null, e.min_ratio]
+  }
+  if (!pair) return null
+  const [share, line] = pair
+  const reading: [string, string] = share !== null && line !== null
+    ? shareAgainst(share, line)
+    : [share !== null ? shareFigure(share) : DASH, line !== null ? limitFigure(line) : DASH]
+  return `${reading[0]} / ${reading[1]}`
+}
+
+/** The evidence of a basis's own line, whichever line it is. */
+const lineEvidence = (basis: BackendBasis) => (basis.line === 'ttfo' ? basis.ttft : basis.line === 'error' ? basis.error : basis.cache)
+
+/**
+ * When the evidence of a decision was taken, "13:05–13:15" in local time: from the later of its cut (where the evidence
+ * started over) and its window's start, to its window's end. Only from what the record holds: without its window (older
+ * records, and the lines that do not keep it), or with a start at or after its end, null; never a window worked out or
+ * its ends swapped here.
+ */
+export function basisPeriod(basis: BackendBasis | null | undefined): string | null {
+  const evidence = basis ? lineEvidence(basis) : undefined
+  const from = evidence?.window_from ? Date.parse(evidence.window_from) : Number.NaN
+  const to = evidence?.window_to ? Date.parse(evidence.window_to) : Number.NaN
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null
+  const cut = basis?.cut ? Date.parse(basis.cut) : Number.NaN
+  const start = Number.isFinite(cut) ? Math.max(cut, from) : from
+  // A start at or after the end (a cut past the window, an odd record) has no period to show: nothing is swapped.
+  if (start >= to) return null
+  const clock = (ms: number) => {
+    const date = new Date(ms)
+    return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  }
+  return `${clock(start)}–${clock(to)}`
+}
+
+/** A figure of a basis: its label (admin.schedQuality.evidence.<label>) and its value. */
 export interface BasisFigure {
   label: string
-  params?: Record<string, unknown>
   value: string
 }
 
 /**
- * What a decision was taken on, as figures against what they were measured against: the share over the group's limit
- * against the line drawn from the front peers (or the peers' own share when there is no line), the failure share
- * against the limit, the cache hit against the minimum; then the units counted (all, and this group's). A figure the
- * record does not have is left out.
+ * What a decision was taken on: when its evidence was taken, what it read against its line (basisReading), then the
+ * units counted (all, and this group's). A figure the record does not have is left out.
  */
-export function basisFigures(basis: BackendBasis): { measure: [BasisFigure, BasisFigure] | null; samples: BasisFigure[] } {
-  let measure: [BasisFigure, BasisFigure] | null = null
-  if (basis.line === 'ttfo' && basis.ttft && basis.ttft.n > 0) {
-    const e = basis.ttft
-    measure = [
-      { label: 'over', params: { s: e.limit_s }, value: pct(e.k / e.n) },
-      e.z != null ? { label: 'bar', value: pct(e.z) } : { label: 'peers', value: pct(e.prior_mu) }
-    ]
-  } else if (basis.line === 'error' && basis.error && basis.error.padded > 0) {
-    const e = basis.error
-    measure = [{ label: 'failed', value: pct(e.failed / e.padded) }, { label: 'limit', value: limitPct(e.limit) }]
-  } else if (basis.line === 'cache' && basis.cache && basis.cache.turns > 0) {
-    const e = basis.cache
-    measure = [{ label: 'hit', value: pct(e.ratio) }, { label: 'min', value: limitPct(e.min_ratio) }]
-  }
+export function basisFigures(basis: BackendBasis): { period: string | null; reading: string | null; samples: BasisFigure[] } {
   const samples: BasisFigure[] = []
   if (basis.samples_total != null) samples.push({ label: 'samples', value: String(basis.samples_total) })
   if (basis.samples_local != null) samples.push({ label: 'local', value: String(basis.samples_local) })
-  return { measure, samples }
+  return { period: basisPeriod(basis), reading: basisReading(basis), samples }
+}
+
+/** What an assessment's have / need count: weighted samples, sessions, slow sessions, turns or low sessions. */
+export type LackUnit = 'samples' | 'sessions' | 'slowSessions' | 'turns' | 'lowSessions'
+export const LACK_UNITS: LackUnit[] = ['samples', 'sessions', 'slowSessions', 'turns', 'lowSessions']
+
+/** Every cause each line's assessment can carry (backend assessmentCauses); any other name makes the pair unreadable. */
+const LINE_CAUSES: Record<BackendDim, string[]> = {
+  ttfo: [
+    'no_peers', 'all_peers_rear', 'peer_known_insufficient', 'no_samples', 'mass_insufficient', 'sessions_insufficient',
+    'slow_sessions_insufficient', 'absolute_unconfirmed', 'relative_unconfirmed', 'worst_mean_above_tolerance', 'relative_veto'
+  ],
+  error: ['clear_insufficient', 'bounds_unconfirmed', 'recovery_over_limit'],
+  cache: ['turns_insufficient', 'low_sessions_insufficient']
+}
+
+/**
+ * Which of the assessment's own shortfalls its have / need are, from its causes, picked as the backend picks the pair
+ * (backend/internal/domain/schedquality/assessment.go: `classify`, `classifyTTFT`, `consider` — the first "own short"
+ * cause it meets keeps the pair; `causes` comes in the order of the table `assessmentCauses`, which is also the order
+ * rule B reports them in). First output: samples (`no_samples`, `mass_insufficient`: the weight against 20), else
+ * sessions (`sessions_insufficient`, against 3), else slow sessions (`slow_sessions_insufficient`, against 2, which
+ * `classifyTTFT` skips while `absolute_unconfirmed` is there too). Cache (`classify`): turns before low sessions of 10
+ * turns (0 / 1). Errors: clear outcomes (`clear_insufficient`, against 50), read as samples. Null — no unit word — when
+ * there are no causes, a cause the line does not know, or the previous rules' peer causes (their pair was the peers').
+ */
+export function lackUnit(line: BackendDim, causes: string[]): LackUnit | null {
+  if (!causes.length || causes.some((cause) => !LINE_CAUSES[line].includes(cause))) return null
+  const has = (cause: string) => causes.includes(cause)
+  if (line === 'ttfo') {
+    if (has('no_peers') || has('all_peers_rear') || has('peer_known_insufficient')) return null
+    if (has('no_samples') || has('mass_insufficient')) return 'samples'
+    if (has('sessions_insufficient')) return 'sessions'
+    if (has('slow_sessions_insufficient') && !has('absolute_unconfirmed')) return 'slowSessions'
+    return null
+  }
+  if (line === 'cache') return has('turns_insufficient') ? 'turns' : has('low_sessions_insufficient') ? 'lowSessions' : null
+  return has('clear_insufficient') ? 'samples' : null
+}
+
+/** "会话 2 / 3", or "2 / 3" when the unit cannot be told. */
+export const lacksText = (t: Translate, unit: LackUnit | null, have: number, need: number) =>
+  t(unit ? `admin.schedQuality.panel.lacksUnit.${unit}` : 'admin.schedQuality.panel.lacks', { have, need })
+
+/**
+ * A line's latest assessment on trial as its cell and the list's tip card show it: passing (green), what it still lacks
+ * against what it needs with what that is ("会话 2 / 3", whole units: a shortfall never reads as enough; lackUnit), or
+ * unknown. A dash before the trial's first assessment (the latest is still the one that opened it) or without any.
+ */
+export function trialNote(latest: BackendLastEval | null | undefined, line: BackendDim, t: Translate): { text: string; pass: boolean } {
+  if (!latest || latest.acted) return { text: DASH, pass: false }
+  if (latest.reason === 'within') return { text: t('admin.schedQuality.verdict.pass'), pass: true }
+  if (latest.have != null && latest.need != null) {
+    return { text: lacksText(t, lackUnit(line, latest.causes ?? []), Math.floor(latest.have), Math.ceil(latest.need)), pass: false }
+  }
+  return { text: t('admin.schedQuality.verdict.unknown'), pass: false }
 }
 
 /** Why a first-output verdict is unknown (rule B's reasons); the other lines carry none. */

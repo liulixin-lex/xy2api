@@ -26,12 +26,13 @@ type schedAdminGroupMembers struct {
 func (g schedAdminGroupMembers) GetAccountIDsByGroupIDs(context.Context, []int64) ([]int64, error) {
 	return g.ids, nil
 }
-func (e *schedAdminEngine) PreviewPolicy(_ context.Context, _ int64, p schedquality.Policy) ([]SchedPolicyChange, error) {
+func (e *schedAdminEngine) PreviewPolicy(_ context.Context, _ int64, p schedquality.Policy) ([]SchedPolicyChange, schedquality.RuleBParams, error) {
 	e.previewCalls = append(e.previewCalls, p)
 	if e.preview != nil {
-		return e.preview(p)
+		changes, err := e.preview(p)
+		return changes, e.rule.Params, err
 	}
-	return e.changes, nil
+	return e.changes, e.rule.Params, nil
 }
 func (r *schedAdminAccounts) SchedAdminDecisions(context.Context, int64, int, int64) ([]SchedAdminDecision, error) {
 	return []SchedAdminDecision{}, nil
@@ -58,6 +59,7 @@ func TestSchedAdminV2DetailJSONEvidence(t *testing.T) {
 	out, err := s.Detail(context.Background(), 1)
 	require.NoError(t, err)
 	raw := schedAdminJSON(t, out)
+	require.Equal(t, schedquality.RuleVersion, raw["current_rule_version"])
 	groups := raw["groups"].([]any)
 	model := groups[0].(map[string]any)["by_model"].([]any)[0].(map[string]any)
 	require.ElementsMatch(t, []string{"model", "placement", "exempt", "lines"}, schedAdminJSONKeys(model))
@@ -295,7 +297,8 @@ func TestSchedAdminV2PreviewJSONAndConflict(t *testing.T) {
 	out, err := s.PreviewPolicy(context.Background(), 1, 7, policy)
 	require.NoError(t, err)
 	raw := schedAdminJSON(t, out)
-	require.ElementsMatch(t, []string{"relaxed_lines", "lines", "changed"}, schedAdminJSONKeys(raw))
+	require.ElementsMatch(t, []string{"relaxed_lines", "lines", "changed", "reach"}, schedAdminJSONKeys(raw))
+	require.Equal(t, []any{}, raw["reach"], "a preview without published data has an empty array")
 	require.Equal(t, []any{"ttfo"}, raw["relaxed_lines"])
 	require.Equal(t, SchedAdminVerdictCounts{Pass: 1}, out.Lines[schedquality.DimensionTTFO].Now)
 	require.Equal(t, SchedAdminVerdictCounts{Fail: 1}, out.Lines[schedquality.DimensionTTFO].After)

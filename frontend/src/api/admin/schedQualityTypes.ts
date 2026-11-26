@@ -58,6 +58,8 @@ export interface BackendRear {
   until: string
   /** The previous rules' stay step; not shown (the rules in force have none). */
   level?: number | null
+  /** Each restricted line of the model on its own (at the rear or on trial); absent from an older backend's answer. */
+  line_details?: BackendLineDetail[] | null
   exempt: boolean
   /**
    * The record really puts the account at the back of the group: not exempt, quality scheduling switched on, its
@@ -75,6 +77,22 @@ export interface BackendTrial {
   trial_started_at?: string | null
   /** The trial's end at the latest (it may end sooner). */
   until: string
+  /** Each line on trial on its own, with its own end and latest assessment; absent from an older backend's answer. */
+  line_details?: BackendLineDetail[] | null
+}
+
+/**
+ * A restricted line of a group × model, on its own: at the rear (its review, and the decision that began this stay:
+ * enter, renew or trial_fail, the same shape as a decision's basis from the same mapping) or on trial (its end at the
+ * latest and its latest assessment). A rear item lists every restricted line of its model, its lines on trial too.
+ */
+export interface BackendLineDetail {
+  line: BackendDim
+  /** Absent from the first answers that had details: the item's own kind then (rear[] rear, trial[] trial). */
+  identity?: 'rear' | 'trial'
+  until: string
+  basis?: BackendBasis | null
+  last_eval?: BackendLastEval | null
 }
 
 /**
@@ -152,6 +170,9 @@ export interface BackendTTFOEvidence {
   z: number | null
   /** Why the verdict is unknown (rule B's unknown reasons). */
   causes: string[]
+  /** The window the samples were taken from, as on the cache line; absent on records from before it was kept. */
+  window_from?: string | null
+  window_to?: string | null
 }
 
 export interface BackendErrorEvidence {
@@ -170,6 +191,9 @@ export interface BackendErrorEvidence {
    * account does not recover yet). Omitted when false and on records before it was kept.
    */
   recovery_over_limit?: boolean
+  /** The window the outcomes were taken from, as on the cache line; absent on records from before it was kept. */
+  window_from?: string | null
+  window_to?: string | null
 }
 
 export interface BackendCacheEvidence {
@@ -182,7 +206,7 @@ export interface BackendCacheEvidence {
   /**
    * From rule 4.0, absent on older records (never read as 0): the low sessions with 10 turns or more of their own, the
    * path a failing verdict took (two adjacent, one at 5 points short, one at 20 points short over 10 turns) and the
-   * window the turns were taken from. Read, not shown yet.
+   * window the turns were taken from (shown as the opened decision's period).
    */
   low_sessions_10?: number | null
   path?: 'pair' | 'single5' | 'deep10' | null
@@ -222,6 +246,11 @@ export interface BackendLine<D extends BackendDim = BackendDim> extends BackendS
   source_groups: number[]
   /** The line's latest real assessment; null on rows written before it was kept, or not assessed yet. */
   last_eval?: BackendLastEval | null
+  /**
+   * At the rear only: the decision that began this stay at the rear (enter, renew or trial_fail), the same shape as a
+   * decision's basis, from the same mapping. Absent on other lines and from an older backend.
+   */
+  basis?: BackendBasis | null
 }
 
 /**
@@ -308,6 +337,8 @@ export interface BackendAccountDetail {
   groups: BackendDetailGroup[]
   auto_states: BackendAutoState[]
   exemptions: BackendExemption[]
+  /** The rule version in force; a decision of any other version is of the previous rules. Absent from an older backend. */
+  current_rule_version?: string | null
 }
 
 // ---- GET /accounts/:id/decisions ----
@@ -408,23 +439,22 @@ export interface SchedGroupPolicyUpdate {
   policy: BackendPolicy
 }
 
-/** Verdicts of one line over the group's account × model keys. */
-export interface BackendVerdictCounts {
-  pass: number
-  unknown: number
-  fail: number
-}
-
 /**
- * What the thresholds would say on the evidence in the current windows: each line assessed once with the saved and
- * once with the new thresholds. Not a forecast of identities (a tightened line keeps them; a relaxed one is cleared
- * and judged again on saving).
+ * What the form reads of the preview of unsaved thresholds: the lines saving them would relax (cleared and judged again
+ * at once), and per model, of the group's member accounts with enough samples of their own over the last 12 hours
+ * (every group's requests, none before the account's recovery), how many (n) and how many of them reach the thresholds
+ * (ok): the cache by its minimum, the first output by its limit and the tolerance in the settings. A description of the
+ * 12 hours, not a forecast of verdicts; empty while the 12-hour figures load.
  */
 export interface BackendPolicyPreview {
   relaxed_lines: BackendDim[]
-  lines: Record<BackendDim, { now: BackendVerdictCounts; after: BackendVerdictCounts }>
-  /** At most 50. */
-  changed: { account_id: number; name: string; model: string; line: BackendDim; from: BackendVerdict; to: BackendVerdict }[]
+  reach: BackendPolicyReach[]
+}
+
+export interface BackendPolicyReach {
+  model: string
+  cache: { ok: number; n: number }
+  first_output: { ok: number; n: number }
 }
 
 // ---- POST /groups/summary ----
@@ -576,6 +606,8 @@ export interface BackendPerfLine extends BackendSampleCounts {
   until: string | null
   trial_started_at?: string | null
   last_eval: BackendLastEval | null
+  /** At the rear only, as on the panel's line (BackendLine.basis). */
+  basis?: BackendBasis | null
 }
 
 /**

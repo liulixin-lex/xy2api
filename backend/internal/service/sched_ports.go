@@ -150,6 +150,7 @@ type SchedPolicyChange struct {
 	Lines     map[schedquality.Dimension]schedquality.Verdict
 }
 type SchedGroupRow struct {
+	TTFTBasis, ErrorBasis, CacheBasis          *SchedAdminBasis
 	TTFTLastEval, ErrorLastEval, CacheLastEval *SchedAdminLastEval
 	TTFTSamples, ErrorSamples, CacheSamples    schedquality.SampleCounts
 	GroupID                                    int64
@@ -163,7 +164,8 @@ type SchedGroupRow struct {
 	SourceGroups                               []int64
 }
 type SchedQualityEngine interface {
-	PreviewPolicy(ctx context.Context, groupID int64, p schedquality.Policy) ([]SchedPolicyChange, error)
+	// PreviewPolicy also returns the rule parameters used by these assessments.
+	PreviewPolicy(ctx context.Context, groupID int64, p schedquality.Policy) ([]SchedPolicyChange, schedquality.RuleBParams, error)
 	Start(ctx context.Context)
 	Stop()
 	Observe(sample schedquality.AttemptSample)

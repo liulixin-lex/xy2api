@@ -80,11 +80,7 @@ beforeEach(() => {
   api.groupBoard.mockResolvedValue(board())
   api.getGroupPolicy.mockResolvedValue(policyFixture)
   api.groupsSummary.mockResolvedValue({ at: '', stale: false, groups: [] })
-  api.previewGroupPolicy.mockResolvedValue({
-    relaxed_lines: [],
-    lines: Object.fromEntries(['ttfo', 'error', 'cache'].map((line) => [line, { now: { pass: 3, unknown: 1, fail: 0 }, after: { pass: 2, unknown: 1, fail: 1 } }])),
-    changed: [{ account_id: 7, name: 'acc-07', model: 'gpt-6.1-sol', line: 'error', from: 'pass', to: 'fail' }]
-  })
+  api.previewGroupPolicy.mockResolvedValue({ relaxed_lines: [], reach: [{ model: 'gpt-6.1-sol', cache: { ok: 2, n: 3 }, first_output: { ok: 1, n: 3 } }] })
 })
 afterAll(() => { delete document.documentElement.dataset.motion })
 

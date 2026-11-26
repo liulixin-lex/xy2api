@@ -13,16 +13,18 @@ const (
 )
 
 type ErrorAssessment struct {
-	Verdict      Verdict  `json:"verdict"`
-	Limit        float64  `json:"limit"` // max(分组上限, ErrorRateFloor)
-	Clear        int      `json:"clear"`
-	Failed       int      `json:"failed"`
-	Unknown      int      `json:"unknown"`
-	Padded       int      `json:"padded"` // n = max(50, k+u)
-	LowerFail    float64  `json:"lower_fail"`
-	LowerPass    float64  `json:"lower_pass"`
-	AttemptIDs   []string `json:"-"`
-	SourceGroups []int64  `json:"-"` // Actual selected request units, deduplicated and ascending.
+	WindowFrom   time.Time `json:"window_from,omitzero"`
+	WindowTo     time.Time `json:"window_to,omitzero"`
+	Verdict      Verdict   `json:"verdict"`
+	Limit        float64   `json:"limit"` // max(分组上限, ErrorRateFloor)
+	Clear        int       `json:"clear"`
+	Failed       int       `json:"failed"`
+	Unknown      int       `json:"unknown"`
+	Padded       int       `json:"padded"` // n = max(50, k+u)
+	LowerFail    float64   `json:"lower_fail"`
+	LowerPass    float64   `json:"lower_pass"`
+	AttemptIDs   []string  `json:"-"`
+	SourceGroups []int64   `json:"-"` // Actual selected request units, deduplicated and ascending.
 
 	// RecoveryOverLimit explains why an otherwise passing assessment became unknown.
 	RecoveryOverLimit bool `json:"recovery_over_limit,omitempty"`
@@ -46,12 +48,12 @@ func AssessError(samples, running []AttemptSample, limit float64, cut, now time.
 
 // AssessErrorForGroup counts the target group's clear outcomes after final-attempt selection and slot truncation.
 func AssessErrorForGroup(samples, running []AttemptSample, limit float64, cut, now time.Time, groupID int64) (ErrorAssessment, int) {
-	out := ErrorAssessment{Limit: EffectiveErrorRate(limit)}
+	out := ErrorAssessment{Limit: EffectiveErrorRate(limit), WindowFrom: now.Add(-ErrorWindow), WindowTo: now}
 	local := 0
-	rows := finalRequests(samples, running, now)
+	rows := finalRequests(samples, running, out.WindowTo)
 	selected := rows[:0]
 	for _, unit := range rows {
-		if !unit.startedAt.After(cut) || unit.at().Before(now.Add(-ErrorWindow)) {
+		if !unit.startedAt.After(cut) || unit.at().Before(out.WindowFrom) {
 			continue
 		}
 		s := unit.final

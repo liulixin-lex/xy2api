@@ -33,6 +33,11 @@ export interface TipCard {
    * width on a narrow screen (by default the note keeps its width and they give way with an ellipsis).
    */
   wrapEnd?: boolean
+  /**
+   * The widest text each column can hold (a line each, for several cases): drawn as an invisible row of no height, so
+   * the columns, and the card, keep that width whatever the rows hold this time.
+   */
+  sizer?: string[]
 }
 export type TipContent = string | TipCard
 
@@ -174,6 +179,10 @@ function render(el: HTMLElement, content: TipContent) {
       : cols >= 3 ? `repeat(${cols - 1}, minmax(0, max-content)) minmax(max-content, 1fr)` : `repeat(${cols}, minmax(0, max-content))`
     content.head?.forEach((text, index) => grid.appendChild(node('span', column('sq-tip__h', index), text)))
     for (const row of rows) row.forEach((value, index) => grid.appendChild(cell(column('sq-tip__c', index), value)))
+    if (content.sizer && rows.length) {
+      grid.classList.add('sq-tip__grid--sized')
+      content.sizer.forEach((text, index) => grid.appendChild(node('span', column('sq-tip__c sq-tip__sizer', index), text)))
+    }
     parts.push(grid)
   }
   el.replaceChildren(...parts)

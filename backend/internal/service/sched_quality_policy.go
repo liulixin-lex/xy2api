@@ -302,23 +302,23 @@ func (s *SchedQualityEngineService) refreshConfig(ctx context.Context, now time.
 }
 
 // PreviewPolicy reports current per-line verdicts without changing stored state.
-func (s *SchedQualityEngineService) PreviewPolicy(ctx context.Context, group int64, p schedquality.Policy) ([]SchedPolicyChange, error) {
+func (s *SchedQualityEngineService) PreviewPolicy(ctx context.Context, group int64, p schedquality.Policy) ([]SchedPolicyChange, schedquality.RuleBParams, error) {
 	if err := ValidateSchedQualityPolicy(p); err != nil {
-		return nil, err
+		return nil, schedquality.RuleBParams{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
 	d, err := s.inputs(ctx, now, s.window.samples)
 	if err != nil {
-		return nil, err
+		return nil, schedquality.RuleBParams{}, err
 	}
 	if _, ok := s.members[group]; !ok {
-		return nil, infraerrors.BadRequest("INVALID_SCHED_GROUP", "quality policies require an OpenAI group")
+		return nil, schedquality.RuleBParams{}, infraerrors.BadRequest("INVALID_SCHED_GROUP", "quality policies require an OpenAI group")
 	}
 	states, _, resets, err := s.store.LoadRows(ctx)
 	if err != nil {
-		return nil, err
+		return nil, schedquality.RuleBParams{}, err
 	}
 	keys, rows := s.rowKeys(d, states)
 	old := s.policies[group]
@@ -347,5 +347,7 @@ func (s *SchedQualityEngineService) PreviewPolicy(ctx context.Context, group int
 			delete(byPair, pair)
 		}
 	}
-	return out, nil
+	// Copy the exact parameters used by assessLine while the existing lock is held.
+	// Callers need no additional settings read or access to the mutable rule.
+	return out, s.rule.Params, nil
 }

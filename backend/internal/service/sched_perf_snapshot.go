@@ -83,6 +83,8 @@ type SchedPerfSnapshot struct {
 	scores   map[SchedAccountModel]schedPerfScore
 	first15  map[int64]int
 	policies map[int64]SchedPolicyRecord // immutable version used to classify every row
+	reach    map[SchedAccountModel]schedPerfReach
+	resets   map[int64]time.Time // reset cutoffs used to build reach
 }
 
 func (s *SchedPerfSnapshot) Usable(now time.Time) bool {
@@ -137,7 +139,8 @@ func perfKeyOrder(a, b schedQualityKey) int {
 }
 
 func buildSchedPerf(facts map[string]SchedPerfFact, switches map[int64]SchedPerfSwitch, policies map[int64]SchedPolicyRecord, resets map[int64]time.Time, at time.Time) *SchedPerfSnapshot {
-	s := &SchedPerfSnapshot{at: at, from: at.Add(-schedPerfWindow), complete: true, policies: policies, rows: make(map[schedQualityKey]*schedPerfRow), scores: make(map[SchedAccountModel]schedPerfScore), first15: make(map[int64]int)}
+	s := &SchedPerfSnapshot{at: at, from: at.Add(-schedPerfWindow), complete: true, policies: policies, resets: resets, rows: make(map[schedQualityKey]*schedPerfRow), scores: make(map[SchedAccountModel]schedPerfScore), first15: make(map[int64]int)}
+	reach := make(map[SchedAccountModel]*schedPerfReachBuilder)
 	training := make(map[schedQualityKey]*perfTraining)
 	peers := make(map[schedGroupModel]perfStrata)
 	limits := make(map[int64]uint64, len(policies))
@@ -148,8 +151,16 @@ func buildSchedPerf(facts map[string]SchedPerfFact, switches map[int64]SchedPerf
 	}
 	end, begin := at.UnixMicro(), s.from.UnixMicro()
 	for _, f := range facts {
+		if f.Finish < begin || f.Finish >= end || f.Start > f.Finish || f.Start <= resets[f.Account].UnixMicro() {
+			continue
+		}
+		am := SchedAccountModel{f.Account, f.Model}
+		if reach[am] == nil {
+			reach[am] = &schedPerfReachBuilder{}
+		}
+		reach[am].add(f)
 		limit, enabled := limits[f.Group]
-		if !enabled || f.Finish < begin || f.Finish >= end || f.Start > f.Finish || f.Start <= resets[f.Account].UnixMicro() {
+		if !enabled {
 			continue
 		}
 		key := schedQualityKey{f.Account, f.Model, f.Group}
@@ -208,6 +219,10 @@ func buildSchedPerf(facts map[string]SchedPerfFact, switches map[int64]SchedPerf
 		counts[layer].n++
 		counts[layer].slow += slow
 		peers[gm] = counts
+	}
+	s.reach = make(map[SchedAccountModel]schedPerfReach, len(reach))
+	for key, row := range reach {
+		s.reach[key] = row.freeze()
 	}
 	excesses := make(map[SchedAccountModel]*big.Rat)
 	for k, t := range training {
@@ -292,16 +307,24 @@ func perfLimitMillis(seconds float64) uint64 {
 }
 
 func perfSlow(f SchedPerfFact, limit uint64) (int, bool) {
-	if f.TTFO > 0 {
-		if uint64(f.TTFO) > limit {
-			return 1, true
-		}
-		return 0, true
+	ms, censored, ok := perfFirstClock(f)
+	if !ok || censored && ms < limit {
+		return 0, false
 	}
-	if f.Outcome == q.OutcomeTimeout && f.FullTier && f.Censored >= 0 && uint64(f.Censored) >= limit {
+	if censored || ms > limit {
 		return 1, true
 	}
-	return 0, false
+	return 0, true
+}
+
+func perfFirstClock(f SchedPerfFact) (ms uint64, censored, ok bool) {
+	if f.TTFO > 0 {
+		return uint64(f.TTFO), false, true
+	}
+	if f.Outcome == q.OutcomeTimeout && f.FullTier && f.Censored >= 0 {
+		return uint64(f.Censored), true, true
+	}
+	return 0, false, false
 }
 func (s *SchedPerfSnapshot) countSwitches(events map[int64]SchedPerfSwitch, resets map[int64]time.Time) {
 	type commit struct {

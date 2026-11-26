@@ -30,13 +30,17 @@ type schedAdminEngine struct {
 	overrides    []SchedOverride
 	policy       SchedPolicyRecord
 	policyErr    error
+	rule         SchedTTFTRuleRecord
 	changes      []SchedPolicyChange
 	preview      func(schedquality.Policy) ([]SchedPolicyChange, error)
 	previewCalls []schedquality.Policy
 }
 
 func (e *schedAdminEngine) PerformanceSnapshot() *SchedPerfSnapshot { return e.perf }
-func (e *schedAdminEngine) Snapshot() *SchedQualitySnapshot         { e.reads++; return e.snapshot }
+func (e *schedAdminEngine) TTFTRule(context.Context) (SchedTTFTRuleRecord, error) {
+	return e.rule, nil
+}
+func (e *schedAdminEngine) Snapshot() *SchedQualitySnapshot { e.reads++; return e.snapshot }
 func (e *schedAdminEngine) Reset(_ context.Context, id int64) (time.Time, error) {
 	if e.resetErr != nil {
 		return time.Time{}, e.resetErr

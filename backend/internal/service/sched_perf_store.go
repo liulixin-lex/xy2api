@@ -43,14 +43,17 @@ func (s *SchedQualityEngineService) runPerformance(ctx context.Context) {
 		if err := s.publishPerformance(ctx, &w, at); err != nil && ctx.Err() == nil {
 			slog.WarnContext(ctx, "sched_quality.performance_load", "error", err)
 		}
-		now := s.now()
-		delay := now.Truncate(schedPerfTick).Add(schedPerfTick).Sub(now)
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
+		// Wait for the next unpublished boundary, even if the timer wakes
+		// before the wall clock reaches it. Slow loads skip expired ticks.
+		next := at.Add(schedPerfTick)
+		for delay := next.Sub(s.now()); delay > 0; delay = next.Sub(s.now()) {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 		}
 	}
 }
@@ -71,7 +74,7 @@ func (s *SchedQualityEngineService) publishPerformance(ctx context.Context, w *s
 	if !w.readyLogged {
 		w.readyLogged = true
 		slog.InfoContext(ctx, "sched_quality.performance_ready",
-			"snapshot_at", snapshot.at, "from", snapshot.from,
+			"component", "sched_quality", "snapshot_at", snapshot.at, "from", snapshot.from,
 			"rows", len(w.facts), "load_ms", time.Since(w.loadStarted).Milliseconds())
 	}
 	return nil
