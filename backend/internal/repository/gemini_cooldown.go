@@ -43,7 +43,7 @@ func (r *accountRepository) MutateGeminiCooldown(ctx context.Context, id int64, 
 	var now time.Time
 	if !rows.Next() {
 		_ = rows.Close()
-		return errors.New("Gemini cooldown database clock unavailable")
+		return errors.New("gemini cooldown database clock unavailable")
 	}
 	err = rows.Scan(&now)
 	if err == nil {
