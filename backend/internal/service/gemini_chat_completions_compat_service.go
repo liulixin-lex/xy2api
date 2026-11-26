@@ -123,6 +123,15 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		}
 	}()
 
+	ctx = withGeminiRetryObservation(ctx)
+	streamErrorsBefore := len(GetOpsStreamErrors(c))
+	finishRecovery, recoveryErr := s.beginGeminiRecovery(ctx, account, originalModel, true)
+	if recoveryErr != nil {
+		return nil, recoveryErr
+	}
+	defer func() {
+		finishRecovery(retErr == nil && result != nil && len(GetOpsStreamErrors(c)) == streamErrorsBefore)
+	}()
 	mappedModel := req.Model
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(req.Model)
@@ -213,10 +222,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 				}
 				break
 			}
-			if attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries) {
-				if resp.StatusCode == http.StatusTooManyRequests {
-					s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, originalModel)
-				}
+			if geminiRetryFits(attemptGuard.ctx, account, resp.Header, respBody) && attempt < geminiMaxRetries && !resilienceGeminiSkipInPlaceRetry(ctx, account, resp.StatusCode, resp.Header, respBody) && geminiInPlaceRetryAllowed(attemptGuard.ctx, &inPlaceRetries) {
 				upstreamReqID := resp.Header.Get(requestIDHeader)
 				if upstreamReqID == "" {
 					upstreamReqID = resp.Header.Get("x-goog-request-id")
@@ -235,7 +241,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 					Message:            upstreamMsg,
 				})
 				logger.LegacyPrintf("service.gemini_chat_completions", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				if !sleepGeminiBackoffCtx(attemptGuard.ctx, attempt) {
+				if !sleepGeminiRetryCtx(attemptGuard.ctx, account, attempt) {
 					return nil, context.Cause(attemptGuard.ctx)
 				}
 				continue

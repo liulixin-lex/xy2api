@@ -503,6 +503,7 @@
         </span>
         <!-- Help icon -->
         <span
+          v-if="geminiSimulatedQuota"
           class="group relative cursor-help"
         >
           <svg
@@ -578,7 +579,7 @@
           {{ error }}
         </div>
         <!-- Gemini: show daily usage bars when available -->
-        <div v-else-if="geminiUsageAvailable" class="space-y-1">
+        <div v-else-if="geminiSimulatedQuota && geminiUsageAvailable" class="space-y-1">
           <UsageProgressBar
             v-for="bar in geminiUsageBars"
             :key="bar.key"
@@ -689,6 +690,7 @@
 </template>
 
 <script setup lang="ts">
+import { isOfficialGeminiBaseUrl } from '@/utils/geminiUpstream'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
@@ -950,6 +952,8 @@ const antigravityTier = computed(() => {
 })
 
 // Gemini 账户类型（从 credentials 中提取）
+const geminiSimulatedQuota = computed(() => props.account.platform === 'gemini' && props.account.type !== 'service_account' && (props.account.type !== 'apikey' || isOfficialGeminiBaseUrl(props.account.credentials?.base_url)))
+
 const geminiTier = computed(() => {
   if (props.account.platform !== 'gemini') return null
   const creds = props.account.credentials as GeminiCredentials | undefined
@@ -1031,6 +1035,7 @@ const geminiUserLevel = computed((): string | null => {
 
 // Gemini 认证类型（按要求：授权方式简称 + 用户等级）
 const geminiAuthTypeLabel = computed(() => {
+  if (props.account.platform === 'gemini' && !geminiSimulatedQuota.value) return props.account.type === 'service_account' ? 'Vertex' : t('admin.accounts.gemini.thirdPartyKey')
   if (props.account.platform !== 'gemini') return null
   if (!geminiChannelShort.value) return null
   return geminiUserLevel.value ? `${geminiChannelShort.value} ${geminiUserLevel.value}` : geminiChannelShort.value

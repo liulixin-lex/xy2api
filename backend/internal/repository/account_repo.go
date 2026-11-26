@@ -907,6 +907,7 @@ func lockAndMergeAccountProbeExtra(
 		return nil, err
 	}
 	extra := service.MergeOpenAICodexTicketExtra(incomingExtra, currentExtra)
+	service.MergeGeminiCooldownExtra(extra, currentExtra)
 	// A reset can happen after the caller's read; only the locked row is authoritative.
 	if resetAt, ok := currentExtra["group_quality_reset_at"]; ok {
 		extra["group_quality_reset_at"] = resetAt

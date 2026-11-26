@@ -40,6 +40,12 @@ func requestBudget(ctx context.Context) *resilience.Budget {
 // calls it once per failed attempt, before any same-account retry or switch.
 func resilienceAttemptFailed(ctx context.Context, accountID int64, failoverErr *service.UpstreamFailoverError) bool {
 	st := resilience.StateFrom(ctx)
+	if failoverErr != nil && failoverErr.Reason == service.GeminiRecoveryPendingReason {
+		// No upstream call was made. Switching is bounded by the existing switch
+		// count and wall budget, without penalizing this account or its session.
+		b := requestBudget(ctx)
+		return b != nil && !b.CanAttempt(time.Now())
+	}
 	if failoverErr != nil && failoverErr.PreDispatchSelectionInvalidated {
 		return true
 	}

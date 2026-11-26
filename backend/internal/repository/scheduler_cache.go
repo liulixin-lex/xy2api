@@ -853,6 +853,7 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 	}
 	return service.Account{
 		ID:                      account.ID,
+		ProxyID:                 account.ProxyID,
 		Name:                    account.Name,
 		Platform:                account.Platform,
 		Type:                    account.Type,
@@ -944,7 +945,7 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	}
 	// Candidate-list admission evaluates the account override before hydrating
 	// the full account. Dropping it silently falls back to the platform threshold.
-	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold"}
+	keys := []string{"base_url", "tier_id", "pool_mode", "custom_error_codes_enabled", "custom_error_codes", "model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold"}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {
@@ -1034,6 +1035,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		service.OpenAIAutoResetCredit7dThresholdExtraKey,
 		service.OpenAIAutoResetCreditStateExtraKey,
 		"model_rate_limits",
+		service.GeminiCooldownExtraKey,
 		service.UpstreamBillingProbeExtraKey,
 		service.GrokMediaEligibleExtraKey,
 		"grok_billing_snapshot",

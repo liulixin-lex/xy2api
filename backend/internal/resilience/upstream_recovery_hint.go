@@ -1,7 +1,6 @@
 package resilience
 
 import (
-	"github.com/tidwall/gjson"
 	"math"
 	"math/big"
 	"net/http"
@@ -10,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/tidwall/gjson"
 )
 
 // UpstreamRecoveryHint preserves the uncapped upstream retry boundary.
@@ -182,6 +183,9 @@ func ParseUpstreamRecoveryHint(h http.Header, payload []byte, observedAt time.Ti
 		return winner, !winner.NotBefore.IsZero()
 	}
 	root := gjson.ParseBytes(payload)
+	if root.IsArray() && len(root.Array()) == 1 && root.Get("0.error").IsObject() {
+		root = root.Get("0")
+	}
 	if !root.IsObject() {
 		return winner, !winner.NotBefore.IsZero()
 	}
@@ -227,6 +231,22 @@ func ParseUpstreamRecoveryHint(h http.Header, payload []byte, observedAt time.Ti
 		if !object.IsObject() {
 			continue
 		}
+
+		// Gemini transports express retry boundaries as structured error details.
+		// Preserve the full boundary; caller wait budgets never shorten it.
+		for _, detail := range object.Get("details").Array() {
+			candidates := []struct{ value, source string }{
+				{detail.Get("metadata.quotaResetDelay").String(), "quotaResetDelay"},
+			}
+			if detail.Get("@type").String() == "type.googleapis.com/google.rpc.RetryInfo" {
+				candidates = append(candidates, struct{ value, source string }{detail.Get("retryDelay").String(), "RetryInfo.retryDelay"})
+			}
+			for _, candidate := range candidates {
+				if delay, err := time.ParseDuration(candidate.value); err == nil && delay > 0 {
+					choose(observedAt.Add(delay), strings.TrimPrefix(path+".details."+candidate.source, "."), nil)
+				}
+			}
+		}
 		for _, field := range []string{"retry_after", "retry_after_ms", "resets_in_seconds"} {
 			value := object.Get(field)
 			if value.Type != gjson.String && value.Type != gjson.Number {
@@ -244,6 +264,11 @@ func ParseUpstreamRecoveryHint(h http.Header, payload []byte, observedAt time.Ti
 		message := object.Get("message")
 		if message.Type != gjson.String || strings.ContainsAny(message.Str, "\r\n") {
 			continue
+		}
+		for _, match := range geminiRetryMessage.FindAllStringSubmatch(message.Str, -1) {
+			if d, ok := recoveryDelay(match[1], time.Second); ok {
+				choose(observedAt.Add(d), strings.TrimPrefix(path+".message", "."), nil)
+			}
 		}
 		for _, match := range reTryAgainIn.FindAllStringSubmatch(message.Str, -1) {
 			if d, ok := recoveryDelay(match[1], recoveryUnit(match[2])); ok {
@@ -278,3 +303,5 @@ func ParseUpstreamRecoveryHint(h http.Header, payload []byte, observedAt time.Ti
 var recoveryCompoundParts = regexp.MustCompile(`(\d+(?:\.\d+)?)(ms|h|m|s)`)
 
 var recoveryDecimalNumber = regexp.MustCompile(`^[+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
+
+var geminiRetryMessage = regexp.MustCompile(`(?i)\bplease retry in ([0-9]+(?:\.[0-9]+)?)s\b`)
