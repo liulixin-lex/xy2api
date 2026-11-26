@@ -9,6 +9,7 @@
 - GPT-6.2 在价格目录缺失或名称带推理后缀时不再按其它模型家族计价，带供应商前缀时会匹配渠道价格；目录已有精确 6.2 价格时扣费不变。
 - GPT-6.2 Sol / Astra 出现在默认模型列表、白名单预设与客户端配置中，OAuth 账号的默认提示词改用官方 6.2 模板。
 - 可通过 `gateway.gpt62_chat_system_as_developer`（默认关闭）让 GPT-6.2 的 Chat 系统提示留在 Responses `input` 中，避免部分中转把它放入不可缓存的 `instructions`。
+- 依赖：`gorilla/websocket` 升到修复 GO-2026-6278 的上游提交（客户端帧的掩码改用密码学随机数；上游还没有包含它的正式版本）。管理端运维监控的 WebSocket 有一处可见变化：带了 `Connection: Upgrade` 却缺 `Upgrade: websocket` 的握手请求现在返回 426（原来是 400）。
 
 ### Codex 协作恢复
 
