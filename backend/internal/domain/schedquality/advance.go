@@ -12,12 +12,12 @@ func Due(s LineState, at time.Time, fiveMin, touched bool) (EventKind, bool) {
 		return EventReview, !at.Before(s.Until)
 	}
 	if s.Trial {
-		return EventTrial, touched || !at.Before(s.TrialUntil) || at.Equal(s.Epoch.Add(TrialMinimum)) || at.Equal(s.Epoch.Add(TrialSampleCheck))
+		return EventTrial, touched || !at.Before(s.TrialUntil) || at.Equal(s.Epoch.Add(TrialMinimum))
 	}
 	if fiveMin {
 		return EventRegular, true
 	}
-	return EventClock, false
+	return EventRegular, false
 }
 
 func (s LineState) Cut(kind EventKind) time.Time {
@@ -47,8 +47,8 @@ func Step(prev LineState, kind EventKind, v Verdict, basis Basis, at time.Time) 
 		switch v {
 		case VerdictFail:
 			s.GoodSince = time.Time{}
-			if s.Line == DimensionTTFO || (!s.PendingAt.IsZero() && s.PendingAt.Equal(at.Add(-RegularInterval))) {
-				enterRear(&s, at, s.Admissions > 0)
+			if s.Line == DimensionTTFO || singleCacheConfirmation(s.Line, basis.Cache) || (!s.PendingAt.IsZero() && s.PendingAt.Equal(at.Add(-RegularInterval))) {
+				enterRear(&s, at)
 				s.Admissions++
 				action = ActionEnter
 			} else {
@@ -72,7 +72,7 @@ func Step(prev LineState, kind EventKind, v Verdict, basis Basis, at time.Time) 
 		}
 		switch v {
 		case VerdictFail:
-			enterRear(&s, at, true)
+			enterRear(&s, at)
 			action = ActionRenew
 		default:
 			origin := s.Until
@@ -80,6 +80,7 @@ func Step(prev LineState, kind EventKind, v Verdict, basis Basis, at time.Time) 
 				origin, basis.MissingDeadline = at, true
 			}
 			s.Identity, s.Trial = IdentityUnknown, true
+			s.Level = 0
 			s.Epoch, s.TrialUntil = origin, origin.Add(TrialDuration)
 			s.Until, s.GoodSince, s.PendingAt = time.Time{}, time.Time{}, time.Time{}
 			action = ActionTrial
@@ -94,28 +95,23 @@ func Step(prev LineState, kind EventKind, v Verdict, basis Basis, at time.Time) 
 		}
 		switch v {
 		case VerdictFail:
-			enterRear(&s, at, true)
+			recordTrialExit(&basis, s.Epoch, at, "fail")
+			enterRear(&s, at)
 			s.Admissions++
 			action = ActionTrialFail
 		default:
-			if s.TrialUntil.IsZero() {
-				basis.MissingDeadline = true
+			if s.Line == DimensionCache && v == VerdictPass && (basis.Cache == nil || basis.Cache.Turns < TrialCacheTurns) {
+				v = VerdictUnknown
 			}
 			switch {
 			case v == VerdictPass && !at.Before(s.Epoch.Add(TrialMinimum)):
-				releaseTrial(&s, &basis, at, "qualified")
+				releaseTrial(&s, &basis, at, "good")
 				action = ActionTrialPass
 			case !at.Before(s.TrialUntil):
 				releaseTrial(&s, &basis, at, "deadline")
 				action = ActionTrialTimeout
-			case !at.Before(s.Epoch.Add(TrialSampleCheck)) && basis.OwnSampleAt60 != nil && !*basis.OwnSampleAt60:
-				releaseTrial(&s, &basis, at, "no_samples")
-				action = ActionTrialTimeout
 			}
 		}
-	case EventClock:
-		// History clearing requires the entire group; StepGroup owns that clock.
-		return prev, ""
 	default:
 		return prev, ""
 	}
@@ -127,13 +123,15 @@ func Step(prev LineState, kind EventKind, v Verdict, basis Basis, at time.Time) 
 	return s, action
 }
 
-func enterRear(s *LineState, at time.Time, escalate bool) {
-	if escalate {
-		s.Level = min(s.Level+1, len(CooldownLadder)-1)
-	}
+func singleCacheConfirmation(line Dimension, cache *CacheAssessment) bool {
+	return line == DimensionCache && cache != nil && (cache.Path == CachePathSingle5 || cache.Path == CachePathDeep10)
+}
+
+func enterRear(s *LineState, at time.Time) {
+	s.Level = 0
 	s.Identity, s.Trial = IdentityRear, false
 	s.Entry, s.Epoch, s.LastRear = at, at, at
-	s.Until = at.Add(CooldownLadder[s.Level])
+	s.Until = at.Add(RearDuration)
 	s.TrialUntil, s.GoodSince, s.PendingAt = time.Time{}, time.Time{}, time.Time{}
 }
 
@@ -141,10 +139,17 @@ func releaseTrial(s *LineState, basis *Basis, at time.Time, reason string) {
 	if reason == "deadline" && !s.TrialUntil.IsZero() && s.TrialUntil.Before(at) {
 		at = s.TrialUntil
 	}
-	basis.ReleaseReason = reason
-	basis.TrialDurationSeconds = int64(at.Sub(s.Epoch) / time.Second)
+	recordTrialExit(basis, s.Epoch, at, reason)
 	s.Identity, s.Trial, s.Epoch = IdentityUnknown, false, at
+	s.Level = 0
 	s.Until, s.TrialUntil, s.PendingAt, s.GoodSince = time.Time{}, time.Time{}, time.Time{}, time.Time{}
+}
+
+func recordTrialExit(basis *Basis, origin, at time.Time, reason string) {
+	basis.ReleaseReason = reason
+	if !origin.IsZero() {
+		basis.TrialDurationSeconds = max(0, int64(at.Sub(origin)/time.Second))
+	}
 }
 
 // Evaluation is an assessment frozen before any member of a group transitions.
@@ -154,70 +159,13 @@ type Evaluation struct {
 	Basis   Basis
 }
 
-// QuietDeadline exists only while the whole group is normal and retains history.
-// A relaxed line's last failure still delays clearing its siblings' history;
-// timestamps alone cannot recreate the clock after all history has cleared.
-func QuietDeadline(rows []LineState) time.Time {
-	var last time.Time
-	hasHistory := false
-	for _, r := range rows {
-		if r.Identity == IdentityRear || r.Trial {
-			return time.Time{}
-		}
-		hasHistory = hasHistory || r.Level > 0 || r.Admissions > 0
-		if r.LastRear.After(last) {
-			last = r.LastRear
-		}
-	}
-	if !hasHistory || last.IsZero() {
-		return time.Time{}
-	}
-	return last.Add(LevelClearQuiet)
-}
-
-// StepGroup advances one account/group/model atomically using frozen history.
-// Only confirmed failures share the new level; other transitions remain local.
+// StepGroup advances one account/group/model using evaluations frozen before any transition.
 func StepGroup(prev []LineState, evaluations map[Dimension]Evaluation, at time.Time) ([]LineState, []Action) {
 	next, actions := make([]LineState, len(prev)), make([]Action, len(prev))
-	level := -1
-	for _, r := range prev {
-		if r.Level > 0 || r.Admissions > 0 {
-			level = max(level, r.Level)
-		}
-	}
-	level = min(level+1, len(CooldownLadder)-1)
-	bad := false
 	for i, r := range prev {
 		next[i] = r
 		if e, ok := evaluations[r.Line]; ok {
 			next[i], actions[i] = Step(r, e.Kind, e.Verdict, e.Basis, at)
-		}
-		if actions[i] == ActionEnter || actions[i] == ActionRenew || actions[i] == ActionTrialFail {
-			bad = true
-			next[i].Level, next[i].Until = level, at.Add(CooldownLadder[level])
-		}
-	}
-	deadline := QuietDeadline(next)
-	if !bad && !deadline.IsZero() && !at.Before(deadline) {
-		for i, r := range next {
-			if (r.Level > 0 || r.Admissions > 0) && at.After(prev[i].EvaluatedAt) {
-				next[i].Level, next[i].Admissions = 0, 0
-				next[i].EvaluatedAt = at
-				if actions[i] != "" {
-					continue
-				} // Preserve a simultaneous release and its reason.
-				actions[i] = ActionClear
-				basis := Basis{RuleVersion: RuleVersion, Line: r.Line, Kind: "clock"}
-				if e, ok := evaluations[r.Line]; ok {
-					basis = e.Basis
-				}
-				next[i].Basis = &basis
-				if e, ok := evaluations[r.Line]; ok {
-					next[i].LastAssessment = RecordAssessment(prev[i], at, e.Kind, e.Verdict, ActionClear, basis)
-				} else {
-					next[i].LastAssessment = RecordAssessment(prev[i], at, EventClock, VerdictUnknown, ActionClear, basis)
-				}
-			}
 		}
 	}
 	return next, actions

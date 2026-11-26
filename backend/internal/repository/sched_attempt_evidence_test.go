@@ -235,9 +235,8 @@ func assertSchedAttemptOwnerTimeoutEvidence(t *testing.T, db *sql.DB) {
 		})
 	}
 
-	// Rule B exposes the peer bound U at 20 known attempts. Read 19 fast
-	// samples from another member in a different source
-	// group so they do not affect group 7's prior. Account 91 is the observer.
+	// Samples from another source group must not affect group 7's prior.
+	// Account 91 observes the group prior without supplying its own evidence.
 	fast := 100
 	var background []schedquality.AttemptSample
 	for i := 0; i < 19; i++ {
@@ -257,7 +256,8 @@ func assertSchedAttemptOwnerTimeoutEvidence(t *testing.T, db *sql.DB) {
 			snap := engine.Snapshot()
 			observer := snap.GroupRows[91]
 			require.Len(t, observer, 1)
-			require.Equal(t, tc.known == 1, observer[0].TTFT.U != nil, "candidate must contribute the 20th known peer sample exactly when eligible")
+			require.Nil(t, observer[0].TTFT.U)
+			require.Equal(t, 0.5, observer[0].TTFT.PriorMu)
 			groupRows := snap.GroupRows[account]
 			require.Len(t, groupRows, 1)
 			row := groupRows[0]
@@ -271,8 +271,9 @@ func assertSchedAttemptOwnerTimeoutEvidence(t *testing.T, db *sql.DB) {
 			} else {
 				require.Equal(t, []int64{7}, row.TTFTSourceGroups)
 			}
-			// All accounts see the same group prior. The account prior excludes its own evidence.
-			require.Equal(t, 0.5, row.TTFT.PeerNu)
+			// The account prior excludes its own evidence; relative evidence stays empty.
+			require.Zero(t, row.TTFT.PeerNu)
+			require.Nil(t, row.TTFT.PRel)
 			prior := 0.5
 			if tc.known > 0 {
 				if tc.slow > 0 {

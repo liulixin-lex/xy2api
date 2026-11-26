@@ -21,13 +21,13 @@ func TestRecoveryReleaseStartsFreshEvidence(t *testing.T) {
 	f.store.Rows = []q.LineState{{LineKey: key, Trial: true, Epoch: origin, TrialUntil: origin.Add(120 * time.Minute), EvaluatedAt: at.Add(-time.Second), Admissions: 1, Level: 2, LastRear: origin.Add(-80 * time.Minute)}}
 	f.ledger.Rows = errorRecoverySamples(52, 0, at.Add(-time.Second))
 	f.now = at.Add(10 * time.Second)
-	f.e.observedSince = origin.Add(-time.Hour)
+
 	f.cycle()
 	r := f.line(q.DimensionError)
 	require.False(t, r.Trial)
 	require.Equal(t, q.IdentityUnknown, r.Identity)
 	require.Equal(t, at, r.Epoch)
-	require.Equal(t, "qualified", f.store.Decisions[0].Basis.ReleaseReason)
+	require.Equal(t, "good", f.store.Decisions[0].Basis.ReleaseReason)
 	f.now = at.Truncate(5 * time.Minute).Add(5*time.Minute + 10*time.Second)
 	f.cycle()
 	r = f.line(q.DimensionError)
@@ -52,73 +52,6 @@ func TestRecoveryReleaseStartsFreshEvidence(t *testing.T) {
 	f.now = f.now.Add(5 * time.Minute)
 	f.cycle()
 	require.Equal(t, q.IdentityPass, f.line(q.DimensionError).Identity)
-}
-
-func TestRecoveryHistoricalSixtyCannotUseFuture(t *testing.T) {
-	for _, line := range q.Lines {
-		for _, restarted := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/restart%t", line, restarted), func(t *testing.T) {
-				f := newQualityFixture(t)
-				origin := f.now.Truncate(time.Minute).Add(5 * time.Second)
-				check := origin.Add(time.Hour)
-				r := q.LineState{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: line}, Trial: true, Epoch: origin, TrialUntil: origin.Add(120 * time.Minute), EvaluatedAt: check.Add(-time.Second), Admissions: 1, LastRear: origin.Add(-20 * time.Minute)}
-				f.store.Rows = []q.LineState{r}
-				f.now = check.Add(time.Minute + 10*time.Second)
-				f.e.observedSince = origin.Add(-time.Minute)
-				a := engineSamples(1, check.Add(time.Minute), true)[0]
-				a.StartedAt = check.Add(time.Second)
-				a.GroupID = 99
-				a.Continuation = true
-				a.SessionKey = "new-after-check"
-				a.InputTokens = new(1)
-				a.CacheReadTokens = new(99)
-				a.CacheCreationTokens = new(0)
-				f.ledger.Rows = []q.AttemptSample{a}
-				if restarted {
-					f.e = NewSchedQualityEngineService(f.store, f.ledger, f.switches, func() time.Time { return f.now }, nil)
-				}
-				f.cycle()
-				got := f.line(line)
-				if restarted {
-					require.True(t, got.Trial)
-					require.Empty(t, f.store.Decisions)
-				} else {
-					require.False(t, got.Trial)
-					require.Equal(t, check, got.Epoch)
-					require.Len(t, f.store.Decisions, 1)
-					require.Equal(t, "no_samples", f.store.Decisions[0].Basis.ReleaseReason)
-					require.Equal(t, check, f.store.Decisions[0].At)
-				}
-				raw, err := json.Marshal(f.store.Rows)
-				require.NoError(t, err)
-				require.NoError(t, json.Unmarshal(raw, &f.store.Rows))
-				prior := len(f.store.Decisions)
-				f.cycle()
-				require.Len(t, f.store.Decisions, prior)
-			})
-		}
-	}
-}
-
-func TestRecoveryClearBeforeLaterFailure(t *testing.T) {
-	f := newQualityFixture(t)
-	f.badTTFT()
-	at := f.now.Add(-10 * time.Second)
-	deadline := at.Add(-time.Minute)
-	for _, line := range q.Lines {
-		f.store.Rows = append(f.store.Rows, q.LineState{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: line}, Level: 3, Admissions: 4, LastRear: deadline.Add(-24 * time.Hour), EvaluatedAt: deadline.Add(-time.Second)})
-	}
-	f.cycle()
-	require.Equal(t, q.IdentityRear, f.line(q.DimensionTTFO).Identity)
-	require.Zero(t, f.line(q.DimensionTTFO).Level)
-	var cleared int
-	for _, d := range f.store.Decisions {
-		if d.Key.AccountID == 1 && d.Action == q.ActionClear {
-			cleared++
-			require.Equal(t, deadline, d.At)
-		}
-	}
-	require.Equal(t, 3, cleared)
 }
 
 func TestRecoveryCommitRollbackRetainsEverything(t *testing.T) {
@@ -168,7 +101,7 @@ func TestRecoveryCommitRollbackRetainsEverything(t *testing.T) {
 // Group policy and global Rule B relaxation use the same clock-preserving path.
 func TestRecoveryRelaxPreservesRecentFailureClock(t *testing.T) {
 	for _, scope := range []string{"group", "global"} {
-		for _, next := range []string{"fail_after_five", "quiet_clear", "reset"} {
+		for _, next := range []string{"fail_after_five", "reset"} {
 			t.Run(scope+"/"+next, func(t *testing.T) {
 				f := newQualityFixture(t)
 				f.now = f.now.Truncate(time.Minute)
@@ -221,32 +154,10 @@ func TestRecoveryRelaxPreservesRecentFailureClock(t *testing.T) {
 					f.cycle()
 					failed := f.line(q.DimensionTTFO)
 					require.Equal(t, q.IdentityRear, failed.Identity)
-					require.Equal(t, 3, failed.Level)
-					require.Equal(t, 160*time.Minute, failed.Until.Sub(failed.Entry))
+					require.Zero(t, failed.Level)
+					require.Equal(t, q.RearDuration, failed.Until.Sub(failed.Entry))
 					require.Equal(t, at.Add(5*time.Minute), failed.Entry)
 					require.Equal(t, 2, f.line(q.DimensionCache).Level)
-				case "quiet_clear":
-					deadline := last.Add(q.LevelClearQuiet)
-					f.now = deadline.Add(10*time.Second - time.Nanosecond)
-					f.cycle()
-					require.Equal(t, 2, f.line(q.DimensionCache).Level)
-					f.now = deadline.Add(10 * time.Second)
-					f.cycle()
-					require.Zero(t, f.line(q.DimensionCache).Level)
-					require.Zero(t, f.line(q.DimensionCache).Admissions)
-					var cleared int
-					for _, d := range f.store.Decisions {
-						if d.Action == q.ActionClear {
-							cleared++
-							require.Equal(t, deadline, d.At)
-							require.Equal(t, q.DimensionCache, d.Key.Line)
-						}
-					}
-					require.Equal(t, 1, cleared)
-					count := len(f.store.Decisions)
-					f.now = f.now.Add(time.Minute)
-					f.cycle()
-					require.Len(t, f.store.Decisions, count)
 				case "reset":
 					_, err := f.e.Reset(t.Context(), 1)
 					require.NoError(t, err)

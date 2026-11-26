@@ -47,7 +47,7 @@ func (s *OpenAIGatewayService) pickOpenAILastResort(ctx context.Context, req Ope
 // resilienceOpenAILastResort is the OpenAI-scheduler variant of last-resort
 // selection. It reuses the scheduler's per-account request gate on a copy
 // with the soft restrictions cleared.
-func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, req OpenAIAccountScheduleRequest, avoided map[int64]struct{}) *AccountSelectionResult {
+func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, req OpenAIAccountScheduleRequest, avoided map[int64]struct{}) (selected *AccountSelectionResult) {
 	if s == nil || s.resilience == nil || req.GroupID == nil || s.accountRepo == nil || !resilience.Current().LastResortOn() || ctx.Err() != nil {
 		return nil
 	}
@@ -119,6 +119,15 @@ func (s *OpenAIGatewayService) resilienceOpenAILastResort(ctx context.Context, r
 	cands = s.pickOpenAILastResort(ctx, req, cands)
 	if len(cands) == 0 {
 		return nil
+	}
+	if outcome := req.newSessionOutcome; outcome != nil && outcome.captureDetails {
+		outcome.rescueAttempted = true
+		defer func() {
+			if selected != nil && selected.Account != nil {
+				id := selected.Account.ID
+				outcome.rescue = &newSessionRescueLog{AccountID: id, Placement: outcome.candidates[id].position}
+			}
+		}()
 	}
 	// Take the first candidate with a free slot; when all are busy, wait
 	// for the best one. Codex accounts under upstream pressure take slots

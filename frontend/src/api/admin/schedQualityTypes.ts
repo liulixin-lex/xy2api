@@ -53,10 +53,10 @@ export interface BackendRear {
   model: string
   /** The lines at the rear. */
   lines: BackendDim[]
-  /** The line with the latest end, whose end and stay step these are; absent from an older backend's answer. */
+  /** The line with the latest end, whose end this is; absent from an older backend's answer. */
   until_line?: BackendDim | null
   until: string
-  /** Stay step, 0..4 (shown as 1..5); absent from an older backend's answer. */
+  /** The previous rules' stay step; not shown (the rules in force have none). */
   level?: number | null
   exempt: boolean
   /**
@@ -136,13 +136,18 @@ export interface BackendTTFOEvidence {
   d: number
   /** Share over the limit of the group's other accounts on the model (the prior the estimate shrinks towards). */
   prior_mu: number
-  /** Share over the limit of all the group's accounts on the model (the peers' prior). */
-  peer_nu: number
+  /** The tolerance and confidence the verdict was taken with; absent on records before rule 4.0. */
+  tolerance?: number | null
+  confidence?: number | null
+  /** Share over the limit of all the group's accounts on the model (the peers' prior); absent from rule 4.0 on. */
+  peer_nu?: number
   /** Confidence that the share over the limit is above the tolerance. */
   p_abs: number
-  /** Confidence that the share is above the peers' by the margin; null without enough peer evidence. */
+  /**
+   * The previous rules' comparison with the front peers: confidence that the share is above theirs by the margin, their
+   * upper share and the line compared against (u + margin). Null without enough peer evidence and from rule 4.0 on.
+   */
   p_rel: number | null
-  /** Upper estimate of the front peers' share over the limit, and the line compared against (u + margin). */
   u: number | null
   z: number | null
   /** Why the verdict is unknown (rule B's unknown reasons). */
@@ -174,6 +179,15 @@ export interface BackendCacheEvidence {
   ratio: number
   sessions: number
   low_sessions: number
+  /**
+   * From rule 4.0, absent on older records (never read as 0): the low sessions with 10 turns or more of their own, the
+   * path a failing verdict took (two adjacent, one at 5 points short, one at 20 points short over 10 turns) and the
+   * window the turns were taken from. Read, not shown yet.
+   */
+  low_sessions_10?: number | null
+  path?: 'pair' | 'single5' | 'deep10' | null
+  window_from?: string | null
+  window_to?: string | null
 }
 
 export interface BackendEvidenceOf {
@@ -194,7 +208,7 @@ export interface BackendSampleCounts {
 /** One line of one group × model. */
 export interface BackendLine<D extends BackendDim = BackendDim> extends BackendSampleCounts {
   identity: BackendIdentity
-  /** Rear stay step, 0..4 (20, 40, 80, 160, 240 minutes). */
+  /** The previous rules' stay step; not shown (the rules in force have none). */
   level: number
   /** End of the rear stay. */
   until: string | null
@@ -320,6 +334,11 @@ export interface BackendBasis extends BackendSampleCounts {
   cache?: BackendCacheEvidence
   /** Only on trial_timeout; null or absent on other decisions and on records before it was kept. */
   trial_seats?: BackendTrialSeats | null
+  /**
+   * Why a trial ended: fail (back to the rear), good (passed after 15 minutes), deadline (back to normal at its end);
+   * the previous rules wrote qualified | no_samples | deadline. Absent on other decisions.
+   */
+  release_reason?: string | null
 }
 
 /** A change of a line's identity. Records of the previous rules have an empty line and no basis. */
@@ -368,7 +387,7 @@ export interface BackendGroupPolicy {
   group_id: number
   version: number
   policy: BackendPolicy
-  /** The error limit in force: the group's or 5 %, whichever is larger. */
+  /** The error limit in force: the group's or 1 %, whichever is larger. */
   effective_max_error_rate: number
   /**
    * With the limit in force: the fewest failures among `known` clear outcomes (50, 100) that judge the line bad once.
@@ -504,12 +523,21 @@ export type SchedTTFTRuleField = keyof SchedTTFTRuleValues
 export interface BackendTTFTRule extends SchedTTFTRuleValues {
   version: number
   defaults: SchedTTFTRuleValues
-  /** The range each setting was replayed over; outside it there is no data behind the setting. */
+  /**
+   * The range each setting was replayed over; outside it there is no data behind the setting. One value when only it
+   * was replayed (rule 4.0: the defaults).
+   */
   replayed: Record<SchedTTFTRuleField, [number, number]>
 }
 
+/**
+ * The values a save sends. The backend requires `peer_margin` (400 INVALID_TTFT_RULE without it); the settings form
+ * sends it back as loaded, or the answer's default, and leaves it out only when it has neither.
+ */
+export type SchedTTFTRuleUpdateValues = Omit<SchedTTFTRuleValues, 'peer_margin'> & { peer_margin?: number }
+
 /** A version conflict is rejected with HTTP 409, an invalid value with 400 INVALID_TTFT_RULE. */
-export interface SchedTTFTRuleUpdate extends SchedTTFTRuleValues {
+export type SchedTTFTRuleUpdate = SchedTTFTRuleUpdateValues & {
   expected_version: number
 }
 
@@ -543,7 +571,7 @@ export interface BackendPerfGroup {
  */
 export interface BackendPerfLine extends BackendSampleCounts {
   identity: BackendIdentity
-  /** Rear stay step, 0..4 (20, 40, 80, 160, 240 minutes); with the trial's start, absent from an older backend's answer. */
+  /** The previous rules' stay step, not shown; with the trial's start, absent from an older backend's answer. */
   level?: number | null
   until: string | null
   trial_started_at?: string | null

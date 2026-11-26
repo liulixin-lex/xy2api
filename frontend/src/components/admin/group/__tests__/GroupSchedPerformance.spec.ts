@@ -249,7 +249,7 @@ describe('GroupSchedBoard 12-hour view', () => {
   })
 
   // Plan item 8: the stay as the line has it, the trial's start sent by the backend (60- and 120-minute trials coexist).
-  it('gives a rear line its step and review and a trial line its start and latest end, in the mark\'s tip and the detail', async () => {
+  it('gives a rear line its review (no step) and a trial line its start and latest end, in the mark\'s tip and the detail', async () => {
     const at = (m: number) => new Date(Date.parse('2026-11-19T12:00:00Z') + m * 60_000).toISOString()
     const value = answer()
     value.rows[0].lines = {
@@ -262,7 +262,7 @@ describe('GroupSchedBoard 12-hour view', () => {
     value.rows[1].lines = { ttfo: unknown(lastEval({ acted: true, action: 'trial_pass', reason: 'over' })), error: pass, cache: pass }
     api.groupPerformance.mockResolvedValue(value)
     await openPerf()
-    const rear = `admin.schedQuality.stay.rear:${JSON.stringify({ level: 3, time: formatShortTime(at(40)) })}`
+    const rear = `admin.schedQuality.stay.rear:${JSON.stringify({ time: formatShortTime(at(40)) })}`
     const trial = (end: number) => `admin.schedQuality.stay.trial:${JSON.stringify({ start: formatShortTime(at(-30)), end: formatShortTime(at(end)) })}`
     const tip = (id: number, dim: string) => row(id).querySelector<HTMLElement>(`[data-sq-perf-line="${dim}"]`)!.getAttribute('aria-label')!
     expect(tip(483, 'ttfo').endsWith(` · ${rear}`)).toBe(true)

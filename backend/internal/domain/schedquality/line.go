@@ -32,13 +32,13 @@ type LineState struct {
 	LineKey
 	Identity                     Identity
 	Trial                        bool
-	Level                        int                 // 0..4，对应 CooldownLadder
-	Admissions                   int                 // 进后排次数；大于 0 即“有过失败记录”
+	Level                        int                 // Reserved for old readers; new rules write zero.
+	Admissions                   int                 // 4.0: automatic transitions only increment; no timing effect or timed clearing. On rollback, 0.6.14 treats >0 as failure history for escalation.
 	PendingAt                    time.Time           `json:",omitzero"` // 报错线和缓存线：上一次普通评估不达标的时刻
 	Epoch                        time.Time           `json:",omitzero"` // 取证起点（常规评估和试用）；零值表示不截
 	Entry                        time.Time           `json:",omitzero"` // 本轮进后排的时刻，到期复核从这里截
 	Until, TrialUntil, GoodSince time.Time           `json:",omitzero"`
-	LastRear                     time.Time           `json:",omitzero"` // 最近一次进后排、续期或试用判回后排
+	LastRear                     time.Time           `json:",omitzero"` // Written but not read by 4.0; 0.6.14 uses the last failure time for quiet-history clearing after rollback.
 	EvaluatedAt                  time.Time           `json:",omitzero"`
 	LastAssessment               []AssessmentSegment `json:",omitempty"`
 	Basis                        *Basis              // 最近一次身份变化时的证据
@@ -49,18 +49,17 @@ const (
 	EventRegular EventKind = iota
 	EventTrial
 	EventReview
-	EventClock
+	EventClock // Retained numeric value for reading historical clock assessments.
 )
 
-type Action string // enter renew release trial trial_pass trial_fail trial_timeout reset relax clear，各取同名常量 ActionEnter…ActionClear
-var CooldownLadder = [...]time.Duration{20 * time.Minute, 40 * time.Minute, 80 * time.Minute, 160 * time.Minute, 240 * time.Minute}
+type Action string
 
 const (
-	RegularInterval  = 5 * time.Minute
-	TrialDuration    = 120 * time.Minute
-	TrialMinimum     = 15 * time.Minute
-	TrialSampleCheck = 60 * time.Minute
-	LevelClearQuiet  = 24 * time.Hour
+	RegularInterval = 5 * time.Minute
+	RearDuration    = 60 * time.Minute
+	TrialDuration   = 60 * time.Minute
+	TrialMinimum    = 15 * time.Minute
+	TrialCacheTurns = 40
 )
 
 const (

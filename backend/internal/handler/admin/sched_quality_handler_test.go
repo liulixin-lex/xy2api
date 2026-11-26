@@ -461,8 +461,9 @@ func TestSchedQualityPolicyFloorAndRequiredFields(t *testing.T) {
 				verb = "POST"
 			}
 			valid := map[string]any{"enabled": false, "ttft_seconds": 0.01, "max_error_rate": 0.05, "min_cache_ratio": 0.0, "takeover_idle_seconds": 0}
+			expectedVersion := int64(63)
 			request := func(p map[string]any) *httptest.ResponseRecorder {
-				raw, _ := json.Marshal(map[string]any{"expected_version": 63, "policy": p})
+				raw, _ := json.Marshal(map[string]any{"expected_version": expectedVersion, "policy": p})
 				return schedAdminHandlerRequest(r, verb, path, string(raw))
 			}
 			for key, value := range valid {
@@ -473,7 +474,7 @@ func TestSchedQualityPolicyFloorAndRequiredFields(t *testing.T) {
 				require.Equal(t, 400, request(valid).Code)
 				valid[key] = value
 			}
-			valid["max_error_rate"] = 0.049
+			valid["max_error_rate"] = 0.009
 			w := request(valid)
 			require.Equal(t, 400, w.Code)
 			require.Contains(t, w.Body.String(), "SCHED_ERROR_RATE_TOO_LOW")
@@ -482,8 +483,13 @@ func TestSchedQualityPolicyFloorAndRequiredFields(t *testing.T) {
 			require.Equal(t, 400, w.Code)
 			require.Contains(t, w.Body.String(), "INVALID_SCHED_POLICY")
 			require.NotContains(t, w.Body.String(), "SCHED_ERROR_RATE_TOO_LOW")
-			valid["max_error_rate"] = 0.05
-			require.Equal(t, 200, request(valid).Code)
+			for _, rate := range []float64{0.01, 0.049, 0.05} {
+				valid["max_error_rate"] = rate
+				require.Equal(t, 200, request(valid).Code)
+				if method == "save" {
+					expectedVersion++
+				}
+			}
 		})
 	}
 }
@@ -532,7 +538,7 @@ func TestSchedQualityTTFTRuleJSONValidationAndChange(t *testing.T) {
 	data := schedAdminHandlerData(t, schedAdminHandlerRequest(r, "GET", "/ttft-rule", ""))
 	require.Len(t, data, 6)
 	require.JSONEq(t, `{"confidence":0.8,"tolerance":0.2,"peer_margin":0.05}`, string(data["defaults"]))
-	require.JSONEq(t, `{"confidence":[0.8,0.95],"tolerance":[0.2,0.25],"peer_margin":[0.05,0.15]}`, string(data["replayed"]))
+	require.JSONEq(t, `{"confidence":[0.8,0.8],"tolerance":[0.2,0.2],"peer_margin":[0.05,0.15]}`, string(data["replayed"]))
 	for _, tc := range []struct{ body, change string }{{`{"expected_version":63,"confidence":0.9,"tolerance":0.2,"peer_margin":0.05}`, "relax"}, {`{"expected_version":63,"confidence":0.7,"tolerance":0.2,"peer_margin":0.05}`, "tighten"}, {`{"expected_version":63,"confidence":0.9,"tolerance":0.1,"peer_margin":0.05}`, "mixed"}, {`{"expected_version":63,"confidence":0.8,"tolerance":0.2,"peer_margin":0.05}`, "none"}} {
 		data := schedAdminHandlerData(t, schedAdminHandlerRequest(r, "PUT", "/ttft-rule", tc.body))
 		require.Len(t, data, 8)

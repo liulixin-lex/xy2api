@@ -177,7 +177,6 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 			}
 			if !r.Epoch.IsZero() {
 				add(r.Epoch.Add(q.TrialMinimum))
-				add(r.Epoch.Add(q.TrialSampleCheck))
 			}
 			// Missing evidence cannot justify minute-by-minute historical verdicts.
 			minuteStart := schedQualitySince(start, horizon.Add(-schedEvidenceRetention))
@@ -186,18 +185,6 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 		default:
 			regularStart := schedQualitySince(start, horizon.Add(-schedEvidenceRetention))
 			add(regularStart.UTC().Truncate(q.RegularInterval).Add(q.RegularInterval))
-			g := schedQualityKey{r.AccountID, r.Model, r.GroupID}
-			group := groupRows(g)
-			if at := q.QuietDeadline(group); !at.IsZero() {
-				watermark := start
-				for _, sibling := range group {
-					watermark = schedQualitySince(watermark, sibling.EvaluatedAt)
-				}
-				if !at.After(watermark) {
-					at = watermark.Add(time.Microsecond)
-				}
-				add(at)
-			}
 		}
 		return nil
 	}
@@ -229,7 +216,6 @@ func (s *SchedQualityEngineService) replay(ctx context.Context, d *schedQualityD
 			continue
 		}
 		d.replayStats.batches++
-		d.usePeerBucket(e.at, rows)
 		eventKeys := make([]q.LineKey, 0, len(e.keys))
 		for k := range e.keys {
 			eventKeys = append(eventKeys, k)

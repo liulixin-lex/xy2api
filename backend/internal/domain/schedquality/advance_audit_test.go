@@ -3,7 +3,6 @@
 package schedquality
 
 import (
-	"reflect"
 	"testing"
 	"time"
 )
@@ -78,9 +77,9 @@ func TestStepAuditF3GoodSinceResets(t *testing.T) {
 						(next.Identity != IdentityUnknown || !next.PendingAt.Equal(machineNow)) {
 						t.Fatal("first error/cache failure must remain pending and Unknown")
 					}
-					if tc.kind == EventTrial && (next.Level != 3 || next.Admissions != 4 ||
-						next.Until.Sub(machineNow) != 160*time.Minute) {
-						t.Fatalf("trial failure must advance exactly once from level 2 despite prior admissions: %+v", next)
+					if tc.kind == EventTrial && (next.Level != 0 || next.Admissions != 4 ||
+						next.Until.Sub(machineNow) != RearDuration) {
+						t.Fatalf("trial failure must use a fixed period and count exactly once: %+v", next)
 					}
 				})
 			}
@@ -88,18 +87,15 @@ func TestStepAuditF3GoodSinceResets(t *testing.T) {
 	}
 }
 
-func TestStepAuditF3QuietClearRequiresLastRear(t *testing.T) {
+func TestStepNormalAssessmentDoesNotClearLegacyHistory(t *testing.T) {
 	for _, level := range []int{0, 3} {
 		s := machineState(DimensionTTFO)
 		s.Level, s.Admissions = level, 4
 		if _, due := Due(s, machineNow, false, false); due {
-			t.Fatalf("quiet clock due without LastRear at level %d", level)
-		}
-		if next, action := machineStep(s, EventClock, VerdictUnknown, machineNow); action != "" || !reflect.DeepEqual(next, s) {
-			t.Fatalf("Clock cleared history without LastRear: %+v / %s", next, action)
+			t.Fatalf("normal history created an automatic clock at level %d", level)
 		}
 		if next, action := machineStep(s, EventRegular, VerdictUnknown, machineNow); action != "" || next.Level != level || next.Admissions != 4 {
-			t.Fatalf("regular tick cleared quiet history without LastRear: %+v / %s", next, action)
+			t.Fatalf("regular tick cleared legacy history: %+v / %s", next, action)
 		}
 	}
 }
@@ -115,14 +111,11 @@ func TestStepFirstAdmissionRetainedAfterGoodEvidence(t *testing.T) {
 		if next.Level != 0 || next.Admissions != 1 || action != "" {
 			t.Fatalf("first-admission history cleared before 30 minutes: %+v / %s", next, action)
 		}
-		if tick == 6 && (next.Level != 0 || next.Admissions != 1 || action != "") {
-			t.Fatalf("level-zero admission did not clear with 30 minutes of good evidence: %+v / %s", next, action)
-		}
 		s = next
 	}
 	at := s.EvaluatedAt.Add(RegularInterval)
 	next, action := machineStep(s, EventRegular, VerdictFail, at)
-	if action != ActionEnter || next.Level != 1 || next.Admissions != 2 || next.Until.Sub(at) != 40*time.Minute {
-		t.Fatalf("cleared first admission escalated on re-entry: %+v / %s", next, action)
+	if action != ActionEnter || next.Level != 0 || next.Admissions != 2 || next.Until.Sub(at) != RearDuration {
+		t.Fatalf("historical admission changed the next rear period: %+v / %s", next, action)
 	}
 }

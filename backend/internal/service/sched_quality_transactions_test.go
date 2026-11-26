@@ -308,14 +308,14 @@ func TestEngineDecisionDeadlinesAndCounters(t *testing.T) {
 	require.Equal(t, float64(3), record["released"])
 	require.Equal(t, float64(1), record["trial"])
 	require.Equal(t, float64(1), record["relax"])
-	require.Equal(t, float64(1), record["clear"])
+	require.Equal(t, float64(0), record["clear"], "retired quiet-clock action must not increment counters")
 }
 
 // Even with generation fencing, an unsuccessful Redis cleanup can leave seats
 // touched through a still-fresh old view. Reassess that residual window if
 // the first cooldown no longer outlasts both view staleness and lease idleness.
 func TestSchedTrialResetResidualWindowFitsFirstCooldown(t *testing.T) {
-	require.Greater(t, q.CooldownLadder[0], TrialLeaseIdle+q.ViewMaxAge)
+	require.Greater(t, q.RearDuration, TrialLeaseIdle+q.ViewMaxAge)
 }
 
 type timeoutSeatProbe struct {

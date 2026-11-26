@@ -3,7 +3,7 @@ package schedquality
 import "time"
 
 const (
-	ErrorRateFloor        = 0.05
+	ErrorRateFloor        = 0.01
 	TakeoverFullCooloff   = 60 * time.Second
 	EvalInterval          = 5 * time.Second
 	LedgerReloadOverlap   = 10 * time.Second

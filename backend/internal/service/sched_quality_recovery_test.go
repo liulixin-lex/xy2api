@@ -94,7 +94,7 @@ func TestEngineErrorRecoveryKeepsTrialAcrossRestart(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newQualityFixture(t)
 			reviewAt := f.now.Add(-10 * time.Second)
-			entry := reviewAt.Add(-q.CooldownLadder[0])
+			entry := reviewAt.Add(-q.RearDuration)
 			f.store.Rows = []q.LineState{{
 				LineKey:  q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionError},
 				Identity: q.IdentityRear, Entry: entry, LastRear: entry, Until: reviewAt, EvaluatedAt: entry, Admissions: 1,
@@ -157,7 +157,7 @@ func TestEngineRestartRecoversTrialArrivalsAndMinutes(t *testing.T) {
 	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	run := func(mode string) q.LineState {
 		f := newQualityFixture(t)
-		f.now = start.Add(50*time.Minute + 10*time.Second)
+		f.now = start.Add(70*time.Minute + 10*time.Second)
 		f.store.Rows = []q.LineState{{LineKey: q.LineKey{AccountID: 1, GroupID: 10, Model: "synthetic-model", Line: q.DimensionError}, Trial: true, Epoch: start, TrialUntil: start.Add(time.Hour), Admissions: 1, LastRear: start.Add(-20 * time.Minute), EvaluatedAt: start}}
 		f.ledger.Rows = engineSamples(6, start.Add(time.Minute), false)
 		for i := range f.ledger.Rows {
@@ -173,18 +173,18 @@ func TestEngineRestartRecoversTrialArrivalsAndMinutes(t *testing.T) {
 			f.now = start.Add(time.Minute + 10*time.Second)
 			f.cycle()
 			require.Equal(t, start.Add(time.Minute), f.line(q.DimensionError).Entry)
-			f.now = start.Add(50*time.Minute + 10*time.Second)
+			f.now = start.Add(70*time.Minute + 10*time.Second)
 		}
 		f.cycle()
 		state := f.line(q.DimensionError)
 		require.True(t, state.Trial)
 		require.Equal(t, start.Add(time.Minute), state.Entry)
-		require.Equal(t, start.Add(41*time.Minute), state.Epoch)
+		require.Equal(t, start.Add(61*time.Minute), state.Epoch)
 		require.Len(t, f.store.Decisions, 2)
 		require.Equal(t, q.ActionTrialFail, f.store.Decisions[0].Action)
 		require.Equal(t, start.Add(time.Minute), f.store.Decisions[0].At)
 		require.Equal(t, q.ActionTrial, f.store.Decisions[1].Action)
-		require.Equal(t, start.Add(41*time.Minute), f.store.Decisions[1].At)
+		require.Equal(t, start.Add(61*time.Minute), f.store.Decisions[1].At)
 		f.e.processedAt = time.Time{}
 		f.cycle()
 		require.Equal(t, state, f.line(q.DimensionError))

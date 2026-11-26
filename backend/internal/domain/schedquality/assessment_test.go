@@ -27,17 +27,17 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 		have   float64
 		need   int
 	}{
-		{RuleBNoPeers, ReasonPeerShort, 0, 20},
-		{RuleBAllPeersRear, ReasonPeerShort, 0, 20},
-		{RuleBPeerKnownInsufficient, ReasonPeerShort, 9.25, 20},
+		{RuleBNoPeers, ReasonOther, 0, 0},
+		{RuleBAllPeersRear, ReasonOther, 0, 0},
+		{RuleBPeerKnownInsufficient, ReasonOther, 0, 0},
 		{RuleBNoSamples, ReasonOwnShort, 0, 20},
 		{RuleBMassInsufficient, ReasonOwnShort, 8.75, 20},
 		{RuleBSessionsInsufficient, ReasonOwnShort, 2, 3},
 		{RuleBSlowSessionsInsufficient, ReasonOwnShort, 1, 2},
 		{RuleBAbsoluteUnconfirmed, ReasonWithin, 0, 0},
-		{RuleBRelativeUnconfirmed, ReasonWithin, 0, 0},
+		{RuleBRelativeUnconfirmed, ReasonOther, 0, 0},
 		{RuleBWorstMeanAboveTolerance, ReasonWithin, 0, 0},
-		{RuleBRelativeVeto, ReasonWithin, 0, 0},
+		{RuleBRelativeVeto, ReasonOther, 0, 0},
 	}
 	var tested []string
 	for _, tc := range cases {
@@ -45,9 +45,6 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 		t.Run(string(tc.cause), func(t *testing.T) {
 			e := &TTFTEvidence{N: 8.75, S: 2, D: 1, Causes: []RuleBUnknownReason{tc.cause}}
 			b := Basis{Line: DimensionTTFO, TTFT: e}
-			if tc.cause == RuleBPeerKnownInsufficient {
-				b.PeerKnown = 9.25
-			}
 			if tc.cause == RuleBNoSamples {
 				e.N = 0
 			}
@@ -90,7 +87,7 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 	require.LessOrEqual(t, len(assessmentCauses), 32)
 	var registered []string
 	for _, def := range assessmentCauses {
-		if def.ruleB != nil {
+		if def.line == DimensionTTFO {
 			registered = append(registered, string(def.name))
 		}
 	}
@@ -99,34 +96,27 @@ func TestAssessmentTTFTCauses(t *testing.T) {
 
 func TestAssessmentRuleBOutputWithoutPeers(t *testing.T) {
 	in := ruleBTestInput(40, 0, false)
-	in.Peers = nil
 	result := evaluateRuleBTest(t, in, DefaultRuleBParams())
-	require.Equal(t, RuleBUnknown, result.State)
-	require.Contains(t, result.UnknownReasons, RuleBNoPeers)
+	require.Equal(t, RuleBGood, result.State)
+	require.Empty(t, result.UnknownReasons)
 	b := Basis{Line: DimensionTTFO, TTFT: NewTTFTEvidence(result, in.LimitSeconds)}
-	seg := RecordAssessment(LineState{}, in.Now, EventRegular, VerdictUnknown, "", b)[0]
-	var names []string
-	for _, name := range result.UnknownReasons {
-		names = append(names, string(name))
-	}
-	require.ElementsMatch(t, names, seg.CauseNames())
-	require.Equal(t, ReasonPeerShort, seg.Reason)
-	require.Equal(t, new(0.0), seg.Have)
-	require.Equal(t, new(20), seg.Need)
+	seg := RecordAssessment(LineState{}, in.Now, EventRegular, VerdictPass, "", b)[0]
+	require.Equal(t, ReasonWithin, seg.Reason)
+	require.Empty(t, seg.CauseNames())
+	require.Nil(t, seg.Need)
 }
 
 func TestAssessmentSlowSessionsRequireConfirmedLines(t *testing.T) {
 	for _, tc := range []struct {
 		name                     string
 		slow, censored, peerSlow int
-		absolute, relative       bool
+		absolute                 bool
 		reasons                  []RuleBUnknownReason
 		primary                  AssessmentReason
 	}{
-		{"relative veto", 4, 0, 0, false, true, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBAbsoluteUnconfirmed, RuleBRelativeVeto}, ReasonWithin},
-		{"censored worst mean", 0, 16, 0, false, false, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBAbsoluteUnconfirmed, RuleBRelativeUnconfirmed, RuleBWorstMeanAboveTolerance}, ReasonWithin},
-		{"relative unconfirmed", 22, 0, 30, true, false, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBRelativeUnconfirmed, RuleBWorstMeanAboveTolerance}, ReasonWithin},
-		{"both confirmed", 22, 0, 0, true, true, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBWorstMeanAboveTolerance}, ReasonOwnShort},
+		{"censored worst mean", 0, 16, 0, false, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBAbsoluteUnconfirmed, RuleBWorstMeanAboveTolerance}, ReasonWithin},
+		{"slow peers", 22, 0, 30, true, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBWorstMeanAboveTolerance}, ReasonOwnShort},
+		{"fast peers", 22, 0, 0, true, []RuleBUnknownReason{RuleBSlowSessionsInsufficient, RuleBWorstMeanAboveTolerance}, ReasonOwnShort},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := RuleBInput{Scope: RuleBScope{GroupID: 1, AccountID: 1, Model: "m"}, Now: machineNow, LimitSeconds: 15}
@@ -148,17 +138,14 @@ func TestAssessmentSlowSessionsRequireConfirmedLines(t *testing.T) {
 						samples = append(samples, RuleBSample{AccountID: account, GroupID: 1, Model: "m", SessionKey: fmt.Sprintf("t%d", i), StartedAt: at.Add(-5 * time.Second), AvailableAt: at, CensoredMs: 5000, Stream: true, Outcome: OutcomeTimeout})
 					}
 					in.Samples = samples
-				} else {
-					in.Peers = append(in.Peers, RuleBPeer{Scope: RuleBScope{AccountID: account, GroupID: 1, Model: "m"}, Identity: -1, Samples: samples})
 				}
 				in.GroupSamples = append(in.GroupSamples, samples...)
 			}
 			result := evaluateRuleBTest(t, in, DefaultRuleBParams())
 			require.Equal(t, RuleBUnknown, result.State)
 			require.Equal(t, tc.absolute, result.Absolute)
-			require.Equal(t, tc.relative, result.Relative)
 			require.ElementsMatch(t, tc.reasons, result.UnknownReasons)
-			b := Basis{Line: DimensionTTFO, TTFT: NewTTFTEvidence(result, in.LimitSeconds), PeerKnown: result.PeerCounts.N - result.PeerCounts.X}
+			b := Basis{Line: DimensionTTFO, TTFT: NewTTFTEvidence(result, in.LimitSeconds)}
 			seg := RecordAssessment(LineState{}, in.Now, EventRegular, VerdictUnknown, "", b)[0]
 			var causes []string
 			for _, cause := range tc.reasons {
@@ -181,7 +168,7 @@ func TestAssessmentLineOutcomes(t *testing.T) {
 	cache := func(c CacheAssessment) Basis { return Basis{Line: DimensionCache, Cache: &c} }
 	errLine := func(e ErrorAssessment) Basis { return Basis{Line: DimensionError, Error: &e} }
 	recovery := errLine(ErrorAssessment{Clear: 60, RecoveryOverLimit: true})
-	ttft := Basis{Line: DimensionTTFO, PeerKnown: 2.5, TTFT: &TTFTEvidence{
+	ttft := Basis{Line: DimensionTTFO, TTFT: &TTFTEvidence{S: 2,
 		Causes: []RuleBUnknownReason{RuleBRelativeVeto, RuleBSessionsInsufficient, RuleBPeerKnownInsufficient},
 	}}
 	for _, tc := range []struct {
@@ -195,15 +182,15 @@ func TestAssessmentLineOutcomes(t *testing.T) {
 		have    float64
 		need    int
 	}{
-		{"cache-turns", cache(CacheAssessment{Turns: 12, MinRatio: .8, LowSessions: 1}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheTurnsShort, cacheLowSessionsShort}, 12, 20},
-		{"cache-low-sessions", cache(CacheAssessment{Turns: 22, MinRatio: .8, LowSessions: 1}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheLowSessionsShort}, 1, 2},
+		{"cache-turns", cache(CacheAssessment{Turns: 12, MinRatio: .8, Ratio: .79, LowSessions: 1, LowSessions10: new(0)}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheTurnsShort, cacheLowSessionsShort}, 12, 20},
+		{"cache-low-sessions", cache(CacheAssessment{Turns: 22, MinRatio: .8, LowSessions: 1, LowSessions10: new(0)}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{cacheLowSessionsShort}, 0, 1},
 		{"clear", errLine(ErrorAssessment{Clear: 13, LowerPass: .1, Limit: .05}), EventRegular, VerdictUnknown, "", ReasonOwnShort, []string{errorClearShort, errorBoundsUnconfirmed}, 13, 50},
 		{"bounds", errLine(ErrorAssessment{Clear: 50, LowerPass: .07, Limit: .05}), EventRegular, VerdictUnknown, "", ReasonWithin, []string{errorBoundsUnconfirmed}, 0, 0},
 		{"recovery-blocked", recovery, EventReview, VerdictUnknown, ActionTrial, ReasonPending, []string{errorRecoveryOverLimit}, 0, 0},
 		{"recovery-open", recovery, EventTrial, VerdictUnknown, "", ReasonTrialOpen, []string{errorRecoveryOverLimit}, 0, 0},
 		{"recovery-timeout", recovery, EventTrial, VerdictUnknown, ActionTrialTimeout, ReasonPending, []string{errorRecoveryOverLimit}, 0, 0},
-		{"peer-priority", ttft, EventReview, VerdictUnknown, ActionTrial, ReasonPeerShort, []string{string(RuleBPeerKnownInsufficient), string(RuleBSessionsInsufficient), string(RuleBRelativeVeto)}, 2.5, 20},
-		{"trial-open", ttft, EventTrial, VerdictUnknown, "", ReasonTrialOpen, []string{string(RuleBPeerKnownInsufficient), string(RuleBSessionsInsufficient), string(RuleBRelativeVeto)}, 2.5, 20},
+		{"retired-peer-gates", ttft, EventReview, VerdictUnknown, ActionTrial, ReasonOwnShort, []string{string(RuleBPeerKnownInsufficient), string(RuleBSessionsInsufficient), string(RuleBRelativeVeto)}, 2, 3},
+		{"trial-open", ttft, EventTrial, VerdictUnknown, "", ReasonTrialOpen, []string{string(RuleBPeerKnownInsufficient), string(RuleBSessionsInsufficient), string(RuleBRelativeVeto)}, 2, 3},
 		{"pending-error", errLine(ErrorAssessment{}), EventRegular, VerdictFail, "", ReasonPending, []string{}, 0, 0},
 		{"pending-cache", cache(CacheAssessment{}), EventRegular, VerdictFail, "", ReasonPending, []string{}, 0, 0},
 		{"enter", cache(CacheAssessment{}), EventRegular, VerdictFail, ActionEnter, ReasonOver, []string{}, 0, 0},
@@ -320,8 +307,8 @@ func TestAssessmentUnmappedCauseRoundTrip(t *testing.T) {
 		names  []string
 	}{
 		{"only unknown", []RuleBUnknownReason{unknown, "second_unknown"}, ReasonOther, []string{"other"}},
-		{"known and unknown", []RuleBUnknownReason{RuleBNoPeers, unknown}, ReasonPeerShort, []string{"no_peers", "other"}},
-		{"unknown and known", []RuleBUnknownReason{unknown, RuleBNoPeers}, ReasonPeerShort, []string{"no_peers", "other"}},
+		{"retired and unknown", []RuleBUnknownReason{RuleBNoPeers, unknown}, ReasonOther, []string{"no_peers", "other"}},
+		{"unknown and retired", []RuleBUnknownReason{unknown, RuleBNoPeers}, ReasonOther, []string{"no_peers", "other"}},
 		{"unknown and within", []RuleBUnknownReason{unknown, RuleBAbsoluteUnconfirmed}, ReasonWithin, []string{"absolute_unconfirmed", "other"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -334,15 +321,23 @@ func TestAssessmentUnmappedCauseRoundTrip(t *testing.T) {
 			require.NoError(t, json.Unmarshal(data, &after))
 			require.Equal(t, tc.reason, after[0].Reason)
 			require.Equal(t, tc.names, after[0].CauseNames())
-			if tc.reason == ReasonPeerShort {
-				require.Equal(t, new(0.0), after[0].Have)
-				require.Equal(t, new(20), after[0].Need)
-			} else {
-				require.Nil(t, after[0].Have)
-				require.Nil(t, after[0].Need)
-			}
+			require.Nil(t, after[0].Have)
+			require.Nil(t, after[0].Need)
 		})
 	}
+}
+
+func TestAssessmentDecodesHistoricalPeerCauses(t *testing.T) {
+	const stored = `{"f":"2026-01-01T12:00:00Z","l":"2026-01-01T12:00:00Z","n":1,"k":0,"r":"peer_short","c":1287,"h":9.25,"t":20}`
+	var history AssessmentSegment
+	require.NoError(t, json.Unmarshal([]byte(stored), &history))
+	require.Equal(t, ReasonPeerShort, history.Reason)
+	require.Equal(t, []string{"no_peers", "all_peers_rear", "peer_known_insufficient", "relative_unconfirmed", "relative_veto"}, history.CauseNames())
+	require.Equal(t, new(9.25), history.Have)
+	require.Equal(t, new(20), history.Need)
+	encoded, err := json.Marshal(history)
+	require.NoError(t, err)
+	require.JSONEq(t, stored, string(encoded))
 }
 
 func TestAssessmentWatermarkTolerance(t *testing.T) {
@@ -369,4 +364,44 @@ func TestAssessmentWatermarkTolerance(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAssessmentCacheTrialNeedsFortyTurns(t *testing.T) {
+	for _, turns := range []int{25, 40} {
+		b := Basis{Line: DimensionCache, Cache: &CacheAssessment{Turns: turns, MinRatio: .8, Ratio: .8, Verdict: VerdictPass}}
+		prev := LineState{LineKey: LineKey{Line: DimensionCache}, Trial: true,
+			Epoch: machineNow.Add(-15 * time.Minute), TrialUntil: machineNow.Add(45 * time.Minute)}
+		next, action := Step(prev, EventTrial, VerdictPass, b, machineNow)
+		require.Len(t, next.LastAssessment, 1)
+		s := next.LastAssessment[0]
+		if turns < 40 {
+			require.Empty(t, action)
+			require.True(t, next.Trial)
+			require.Equal(t, ReasonTrialOpen, s.Reason)
+			require.Equal(t, []string{cacheTurnsShort}, s.CauseNames())
+			require.Equal(t, new(float64(turns)), s.Have)
+			require.Equal(t, new(40), s.Need)
+		} else {
+			require.Equal(t, ActionTrialPass, action)
+			require.False(t, next.Trial)
+			require.Equal(t, ReasonWithin, s.Reason)
+			require.Empty(t, s.CauseNames())
+			require.Nil(t, s.Need)
+		}
+	}
+}
+
+func TestAssessmentHistoricalClockReadOnly(t *testing.T) {
+	const stored = "{\"w\":1767268800000000,\"f\":\"2026-01-01T12:00:00Z\",\"l\":\"2026-01-01T12:00:00Z\",\"n\":1,\"k\":3,\"a\":\"clear\",\"r\":\"within\"}"
+	var segment AssessmentSegment
+	require.NoError(t, json.Unmarshal([]byte(stored), &segment))
+	require.Equal(t, EventClock, segment.Kind)
+	require.Equal(t, ActionClear, segment.Action)
+	encoded, err := json.Marshal(segment)
+	require.NoError(t, err)
+	require.JSONEq(t, stored, string(encoded))
+	prev := LineState{LineKey: LineKey{Line: DimensionTTFO}, EvaluatedAt: segment.LastAt, LastAssessment: []AssessmentSegment{segment}}
+	next, action := Step(prev, segment.Kind, VerdictUnknown, Basis{}, segment.LastAt.Add(time.Minute))
+	require.Empty(t, action)
+	require.Equal(t, prev, next, "a historical clock must not change state or its assessment watermark")
 }

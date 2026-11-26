@@ -46,13 +46,13 @@ const (
 
 type ruleBReasonInput struct {
 	*RuleBResult
-	eligiblePeers int
-	tolerance     float64
+	tolerance float64
 }
 
 type assessmentCause struct {
 	name   RuleBUnknownReason
 	reason AssessmentReason
+	line   Dimension // Owning line; independent of the persisted bit position.
 	// Rule B emits this cause when the predicate holds on an unknown verdict.
 	ruleB func(ruleBReasonInput) bool
 }
@@ -61,24 +61,25 @@ const otherCauseIndex = 16
 
 // Append only: indexes are persisted bit positions, not gate priorities.
 // Rule B and the assessment summary use the same names and classifications.
+// Retired peer gates keep their persisted slots but no longer have predicates.
 var assessmentCauses = [...]assessmentCause{
-	{RuleBNoPeers, ReasonPeerShort, func(g ruleBReasonInput) bool { return g.eligiblePeers == 0 }},
-	{RuleBAllPeersRear, ReasonPeerShort, func(g ruleBReasonInput) bool { return g.eligiblePeers > 0 && g.PeerCount == 0 }},
-	{RuleBPeerKnownInsufficient, ReasonPeerShort, func(g ruleBReasonInput) bool { return g.PeerCount > 0 && g.PeerCounts.N-g.PeerCounts.X < ruleBMinMass }},
-	{RuleBNoSamples, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.N == 0 }},
-	{RuleBMassInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.N < ruleBMinMass-1e-8 }},
-	{RuleBSessionsInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.S < ruleBMinSessions }},
-	{RuleBSlowSessionsInsufficient, ReasonOwnShort, func(g ruleBReasonInput) bool { return g.Counts.D < ruleBMinSlowSessions }},
-	{RuleBAbsoluteUnconfirmed, ReasonWithin, func(g ruleBReasonInput) bool { return !g.Absolute }},
-	{RuleBRelativeUnconfirmed, ReasonWithin, func(g ruleBReasonInput) bool { return g.U != nil && !g.Relative }},
-	{RuleBWorstMeanAboveTolerance, ReasonWithin, func(g ruleBReasonInput) bool { return g.WorstMean > g.tolerance }},
-	{RuleBRelativeVeto, ReasonWithin, func(g ruleBReasonInput) bool { return g.GoodBase && g.Relative }},
-	{cacheTurnsShort, ReasonOwnShort, nil},
-	{cacheLowSessionsShort, ReasonOwnShort, nil},
-	{errorClearShort, ReasonOwnShort, nil},
-	{errorBoundsUnconfirmed, ReasonWithin, nil},
-	{errorRecoveryOverLimit, ReasonPending, nil},
-	otherCauseIndex: {"other", ReasonOther, nil},
+	{RuleBNoPeers, ReasonPeerShort, DimensionTTFO, nil},
+	{RuleBAllPeersRear, ReasonPeerShort, DimensionTTFO, nil},
+	{RuleBPeerKnownInsufficient, ReasonPeerShort, DimensionTTFO, nil},
+	{RuleBNoSamples, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.N == 0 }},
+	{RuleBMassInsufficient, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.N < ruleBMinMass-ruleBMassRounding }},
+	{RuleBSessionsInsufficient, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.S < ruleBMinSessions }},
+	{RuleBSlowSessionsInsufficient, ReasonOwnShort, DimensionTTFO, func(g ruleBReasonInput) bool { return g.Counts.D < ruleBMinSlowSessions }},
+	{RuleBAbsoluteUnconfirmed, ReasonWithin, DimensionTTFO, func(g ruleBReasonInput) bool { return !g.Absolute }},
+	{RuleBRelativeUnconfirmed, ReasonWithin, DimensionTTFO, nil},
+	{RuleBWorstMeanAboveTolerance, ReasonWithin, DimensionTTFO, func(g ruleBReasonInput) bool { return g.WorstMean > g.tolerance }},
+	{RuleBRelativeVeto, ReasonWithin, DimensionTTFO, nil},
+	{cacheTurnsShort, ReasonOwnShort, DimensionCache, nil},
+	{cacheLowSessionsShort, ReasonOwnShort, DimensionCache, nil},
+	{errorClearShort, ReasonOwnShort, DimensionError, nil},
+	{errorBoundsUnconfirmed, ReasonWithin, DimensionError, nil},
+	{errorRecoveryOverLimit, ReasonPending, DimensionError, nil},
+	otherCauseIndex: {"other", ReasonOther, "", nil},
 }
 
 func assessmentCauseIndex(name RuleBUnknownReason) int {
@@ -124,16 +125,6 @@ func RecordAssessment(prev LineState, at time.Time, kind EventKind, verdict Verd
 	}
 	at = at.UTC().Round(time.Microsecond)
 	history := prev.LastAssessment
-	if kind == EventClock {
-		// A clock can carry a verified assessment forward, but cannot repair a
-		// gap left by an older writer. Never mutate a committed segment.
-		if len(history) == 0 || !history[len(history)-1].MatchesWatermark(prev.EvaluatedAt) {
-			return history
-		}
-		history = slices.Clone(history)
-		history[len(history)-1].Watermark = new(at.UnixMicro())
-		return history
-	}
 	segment := AssessmentSegment{FirstAt: at, LastAt: at, Watermark: new(at.UnixMicro()), Count: 1, Kind: kind, Action: action}
 	segment.classify(verdict, basis)
 	if n := len(history); n > 0 {
@@ -161,14 +152,21 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 		s.Reason = ReasonOther
 		switch {
 		case b.TTFT != nil:
-			s.classifyTTFT(b.TTFT, b.PeerKnown)
+			s.classifyTTFT(b.TTFT)
 		case b.Cache != nil:
 			cache := b.Cache
-			if cache.Turns < CacheMinTurns {
-				s.addCause(cacheTurnsShort, float64(cache.Turns), CacheMinTurns)
+			need := CacheMinTurns
+			if cache.Ratio < cache.MinRatio && cacheDeficitAtLeast(cache.Ratio, cache.MinRatio, cacheDeepDeficit) {
+				need = cacheDeepMinTurns
 			}
-			if cache.Turns > 0 && cache.Ratio < cache.MinRatio && cache.LowSessions < cacheMinLowSessions {
-				s.addCause(cacheLowSessionsShort, float64(cache.LowSessions), cacheMinLowSessions)
+			if s.Kind == EventTrial && cache.Ratio >= cache.MinRatio {
+				need = TrialCacheTurns
+			}
+			if cache.Turns < need {
+				s.addCause(cacheTurnsShort, float64(cache.Turns), need)
+			}
+			if cache.Turns > 0 && cache.Ratio < cache.MinRatio && cache.LowSessions10 != nil && *cache.LowSessions10 == 0 {
+				s.addCause(cacheLowSessionsShort, float64(*cache.LowSessions10), 1)
 			}
 		case b.Error != nil:
 			errLine := b.Error
@@ -191,10 +189,9 @@ func (s *AssessmentSegment) classify(verdict Verdict, b Basis) {
 // Only unknown verdicts select among competing causes. At equal priority keep
 // the first gate reported by the rule (e.g. TTFT mass before session count).
 var unknownReasonPriority = map[AssessmentReason]int{
-	ReasonPeerShort: 4,
-	ReasonOwnShort:  3,
-	ReasonPending:   2,
-	ReasonWithin:    1,
+	ReasonOwnShort: 3,
+	ReasonPending:  2,
+	ReasonWithin:   1,
 }
 
 func (s *AssessmentSegment) consider(reason AssessmentReason, have float64, need int) {
@@ -207,25 +204,26 @@ func (s *AssessmentSegment) consider(reason AssessmentReason, have float64, need
 	}
 }
 
-func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence, peerKnown float64) {
+func (s *AssessmentSegment) classifyTTFT(e *TTFTEvidence) {
 	for _, name := range e.Causes {
 		i := assessmentCauseIndex(name)
 		def := assessmentCauses[i]
-		if def.ruleB == nil {
+		if def.line != DimensionTTFO {
 			s.Causes |= 1 << otherCauseIndex
 			continue
 		}
 		s.Causes |= 1 << i
+		if def.ruleB == nil {
+			continue // Historical cause bits still decode; retired gates do not classify current assessments.
+		}
 		switch def.reason {
-		case ReasonPeerShort:
-			s.consider(def.reason, peerKnown, ruleBMinMass)
 		case ReasonOwnShort:
 			switch name {
 			case RuleBSessionsInsufficient:
 				s.consider(def.reason, float64(e.S), ruleBMinSessions)
 			case RuleBSlowSessionsInsufficient:
-				// D gates a bad verdict only after both probability tests confirm it.
-				if !slices.Contains(e.Causes, RuleBAbsoluteUnconfirmed) && !slices.Contains(e.Causes, RuleBRelativeUnconfirmed) {
+				// D gates a bad verdict once the absolute probability confirms it.
+				if !slices.Contains(e.Causes, RuleBAbsoluteUnconfirmed) {
 					s.consider(def.reason, float64(e.D), ruleBMinSlowSessions)
 				}
 			default:

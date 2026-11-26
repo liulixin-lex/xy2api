@@ -21,7 +21,8 @@ import (
 
 type selectionRuntimeRepo struct {
 	schedulerTestOpenAIAccountRepo
-	lists int
+	lists  int
+	onList func(int) ([]Account, error)
 }
 
 func (r *selectionRuntimeRepo) ListByGroup(context.Context, int64) ([]Account, error) {
@@ -30,6 +31,9 @@ func (r *selectionRuntimeRepo) ListByGroup(context.Context, int64) ([]Account, e
 
 func (r *selectionRuntimeRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, group int64, platform string) ([]Account, error) {
 	r.lists++
+	if r.onList != nil {
+		return r.onList(r.lists)
+	}
 	return r.schedulerTestOpenAIAccountRepo.ListSchedulableByGroupIDAndPlatform(ctx, group, platform)
 }
 func (r *selectionRuntimeRepo) ListAllWithFilters(context.Context, string, string, string, string, int64, string) ([]Account, error) {
@@ -292,6 +296,11 @@ func TestOpenAINewSessionSelectionLogUsesObservedCandidates(t *testing.T) {
 		require.Equal(t, []any{"error"}, event[0]["cheapest_downgraded_reason"])
 		require.Equal(t, .8, event[0]["next_higher_rate_multiplier"])
 		require.Equal(t, false, event[0]["next_higher_is_downgraded"])
+		require.Equal(t, []newSessionCandidateLog{
+			{AccountID: 2, Placement: "front", Rank: 1},
+			{AccountID: 3, Placement: "rear", Rank: 2, Lines: map[string]string{"error": "rear"}},
+			{AccountID: 1, Placement: "rear", Rank: 3, Lines: map[string]string{"error": "rear"}},
+		}, requireNewSessionLists(t, event[0], 2))
 	})
 
 	t.Run("observed load and slot skips", func(t *testing.T) {
@@ -309,6 +318,11 @@ func TestOpenAINewSessionSelectionLogUsesObservedCandidates(t *testing.T) {
 		require.Equal(t, []int64{2, 3}, f.attempts)
 		require.Equal(t, float64(1), event[0]["load_full_skipped_count"])
 		require.Equal(t, float64(1), event[0]["slot_unavailable_skipped_count"])
+		require.Equal(t, []newSessionCandidateLog{
+			{AccountID: 3, Placement: "front", Rank: 1},
+			{AccountID: 2, Placement: "front", Rank: 2, Skip: []string{"slot_unavailable"}},
+			{AccountID: 1, Placement: "front", Rank: 3, Skip: []string{"load_full"}},
+		}, requireNewSessionLists(t, event[0], 3))
 	})
 
 	t.Run("trial full is counted", func(t *testing.T) {
@@ -327,6 +341,7 @@ func TestOpenAINewSessionSelectionLogUsesObservedCandidates(t *testing.T) {
 		require.Len(t, event, 1)
 		require.Equal(t, float64(1), event[0]["trial_full_count"])
 		require.Equal(t, float64(0), event[0]["trial_unknown_count"])
+		require.Equal(t, newSessionCandidateLog{AccountID: 2, Placement: "trial_full", Rank: 2, Lines: map[string]string{"ttfo": "trial"}}, requireNewSessionLists(t, event[0], 1)[1])
 	})
 
 	t.Run("seat read failure is unknown", func(t *testing.T) {
@@ -346,6 +361,7 @@ func TestOpenAINewSessionSelectionLogUsesObservedCandidates(t *testing.T) {
 		require.Equal(t, float64(1), event[0]["trial_unknown_count"])
 		require.Equal(t, float64(0), event[0]["trial_full_count"])
 		require.Equal(t, []any{"unknown"}, event[0]["cheapest_downgraded_reason"])
+		require.Equal(t, "trial_unknown", requireNewSessionLists(t, event[0], 1)[1].Placement)
 	})
 
 	t.Run("profit ceiling and empty candidate pool", func(t *testing.T) {
@@ -364,6 +380,7 @@ func TestOpenAINewSessionSelectionLogUsesObservedCandidates(t *testing.T) {
 		require.Equal(t, float64(1), event[0]["filtered_profit_ceiling_count"])
 		require.Equal(t, "profit_ceiling", event[0]["no_candidate_reason"])
 		require.Nil(t, event[0]["selected_account_id"])
+		require.Empty(t, requireNewSessionLists(t, event[0], 0))
 	})
 
 	t.Run("no candidates is logged once", func(t *testing.T) {
@@ -385,6 +402,9 @@ func TestOpenAINewSessionSelectionLogUsesObservedCandidates(t *testing.T) {
 		event = selectionNewSessionEvents(t, logs.String())
 		require.Len(t, event, 1)
 		require.Equal(t, "cached_no_candidate", event[0]["no_candidate_reason"])
+		require.Equal(t, float64(0), event[0]["pool_rounds"])
+		require.Nil(t, event[0]["candidates"])
+		require.Nil(t, event[0]["excluded"])
 	})
 }
 

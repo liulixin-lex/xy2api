@@ -8,6 +8,12 @@ type HasKey = (key: string) => boolean
 
 export const DASH = '—'
 
+/**
+ * The rule version in force (the decisions' `basis.rule_version`). Records of any other version are of the previous
+ * rules and say so. Written here until the backend sends it.
+ */
+export const SCHED_RULE_VERSION = '4.0'
+
 /** Whole seconds left until `until`, never below 0; null when there is no end time. */
 export function secondsUntil(until: string | null, now: number): number | null {
   return until === null ? null : Math.max(0, Math.ceil((Date.parse(until) - now) / 1000))

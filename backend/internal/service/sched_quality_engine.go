@@ -29,7 +29,6 @@ type SchedQualityEngineService struct {
 	snapshot               atomic.Pointer[SchedQualitySnapshot]
 	performance            atomic.Pointer[SchedPerfSnapshot]
 	processedAt            time.Time
-	observedSince          time.Time
 	loaded                 bool
 	loadSince, loadThrough time.Time
 	finishedCursor         SchedAttemptCursor
@@ -38,7 +37,6 @@ type SchedQualityEngineService struct {
 	insertedAt             time.Time
 	configAt               time.Time
 	rule                   SchedTTFTRuleRecord
-	peerBuckets            map[time.Time]*peerBucket
 	leases                 SchedTrialLeases
 	policies               map[int64]SchedPolicyRecord
 	members                map[int64][]int64
@@ -62,7 +60,7 @@ func NewSchedQualityEngineService(store SchedQualityStore, attempts SchedAttempt
 	if now == nil {
 		now = time.Now
 	}
-	s := &SchedQualityEngineService{observedSince: now(), store: store, attempts: attempts, switches: switches, now: now, seenResets: make(map[int64]time.Time), instanceID: uuid.NewString(), obs: schedObsOrNop(obs), rule: SchedTTFTRuleRecord{Params: schedquality.DefaultRuleBParams()}}
+	s := &SchedQualityEngineService{store: store, attempts: attempts, switches: switches, now: now, seenResets: make(map[int64]time.Time), instanceID: uuid.NewString(), obs: schedObsOrNop(obs), rule: SchedTTFTRuleRecord{Params: schedquality.DefaultRuleBParams()}}
 	at := now().UTC().Truncate(schedPerfTick)
 	s.performance.Store(&SchedPerfSnapshot{at: at, from: at})
 	s.snapshot.Store(&SchedQualitySnapshot{View: &schedQualityView{}})
@@ -224,7 +222,7 @@ func (s *SchedQualityEngineService) inputs(ctx context.Context, now time.Time, s
 	if err := s.refreshConfig(ctx, now); err != nil {
 		return nil, err
 	}
-	d := &schedQualityData{evidenceSince: schedQualitySince(s.loadSince, now.Add(-schedEvidenceRetention)), observedSince: s.observedSince, now: now, samples: samples, globalEnabled: true, running: s.window.running, previous: s.window.previous, runningCache: s.window.runningPredecessors(), peerBuckets: clonePeerBuckets(s.peerBuckets, now), ruleSamples: make(map[SchedAccountModel][]schedquality.RuleBSample), ruleGroups: make(map[schedGroupModel][]schedquality.RuleBSample)}
+	d := &schedQualityData{evidenceSince: schedQualitySince(s.loadSince, now.Add(-schedEvidenceRetention)), now: now, samples: samples, globalEnabled: true, running: s.window.running, previous: s.window.previous, runningCache: s.window.runningPredecessors(), ruleSamples: make(map[SchedAccountModel][]schedquality.RuleBSample), ruleGroups: make(map[schedGroupModel][]schedquality.RuleBSample)}
 	for pair, rows := range samples {
 		d.ruleSamples[pair] = ruleBSamples(rows)
 	}
@@ -413,8 +411,6 @@ func (s *SchedQualityEngineService) countDecision(action schedquality.Action) {
 		s.obs.Count("trial", 1)
 	case schedquality.ActionRelax:
 		s.obs.Count("relax", 1)
-	case schedquality.ActionClear:
-		s.obs.Count("clear", 1)
 	}
 }
 

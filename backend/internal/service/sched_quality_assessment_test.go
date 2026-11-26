@@ -5,6 +5,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -23,8 +24,9 @@ func TestSchedAssessmentPublishedOnlyAfterCommit(t *testing.T) {
 		return SchedAdminGroupModel(rows[0], false).Lines
 	}
 	first := lines()
-	require.Equal(t, q.ReasonPeerShort, first.TTFO.LastEval.Reason)
-	require.Equal(t, new(0.0), first.TTFO.LastEval.Have)
+	require.Equal(t, q.ReasonOwnShort, first.TTFO.LastEval.Reason)
+	require.NotNil(t, first.TTFO.LastEval.Have)
+	require.InDelta(t, math.Exp2(-float64(f.line(q.DimensionTTFO).EvaluatedAt.Sub(f.ledger.Rows[0].FinishedAt))/float64(q.RuleBHalfLife)), *first.TTFO.LastEval.Have, 1e-12)
 	require.Equal(t, new(20), first.TTFO.LastEval.Need)
 	require.Equal(t, q.ReasonOwnShort, first.Cache.LastEval.Reason)
 	require.Equal(t, new(50), first.Error.LastEval.Need)
@@ -88,7 +90,7 @@ func TestSchedAssessmentRelaxStartsRun(t *testing.T) {
 	require.Equal(t, before[0], relaxed.LastAssessment[0])
 	seg := relaxed.LastAssessment[1]
 	require.Equal(t, q.EventRegular, seg.Kind)
-	require.Equal(t, q.ReasonPeerShort, seg.Reason)
+	require.Equal(t, q.ReasonOwnShort, seg.Reason)
 	require.Empty(t, seg.Action)
 	require.Equal(t, f.now.Round(time.Microsecond), seg.FirstAt)
 	require.Equal(t, f.now.Round(time.Microsecond), seg.LastAt)
@@ -125,70 +127,34 @@ func TestSchedAssessmentDTOAcrossRawWatermarkOffsets(t *testing.T) {
 	}
 }
 
-func TestSchedAssessmentClockPreservesRun(t *testing.T) {
-	at := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	clock := at.Add(95 * time.Second)
-	b := q.Basis{Line: q.DimensionCache, Cache: &q.CacheAssessment{Turns: 7}}
-	r := q.LineState{LineKey: q.LineKey{Line: q.DimensionCache}, Admissions: 1, LastRear: clock.Add(-q.LevelClearQuiet)}
-	first, _ := q.Step(r, q.EventRegular, q.VerdictUnknown, b, at)
-	firstDTO := SchedAdminLastEvalFromState(first)
-	require.NotNil(t, firstDTO)
-	group, actions := q.StepGroup([]q.LineState{first}, nil, clock)
-	cleared := group[0]
-	require.Equal(t, q.ActionClear, actions[0])
-	require.Equal(t, clock, cleared.EvaluatedAt)
-	require.Equal(t, firstDTO, SchedAdminLastEvalFromState(cleared))
-	require.Equal(t, firstDTO, SchedAdminLastEvalFromState(first))
-	next, _ := q.Step(cleared, q.EventRegular, q.VerdictUnknown, b, at.Add(q.RegularInterval))
-	require.Len(t, next.LastAssessment, 1)
-	last := SchedAdminLastEvalFromState(next)
-	require.NotNil(t, last)
-	require.Equal(t, firstDTO.Since, last.Since)
-	require.Equal(t, at.Add(q.RegularInterval).Format(time.RFC3339Nano), last.At)
-	require.EqualValues(t, 2, last.Count)
-
-	for _, missing := range []bool{true, false} {
-		stale := first
-		stale.LastAssessment = append([]q.AssessmentSegment{}, first.LastAssessment...)
-		if missing {
-			stale.LastAssessment[0].Watermark = nil
-		} else {
-			stale.EvaluatedAt = at.Add(time.Second)
-		}
-		require.Nil(t, SchedAdminLastEvalFromState(stale))
-		group, _ := q.StepGroup([]q.LineState{stale}, nil, clock)
-		cleared := group[0]
-		require.Nil(t, SchedAdminLastEvalFromState(cleared))
-		next, _ := q.Step(cleared, q.EventRegular, q.VerdictUnknown, b, at.Add(q.RegularInterval))
-		require.Len(t, next.LastAssessment, 2)
-		require.EqualValues(t, 1, SchedAdminLastEvalFromState(next).Count)
-	}
-}
-
 func TestSchedAssessmentPolicySaveKeepsHistory(t *testing.T) {
 	f := newQualityFixture(t)
-	f.badTTFT()
+	f.ledger.Rows = errorRecoverySamples(20, 20, f.now.Add(-30*time.Second))
 	f.cycle()
-	before := f.line(q.DimensionTTFO)
-	require.Equal(t, q.ActionEnter, before.LastAssessment[0].Action)
+	f.now = f.now.Add(q.RegularInterval)
+	f.cycle()
+	before := f.line(q.DimensionError)
+	require.Equal(t, q.ActionEnter, before.LastAssessment[len(before.LastAssessment)-1].Action)
 	f.now = before.Until.Add(10 * time.Second)
 	f.cycle()
-	before = f.line(q.DimensionTTFO)
-	require.Len(t, before.LastAssessment, 2)
-	require.Equal(t, q.ActionTrial, before.LastAssessment[1].Action)
+	before = f.line(q.DimensionError)
+	require.Len(t, before.LastAssessment, 3)
+	require.Equal(t, q.ActionTrial, before.LastAssessment[2].Action)
 	f.now = f.now.Add(2 * time.Second)
+	// This batch is visible to the explicit rejudge, after the periodic horizon.
+	f.ledger.Rows = append(f.ledger.Rows, errorRecoverySamples(52, 0, f.now.Add(-time.Second))...)
 	policy := f.store.Policies[10].Policy
-	policy.TTFTSeconds = 100
+	policy.MaxErrorRate = .1
 	_, err := f.e.UpdatePolicy(t.Context(), 10, 0, policy)
 	require.NoError(t, err)
-	after := f.line(q.DimensionTTFO)
-	require.Len(t, after.LastAssessment, 3)
-	require.Equal(t, before.LastAssessment, after.LastAssessment[:2])
-	seg := after.LastAssessment[2]
+	after := f.line(q.DimensionError)
+	require.Len(t, after.LastAssessment, 4)
+	require.Equal(t, before.LastAssessment, after.LastAssessment[:3])
+	seg := after.LastAssessment[3]
 	require.Equal(t, q.EventRegular, seg.Kind)
 	require.Equal(t, q.ReasonWithin, seg.Reason)
 	want := &SchedAdminLastEval{At: f.now.Format(time.RFC3339Nano), Since: f.now.Format(time.RFC3339Nano), Count: 1, Reason: q.ReasonWithin, Causes: []string{}}
 	require.Equal(t, want, SchedAdminLastEvalFromState(after))
-	published := SchedAdminGroupModel(f.e.Snapshot().RowsForAccount(1)[0], false).Lines.TTFO.LastEval
+	published := SchedAdminGroupModel(f.e.Snapshot().RowsForAccount(1)[0], false).Lines.Error.LastEval
 	require.Equal(t, want, published)
 }

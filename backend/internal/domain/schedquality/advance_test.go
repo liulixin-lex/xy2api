@@ -4,6 +4,7 @@ package schedquality
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 	"testing"
@@ -51,9 +52,63 @@ func TestStepOrdinaryConfirmation(t *testing.T) {
 	}
 }
 
+func TestStepCacheConfirmationPath(t *testing.T) {
+	for _, tc := range []struct {
+		name, path  string
+		read, turns int
+	}{
+		{"exact five points", "single5", 850, 20},
+		{"one token above the boundary", "pair", 851, 20},
+		{"deep deficit with ten turns", "deep10", 700, 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var samples []AttemptSample
+			for i := range tc.turns {
+				samples = append(samples, AttemptSample{
+					AttemptID: fmt.Sprint(i), SessionKey: "session", Continuation: true, Outcome: OutcomeOK,
+					StartedAt: machineNow.Add(-time.Minute), FinishedAt: machineNow,
+					InputTokens: new(1000 - tc.read), CacheReadTokens: new(tc.read), CacheCreationTokens: new(0),
+				})
+			}
+			cache := AssessCache(samples, .90, time.Time{}, machineNow)
+			if cache.Verdict != VerdictFail || cache.Path != tc.path {
+				t.Fatalf("cache assessment = %+v", cache)
+			}
+			basis := Basis{Line: DimensionCache, Cache: &cache}
+			next, action := Step(machineState(DimensionCache), EventRegular, cache.Verdict, basis, machineNow)
+			if tc.path == "pair" {
+				if action != "" || next.PendingAt != machineNow {
+					t.Fatalf("first assessment = %+v/%s", next, action)
+				}
+				next, action = Step(next, EventRegular, cache.Verdict, basis, machineNow.Add(RegularInterval))
+			}
+			if action != ActionEnter || next.Basis.Cache.Path != tc.path {
+				t.Fatalf("confirmation = %+v/%s", next, action)
+			}
+		})
+	}
+}
+
+func TestStepCacheUnrecognizedPathRequiresAdjacentFailures(t *testing.T) {
+	for _, path := range []string{"", "future-path", "pair"} {
+		t.Run(path, func(t *testing.T) {
+			basis := Basis{Line: DimensionCache, Cache: &CacheAssessment{Path: path, Verdict: VerdictFail}}
+			pending, action := Step(machineState(DimensionCache), EventRegular, VerdictFail, basis, machineNow)
+			if action != "" || pending.Identity == IdentityRear || pending.PendingAt != machineNow {
+				t.Fatalf("unrecognized path must wait for confirmation: %+v / %s", pending, action)
+			}
+			at := machineNow.Add(5 * time.Minute)
+			confirmed, action := Step(pending, EventRegular, VerdictFail, basis, at)
+			if action != ActionEnter || confirmed.Identity != IdentityRear || !confirmed.Until.Equal(at.Add(60*time.Minute)) {
+				t.Fatalf("adjacent failure must confirm: %+v / %s", confirmed, action)
+			}
+		})
+	}
+}
+
 func TestStepCooldownAndReview(t *testing.T) {
 	s, action := machineStep(machineState(DimensionTTFO), EventRegular, VerdictFail, machineNow)
-	if action != ActionEnter || s.Level != 0 || s.Admissions != 1 || s.Until.Sub(machineNow) != 20*time.Minute {
+	if action != ActionEnter || s.Level != 0 || s.Admissions != 1 || s.Until.Sub(machineNow) != RearDuration {
 		t.Fatalf("first entry: %+v/%s", s, action)
 	}
 	frozen := s
@@ -67,7 +122,7 @@ func TestStepCooldownAndReview(t *testing.T) {
 		trial  bool
 		level  int
 	}{
-		{VerdictFail, ActionRenew, IdentityRear, false, 1},
+		{VerdictFail, ActionRenew, IdentityRear, false, 0},
 		{VerdictPass, ActionTrial, IdentityUnknown, true, 0},
 		{VerdictUnknown, ActionTrial, IdentityUnknown, true, 0},
 	} {
@@ -88,16 +143,15 @@ func TestStepCooldownAndReview(t *testing.T) {
 	for level := 1; level <= 6; level++ {
 		at := s.Until
 		s, action = machineStep(s, EventReview, VerdictFail, at)
-		want := min(level, 4)
-		if action != ActionRenew || s.Level != want || s.Until.Sub(at) != CooldownLadder[want] {
-			t.Fatalf("ladder: %+v", s)
+		if action != ActionRenew || s.Level != 0 || s.Until.Sub(at) != RearDuration {
+			t.Fatalf("fixed rear duration: %+v", s)
 		}
 	}
 	s, _ = machineStep(s, EventReview, VerdictPass, s.Until)
 	s, _ = machineStep(s, EventTrial, VerdictPass, s.Epoch.Add(TrialMinimum))
 	s, action = machineStep(s, EventRegular, VerdictFail, s.EvaluatedAt.Add(RegularInterval))
-	if action != ActionEnter || s.Level != 4 || s.Admissions != 2 {
-		t.Fatal("later entry must escalate and count")
+	if action != ActionEnter || s.Level != 0 || s.Admissions != 2 {
+		t.Fatal("later entry must keep the fixed duration and count")
 	}
 }
 
@@ -114,15 +168,15 @@ func TestStepTrialDeadlineEvidenceWins(t *testing.T) {
 		} {
 			prev := trial
 			prev.Line = line
-			next, a := machineStep(prev, EventTrial, tc.v, prev.TrialUntil)
+			next, a := Step(prev, EventTrial, tc.v, Basis{Line: line, Cache: &CacheAssessment{Turns: TrialCacheTurns}}, prev.TrialUntil)
 			if a != tc.a || next.Identity != tc.id || next.Trial || !next.Epoch.Equal(prev.TrialUntil) {
 				t.Fatalf("deadline %+v/%s", next, a)
 			}
 			if tc.v == VerdictUnknown && (next.Level != prev.Level || next.Admissions != prev.Admissions) {
 				t.Fatal("timeout lost history")
 			}
-			if tc.v == VerdictFail && (next.Level != 1 || next.Admissions != 2 || !next.LastRear.Equal(prev.TrialUntil)) {
-				t.Fatal("trial failed to escalate")
+			if tc.v == VerdictFail && (next.Level != 0 || next.Admissions != 2 || !next.LastRear.Equal(prev.TrialUntil)) {
+				t.Fatal("trial failure did not restart rear")
 			}
 			if tc.v == VerdictPass && !next.GoodSince.IsZero() {
 				t.Fatal("trial pass must start good evidence at the actual pass time")
@@ -132,23 +186,6 @@ func TestStepTrialDeadlineEvidenceWins(t *testing.T) {
 	s, a := machineStep(trial, EventTrial, VerdictUnknown, trial.EvaluatedAt.Add(time.Minute))
 	if a != "" || !s.Trial {
 		t.Fatal("unknown ended trial early")
-	}
-}
-
-// Acceptance 4: the local step cannot clear shared history, even after 24h.
-func TestStepLevelClearBoundaries(t *testing.T) {
-	s := machineState(DimensionTTFO)
-	s.Level, s.Admissions, s.LastRear = 2, 3, machineNow.Add(-LevelClearQuiet)
-	for i := 0; i <= 6; i++ {
-		next, a := machineStep(s, EventRegular, VerdictPass, machineNow.Add(time.Duration(i)*RegularInterval))
-		if next.Level != 2 || next.Admissions != 3 || a != "" {
-			t.Fatalf("local history clear: %+v/%s", next, a)
-		}
-		s = next
-	}
-	next, a := machineStep(s, EventRegular, VerdictFail, s.EvaluatedAt.Add(RegularInterval))
-	if next.Level != 3 || a != ActionEnter {
-		t.Fatal("good streak lost history")
 	}
 }
 
@@ -163,7 +200,7 @@ func TestDueCutAndIdempotence(t *testing.T) {
 		kind        EventKind
 		due         bool
 	}{
-		{base, machineNow, false, true, EventClock, false}, {base, machineNow, true, false, EventRegular, true},
+		{base, machineNow, false, true, EventRegular, false}, {base, machineNow, true, false, EventRegular, true},
 		{rear, rear.Until.Add(-time.Second), true, true, EventReview, false}, {rear, rear.Until, true, true, EventReview, true},
 		{trial, trial.EvaluatedAt.Add(time.Second), false, false, EventTrial, false}, {trial, trial.EvaluatedAt.Add(time.Second), false, true, EventTrial, true},
 		{trial, trial.TrialUntil, false, false, EventTrial, true},

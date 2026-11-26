@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"slices"
 	"time"
@@ -19,8 +20,8 @@ func ValidateSchedQualityPolicy(p schedquality.Policy) error {
 	if math.IsNaN(p.MaxErrorRate) || math.IsInf(p.MaxErrorRate, 0) || p.MaxErrorRate > 1 {
 		return infraerrors.BadRequest("INVALID_SCHED_POLICY", "max_error_rate must be finite and no greater than 1")
 	}
-	if p.MaxErrorRate < .05 {
-		return infraerrors.BadRequest("SCHED_ERROR_RATE_TOO_LOW", "max_error_rate must be at least 0.05")
+	if p.MaxErrorRate < schedquality.ErrorRateFloor {
+		return infraerrors.BadRequest("SCHED_ERROR_RATE_TOO_LOW", fmt.Sprintf("max_error_rate must be at least %g", schedquality.ErrorRateFloor))
 	}
 	if !valid(p.MinCacheRatio, 0, 1) {
 		return infraerrors.BadRequest("INVALID_SCHED_POLICY", "min_cache_ratio must be between 0 and 1")
@@ -202,39 +203,11 @@ func (s *SchedQualityEngineService) rejudge(tx SchedQualityTx, d *schedQualityDa
 		}
 		if relax(k) {
 			relaxed := schedquality.Relaxed(k)
-			// Forget this line's recurrence level, not the group's latest failure.
+			// Rule 4.0 does not read LastRear. Preserve it so 0.6.14 can
+			// apply its quiet-history clearing clock after rollback.
 			relaxed.LastRear = rows[k].LastRear
 			relaxed.LastAssessment = rows[k].LastAssessment
 			rows[k] = relaxed
-		}
-	}
-	peerRows := make(map[schedquality.LineKey]schedquality.LineState)
-	for _, k := range keys {
-		if !remove(k) && s.policies[k.GroupID].Policy.Enabled {
-			r := rows[k]
-			r.LineKey = k
-			peerRows[k] = r
-		}
-	}
-	d.displayPeers(d.now, peerRows)
-	// Only relaxed TTFO keys may replace identities within an existing bucket;
-	// error/cache changes keep all first-output peers frozen as they were.
-	var clearedPeers map[schedquality.LineKey]schedquality.LineState
-	for k, r := range peerRows {
-		if k.Line == schedquality.DimensionTTFO && relax(k) {
-			if clearedPeers == nil {
-				clearedPeers = make(map[schedquality.LineKey]schedquality.LineState, len(d.peers.rows))
-				for pk, pr := range d.peers.rows {
-					clearedPeers[pk] = pr
-				}
-			}
-			clearedPeers[k] = schedquality.LineState{LineKey: k, Identity: r.Identity, Epoch: r.Epoch}
-		}
-	}
-	if clearedPeers != nil {
-		d.peers = &peerBucket{at: d.peers.at, rows: clearedPeers}
-		if _, frozen := d.peerBuckets[d.peers.at]; frozen {
-			d.peerBuckets[d.peers.at] = d.peers
 		}
 	}
 	var changed []schedquality.LineState
@@ -348,7 +321,6 @@ func (s *SchedQualityEngineService) PreviewPolicy(ctx context.Context, group int
 		return nil, err
 	}
 	keys, rows := s.rowKeys(d, states)
-	d.displayPeers(now, rows)
 	old := s.policies[group]
 	s.policies[group] = SchedPolicyRecord{GroupID: group, Policy: p}
 	defer func() { s.policies[group] = old }()

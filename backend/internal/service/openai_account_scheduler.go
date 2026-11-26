@@ -288,8 +288,8 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	sessionHash = monitorProbeSessionHash(ctx, sessionHash)
 	ctx = withOpenAIStickyMigrationGuard(ctx, previousResponseID, requiredTransport)
 	ordinary := NormalizeOpenAICompatiblePlatform(platform) == PlatformOpenAI && !openAISelectionExempt(ctx) && !openAISelectionManualOnly(ctx)
+	defer func() { newSessionLogState.log(ctx, selection, err) }()
 	defer func() {
-		newSessionLogState.log(ctx, selection, err)
 		s.freezeOpenAITransferEligibility(ctx, groupID, sessionHash, selection, ordinary && err == nil)
 		s.planOpenAIFollow(ctx, groupID, sessionHash, requestedModel, selection, ordinary && err == nil)
 		s.recordOpenAISelectionFlags(ctx, groupID, requestedModel, selection)

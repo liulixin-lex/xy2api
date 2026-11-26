@@ -8,6 +8,7 @@ import (
 
 const (
 	ruleBMinMass         = 20
+	ruleBMassRounding    = 1e-12 // Allow rounding when adding discounted weights near 20.
 	ruleBMinSessions     = 3
 	ruleBMinSlowSessions = 2
 	RuleBHalfLife        = 30 * time.Minute
@@ -52,7 +53,8 @@ const (
 	RuleBMixed     RuleBParamChange = "mixed"
 )
 
-// CompareRuleBParams compares components: increasing any component relaxes the
+// CompareRuleBParams compares active components; PeerMargin is retained only
+// for settings compatibility. Increasing an active component relaxes the
 // requirements for staying in front. Mixed changes include a relaxation.
 func CompareRuleBParams(old, next RuleBParams) (RuleBParamChange, error) {
 	if err := old.Validate(); err != nil {
@@ -61,8 +63,8 @@ func CompareRuleBParams(old, next RuleBParams) (RuleBParamChange, error) {
 	if err := next.Validate(); err != nil {
 		return "", fmt.Errorf("new parameters: %w", err)
 	}
-	up := next.Confidence > old.Confidence || next.Tolerance > old.Tolerance || next.PeerMargin > old.PeerMargin
-	down := next.Confidence < old.Confidence || next.Tolerance < old.Tolerance || next.PeerMargin < old.PeerMargin
+	up := next.Confidence > old.Confidence || next.Tolerance > old.Tolerance
+	down := next.Confidence < old.Confidence || next.Tolerance < old.Tolerance
 	switch {
 	case up && down:
 		return RuleBMixed, nil
@@ -108,17 +110,6 @@ type RuleBScope struct {
 	GroupID   int64
 }
 
-// RuleBPeer carries a member of the target group/model's five-minute snapshot.
-// Identity 1 is rear; every other identity, including trial/unknown, is front.
-// Samples contain the account/model's evidence across ALL source groups, at Now.
-// Epoch is the snapshot's evidence cutoff, not the rear-entry time.
-type RuleBPeer struct {
-	Scope    RuleBScope
-	Identity int
-	Epoch    time.Time
-	Samples  []RuleBSample
-}
-
 type RuleBInput struct {
 	Scope RuleBScope
 	// Cut is epoch, or rear-entry time for an expiry review. Use the zero time for no
@@ -129,7 +120,6 @@ type RuleBInput struct {
 	// GroupSamples supplies all accounts in the target group/model, regardless
 	// of identity or epoch. It must include this account's local samples too.
 	GroupSamples []RuleBSample
-	Peers        []RuleBPeer
 }
 
 // RuleBCounts contains discounted mass, not request counts. X is unknown mass
@@ -150,6 +140,8 @@ const (
 
 type RuleBUnknownReason string
 
+// Retired peer causes remain named for decoding persisted assessment history.
+// New assessments never emit them.
 const (
 	RuleBNoPeers                  RuleBUnknownReason = "no_peers"
 	RuleBAllPeersRear             RuleBUnknownReason = "all_peers_rear"
@@ -164,21 +156,18 @@ const (
 	RuleBRelativeVeto             RuleBUnknownReason = "relative_veto"
 )
 
-// RuleBResult is an assessment, not a scheduling identity. Pointer fields are
-// nil when peers supply less than 20 known mass; nil must remain null in a UI.
-// UnknownReasons can contain several simultaneously applicable failed gates.
+// RuleBResult is an assessment, not a scheduling identity.
+// UnknownReasons contains the applicable absolute-evidence gates only.
 type RuleBResult struct {
-	SamplesLocal, SamplesTotal                             int
-	NLocal                                                 float64
-	State                                                  RuleBState
-	Counts, PriorGroupCounts, PriorLocalCounts, PeerCounts RuleBCounts
-	Prior, PeerPrior                                       float64
-	A, B, AbsoluteProbability, WorstMean                   float64
-	PeerA, PeerB, U                                        *float64
-	RelativeThreshold, RelativeProbability                 *float64
-	Absolute, Relative, GoodBase                           bool
-	PeerCount                                              int
-	UnknownReasons                                         []RuleBUnknownReason
+	SamplesLocal, SamplesTotal                 int
+	NLocal                                     float64
+	State                                      RuleBState
+	Counts, PriorGroupCounts, PriorLocalCounts RuleBCounts
+	Prior                                      float64
+	A, B, AbsoluteProbability, WorstMean       float64
+	Tolerance, Confidence                      float64
+	Absolute, GoodBase                         bool
+	UnknownReasons                             []RuleBUnknownReason
 }
 
 // CountRuleBEvidence counts an account/model across source groups. Both available
@@ -249,7 +238,7 @@ func EvaluateRuleB(in RuleBInput, p RuleBParams) (RuleBResult, error) {
 }
 
 func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult, error) {
-	r := RuleBResult{State: RuleBUnknown}
+	r := RuleBResult{State: RuleBUnknown, Tolerance: p.Tolerance, Confidence: p.Confidence}
 	if err := p.Validate(); err != nil {
 		return r, err
 	}
@@ -267,7 +256,6 @@ func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult
 	}).RuleBCounts
 	g, local, own := r.PriorGroupCounts, r.PriorLocalCounts, r.Counts
 	r.Prior = ruleBPrior(g.K-local.K, (g.N-local.N)-(g.X-local.X))
-	r.PeerPrior = ruleBPrior(g.K, g.N-g.X)
 	r.A = own.K + r.Prior*RuleBPriorStrength
 	r.B = math.Max(own.N, 20) - own.K + (1-r.Prior)*RuleBPriorStrength
 	absoluteCDF, err := ruleBBetaCDF(r.A, r.B, p.Tolerance, maxIterations)
@@ -278,48 +266,15 @@ func evaluateRuleB(in RuleBInput, p RuleBParams, maxIterations int) (RuleBResult
 	// Compare the CDF itself, not the rounded/reconstructed tail probability.
 	r.Absolute = absoluteCDF <= 1-p.Confidence
 	r.WorstMean = (own.K + own.X + r.Prior*RuleBPriorStrength) / (own.N + RuleBPriorStrength)
-	r.GoodBase = own.N >= ruleBMinMass-1e-8 && own.S >= ruleBMinSessions && r.WorstMean <= p.Tolerance
-	eligible := 0
-	for _, peer := range in.Peers {
-		if peer.Scope.AccountID == in.Scope.AccountID || peer.Scope.GroupID != in.Scope.GroupID || peer.Scope.Model != in.Scope.Model {
-			continue
-		}
-		eligible++
-		if peer.Identity == 1 {
-			continue
-		}
-		r.PeerCount++
-		counts := CountRuleBEvidence(peer.Samples, peer.Scope, in.Now, peer.Epoch, in.LimitSeconds)
-		r.PeerCounts.N += counts.N
-		r.PeerCounts.K += counts.K
-		r.PeerCounts.X += counts.X
-	}
-	if r.PeerCounts.N-r.PeerCounts.X >= ruleBMinMass {
-		peers := r.PeerCounts
-		a := peers.K + peers.X + r.PeerPrior*RuleBPriorStrength
-		b := math.Max(0, peers.N-peers.K-peers.X) + (1-r.PeerPrior)*RuleBPriorStrength
-		u, err := ruleBBetaQuantile(a, b, p.Confidence, maxIterations)
-		if err != nil {
-			return r, fmt.Errorf("rule B peer quantile: %w", err)
-		}
-		z := math.Min(.999999, u+p.PeerMargin)
-		cdf, err := ruleBBetaCDF(r.A, r.B, z, maxIterations)
-		if err != nil {
-			return r, fmt.Errorf("rule B relative CDF: %w", err)
-		}
-		probability := 1 - cdf
-		r.PeerA, r.PeerB, r.U = &a, &b, &u
-		r.RelativeThreshold, r.RelativeProbability = &z, &probability
-		r.Relative = cdf <= 1-p.Confidence
-		switch {
-		case r.Absolute && r.Relative && own.D >= ruleBMinSlowSessions:
-			r.State = RuleBBad
-		case r.GoodBase && !r.Relative:
-			r.State = RuleBGood
-		}
+	r.GoodBase = own.N >= ruleBMinMass-ruleBMassRounding && own.S >= ruleBMinSessions && r.WorstMean <= p.Tolerance
+	switch {
+	case r.Absolute && own.D >= ruleBMinSlowSessions:
+		r.State = RuleBBad
+	case r.GoodBase:
+		r.State = RuleBGood
 	}
 	if r.State == RuleBUnknown {
-		gates := ruleBReasonInput{RuleBResult: &r, eligiblePeers: eligible, tolerance: p.Tolerance}
+		gates := ruleBReasonInput{RuleBResult: &r, tolerance: p.Tolerance}
 		for _, cause := range assessmentCauses {
 			if cause.ruleB != nil && cause.ruleB(gates) {
 				r.UnknownReasons = append(r.UnknownReasons, cause.name)

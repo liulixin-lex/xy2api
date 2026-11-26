@@ -3,6 +3,7 @@
 package schedquality
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ func TestAssessCacheTurnsAndSessions(t *testing.T) {
 		want              Verdict
 	}{
 		{"nineteen", 19, 80, 2, VerdictUnknown}, {"twenty", 20, 80, 2, VerdictPass},
-		{"no-tolerance", 20, 79, 2, VerdictFail}, {"one-low-session", 20, 0, 1, VerdictUnknown},
+		{"no-tolerance", 20, 79, 2, VerdictFail}, {"one-low-session", 20, 0, 1, VerdictFail},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rows := machineSamples(tc.n)
@@ -43,14 +44,14 @@ func TestAssessCacheTurnsAndSessions(t *testing.T) {
 	if got := AssessCache(rows, .8, time.Time{}, machineNow); got.LowSessions != 2 || got.Verdict != VerdictFail {
 		t.Fatalf("source groups collapsed: %+v", got)
 	}
-	// Aggregate low with only one of two sessions low remains unknown.
+	// One low session with ten of its own turns is sufficient.
 	for i := range rows {
 		if i%2 == 0 {
 			rows[i].InputTokens = machineInt(1)
 			rows[i].CacheReadTokens = machineInt(9)
 		}
 	}
-	if got := AssessCache(rows, .8, time.Time{}, machineNow); got.LowSessions != 1 || got.Verdict != VerdictUnknown {
+	if got := AssessCache(rows, .8, time.Time{}, machineNow); got.LowSessions != 1 || *got.LowSessions10 != 1 || got.Verdict != VerdictFail {
 		t.Fatalf("single low session: %+v", got)
 	}
 }
@@ -153,5 +154,146 @@ func TestContinuationAndCacheCut(t *testing.T) {
 	rows[0].FinishedAt = rows[0].FinishedAt.Add(-time.Nanosecond)
 	if got := AssessCache(rows, .8, time.Time{}, machineNow); got.Turns != 19 {
 		t.Fatal("expired turn included")
+	}
+}
+
+func TestAssessCacheQualifiedLowSessionAndPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		n, lowTurns, read int
+		want              Verdict
+		path              string
+		low10             int
+	}{
+		{"one-ten", 20, 10, 79, VerdictFail, "pair", 1},
+		{"one-nine", 20, 9, 79, VerdictUnknown, "", 0},
+		{"two-six", 12, 6, 50, VerdictUnknown, "", 0},
+		{"nineteen", 19, 10, 79, VerdictUnknown, "", 1},
+		{"twenty", 20, 10, 79, VerdictFail, "pair", 1},
+		{"deep-ten", 10, 10, 50, VerdictFail, "deep10", 1},
+		{"deep-nine", 9, 9, 50, VerdictUnknown, "", 0},
+		{"deep-boundary", 10, 10, 60, VerdictFail, "deep10", 1},
+		{"above-deep", 10, 10, 61, VerdictUnknown, "", 1},
+		{"deep-nineteen", 19, 10, 60, VerdictFail, "deep10", 1},
+		{"deep-twenty", 20, 10, 60, VerdictFail, "single5", 1},
+		{"single-boundary", 20, 10, 75, VerdictFail, "single5", 1},
+		{"above-single", 20, 10, 76, VerdictFail, "pair", 1},
+		{"equal-floor", 20, 10, 80, VerdictPass, "", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := machineSamples(tc.n)
+			for i := range rows {
+				rows[i].SessionKey = "low"
+				if i >= tc.lowTurns {
+					rows[i].SessionKey = "rest"
+					if tc.name != "two-six" {
+						rows[i].GroupID = int64(100 + i)
+					}
+				}
+				rows[i].InputTokens, rows[i].CacheReadTokens = machineInt(100-tc.read), machineInt(tc.read)
+			}
+			got := AssessCache(rows, .8, time.Time{}, machineNow)
+			if got.Verdict != tc.want || got.Path != tc.path || *got.LowSessions10 != tc.low10 {
+				t.Fatalf("assessment: %+v", got)
+			}
+			if !got.WindowFrom.Equal(machineNow.Add(-CacheWindow)) || !got.WindowTo.Equal(machineNow) {
+				t.Fatalf("window: %+v", got)
+			}
+		})
+	}
+}
+
+func TestAssessCacheLowSessionUsesOwnTokenRatio(t *testing.T) {
+	rows := machineSamples(20)
+	for i := range rows {
+		rows[i].SessionKey = "long"
+		rows[i].InputTokens, rows[i].CacheReadTokens = machineInt(1), machineInt(0)
+		if i >= 10 {
+			rows[i].SessionKey = "short"
+			rows[i].GroupID = int64(i)
+		}
+	}
+	rows[0].InputTokens, rows[0].CacheReadTokens = machineInt(10), machineInt(990)
+	rows[19].InputTokens = machineInt(10000)
+	got := AssessCache(rows, .8, time.Time{}, machineNow)
+	if got.Ratio >= .8 || *got.LowSessions10 != 0 || got.Verdict != VerdictUnknown {
+		t.Fatalf("a long session with high token ratio must not count as low: %+v", got)
+	}
+}
+
+func TestAssessCachePercentagePointBoundaries(t *testing.T) {
+	for _, floorPct := range []int{70, 80, 86} {
+		for _, deficitPct := range []int{5, 20} {
+			for _, extraRead := range []int{-1, 0, 1} {
+				t.Run(fmt.Sprintf("floor%d/deficit%d/read%+d", floorPct, deficitPct, extraRead), func(t *testing.T) {
+					n := 20
+					path := "single5"
+					if deficitPct == 20 {
+						n, path = 10, "deep10"
+					}
+					rows := machineSamples(n)
+					for i := range rows {
+						read := (floorPct-deficitPct)*10000000 + extraRead
+						rows[i].SessionKey = "one"
+						rows[i].InputTokens, rows[i].CacheReadTokens = machineInt(1000000000-read), machineInt(read)
+					}
+					got := AssessCache(rows, float64(floorPct)/100, time.Time{}, machineNow)
+					want := VerdictFail
+					if extraRead > 0 {
+						path = "pair"
+						if deficitPct == 20 {
+							want, path = VerdictUnknown, ""
+						}
+					}
+					if got.Verdict != want || got.Path != path {
+						t.Fatalf("assessment: %+v", got)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestAssessCacheTwoShortLowSessionsDoNotFailAtTwentyTurns(t *testing.T) {
+	rows := machineSamples(20)
+	for i := range rows {
+		read := 50
+		switch {
+		case i < 6:
+			rows[i].SessionKey = "low-a"
+		case i < 12:
+			rows[i].SessionKey = "low-b"
+		default:
+			rows[i].SessionKey = "good"
+			read = 90
+		}
+		rows[i].InputTokens, rows[i].CacheReadTokens = machineInt(100-read), machineInt(read)
+	}
+	got := AssessCache(rows, .8, time.Time{}, machineNow)
+	if got.Turns != 20 || got.LowSessions != 2 || *got.LowSessions10 != 0 || got.Ratio >= .8 || got.Verdict != VerdictUnknown || got.Path != "" {
+		t.Fatalf("two six-turn low sessions are insufficient even with twenty total turns: %+v", got)
+	}
+}
+
+func TestAssessCacheDeficitJustBelowBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		turns, read int
+		verdict     Verdict
+		path        string
+	}{
+		{20, 65, VerdictFail, "pair"},
+		{10, 50, VerdictUnknown, ""},
+	} {
+		t.Run(fmt.Sprint(tc.turns), func(t *testing.T) {
+			rows := machineSamples(tc.turns)
+			for i := range rows {
+				rows[i].SessionKey = "one"
+				rows[i].InputTokens, rows[i].CacheReadTokens = machineInt(100-tc.read), machineInt(tc.read)
+			}
+			got := AssessCache(rows, .6999999999995, time.Time{}, machineNow)
+			if got.Verdict != tc.verdict || got.Path != tc.path {
+				t.Fatalf("assessment: %+v", got)
+			}
+		})
 	}
 }

@@ -126,6 +126,12 @@ func deleteSchedAccountLines(ctx context.Context, tx *sql.Tx, accountID int64, a
 				return nil, nil, err
 			}
 		}
+		// Retain the prior evidence, but this administrative decision belongs to
+		// the currently running rule, not the rule which admitted the old row.
+		basis.RuleVersion = schedquality.RuleVersion
+		basis.ReleaseReason = ""
+		basis.TrialDurationSeconds = 0
+		basis.MissingDeadline = false
 		decisions = append(decisions, schedquality.Decision{At: at, Key: key, Action: "reset", Basis: basis})
 	}
 	return groups, decisions, rows.Err()
@@ -459,8 +465,7 @@ func decodeSchedQualityPolicy(raw json.RawMessage, groupID string) (service.Sche
 	v.TakeoverIdleSeconds, fieldErr = readSchedQualityPolicyField(fields, "takeover_idle_seconds", defaults.TakeoverIdleSeconds)
 	read(fieldErr)
 	record.Policy = schedquality.Policy{Enabled: v.Enabled, TTFTSeconds: v.TTFTSeconds, MaxErrorRate: v.MaxErrorRate, MinCacheRatio: v.MinCacheRatio, TakeoverIdleSeconds: v.TakeoverIdleSeconds}
-	// The v0.6.4 editor allowed error thresholds below 5%. Keep old saved
-	// values usable during rollback/blue-green overlap, matching migration 301.
+	// Clamp legacy saved values to the effective floor used by assessments.
 	if record.Policy.MaxErrorRate < schedquality.ErrorRateFloor {
 		record.Policy.MaxErrorRate = schedquality.ErrorRateFloor
 	}

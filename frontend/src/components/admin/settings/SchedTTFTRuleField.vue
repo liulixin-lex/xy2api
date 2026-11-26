@@ -26,7 +26,7 @@
         <span class="flex items-center gap-2">
           <span v-if="!valid[field]" :id="`${ids[field]}-note`" class="sq-fail-word text-xs" data-sq-ttft-invalid>{{ t(`admin.schedQuality.ttftRule.legal.${field}`) }}</span>
           <span v-else-if="outside[field]" :id="`${ids[field]}-note`" class="text-xs text-amber-700 dark:text-amber-400" data-sq-ttft-outside>
-            {{ t('admin.schedQuality.ttftRule.outside', { range: replayedRange(field) }) }}
+            {{ outsideNote(field) }}
           </span>
           <input
             :id="ids[field]"
@@ -42,14 +42,13 @@
             :data-sq-ttft-unsaved-input="valid[field] && unsaved && changed(field) ? '' : undefined"
             @input="edited[field] = true"
           />
-          <span class="w-16 text-sm sq-text-3">{{ t(`admin.schedQuality.ttftRule.unit.${UNITS[field]}`) }}</span>
+          <span class="w-16 text-sm sq-text-3">{{ t('admin.schedQuality.ttftRule.unit.percent') }}</span>
         </span>
       </div>
       <p v-if="record.defaults" class="text-xs text-gray-500 dark:text-gray-400" data-sq-ttft-defaults>
         {{ t('admin.schedQuality.ttftRule.defaults', {
           confidence: display(record.defaults.confidence),
-          tolerance: display(record.defaults.tolerance),
-          peer_margin: display(record.defaults.peer_margin)
+          tolerance: display(record.defaults.tolerance)
         }) }}
       </p>
     </div>
@@ -68,15 +67,16 @@
 
 <script setup lang="ts">
 /**
- * The first-output line's three global settings in the scheduling card (GET | PUT /admin/sched-quality/ttft-rule),
+ * The first-output line's global settings in the scheduling card (GET | PUT /admin/sched-quality/ttft-rule),
  * built like the group dialog's quality gate block (GroupSchedPolicyField): loaded on its own, saved as a separate
  * request with the version when SettingsView has saved the page (`save()`); a 409 shows "失败 + 重新载入", any
  * other failure "失败" with the backend's message.
  *
- * Confidence and tolerance read as percentages, the margin over the peers as percentage points. Values outside the
- * legal ranges (50 < confidence < 100, 0 < tolerance < 100, 0 ≤ margin < 100) frame the input red and are not
- * saved; values outside the replayed range are allowed with a note that no data supports them. Raising any value
- * makes accounts less likely to go to the rear (relaxing): a pure or mixed relaxation asks first, since saving it
+ * Confidence and tolerance read as percentages; the margin over the peers is not shown (the rules in force do not
+ * compare with peers) and goes back as loaded. Values outside the legal ranges (50 < confidence < 100,
+ * 0 < tolerance < 100) frame the input red and are not saved; values outside the replayed range are allowed with a
+ * note that no data supports them (a range of one value, when only it was replayed, is named as that value). Raising
+ * any value makes accounts less likely to go to the rear (relaxing): a pure or mixed relaxation asks first, since saving it
  * clears every first-output rear and trial and judges them again. Declining keeps the typed values, marked as not
  * saved, like a failed save keeps them.
  */
@@ -84,7 +84,7 @@ import { computed, reactive, ref, shallowRef, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import schedQualityAPI from '@/api/admin/schedQuality'
-import type { BackendTTFTRule, SchedTTFTRuleField, SchedTTFTRuleValues } from '@/api/admin/schedQualityTypes'
+import type { BackendTTFTRule, SchedTTFTRuleUpdateValues } from '@/api/admin/schedQualityTypes'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import {
@@ -92,14 +92,13 @@ import {
   outsideReplayed,
   ttftRuleChange,
   ttftRuleInputValid,
-  ttftRulePercent as display
+  ttftRulePercent as display,
+  type TTFTRuleShownField
 } from './schedTTFTRule'
-
-const UNITS: Record<SchedTTFTRuleField, 'percent' | 'points'> = { confidence: 'percent', tolerance: 'percent', peer_margin: 'points' }
 
 const { t } = useI18n()
 const appStore = useAppStore()
-const ids = { confidence: `sq-ttft-c-${useId()}`, tolerance: `sq-ttft-p-${useId()}`, peer_margin: `sq-ttft-d-${useId()}` }
+const ids = { confidence: `sq-ttft-c-${useId()}`, tolerance: `sq-ttft-p-${useId()}` }
 
 const record = shallowRef<BackendTTFTRule | null>(null)
 const loadFailed = ref(false)
@@ -110,9 +109,9 @@ const saving = ref(false)
 const conflict = ref(false)
 const saveFailed = ref(false)
 const saveMessage = ref('')
-const form = reactive<Record<SchedTTFTRuleField, string>>({ confidence: '', tolerance: '', peer_margin: '' })
+const form = reactive<Record<TTFTRuleShownField, string>>({ confidence: '', tolerance: '' })
 // The inputs show rounded values; a field the user has not typed in keeps the API value as is.
-const edited = reactive<Record<SchedTTFTRuleField, boolean>>({ confidence: false, tolerance: false, peer_margin: false })
+const edited = reactive<Record<TTFTRuleShownField, boolean>>({ confidence: false, tolerance: false })
 
 function fill(rule: BackendTTFTRule) {
   for (const field of FIELDS) {
@@ -137,27 +136,38 @@ async function reload() {
 }
 void reload()
 
-const valid = computed(() => Object.fromEntries(FIELDS.map((field) => [field, ttftRuleInputValid(field, form[field])])) as Record<SchedTTFTRuleField, boolean>)
+const valid = computed(() => Object.fromEntries(FIELDS.map((field) => [field, ttftRuleInputValid(field, form[field])])) as Record<TTFTRuleShownField, boolean>)
 // Nothing loaded (still loading, or the load failed and shows its retry): nothing to check or save, so the page saves.
 const isValid = computed(() => !record.value || FIELDS.every((field) => valid.value[field]))
 
-const current = computed<SchedTTFTRuleValues>(() => {
+const current = computed<SchedTTFTRuleUpdateValues>(() => {
   const saved = record.value
-  const value = (field: SchedTTFTRuleField) => (saved && !edited[field] ? saved[field] : Number((Number(form[field]) / 100).toFixed(6)))
-  return { confidence: value('confidence'), tolerance: value('tolerance'), peer_margin: value('peer_margin') }
+  const value = (field: TTFTRuleShownField) => (saved && !edited[field] ? saved[field] : Number((Number(form[field]) / 100).toFixed(6)))
+  // The margin is not shown and the rules in force do not use it, but the previous rules read it after a rollback: the
+  // loaded value goes back as it is. An answer without it sends the default the same answer gives (the backend requires
+  // the key); without either the key is left out and the backend refuses the save. Never a made-up 0.
+  return { confidence: value('confidence'), tolerance: value('tolerance'), peer_margin: saved?.peer_margin ?? saved?.defaults?.peer_margin }
 })
 
 /** Declined, and the values still differ from the saved ones: the note and the marked inputs show. */
 const unsaved = computed(() => declined.value && !!record.value && ttftRuleChange(record.value, current.value) !== 'none')
-const changed = (field: SchedTTFTRuleField) => !!record.value && current.value[field] !== record.value[field]
+const changed = (field: TTFTRuleShownField) => !!record.value && current.value[field] !== record.value[field]
 
 const outside = computed(() =>
-  Object.fromEntries(FIELDS.map((field) => [field, outsideReplayed(record.value?.replayed?.[field], current.value[field])])) as Record<SchedTTFTRuleField, boolean>
+  Object.fromEntries(FIELDS.map((field) => [field, outsideReplayed(record.value?.replayed?.[field], current.value[field])])) as Record<TTFTRuleShownField, boolean>
 )
 
-const replayedRange = (field: SchedTTFTRuleField) => {
+/**
+ * The note on a value outside the replayed range, from the range the API gives: one value (rule 4.0 was replayed on
+ * its defaults only) reads as that value, a span as before.
+ */
+const outsideNote = (field: TTFTRuleShownField) => {
   const range = record.value?.replayed?.[field]
-  return range ? t(`admin.schedQuality.ttftRule.range.${UNITS[field]}`, { min: display(range[0]), max: display(range[1]) }) : ''
+  if (!range) return ''
+  const [min, max] = range.map(display)
+  return min === max
+    ? t('admin.schedQuality.ttftRule.outsidePoint', { value: min })
+    : t('admin.schedQuality.ttftRule.outside', { range: t('admin.schedQuality.ttftRule.range.percent', { min, max }) })
 }
 
 // ---- Relaxing asks first ----

@@ -14,7 +14,7 @@ import (
 )
 
 func TestEngineRecoveryBoundsExpiredTimers(t *testing.T) {
-	for _, kind := range []string{"rear", "trial", "clear", "regular"} {
+	for _, kind := range []string{"rear", "trial", "regular"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newQualityFixture(t)
 			f.now = f.now.Add(6 * time.Hour) // 18:00:10, retained replay starts at 13:50.
@@ -30,8 +30,6 @@ func TestEngineRecoveryBoundsExpiredTimers(t *testing.T) {
 			case "trial":
 				r.Trial, r.TrialUntil = true, floor.Add(-time.Hour)
 				want = q.ActionTrialTimeout
-			case "clear":
-				want = q.ActionClear
 			case "regular":
 				r.Level, r.Admissions = 0, 0
 			}
@@ -71,7 +69,7 @@ func TestEngineRecoveryBoundsExpiredTimers(t *testing.T) {
 			require.LessOrEqual(t, d.replayStats.batches, 125, "retention bounds the replay, including the new bounded trial")
 			f.cycle()
 			require.Zero(t, f.line(q.DimensionError).Level)
-			require.Zero(t, f.line(q.DimensionError).Admissions)
+			require.Equal(t, r.Admissions, f.line(q.DimensionError).Admissions)
 			rows := append([]q.LineState(nil), f.store.Rows...)
 			saved := append([]q.Decision(nil), f.store.Decisions...)
 			f.e = NewSchedQualityEngineService(f.store, f.ledger, f.switches, func() time.Time { return f.now }, nil)
@@ -139,7 +137,6 @@ func TestEngineSaveDrainsOldConfiguration(t *testing.T) {
 					require.Equal(t, q.RuleBTightened, result.Change)
 				}
 				require.Equal(t, start.Add(40*time.Minute), f.e.processedAt)
-				require.NotEmpty(t, f.e.peerBuckets, "committed catchup buckets must be published")
 				f.now = start.Add(50*time.Minute + 10*time.Second)
 				f.cycle()
 				require.NotEmpty(t, f.store.Decisions, "tightened rule must actually change the outcome")
@@ -189,7 +186,6 @@ func TestEngineReplayFailureAbortsConfigurationSave(t *testing.T) {
 			f.cycle()
 			before := f.e.Snapshot()
 			watermark := f.e.processedAt
-			buckets := clonePeerBuckets(f.e.peerBuckets, f.now)
 			policies := cloneSchedPolicies(f.store.Policies)
 			rows := append([]q.LineState(nil), f.store.Rows...)
 			store := &failReplaySaveStore{fakeSchedQualityStore: f.store}
@@ -211,7 +207,6 @@ func TestEngineReplayFailureAbortsConfigurationSave(t *testing.T) {
 			require.Zero(t, f.store.Rule.Version)
 			require.Equal(t, rows, f.store.Rows)
 			require.Equal(t, watermark, f.e.processedAt)
-			require.Equal(t, buckets, f.e.peerBuckets)
 			require.Same(t, before, f.e.Snapshot())
 		})
 	}

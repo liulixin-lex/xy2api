@@ -14,7 +14,7 @@ const (
 
 type ErrorAssessment struct {
 	Verdict      Verdict  `json:"verdict"`
-	Limit        float64  `json:"limit"` // max(分组上限, 0.05)
+	Limit        float64  `json:"limit"` // max(分组上限, ErrorRateFloor)
 	Clear        int      `json:"clear"`
 	Failed       int      `json:"failed"`
 	Unknown      int      `json:"unknown"`
