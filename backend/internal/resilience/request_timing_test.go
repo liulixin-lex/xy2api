@@ -24,8 +24,8 @@ func TestRequestTimingObservationsDoNotChangeBudget(t *testing.T) {
 	st.NoteWireStatus(200)
 	st.SetEdge("esa")
 	deadline := b.Deadline()
-	st.NoteOpenAIDispatch(now.Add(200*time.Second), "direct")
-	st.NoteOpenAIDispatch(now.Add(241*time.Second), "plugin")
+	st.NoteDispatch(now.Add(200*time.Second), "direct")
+	st.NoteDispatch(now.Add(241*time.Second), "plugin")
 	start := now.Add(239 * time.Second)
 	st.SetAttemptProfile(AttemptProfile{AttemptStart: start})
 	st.SetAttemptProfile(AttemptProfile{AttemptStart: start, Warm: true})
@@ -70,14 +70,14 @@ func TestDispatchHistogramAndNoBudgetExclusions(t *testing.T) {
 	dispatchHist.buckets = nil
 	dispatchHist.Unlock()
 	st := NewRequestState()
-	st.NoteOpenAIDispatch(now, "direct")
+	st.NoteDispatch(now, "direct")
 	st.SetBudget(NewBudget(context.Background(), timingTestSettings(), KindImage, now))
-	st.NoteOpenAIDispatch(now, "direct")
+	st.NoteDispatch(now, "direct")
 	require.Empty(t, DispatchHistogramSnapshot(time.Minute))
 	b := NewBudget(context.Background(), timingTestSettings(), KindText, now)
 	st.SetBudget(b)
-	st.NoteOpenAIDispatch(now.Add(210*time.Second), "direct")
-	st.NoteOpenAIDispatch(now.Add(239*time.Second), "direct")
+	st.NoteDispatch(now.Add(210*time.Second), "direct")
+	st.NoteDispatch(now.Add(239*time.Second), "direct")
 	rows := DispatchHistogramSnapshot(time.Minute)
 	require.Len(t, rows, 1)
 	row := rows[0]
@@ -185,4 +185,24 @@ func TestBudgetBaseSecondsForTestFreezesAcrossHotReloadAndFinish(t *testing.T) {
 	base, ok = image.BudgetBaseSecondsForTest()
 	require.True(t, ok)
 	require.EqualValues(t, 90, base)
+}
+
+func TestDispatchCountExactSurvivesSerialization(t *testing.T) {
+	state := NewRequestState()
+	state.NoteDispatch(time.Now(), "http")
+	exact := state.Timing()
+	require.True(t, exact.DispatchCountExact())
+	state.MarkDispatchCountInexact()
+	state.NoteDispatch(time.Now(), "http")
+	inexact := state.Timing()
+	require.False(t, inexact.DispatchCountExact())
+	require.True(t, exact.DispatchCountExact(), "frozen snapshots keep their original certainty")
+	for _, snapshot := range []RequestTiming{exact, inexact} {
+		data, err := json.Marshal(snapshot)
+		require.NoError(t, err)
+		var restored RequestTiming
+		require.NoError(t, json.Unmarshal(data, &restored))
+		require.Equal(t, snapshot.DispatchCountExact(), restored.DispatchCountExact())
+	}
+	require.False(t, (RequestTiming{DispatchCount: observed(int64(1))}).DispatchCountExact(), "historical count lacks versioned evidence")
 }

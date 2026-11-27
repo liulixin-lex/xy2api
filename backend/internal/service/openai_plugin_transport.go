@@ -26,7 +26,6 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 			return response, err
 		}
 	}
-	noteOpenAIDispatch(request.Context(), "direct")
 	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
 }
 

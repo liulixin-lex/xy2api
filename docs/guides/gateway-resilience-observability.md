@@ -381,3 +381,14 @@ Responses 拒参修复（包括流内修复）在既有上游错误事件中记�
 3. 新会话没选到号或落到后排，先看 `sched_quality.new_session` 的候选名单；会话搬动看 `sched_quality.session_switch` 的 `committed`，用 `gateway_request_id` 连到访问日志和尝试记录的 `request_id`。`sched_quality.attempt_finished` 可区分首输出截止、真实上游失败与取消；怀疑协议转换失败时查 [协议转换日志](#协议转换)。
 
 **设置保存后其他实例行为没变**：其他实例每 10 秒刷新；若长时间未生效，查找 `resilience.settings_refresh_failed`。
+
+### 真实上游发送次数
+
+新请求的 `dispatch_phases.count_version = 2` 表示统一发送口径：`dispatch_count` 统计所有平台实际启动的上游发送尝试，包含拨号失败、同号重试、换号重试、HTTP 重定向及底层传输重发；它不表示供应商确认收到的次数。
+HTTP 在实际传输边界计数，`DoWithTLS` 委托 `Do` 不重复计。请求准备失败、预算或本地参数拒绝不计。WS 每次应用请求帧写入计一次（含生成预热帧），握手和 ping 不计；协作结果认领不算新发送。
+插件成功返回 HTTP 响应或报错携带 request_sent=true 时计 1，明确 request_sent=false 的准备失败计 0；插件 v1 不回报内部重发次数，因此只要尝试提交 Start，本次请求的 dispatch_phases 就写入 count_inexact=true，并在同一 turn 的重试中保留。精确计数时省略此标记；单发补偿必须同时满足计数为 1 且精确（DispatchCountExact()），不得把插件的 1 当作精确单发证据。
+只统计带请求计时状态的上下文；没有预算或非 text 请求也统计，后台探测、刷新、余额查询不产生客户请求计数。计数不参与预算、选号、响应、计费或账号配额。
+相同计数也保存在 `dispatch_phases.dispatch_count`，供没有独立计数列的无账单请求记录使用；没有派发时为 0。阶段耗时仍只记录首发前已完成的阶段。
+WebSocket 的每个新逻辑 turn 重新开始计数和计时；同一 turn 的重试、换号、修复和预热继续累加。Live sideband 的客户文本与二进制应用帧也计数，无请求状态的后台帧不计。
+
+历史记录没有 `count_version` 时维持旧口径，尤其非 OpenAI 历史 0 不代表未发送，不回填，也不可直接与版本 2 比较。

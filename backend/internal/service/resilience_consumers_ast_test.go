@@ -156,7 +156,7 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 			// Optional collaboration steps bound themselves to the slack beyond the existing repair budget.
 			"internal/handler/collab_borrow_wiring.go:OpenAIGatewayHandler.tryCollabBorrow": 1,
 			"internal/handler/collab_lossless.go:OpenAIGatewayHandler.armCollabLossless":    1,
-			"internal/resilience/request_timing.go:RequestState.NoteOpenAIDispatch":         1,
+			"internal/resilience/request_timing.go:RequestState.NoteDispatch":               1,
 			"internal/resilience/timeout_plan.go:RequestState.ResponseStagePlan":            1,
 		},
 		"ClampWait": {
@@ -278,7 +278,7 @@ func callPositions(node ast.Node, name string) []token.Pos {
 func TestG9DispatchObservationCallsites(t *testing.T) {
 	want := map[string]int{
 		"internal/service/resilience_gemini_attempt.go:geminiAttempt.observeDispatch":                                 1,
-		"internal/resilience/request_timing.go:RequestState.NoteOpenAIDispatch":                                       1,
+		"internal/resilience/request_timing.go:RequestState.NoteDispatch":                                             1,
 		"internal/service/gateway_forward.go:GatewayService.Forward":                                                  1,
 		"internal/service/gateway_anthropic_passthrough.go:GatewayService.forwardAnthropicAPIKeyPassthroughWithInput": 1,
 		"internal/service/gateway_forward_as_responses.go:GatewayService.ForwardAsResponses":                          1,

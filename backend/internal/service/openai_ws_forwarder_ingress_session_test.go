@@ -4735,3 +4735,11 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_InvalidEncrypted
 	require.Equal(t, "rs_1", gjson.Get(secondUpstream, "input.0.id").String())
 	require.Equal(t, "again", gjson.Get(secondUpstream, "input.2.text").String())
 }
+
+func (c *openAIWSPreflightFailConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	return c.WriteJSON(ctx, payload)
+}
+
+func (c *openAIWSWriteFailAfterFirstTurnConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	return c.WriteJSON(ctx, payload)
+}

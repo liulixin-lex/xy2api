@@ -2,9 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"math"
 	"net/http"
 	"sort"
@@ -14,7 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	coderws "github.com/coder/websocket"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -602,7 +604,13 @@ func (c *openAIWSConn) writeJSON(value any, writeCtx context.Context) error {
 	if writeCtx == nil {
 		writeCtx = context.Background()
 	}
-	if err := c.ws.WriteJSON(writeCtx, value); err != nil {
+	// Serialization is preparation. Write these bytes directly as a text frame
+	// so neither custom marshalers nor the JSON encoder run a second time.
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("failed to write JSON message: failed to marshal JSON: %w", err)
+	}
+	if err := writeObservedWSFrame(writeCtx, c.ws, coderws.MessageText, payload); err != nil {
 		return err
 	}
 	c.touch()

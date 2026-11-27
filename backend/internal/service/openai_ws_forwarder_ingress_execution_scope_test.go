@@ -365,3 +365,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_SameCodexThreadS
 	}
 	require.Equal(t, 1, preempted, "应恰好有一条会话被抢占")
 }
+
+func (c *openAIWSGatedConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	return c.WriteJSON(ctx, payload)
+}

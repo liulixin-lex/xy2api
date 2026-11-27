@@ -272,7 +272,7 @@ func (r *pluginRuntime) kill() {
 	}
 }
 
-func (r *pluginRuntime) roundTrip(ctx context.Context, request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
+func (r *pluginRuntime) roundTrip(ctx context.Context, request *http.Request, proxyURL string, account *Account) (response *http.Response, resultErr error) {
 	if request == nil || request.URL == nil || account == nil {
 		return nil, errors.New("插件出站请求参数不完整")
 	}
@@ -284,6 +284,16 @@ func (r *pluginRuntime) roundTrip(ctx context.Context, request *http.Request, pr
 	}
 	requestID := strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.FormatInt(account.ID, 36)
 	RecordOpsUpstreamSendBoundary(ctx, account.ID)
+	state, submittedAt := resilience.StateFrom(ctx), time.Now()
+	state.MarkDispatchCountInexact()
+	// v1 reports only success or request_sent, never the physical send count.
+	// Preserve submission time while waiting for that evidence.
+	defer func() {
+		var transportErr *PluginTransportError
+		if resultErr == nil || (errors.As(resultErr, &transportErr) && transportErr.RequestSent) {
+			state.NoteDispatch(submittedAt, "plugin")
+		}
+	}()
 	if err := stream.Send(&pluginv1.ForwardRequest{Frame: &pluginv1.ForwardRequest_Start{Start: &pluginv1.ForwardRequestStart{
 		RequestId:          requestID,
 		Method:             request.Method,

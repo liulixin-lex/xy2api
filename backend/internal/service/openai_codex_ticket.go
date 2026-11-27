@@ -486,12 +486,10 @@ func (s *OpenAIGatewayService) fireCodexAccountTicketProbe(ctx context.Context, 
 	s.traceCodexTicket(CodexTicketTraceEvent{AccountID: account.ID, Model: model, Stage: stage, Outcome: "dispatch", Detail: CodexTicketTraceDetail{Structure: codexRequestStructure(body, req.Header), Transport: s.codexTicketTransportFingerprint(account)}})
 	var resp *http.Response
 	if chainedClient != nil {
-		noteOpenAIDispatch(req.Context(), "codex_ticket")
-		resp, err = chainedClient.Do(req)
+		resp, err = doObservedHTTP(chainedClient, req, "codex_ticket")
 	} else if injectedState != "" {
 		resp, err = s.doOpenAIUpstream(req, proxyURL, account)
 	} else if s.httpUpstream != nil {
-		noteOpenAIDispatch(req.Context(), "codex_ticket")
 		resp, err = s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	} else {
 		err = errors.New("ticket transport unavailable")

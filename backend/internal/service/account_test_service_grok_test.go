@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	coderws "github.com/coder/websocket"
 	"image"
 	"image/color"
 	"image/png"
@@ -641,4 +642,8 @@ func TestAccountTestService_GrokRealtimeModeDialFailure(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, rec.Body.String(), `"type":"error"`)
 	require.Contains(t, rec.Body.String(), "Realtime")
+}
+
+func (c *grokRealtimeTestConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	return c.WriteJSON(ctx, payload)
 }

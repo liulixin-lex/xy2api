@@ -43,7 +43,7 @@ func (r *openAIWSTierRoute) WriteFrame(ctx context.Context, t coderws.MessageTyp
 	if closed {
 		return errOpenAIWSConnClosed
 	}
-	return c.WriteFrame(ctx, t, p)
+	return writeObservedWSFrame(ctx, c, t, p)
 }
 
 func (r *openAIWSTierRoute) replace(next openaiwsv2.FrameConn) error {

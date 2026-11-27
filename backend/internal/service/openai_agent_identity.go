@@ -207,8 +207,7 @@ func registerAgentIdentityTask(ctx context.Context, account *Account) (string, e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	noteOpenAIDispatch(req.Context(), "agent_identity")
-	resp, err := client.Do(req)
+	resp, err := doObservedHTTP(client, req, "agent_identity")
 	if err != nil {
 		return "", errors.New("agent task registration request failed")
 	}

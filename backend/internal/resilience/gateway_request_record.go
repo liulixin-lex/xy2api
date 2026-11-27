@@ -147,6 +147,7 @@ func (s *RequestState) BeginGatewayTurn(at time.Time) {
 	s.ownerAvoidConfirmed = false
 	s.schedSelection.HTTPStreamText = false
 	s.gatewayRecord = &gatewayRequestTrace{started: at, RequestScope: s.gatewayAdmissionScope}
+	s.timing = timingTrace{}
 	s.firstOutput = time.Time{}
 	s.firstOutputNoted.Store(false)
 	s.mu.Unlock()

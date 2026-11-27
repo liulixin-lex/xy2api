@@ -792,3 +792,7 @@ func TestOpenAIWSConnPool_AcquireSkipsDirtyIdleConn(t *testing.T) {
 	require.Len(t, dialer.dialed(), 2)
 	requireConnClosed(t, first.conn)
 }
+
+func (c *openAIWSReaderLoopFakeConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	return c.WriteJSON(ctx, payload)
+}

@@ -44,7 +44,7 @@ var dispatchHist = struct {
 
 func ObserveDispatchRemaining(path string, bodyBytes int64, committed bool, rem time.Duration, now time.Time) {
 	switch path {
-	case "direct", "plugin", "codex_ticket", "codex_models", "image_backfill", "grok_media", "grok_voice", "seedance", "model_catalog", "codex_proxy", "agent_identity":
+	case "direct", "plugin", "websocket", "codex_ticket", "codex_models", "image_backfill", "grok_media", "grok_voice", "seedance", "model_catalog", "codex_proxy", "agent_identity":
 	default:
 		path = "other"
 	}

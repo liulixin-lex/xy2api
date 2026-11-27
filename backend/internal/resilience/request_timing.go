@@ -21,6 +21,7 @@ type RequestTiming struct {
 	KeepaliveCommitMs       *int64          `json:"keepalive_commit_ms,omitempty"`
 	WireStatus              *int64          `json:"wire_status,omitempty"`
 	DispatchCount           *int64          `json:"dispatch_count,omitempty"`
+	DispatchCountInexact    bool            `json:"-"`
 	MinDispatchRemainingMs  *int64          `json:"min_dispatch_remaining_ms,omitempty"`
 	FinalDeadlineMs         *int64          `json:"final_deadline_ms,omitempty"`
 	LateAttemptNoTimerCount *int64          `json:"-"`
@@ -47,6 +48,7 @@ type timingTrace struct {
 	keepaliveCommit time.Time
 	wireStatus      int64
 	dispatchCount   int64
+	countInexact    bool
 	minRemaining    time.Duration
 	attemptTimers   map[time.Time]bool // timer coverage known before dispatch
 	attemptMetrics  map[time.Time]bool // dispatched late owner -> frozen timer coverage
@@ -103,11 +105,14 @@ func (s *RequestState) FinishRejectedDispatch(at time.Time) {
 	s.timing.phasesFinished = at
 }
 
-func (s *RequestState) dispatchPhasesLocked() map[string]int64 {
-	if s.timing.phasesFinished.IsZero() {
-		return nil
+func (s *RequestState) dispatchPhasesLocked() map[string]any {
+	out := map[string]any{"count_version": 2, "dispatch_count": s.timing.dispatchCount}
+	if s.timing.countInexact {
+		out["count_inexact"] = true
 	}
-	out := make(map[string]int64, len(s.timing.dispatchPhases))
+	if s.timing.phasesFinished.IsZero() {
+		return out
+	}
 	for name, elapsed := range s.timing.dispatchPhases {
 		out[name] = elapsed.Milliseconds()
 	}
@@ -150,6 +155,8 @@ func (s *RequestState) Timing() RequestTiming {
 			out.FinalDeadlineMs = observed(b.Deadline().Sub(start).Milliseconds())
 		}
 	}
+	out.DispatchCount = observed(trace.dispatchCount)
+	out.DispatchCountInexact = trace.countInexact
 	if start.IsZero() {
 		return out
 	}
@@ -169,8 +176,7 @@ func (s *RequestState) Timing() RequestTiming {
 	if trace.wireStatus != 0 {
 		out.WireStatus = observed(trace.wireStatus)
 	}
-	out.DispatchCount = observed(trace.dispatchCount)
-	if trace.dispatchCount > 0 {
+	if trace.dispatchCount > 0 && b != nil && b.Kind() == KindText {
 		out.MinDispatchRemainingMs = observed(trace.minRemaining.Milliseconds())
 	}
 	out.LateAttemptCount = observed(int64(lateCount))
@@ -300,19 +306,53 @@ func (s *RequestState) ObserveAttemptStart() {
 // already published at dispatch; completion must not count them again.
 func (s *RequestState) FinishTiming() {}
 
-// NoteOpenAIDispatch is called immediately before an actual HTTP transport.
-// It observes only: it does not admit, consume an attempt, or change a deadline.
-func (s *RequestState) NoteOpenAIDispatch(at time.Time, path string) {
+// MarkDispatchCountInexact records that a submitted plugin request can contain
+// unreported physical sends. It remains set through retries in this turn.
+func (s *RequestState) MarkDispatchCountInexact() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.timing.countInexact = true
+	s.mu.Unlock()
+}
+
+// DispatchCountExact excludes missing observations and plugin submissions.
+func (t RequestTiming) DispatchCountExact() bool {
+	if t.DispatchCount == nil || t.DispatchCountInexact {
+		return false
+	}
+	// SQL and JSON readers restore dispatch_phases, not the in-memory flag.
+	// Missing historical metadata cannot establish an exact count either.
+	var phases struct {
+		Version int  `json:"count_version"`
+		Inexact bool `json:"count_inexact"`
+	}
+	return json.Unmarshal(t.DispatchPhases, &phases) == nil && phases.Version == 2 && !phases.Inexact
+}
+
+func (s *RequestState) DispatchCountExact() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.timing.countInexact
+}
+
+// NoteDispatch observes one actual upstream send attempt, including failed dials.
+// It never admits an attempt, consumes budget, or changes a deadline. A request
+// state is sufficient: non-text and requests without budgets count sends too.
+func (s *RequestState) NoteDispatch(at time.Time, path string) {
 	if s == nil {
 		return
 	}
 	b := s.Budget()
-	if b == nil || b.Kind() != KindText {
-		return
+	textBudget := b != nil && b.Kind() == KindText
+	var rem time.Duration
+	if textBudget {
+		rem = b.Remaining(at)
 	}
-	rem := b.Remaining(at)
-	// All OpenAI HTTP routes, including non-native protocol fallbacks, share
-	// this existing transport observation point after their guard decision.
 	s.ObserveAttemptStart()
 	s.mu.Lock()
 	if s.timing.dispatchCount == 0 {
@@ -324,5 +364,7 @@ func (s *RequestState) NoteOpenAIDispatch(at time.Time, path string) {
 	s.timing.minRemaining = min(s.timing.minRemaining, rem)
 	bytes, committed := s.bodyBytes, !s.timing.keepaliveCommit.IsZero()
 	s.mu.Unlock()
-	ObserveDispatchRemaining(path, bytes, committed, rem, at)
+	if textBudget {
+		ObserveDispatchRemaining(path, bytes, committed, rem, at)
+	}
 }
