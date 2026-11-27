@@ -548,7 +548,7 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 				errCh <- readErr
 				return
 			}
-			if writeErr := upstream.WriteFrame(proxyCtx, messageType, payload); writeErr != nil {
+			if writeErr := writeObservedWSFrame(proxyCtx, upstream, messageType, payload); writeErr != nil {
 				errCh <- writeErr
 				return
 			}

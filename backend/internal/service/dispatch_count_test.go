@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -159,9 +160,11 @@ func (a dispatchPluginAPI) Forward(context.Context, ...grpc.CallOption) (grpc.Bi
 
 type dispatchPluginStream struct {
 	grpc.ClientStream
-	starts   atomic.Int64
-	received int
-	failSend bool
+	starts      atomic.Int64
+	received    int
+	failSend    bool
+	frameError  *pluginv1.ForwardResponseError
+	redirectURL string
 }
 
 func (s *dispatchPluginStream) Send(r *pluginv1.ForwardRequest) error {
@@ -177,16 +180,40 @@ func (s *dispatchPluginStream) CloseSend() error { return nil }
 func (s *dispatchPluginStream) Recv() (*pluginv1.ForwardResponse, error) {
 	s.received++
 	if s.received == 1 {
+		if s.frameError != nil {
+			return &pluginv1.ForwardResponse{Frame: &pluginv1.ForwardResponse_Error{Error: s.frameError}}, nil
+		}
+		if s.redirectURL != "" {
+			req, err := http.NewRequest(http.MethodPost, s.redirectURL+"/start", strings.NewReader("fixture"))
+			if err != nil {
+				return nil, err
+			}
+			response, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+			if err != nil {
+				return nil, err
+			}
+			_, readErr := io.Copy(io.Discard, response.Body)
+			closeErr := response.Body.Close()
+			if readErr != nil {
+				return nil, readErr
+			}
+			if closeErr != nil {
+				return nil, closeErr
+			}
+		}
 		return &pluginv1.ForwardResponse{Frame: &pluginv1.ForwardResponse_Start{Start: &pluginv1.ForwardResponseStart{StatusCode: 201, ContentLength: 0}}}, nil
 	}
 	return &pluginv1.ForwardResponse{Frame: &pluginv1.ForwardResponse_End{End: &pluginv1.ForwardResponseEnd{}}}, nil
 }
 
 func TestDispatchCountPluginRouting(t *testing.T) {
-	for _, mode := range []string{"handled", "unhandled", "unavailable", "draining", "stream_failed", "send_failed", "invalid_request"} {
+	for _, mode := range []string{"handled", "unhandled", "unavailable", "draining", "stream_failed", "send_failed", "invalid_request", "prepare_failed", "upstream_failed"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, st := dispatchState(t)
 			stream := &dispatchPluginStream{failSend: mode == "send_failed"}
+			if mode == "prepare_failed" || mode == "upstream_failed" {
+				stream.frameError = &pluginv1.ForwardResponseError{Code: "FIXTURE_ERROR", Message: "synthetic failure", RequestSent: mode == "upstream_failed"}
+			}
 			api := dispatchPluginAPI{stream: stream}
 			if mode == "stream_failed" {
 				api.err = errors.New("stream failed")
@@ -223,8 +250,15 @@ func TestDispatchCountPluginRouting(t *testing.T) {
 				require.Error(t, err)
 				require.Nil(t, resp)
 			}
-			require.EqualValues(t, int64(calls)+stream.starts.Load(), *st.Timing().DispatchCount)
-			if mode == "handled" || mode == "unhandled" || mode == "send_failed" {
+			require.Equal(t, stream.starts.Load() == 0, st.DispatchCountExact())
+			require.Equal(t, stream.starts.Load() != 0, st.Timing().DispatchCountInexact)
+			require.Equal(t, st.DispatchCountExact(), st.Timing().DispatchCountExact())
+			if mode == "unhandled" {
+				require.Equal(t, 1, calls)
+			} else {
+				require.Zero(t, calls)
+			}
+			if mode == "handled" || mode == "unhandled" || mode == "send_failed" || mode == "upstream_failed" {
 				require.EqualValues(t, 1, *st.Timing().DispatchCount)
 			} else {
 				require.Zero(t, *st.Timing().DispatchCount)
@@ -395,4 +429,121 @@ func TestDispatchCountGrokRealtimeFrames(t *testing.T) {
 		t.Fatal("relay did not reject invalid JSON")
 	}
 	require.EqualValues(t, 2, *st.Timing().DispatchCount)
+}
+
+func TestDispatchCountPluginRedirectIsInexact(t *testing.T) {
+	for _, prepared := range []bool{true, false} {
+		t.Run(fmt.Sprint(prepared), func(t *testing.T) {
+			var physical atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				physical.Add(1)
+				if r.URL.Path == "/start" {
+					http.Redirect(w, r, "/finish", http.StatusTemporaryRedirect)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+			ctx, state := dispatchState(t)
+			stream := &dispatchPluginStream{redirectURL: server.URL}
+			if !prepared {
+				stream.frameError = &pluginv1.ForwardResponseError{Code: "LOCAL_PREPARE", Message: "preparation failed", RequestSent: false}
+			}
+			runtime := &pluginRuntime{api: dispatchPluginAPI{stream: stream}}
+			require.True(t, runtime.beginRequest())
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL, nil)
+			require.NoError(t, err)
+			response, err := runtime.roundTrip(ctx, req, "", &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth})
+			if prepared {
+				require.NoError(t, err)
+				_, err = io.Copy(io.Discard, response.Body)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				require.EqualValues(t, 2, physical.Load())
+				require.EqualValues(t, 1, *state.Timing().DispatchCount)
+			} else {
+				runtime.finishRequest()
+				require.Error(t, err)
+				require.Zero(t, physical.Load())
+				require.Zero(t, *state.Timing().DispatchCount)
+			}
+			require.False(t, state.DispatchCountExact())
+			require.True(t, state.Timing().DispatchCountInexact)
+			require.False(t, state.Timing().DispatchCountExact())
+			require.Contains(t, string(state.Timing().DispatchPhases), "\"count_inexact\":true")
+			t.Logf("physical_sends=%d dispatch_count=%d count_inexact=%t", physical.Load(), *state.Timing().DispatchCount, state.Timing().DispatchCountInexact)
+		})
+	}
+}
+
+func TestDispatchCountPerWebSocketTurn(t *testing.T) {
+	for _, mode := range []string{"pooled", "passthrough"} {
+		t.Run(mode, func(t *testing.T) {
+			state := resilience.NewRequestState()
+			ctx := resilience.WithRequestState(context.Background(), state)
+			state.InitDelivery(ctx, time.Now(), nil)
+			state.EnableGatewayRequest(time.Now())
+			fake := &openAIWSFakeConn{}
+			lease := &openAIWSConnLease{conn: newOpenAIWSConn("fixture", 7, fake, nil)}
+			raw := newStagedPassthroughConn()
+			route := &openAIWSTierRoute{conn: raw}
+			defer func() { require.NoError(t, route.Close()) }()
+			send := func() {
+				if mode == "pooled" {
+					require.NoError(t, lease.WriteJSONContext(ctx, map[string]any{"type": "response.create"}))
+				} else {
+					require.NoError(t, route.WriteFrame(ctx, coderws.MessageText, []byte("{\"type\":\"response.create\"}")))
+					<-raw.writes
+				}
+			}
+			state.BeginGatewayTurn(time.Now())
+			firstID := state.GatewayRequestID()
+			send()
+			state.MarkDispatchCountInexact()
+			state.NoteWireStatus(200)
+			state.NoteKeepaliveCommit(time.Now())
+			first := state.Timing()
+			require.EqualValues(t, 1, *first.DispatchCount)
+			state.BeginGatewayTurn(time.Now())
+			require.NotEqual(t, firstID, state.GatewayRequestID())
+			next := state.Timing()
+			require.Zero(t, *next.DispatchCount)
+			require.True(t, next.DispatchCountExact())
+			require.Nil(t, next.PreDispatchMs)
+			require.Nil(t, next.WireStatus)
+			require.Nil(t, next.KeepaliveCommitMs)
+			send()
+			require.EqualValues(t, 1, *state.Timing().DispatchCount)
+			state.BeginGatewayTurn(time.Now())
+			state.FinishRejectedDispatch(time.Now())
+			require.Zero(t, *state.Timing().DispatchCount, "third turn rejected before send")
+			require.True(t, state.DispatchCountExact())
+			require.NotContains(t, string(state.Timing().DispatchPhases), "count_inexact")
+			require.EqualValues(t, 1, *first.DispatchCount, "previous snapshot stays frozen")
+			require.False(t, first.DispatchCountExact())
+			t.Log("turn1=1 turn2=1 turn3_rejected=0")
+		})
+	}
+}
+
+func TestDispatchCountWebSocketSingleEncodingAndBackground(t *testing.T) {
+	ctx, state := dispatchState(t)
+	fake := &openAIWSFakeConn{}
+	lease := &openAIWSConnLease{conn: newOpenAIWSConn("fixture", 7, fake, nil)}
+	calls := 0
+	value := dispatchMarshalOnce{calls: &calls}
+	require.NoError(t, lease.WriteJSONContext(ctx, value))
+	require.Equal(t, 1, calls)
+	require.Equal(t, []byte("{\"type\":\"response.create\"}"), fake.payload[0])
+	require.EqualValues(t, 1, *state.Timing().DispatchCount)
+	require.NoError(t, writeObservedWSFrame(context.Background(), fake, coderws.MessageText, []byte("{}")))
+	require.Len(t, fake.payload, 2)
+	require.EqualValues(t, 1, *state.Timing().DispatchCount)
+}
+
+type dispatchMarshalOnce struct{ calls *int }
+
+func (v dispatchMarshalOnce) MarshalJSON() ([]byte, error) {
+	*v.calls++
+	return []byte("{\"type\":\"response.create\"}"), nil
 }

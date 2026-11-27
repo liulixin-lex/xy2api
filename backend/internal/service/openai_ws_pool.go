@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"math"
 	"net/http"
 	"sort"
@@ -15,7 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	coderws "github.com/coder/websocket"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -603,14 +604,13 @@ func (c *openAIWSConn) writeJSON(value any, writeCtx context.Context) error {
 	if writeCtx == nil {
 		writeCtx = context.Background()
 	}
-	// Serialization is preparation, not a send. Pass the encoded value to the
-	// connection so custom marshalers run once and a failed encode is not counted.
+	// Serialization is preparation. Write these bytes directly as a text frame
+	// so neither custom marshalers nor the JSON encoder run a second time.
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("failed to write JSON message: failed to marshal JSON: %w", err)
 	}
-	resilience.StateFrom(writeCtx).NoteDispatch(time.Now(), "websocket")
-	if err := c.ws.WriteJSON(writeCtx, json.RawMessage(payload)); err != nil {
+	if err := writeObservedWSFrame(writeCtx, c.ws, coderws.MessageText, payload); err != nil {
 		return err
 	}
 	c.touch()

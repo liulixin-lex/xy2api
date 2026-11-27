@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	coderws "github.com/coder/websocket"
 	"net/http"
 	"strings"
 	"sync"
@@ -2641,4 +2642,34 @@ func TestOpenAIWSConnPool_SnapshotTransportMetrics(t *testing.T) {
 	require.Equal(t, int64(1), snapshot.ProxyClientCacheHits)
 	require.Equal(t, int64(2), snapshot.ProxyClientCacheMisses)
 	require.InDelta(t, 1.0/3.0, snapshot.TransportReuseRatio, 0.0001)
+}
+
+func (c *openAIWSPingBlockingConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	return c.WriteJSON(ctx, payload)
+}
+
+func (c *openAIWSFakeConn) WriteFrame(_ context.Context, _ coderws.MessageType, payload []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return errors.New("closed")
+	}
+	c.payload = append(c.payload, append([]byte(nil), payload...))
+	return nil
+}
+
+func (c *openAIWSBlockingConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	return c.WriteJSON(ctx, payload)
+}
+
+func (c *openAIWSWriteBlockingConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	return c.WriteJSON(ctx, payload)
+}
+
+func (c *openAIWSPingFailConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	return c.WriteJSON(ctx, payload)
+}
+
+func (c *openAIWSContextProbeConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	return c.WriteJSON(ctx, payload)
 }

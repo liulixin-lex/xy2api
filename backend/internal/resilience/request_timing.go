@@ -21,6 +21,7 @@ type RequestTiming struct {
 	KeepaliveCommitMs       *int64          `json:"keepalive_commit_ms,omitempty"`
 	WireStatus              *int64          `json:"wire_status,omitempty"`
 	DispatchCount           *int64          `json:"dispatch_count,omitempty"`
+	DispatchCountInexact    bool            `json:"-"`
 	MinDispatchRemainingMs  *int64          `json:"min_dispatch_remaining_ms,omitempty"`
 	FinalDeadlineMs         *int64          `json:"final_deadline_ms,omitempty"`
 	LateAttemptNoTimerCount *int64          `json:"-"`
@@ -47,6 +48,7 @@ type timingTrace struct {
 	keepaliveCommit time.Time
 	wireStatus      int64
 	dispatchCount   int64
+	countInexact    bool
 	minRemaining    time.Duration
 	attemptTimers   map[time.Time]bool // timer coverage known before dispatch
 	attemptMetrics  map[time.Time]bool // dispatched late owner -> frozen timer coverage
@@ -103,8 +105,11 @@ func (s *RequestState) FinishRejectedDispatch(at time.Time) {
 	s.timing.phasesFinished = at
 }
 
-func (s *RequestState) dispatchPhasesLocked() map[string]int64 {
-	out := map[string]int64{"count_version": 2, "dispatch_count": s.timing.dispatchCount}
+func (s *RequestState) dispatchPhasesLocked() map[string]any {
+	out := map[string]any{"count_version": 2, "dispatch_count": s.timing.dispatchCount}
+	if s.timing.countInexact {
+		out["count_inexact"] = true
+	}
 	if s.timing.phasesFinished.IsZero() {
 		return out
 	}
@@ -151,6 +156,7 @@ func (s *RequestState) Timing() RequestTiming {
 		}
 	}
 	out.DispatchCount = observed(trace.dispatchCount)
+	out.DispatchCountInexact = trace.countInexact
 	if start.IsZero() {
 		return out
 	}
@@ -299,6 +305,40 @@ func (s *RequestState) ObserveAttemptStart() {
 // FinishTiming is retained for completion callers. Late-attempt metrics are
 // already published at dispatch; completion must not count them again.
 func (s *RequestState) FinishTiming() {}
+
+// MarkDispatchCountInexact records that a submitted plugin request can contain
+// unreported physical sends. It remains set through retries in this turn.
+func (s *RequestState) MarkDispatchCountInexact() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.timing.countInexact = true
+	s.mu.Unlock()
+}
+
+// DispatchCountExact excludes missing observations and plugin submissions.
+func (t RequestTiming) DispatchCountExact() bool {
+	if t.DispatchCount == nil || t.DispatchCountInexact {
+		return false
+	}
+	// SQL and JSON readers restore dispatch_phases, not the in-memory flag.
+	// Missing historical metadata cannot establish an exact count either.
+	var phases struct {
+		Version int  `json:"count_version"`
+		Inexact bool `json:"count_inexact"`
+	}
+	return json.Unmarshal(t.DispatchPhases, &phases) == nil && phases.Version == 2 && !phases.Inexact
+}
+
+func (s *RequestState) DispatchCountExact() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.timing.countInexact
+}
 
 // NoteDispatch observes one actual upstream send attempt, including failed dials.
 // It never admits an attempt, consumes budget, or changes a deadline. A request

@@ -3,9 +3,6 @@ package service
 import (
 	"context"
 	"sync"
-	"time"
-
-	"github.com/liulixin-lex/xy2api/internal/resilience"
 
 	coderws "github.com/coder/websocket"
 	openaiwsv2 "github.com/liulixin-lex/xy2api/internal/service/openai_ws_v2"
@@ -46,10 +43,7 @@ func (r *openAIWSTierRoute) WriteFrame(ctx context.Context, t coderws.MessageTyp
 	if closed {
 		return errOpenAIWSConnClosed
 	}
-	if t == coderws.MessageText || t == coderws.MessageBinary {
-		resilience.StateFrom(ctx).NoteDispatch(time.Now(), "websocket")
-	}
-	return c.WriteFrame(ctx, t, p)
+	return writeObservedWSFrame(ctx, c, t, p)
 }
 
 func (r *openAIWSTierRoute) replace(next openaiwsv2.FrameConn) error {

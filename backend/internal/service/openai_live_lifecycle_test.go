@@ -14,6 +14,7 @@ import (
 
 	coderws "github.com/coder/websocket"
 	"github.com/liulixin-lex/xy2api/internal/config"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/stretchr/testify/require"
 )
 
@@ -378,6 +379,7 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 		openaiWSPassthroughDialer: dialer,
 		liveAttestationCipher:     attestationCipher,
 	}
+	state := resilience.NewRequestState()
 	proxyResult := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		downstream, err := coderws.Accept(writer, request, nil)
@@ -386,7 +388,7 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 			return
 		}
 		defer func() { _ = downstream.CloseNow() }()
-		proxyResult <- service.ProxyLiveSideband(request.Context(), record, downstream)
+		proxyResult <- service.ProxyLiveSideband(resilience.WithRequestState(request.Context(), state), record, downstream)
 	}))
 	defer server.Close()
 
@@ -409,6 +411,8 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 	clientBinary := <-upstream.writes
 	require.Equal(t, coderws.MessageBinary, clientBinary.messageType)
 	require.Equal(t, []byte{1, 2, 3}, clientBinary.payload)
+	require.EqualValues(t, 2, *state.Timing().DispatchCount)
+	require.True(t, state.DispatchCountExact())
 
 	upstream.reads <- liveTestFrame{messageType: coderws.MessageText, payload: []byte(`{"type":"server.text"}`)}
 	messageType, payload, err := client.Read(ctx)
@@ -421,6 +425,7 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, coderws.MessageBinary, messageType)
 	require.Equal(t, []byte{4, 5, 6}, payload)
+	require.EqualValues(t, 2, *state.Timing().DispatchCount, "downstream writes do not count")
 
 	require.Equal(t, "wss://chatgpt.com/backend-api/codex/call_proxy", dialer.url)
 	require.Equal(t, "Bearer test-access-token", dialer.headers.Get("Authorization"))

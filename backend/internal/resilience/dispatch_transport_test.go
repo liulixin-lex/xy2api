@@ -27,7 +27,7 @@ func TestDispatchTransportRetriesAndRedirects(t *testing.T) {
 		connections, writes int
 		fail                bool
 	}{
-		{"single", 1, 1, false}, {"failed_dial", 1, 0, true}, {"retry", 2, 2, false},
+		{"single", 1, 1, false}, {"failed_dial", 1, 0, true},
 		{"retry_dial_failed", 2, 1, true}, {"write_only_retry", 0, 2, false}, {"fake_without_trace", 0, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -218,4 +218,51 @@ func TestDispatchTransportHTTP2Reuse(t *testing.T) {
 		require.Equal(t, i, received.Load())
 		require.Equal(t, i, *state.Timing().DispatchCount)
 	}
+}
+
+// A reused HTTP/1 connection closes after receiving the request. net/http
+// retries the replayable GET inside the same RoundTrip on a fresh connection.
+func TestDispatchTransportRealHTTP1InternalRetry(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 2 {
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				t.Error("HTTP/1 server must support hijack")
+				return
+			}
+			conn, _, err := hijacker.Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if err := conn.Close(); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+	base := &http.Transport{}
+	defer base.CloseIdleConnections()
+	client := &http.Client{Transport: ObserveDispatchTransport(base, "direct"), Timeout: 5 * time.Second}
+	response, err := client.Get(server.URL)
+	require.NoError(t, err)
+	_, err = io.Copy(io.Discard, response.Body)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	state := NewRequestState()
+	req, err := http.NewRequestWithContext(WithRequestState(context.Background(), state), http.MethodGet, server.URL, nil)
+	require.NoError(t, err)
+	response, err = client.Do(req)
+	require.NoError(t, err)
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, "ok", string(body))
+	require.EqualValues(t, 2, requests.Load()-1, "exclude the unobserved connection warmup")
+	require.Equal(t, requests.Load()-1, *state.Timing().DispatchCount)
+	require.True(t, state.DispatchCountExact())
+	t.Logf("physical_attempts=%d dispatch_count=%d", requests.Load()-1, *state.Timing().DispatchCount)
 }

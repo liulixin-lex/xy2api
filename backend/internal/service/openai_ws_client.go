@@ -14,6 +14,7 @@ import (
 
 	coderws "github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 	openaiwsv2 "github.com/liulixin-lex/xy2api/internal/service/openai_ws_v2"
 )
 
@@ -34,10 +35,24 @@ type OpenAIWSTransportMetricsSnapshot struct {
 
 // openAIWSClientConn 抽象 WS 客户端连接，便于替换底层实现。
 type openAIWSClientConn interface {
+	openAIWSFrameWriter
 	WriteJSON(ctx context.Context, value any) error
 	ReadMessage(ctx context.Context) ([]byte, error)
 	Ping(ctx context.Context) error
 	Close() error
+}
+
+type openAIWSFrameWriter interface {
+	WriteFrame(context.Context, coderws.MessageType, []byte) error
+}
+
+// Call only at the upstream write boundary, after local preparation. The raw
+// connection does not count again; background contexts have no request state.
+func writeObservedWSFrame(ctx context.Context, conn openAIWSFrameWriter, kind coderws.MessageType, payload []byte) error {
+	if kind == coderws.MessageText || kind == coderws.MessageBinary {
+		resilience.StateFrom(ctx).NoteDispatch(time.Now(), "websocket")
+	}
+	return conn.WriteFrame(ctx, kind, payload)
 }
 
 // openAIWSIdlePingCapable is intentionally separate from openAIWSClientConn.

@@ -42,7 +42,7 @@ OpenAI 的 `first_token_ms` 仍由 `openai_ttft_mode` 控制：`semantic` 默认
 
 ### 派发前分段耗时
 
-`dispatch_phases` 的阶段耗时记录读完请求体到首次派发之间的互斥阶段，单位毫秒，同名阶段累加；重试不重复累计。派发前被明确拒绝的请求冻结到拒绝点；没有完成观测的阶段不填。新记录同时携带 `count_version=2` 和 `dispatch_count` 元数据（不是毫秒）：统计所有平台实际启动的上游发送尝试，包含拨号失败和底层重发；无账单记录也可用此字段核对发送数。历史无版本的记录保持旧口径，非 OpenAI 历史 0 不回填；详见[真实上游发送次数](gateway-resilience-observability.md#真实上游发送次数)。
+`dispatch_phases` 的阶段耗时记录读完请求体到首次派发之间的互斥阶段，单位毫秒，同名阶段累加；重试不重复累计。派发前被明确拒绝的请求冻结到拒绝点；没有完成观测的阶段不填。新记录同时携带 `count_version=2` 和 `dispatch_count` 元数据（不是毫秒）：统计所有平台实际启动的上游发送尝试，包含拨号失败和底层重发；无账单记录也可用此字段核对发送数。插件有过提交时另存 count_inexact=true（精确时省略）：成功或 request_sent=true 计 1，明确未发送计 0；单发补偿必须同时检查计数为 1 且精确。WS 新 turn 重置计数，同一 turn 内继续累加。历史无版本的记录保持旧口径，非 OpenAI 历史 0 不回填；详见[真实上游发送次数](gateway-resilience-observability.md#真实上游发送次数)。
 
 | 字段 | 阶段 |
 |---|---|

@@ -186,3 +186,23 @@ func TestBudgetBaseSecondsForTestFreezesAcrossHotReloadAndFinish(t *testing.T) {
 	require.True(t, ok)
 	require.EqualValues(t, 90, base)
 }
+
+func TestDispatchCountExactSurvivesSerialization(t *testing.T) {
+	state := NewRequestState()
+	state.NoteDispatch(time.Now(), "http")
+	exact := state.Timing()
+	require.True(t, exact.DispatchCountExact())
+	state.MarkDispatchCountInexact()
+	state.NoteDispatch(time.Now(), "http")
+	inexact := state.Timing()
+	require.False(t, inexact.DispatchCountExact())
+	require.True(t, exact.DispatchCountExact(), "frozen snapshots keep their original certainty")
+	for _, snapshot := range []RequestTiming{exact, inexact} {
+		data, err := json.Marshal(snapshot)
+		require.NoError(t, err)
+		var restored RequestTiming
+		require.NoError(t, json.Unmarshal(data, &restored))
+		require.Equal(t, snapshot.DispatchCountExact(), restored.DispatchCountExact())
+	}
+	require.False(t, (RequestTiming{DispatchCount: observed(int64(1))}).DispatchCountExact(), "historical count lacks versioned evidence")
+}
