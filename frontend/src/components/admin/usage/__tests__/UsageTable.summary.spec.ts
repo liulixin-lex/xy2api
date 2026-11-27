@@ -214,6 +214,16 @@ describe('UsageTable request detail', () => {
     expect(user.find('[data-testid="usage-compensation-pending"]').exists()).toBe(false)
   })
 
+  it.each([
+    ['full_chain_cost_unknown', '$0.000000'],
+    ['pricing_unavailable', '—'],
+  ])('shows a pending voucher priced at zero as $0 and an unpriced one as a dash (%s)', async (reason, shown) => {
+    const pending = { ...row, metering_adjustment: { v: 1, adjustments: [{ kind: 'openai_voluntary_compensation_pending', amount: 0, estimated_amount: 0, reason }] } }
+    const wrapper = mountTable(ADMIN, [pending])
+    await cell(wrapper, 'created_at').get('button').trigger('click')
+    expect(wrapper.get('[data-testid="usage-compensation-pending"]').text()).toBe(`admin.usage.compensationPending${shown}`)
+  })
+
   it('projects the user page: no account billing, upstream endpoint, fallback or user wait, even if the answer has them', async () => {
     const wrapper = mountTable(USER)
     await cell(wrapper, 'created_at').get('button').trigger('click')

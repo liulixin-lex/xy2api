@@ -22,15 +22,21 @@ export function accountBilled(row: {
 }
 
 /**
- * The row's voluntary cache-gap compensation: the amount taken off the bill, and whether a voucher awaits settlement
- * (pending: its estimate, 0 when it could not be priced). Null where the row has neither.
+ * The row's voluntary cache-gap compensation: the amount taken off the bill, and the voucher awaiting settlement, if
+ * any: its estimate, which is a price only when every pending item was priced (0 can be a price). Null where the row has
+ * neither.
  */
-export function voluntaryCompensation(row: Pick<AdminUsageLog, 'metering_adjustment'>): { credited: number; pending: number | null } | null {
+export function voluntaryCompensation(row: Pick<AdminUsageLog, 'metering_adjustment'>):
+  { credited: number; pending: { amount: number; priced: boolean } | null } | null {
   let credited = 0
-  let pending: number | null = null
+  let pending: { amount: number; priced: boolean } | null = null
   for (const item of row.metering_adjustment?.adjustments ?? []) {
     if (item.kind === 'openai_voluntary_compensation') credited += item.amount ?? 0
-    else if (item.kind === 'openai_voluntary_compensation_pending') pending = (pending ?? 0) + (item.estimated_amount ?? 0)
+    else if (item.kind === 'openai_voluntary_compensation_pending') {
+      pending ??= { amount: 0, priced: true }
+      pending.amount += item.estimated_amount ?? 0
+      if (item.reason === 'pricing_unavailable') pending.priced = false
+    }
   }
   return credited > 0 || pending !== null ? { credited, pending } : null
 }

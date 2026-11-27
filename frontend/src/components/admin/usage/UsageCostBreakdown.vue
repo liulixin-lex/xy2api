@@ -104,7 +104,7 @@
     </div>
     <div v-if="compensation && compensation.pending !== null" class="flex items-center justify-between gap-6" data-testid="usage-compensation-pending">
       <span :class="tone.label">{{ t('admin.usage.compensationPending') }}</span>
-      <span :class="tone.pending">{{ compensation.pending > 0 ? formatUsd(compensation.pending, 6) : '—' }}</span>
+      <span :class="tone.pending">{{ compensation.pending.priced ? formatUsd(compensation.pending.amount, 6) : '—' }}</span>
     </div>
     <div class="flex items-center justify-between gap-6">
       <span :class="tone.label">{{ t('usage.userBilled') }}</span>

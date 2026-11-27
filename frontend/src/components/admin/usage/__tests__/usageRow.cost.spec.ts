@@ -20,15 +20,15 @@ describe('voluntaryCompensation', () => {
   const row = (adjustments: unknown[] | undefined) =>
     ({ metering_adjustment: adjustments ? { v: 1, adjustments } : undefined } as unknown as AdminUsageLog)
   const credited = (amount: number) => ({ kind: 'openai_voluntary_compensation', amount, estimated_amount: 0.004, reason: 'margin_limited' })
-  const pending = (estimated_amount: number) => ({ kind: 'openai_voluntary_compensation_pending', amount: 0, estimated_amount, reason: 'supplier_cost_unknown' })
+  const pending = (estimated_amount: number, reason = 'supplier_cost_unknown') => ({ kind: 'openai_voluntary_compensation_pending', amount: 0, estimated_amount, reason })
 
   it('reads the credited amount, not the estimate it was capped from', () => {
     expect(voluntaryCompensation(row([{ kind: 'force_cache_billing', input_to_cache_tokens: 10 }, credited(0.0025)]))).toEqual({ credited: 0.0025, pending: null })
   })
 
   it('reads a voucher to settle, unpriced included', () => {
-    expect(voluntaryCompensation(row([pending(0.0031)]))).toEqual({ credited: 0, pending: 0.0031 })
-    expect(voluntaryCompensation(row([pending(0)]))).toEqual({ credited: 0, pending: 0 })
+    expect(voluntaryCompensation(row([pending(0.0031)]))).toEqual({ credited: 0, pending: { amount: 0.0031, priced: true } })
+    expect(voluntaryCompensation(row([pending(0, 'pricing_unavailable')]))).toEqual({ credited: 0, pending: { amount: 0, priced: false } })
   })
 
   it('has nothing to show without compensation or when the margin floor left no room', () => {
