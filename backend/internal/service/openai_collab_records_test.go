@@ -31,6 +31,7 @@ func collabRecordTestService(t *testing.T) *OpenAIGatewayService {
 }
 func collabRecordTestInput() CollabRecordDeliveryInput {
 	settings := resilience.Defaults()
+	settings.Collab.Ladder = true
 	return CollabRecordDeliveryInput{Settings: &settings, HasTools: true, Scope: resilience.CollabRecordScope{Tenant: "tenant", Group: "group", Tree: "tree"}, Account: "account", Site: "site", Generation: 1, SendSeq: 1}
 }
 func collabCallFrame(t *testing.T, args, marker string) []byte {

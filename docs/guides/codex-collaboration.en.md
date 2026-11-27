@@ -44,12 +44,14 @@ Of the eight settings under `collab`, only `records` defaults on. `local_ending.
 
 | Configuration | Behavior |
 |---|---|
-| Ladder off | Existing repair; no lossless-first handling, local ending, record routing, or reads of ended/replaced states |
+| Ladder off | Existing repair; no lossless-first handling, local ending, record routing, reads of ended/replaced states, or new recovery delivery records |
 | Ladder on, lossless-first off | Existing repair first; ladder only before an otherwise final error or for new ciphertext evidence |
 | Ladder on, lossless-first on | Ladder before existing repair; less silent loss, but rare additional errors remain possible |
 | Ladder on, records off | Ladder works without delivery records; ended/replaced states are still read and written |
 | Ladder on, record routing off | Untargeted retries; no borrowing readable content for reassignment |
 | Local ending off or group excluded | No new local endings; ladder still reads earlier ended states |
+
+New recovery delivery records require both `records` and `ladder`. After the ladder is disabled, new requests stop recording issued, plaintext-delivery and consumed evidence. Existing requests keep their starting snapshot; pending records still confirm or void, queued writes finish, and historical records retain their existing expiry. When re-enabled, absent records from the disabled period remain unknown evidence and do not prove that a task never ran. Collaboration observations and the existing rules for ended/replaced states are unchanged.
 
 `collab.lossless_first` defaults to false and requires the ladder. It moves the ladder ahead of existing repair to reduce silent loss, but can add errors in rare cases: failure after semantic output, extra attempts consuming shared upstream quota, or concurrency races. It also gates unread-ciphertext lease suppression of quality migration (with `collab.tree_affinity`) and redispatch borrowing of a convertible account (with `collab.record_routing`). Both require `collab.ladder`; borrowing does not require `collab.tree_affinity`. Enable only after the owner accepts these risks.
 

@@ -43,6 +43,7 @@ func TestCollabSettingsGates(t *testing.T) {
 	check := func(s *Settings, want bool) {
 		require.Equal(t, want, s.CollabIncrementalDeclarationsOn())
 		require.Equal(t, want, s.CollabRecordsOn())
+		require.Equal(t, want, s.CollabRecoveryRecordsWriteOn())
 		require.Equal(t, want, s.CollabTreeAffinityOn())
 		require.Equal(t, want, s.CollabLadderOn())
 		require.Equal(t, want, s.CollabLosslessFirstOn())
@@ -56,6 +57,7 @@ func TestCollabSettingsGates(t *testing.T) {
 	require.False(t, s.CollabLosslessFirstOn())
 	require.False(t, s.CollabLocalEndingOn(1))
 	require.True(t, s.CollabRecordsOn())
+	require.False(t, s.CollabRecoveryRecordsWriteOn())
 	s.Enabled = false
 	check(&s, false)
 	check(nil, false)
