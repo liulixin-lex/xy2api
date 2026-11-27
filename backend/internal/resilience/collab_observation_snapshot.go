@@ -73,7 +73,13 @@ func collabCopyCount(p *int) *int {
 
 // EncodeCollabObservation returns absence on failure. Counts survive truncation;
 // detail dropped by the byte cap is explicitly excluded from reconciliation.
-func EncodeCollabObservation(in *CollabObservation) (raw json.RawMessage) {
+func EncodeCollabObservation(in *CollabObservation) json.RawMessage {
+	return encodeExpandedCollabObservation(in)
+}
+
+// Keep expansion independent from the persistence entry point so a later sparse
+// writer cannot silently change the admin API's existing representation.
+func encodeExpandedCollabObservation(in *CollabObservation) (raw json.RawMessage) {
 	defer func() {
 		if recover() != nil {
 			raw = nil
@@ -116,16 +122,19 @@ func EncodeCollabObservation(in *CollabObservation) (raw json.RawMessage) {
 }
 
 // NormalizeCollabObservationJSON isolates optional data from billing intents and
-// SQL. Invalid, oversized or unsupported documents become SQL NULL, not errors.
+// SQL. Sparse v3 uses the same typed fields as v2: omitted values take their Go
+// defaults, while nullable counts must retain an explicit zero when observed.
+// Both versions expand to v2; persistence still writes v2 in this release.
+// Invalid, oversized or unsupported documents become SQL NULL, not errors.
 func NormalizeCollabObservationJSON(raw []byte) json.RawMessage {
 	if len(raw) == 0 || len(raw) > 4*CollabObservationMaxBytes || !collabPostgresJSON(raw) {
 		return nil
 	}
 	var v CollabObservation
-	if json.Unmarshal(raw, &v) != nil || v.V != CollabObservationVersion {
+	if json.Unmarshal(raw, &v) != nil || (v.V != CollabObservationVersion && v.V != collabObservationSparseVersion) {
 		return nil
 	}
-	return EncodeCollabObservation(&v)
+	return encodeExpandedCollabObservation(&v)
 }
 
 // PostgreSQL rejects NUL, invalid UTF-8 and unpaired Unicode surrogates which

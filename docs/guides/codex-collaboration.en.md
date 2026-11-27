@@ -60,3 +60,10 @@ New recovery delivery records require both `records` and `ladder`. After the lad
 Disabling the seven behavior controls restores the existing repair path. Observation, response restoration isolation, unconditional response fixes, and UI changes require a version rollback. Stored records expire; process-local records disappear on restart. Delivered plaintext, placeholders, local replies, and previous actions cannot be withdrawn. Check prior results before reassigning.
 
 When an older backend omits `collab`, the UI shows defaults and omits the untouched section from saves. Unsupported or null values disable only the collaboration controls and are omitted from unrelated saves. Supported server fields, including unknown extensions inside local ending, survive ordinary saves and JSON round trips without added defaults. JSON edits cannot invent or alter unknown fields; explicit known-field edits are validated before submission and by the backend. If an older version drops the section on save, upgrading again restores defaults. Keep a restricted configuration backup and repeat acceptance before re-enabling.
+
+
+## Observation document compatibility
+
+The backend reads both full v2 and sparse v3 collaboration observations. This release still writes v2 and expands admin responses to the full v2 field structure; regular user responses do not expose the document. Sparse v3 may omit only reversible defaults. An explicit `0` in nullable call or marker counts means an observed zero; omission or `null` means unobserved. Unknown `counts` in a truncated document must not become empty statistics.
+
+Input transformations, replacement counts, overflow and truncation remain available. Invalid or unsupported optional observations retain the existing billing isolation. Enable v3 writing in a separate release only after every reader and rollback target supports v3. This release enables no sparse writer and adds no database migration.
