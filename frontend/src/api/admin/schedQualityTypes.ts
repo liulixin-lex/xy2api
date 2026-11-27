@@ -314,14 +314,12 @@ export interface BackendDetailGroup {
 export interface BackendAutoState {
   key: string
   kind: string
-  /** account | model | proxy */
+  /** account | model */
   scope: string
   model: string
   until: string | null
   /** [current, threshold] for counters that have not tripped yet. */
   count: [number, number] | null
-  /** Other accounts affected when scope is proxy. */
-  shared: number
   clearable: boolean
   why: string
 }

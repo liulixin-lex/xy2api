@@ -74,7 +74,6 @@ export default {
     },
     scope: {
       account: '账号',
-      proxy: '代理',
     },
     goto: {
       iq: 'IQ 检测',
@@ -108,10 +107,6 @@ export default {
       batchOk: '已恢复 {n}',
       batchPartial: '已恢复 {ok} · 失败 {failed}',
     },
-    proxy: {
-      title: '代理隔离',
-      affected: '影响账号',
-    },
     kind: {
       gemini_rate_limit: 'Gemini 限流',
       gemini_account_concurrency: 'Gemini 并发限流',
@@ -125,7 +120,6 @@ export default {
       iq_gate: '智商门',
       same_site: '同站暂停',
       post_output: '输出失败',
-      proxy_circuit: '代理隔离',
       capability_learned: '仅流式',
       capability_marked: '能力不兼容',
       manual_off: '手动停用',
@@ -142,7 +136,6 @@ export default {
       temp_rule: '规则暂停',
       temp_403: '403 暂停',
       temp_auth: '鉴权暂停',
-      temp_health: '健康熔断',
       temp_stream_timeout: '流超时',
       auto_states: '自动状态',
     },
@@ -159,7 +152,6 @@ export default {
       account_scheduling_threshold: '账号门槛',
       privacy_not_set: '隐私未设',
       runtime_blocked: '运行受阻',
-      proxy_stream_quarantined: '代理隔离',
       shadow_parent_unhealthy: '母号受阻',
       channel_upstream_restricted: '上游受限',
       channel_pricing_restricted: '定价受限',

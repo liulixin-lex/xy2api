@@ -69,8 +69,8 @@ function detail(id = 7): BackendAccountDetail {
       { group_id: 54, name: '北辰组', policy, exemption: null, by_model: [model('gpt-a')] }
     ],
     auto_states: [
-      { key: 'iq:gpt-a', kind: 'iq_gate', scope: 'model', model: 'gpt-a', until: inMinutes(5), count: null, shared: 0, clearable: false, why: 'iq_gate' },
-      { key: 'iq:gpt-b', kind: 'iq_gate', scope: 'model', model: 'gpt-b', until: inMinutes(42), count: null, shared: 0, clearable: false, why: 'iq_gate' }
+      { key: 'iq:gpt-a', kind: 'iq_gate', scope: 'model', model: 'gpt-a', until: inMinutes(5), count: null, clearable: false, why: 'iq_gate' },
+      { key: 'iq:gpt-b', kind: 'iq_gate', scope: 'model', model: 'gpt-b', until: inMinutes(42), count: null, clearable: false, why: 'iq_gate' }
     ],
     exemptions: [],
     current_rule_version: '4.0'
@@ -205,7 +205,7 @@ describe('SchedQualityPanel switching accounts (7h)', () => {
   it('moves focus to the title when it goes to the parent account from inside (7h-3)', async () => {
     api.accountDetail.mockImplementation(async (id: number) => ({
       ...detail(id),
-      auto_states: [{ key: 'parent_blocked:12', kind: 'parent_blocked', scope: 'account', model: '', until: null, count: null, shared: 0, clearable: false, why: 'parent_blocked' }]
+      auto_states: [{ key: 'parent_blocked:12', kind: 'parent_blocked', scope: 'account', model: '', until: null, count: null, clearable: false, why: 'parent_blocked' }]
     }))
     mount(Panel, { attachTo: document.body })
     await openOn(7)
@@ -219,7 +219,7 @@ describe('SchedQualityPanel switching accounts (7h)', () => {
     const parentDetail = deferred<BackendAccountDetail>()
     api.accountDetail.mockImplementation(async (id: number) => (id === 12 ? parentDetail.promise : {
       ...detail(id),
-      auto_states: [{ key: 'parent_blocked:12', kind: 'parent_blocked', scope: 'account', model: '', until: null, count: null, shared: 0, clearable: false, why: 'parent_blocked' }]
+      auto_states: [{ key: 'parent_blocked:12', kind: 'parent_blocked', scope: 'account', model: '', until: null, count: null, clearable: false, why: 'parent_blocked' }]
     }))
     const parent = { id: 12, name: 'parent-12', platform: 'openai', type: 'oauth' } as never
     mount(Panel, { attachTo: document.body, props: { account: (id: number) => (id === 12 ? parent : undefined) } })

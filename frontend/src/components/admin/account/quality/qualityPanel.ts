@@ -163,10 +163,10 @@ export function pickModelTab(models: string[], requested: string | null, current
   return models[0] ?? null
 }
 
-/** Whether 恢复 has something to clear: a line at the rear or on trial, or a clearable automatic state other than the shared proxy. */
+/** Whether 恢复 has something to clear: a line at the rear or on trial, or a clearable automatic state. */
 export function panelRecoverable(detail: Pick<BackendAccountDetail, 'groups' | 'auto_states'>): boolean {
   return detail.groups.some((group) => group.by_model.some((row) => row.placement !== 'front')) ||
-    detail.auto_states.some((item) => item.clearable && item.kind !== 'proxy_circuit')
+    detail.auto_states.some((item) => item.clearable)
 }
 
 /** The exemption covering every group, if any. */
