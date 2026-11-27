@@ -30,7 +30,9 @@ func recordResilienceUndelivered(c *gin.Context) {
 	usageJSON, upstreamCost, billed := st.UndeliveredUsage()
 	clientRequestID, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string)
 	requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
+	gatewayRequestID := st.GatewayRequestID()
 	rec := &service.UndeliveredRequest{
+		GatewayRequestID:      &gatewayRequestID,
 		RequestID:             strings.TrimSpace(requestID),
 		ClientRequestID:       strings.TrimSpace(clientRequestID),
 		InboundEndpoint:       GetInboundEndpoint(c),

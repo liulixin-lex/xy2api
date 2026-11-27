@@ -29,12 +29,13 @@ func (r *resilienceRepository) InsertUndelivered(ctx context.Context, rec *servi
 		INSERT INTO gateway_undelivered_requests (
 			request_id, client_request_id, user_id, api_key_id, group_id, account_id,
 			platform, model, inbound_endpoint, disconnect_stage, duration_ms,
-			upstream_usage_json, estimated_upstream_cost, billed
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)`,
+			upstream_usage_json, estimated_upstream_cost, billed, gateway_request_id
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15)`,
 		truncateRunes(rec.RequestID, 128), truncateRunes(rec.ClientRequestID, 128),
 		nullInt64Ptr(rec.UserID), nullInt64Ptr(rec.APIKeyID), nullInt64Ptr(rec.GroupID), nullInt64Ptr(rec.AccountID),
 		truncateRunes(rec.Platform, 32), truncateRunes(rec.Model, 255), truncateRunes(rec.InboundEndpoint, 128),
 		truncateRunes(rec.DisconnectStage, 32), rec.DurationMs, usage, rec.EstimatedUpstreamCost, rec.Billed,
+		nullString(rec.GatewayRequestID),
 	)
 	if err != nil {
 		return fmt.Errorf("insert undelivered request: %w", err)
@@ -82,7 +83,7 @@ func (r *resilienceRepository) ListUndelivered(ctx context.Context, filter servi
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, request_id, client_request_id, user_id, api_key_id, group_id, account_id,
 		       platform, model, inbound_endpoint, disconnect_stage, duration_ms,
-		       COALESCE(upstream_usage_json::text, ''), estimated_upstream_cost, billed, created_at
+		       COALESCE(upstream_usage_json::text, ''), estimated_upstream_cost, billed, created_at, gateway_request_id
 		FROM gateway_undelivered_requests`+clause+fmt.Sprintf(`
 		ORDER BY created_at DESC, id DESC
 		LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
@@ -97,7 +98,7 @@ func (r *resilienceRepository) ListUndelivered(ctx context.Context, filter servi
 		var usage string
 		if err := rows.Scan(&rec.ID, &rec.RequestID, &rec.ClientRequestID, &userID, &keyID, &groupID, &accountID,
 			&rec.Platform, &rec.Model, &rec.InboundEndpoint, &rec.DisconnectStage, &rec.DurationMs,
-			&usage, &rec.EstimatedUpstreamCost, &rec.Billed, &rec.CreatedAt); err != nil {
+			&usage, &rec.EstimatedUpstreamCost, &rec.Billed, &rec.CreatedAt, &rec.GatewayRequestID); err != nil {
 			return nil, nil, fmt.Errorf("scan undelivered request: %w", err)
 		}
 		rec.UserID = int64PtrFromNull(userID)

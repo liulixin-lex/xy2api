@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -118,9 +119,15 @@ func TestUndeliveredRepositoryRoundTripAndRetention(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	gatewayID := uuid.NewString()
 	insert := func(stage string, billed bool, usage []byte) {
+		var id *string
+		if billed {
+			id = &gatewayID
+		}
 		require.NoError(t, repo.InsertUndelivered(ctx, &service.UndeliveredRequest{
-			RequestID: tag + "-" + stage, ClientRequestID: "c-" + stage, UserID: &userID, APIKeyID: &keyID, GroupID: &groupID,
+			GatewayRequestID: id,
+			RequestID:        tag + "-" + stage, ClientRequestID: "c-" + stage, UserID: &userID, APIKeyID: &keyID, GroupID: &groupID,
 			Platform: service.PlatformOpenAI, Model: "gpt-6.1-sol", InboundEndpoint: "/v1/responses",
 			DisconnectStage: stage, DurationMs: 125400, UpstreamUsage: usage, EstimatedUpstreamCost: 0.25, Billed: billed,
 		}))
@@ -135,8 +142,13 @@ func TestUndeliveredRepositoryRoundTripAndRetention(t *testing.T) {
 	require.Len(t, list, 1)
 	require.Equal(t, tag+"-header_wait", list[0].RequestID, "newest first")
 	require.True(t, list[0].Billed)
+	require.Equal(t, &gatewayID, list[0].GatewayRequestID)
 	require.JSONEq(t, `{"input_tokens":10,"output_tokens":2}`, string(list[0].UpstreamUsage))
 	require.Equal(t, groupID, *list[0].GroupID)
+	legacy, _, err := repo.ListUndelivered(ctx, service.UndeliveredFilter{APIKeyID: keyID}, pagination.PaginationParams{Page: 2, PageSize: 1})
+	require.NoError(t, err)
+	require.Len(t, legacy, 1)
+	require.Nil(t, legacy[0].GatewayRequestID, "legacy rows stay NULL without inferred identities")
 
 	list, _, err = repo.ListUndelivered(ctx, service.UndeliveredFilter{UserID: userID, Since: time.Now().Add(time.Hour)}, pagination.PaginationParams{Page: 1, PageSize: 10})
 	require.NoError(t, err)

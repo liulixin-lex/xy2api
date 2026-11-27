@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -15,23 +16,27 @@ import (
 // ──────────────────────────────────────────────────────────
 
 const (
-	EndpointMessages             = "/v1/messages"
-	EndpointSystemOne            = "/v1/systemone"
-	EndpointChatCompletions      = "/v1/chat/completions"
-	EndpointEmbeddings           = "/v1/embeddings"
-	EndpointAlphaSearch          = "/v1/alpha/search"
-	EndpointResponses            = "/v1/responses"
-	EndpointResponsesCompact     = "/v1/responses/compact"
-	EndpointResponsesInputTokens = "/v1/responses/input_tokens"
-	EndpointImagesGenerations    = "/v1/images/generations"
-	EndpointImagesEdits          = "/v1/images/edits"
-	EndpointImageTasks           = "/v1/images/tasks"
-	EndpointVideosGenerations    = "/v1/videos/generations"
-	EndpointVideosEdits          = "/v1/videos/edits"
-	EndpointVideosExtensions     = "/v1/videos/extensions"
-	EndpointVideos               = "/v1/videos"
-	EndpointSeedanceTasks        = "/api/v3/contents/generations/tasks"
-	EndpointGeminiModels         = "/v1beta/models"
+	EndpointMessages                    = "/v1/messages"
+	EndpointSystemOne                   = "/v1/systemone"
+	EndpointChatCompletions             = "/v1/chat/completions"
+	EndpointEmbeddings                  = "/v1/embeddings"
+	EndpointAlphaSearch                 = "/v1/alpha/search"
+	EndpointResponses                   = "/v1/responses"
+	EndpointResponsesCompact            = "/v1/responses/compact"
+	EndpointResponsesInputTokens        = "/v1/responses/input_tokens"
+	EndpointImagesGenerations           = "/v1/images/generations"
+	EndpointImagesEdits                 = "/v1/images/edits"
+	EndpointImageTasks                  = "/v1/images/tasks"
+	EndpointVideosGenerations           = "/v1/videos/generations"
+	EndpointVideosEdits                 = "/v1/videos/edits"
+	EndpointVideosExtensions            = "/v1/videos/extensions"
+	EndpointVideos                      = "/v1/videos"
+	EndpointSeedanceTasks               = "/api/v3/contents/generations/tasks"
+	EndpointGeminiModels                = "/v1beta/models"
+	EndpointGeminiModel                 = "/v1beta/models/{model}"
+	EndpointGeminiGenerateContent       = "/v1beta/models:generateContent"
+	EndpointGeminiStreamGenerateContent = "/v1beta/models:streamGenerateContent"
+	EndpointGeminiCountTokens           = "/v1beta/models:countTokens"
 )
 
 const EndpointAntigravityGenerateContent = "/v1internal:streamGenerateContent"
@@ -52,7 +57,7 @@ const (
 //	"/antigravity/v1/messages"   → "/v1/messages"
 //	"/v1/chat/completions"       → "/v1/chat/completions"
 //	"/openai/v1/responses/foo"   → "/v1/responses"
-//	"/v1beta/models/gemini:gen"  → "/v1beta/models"
+//	"/v1beta/models/gemini:generateContent" → "/v1beta/models:generateContent"
 //
 // The OpenAI Responses API is also exposed via a few bare/alias
 // routes that do not carry a "/v1/" prefix (top-level bare route and
@@ -82,6 +87,17 @@ const (
 // would erroneously match first.
 func NormalizeInboundEndpoint(path string) string {
 	path = strings.TrimSpace(path)
+	if isGeminiInboundEndpoint(path) {
+		return path
+	}
+	return normalizeInboundEndpoint(path, "")
+}
+
+func normalizeInboundEndpoint(path, method string) string {
+	path = strings.TrimSpace(path)
+	if endpoint, ok := normalizeGeminiInboundEndpoint(path, method); ok {
+		return endpoint
+	}
 	switch {
 	case strings.Contains(path, "/contents/generations/tasks"):
 		return EndpointSeedanceTasks
@@ -115,10 +131,54 @@ func NormalizeInboundEndpoint(path string) string {
 		return EndpointResponsesCompact
 	case strings.Contains(path, EndpointResponses) || isResponsesRootAliasPath(path):
 		return EndpointResponses
-	case strings.Contains(path, EndpointGeminiModels):
-		return EndpointGeminiModels
 	default:
 		return path
+	}
+}
+
+// Gemini labels describe the existing routes without retaining model names.
+// The request method is available before body reads, including failed uploads.
+// Unknown actions and invalid segments remain in the legacy mixed bucket.
+func normalizeGeminiInboundEndpoint(path, method string) (string, bool) {
+	if method == "" {
+		path, _, _ = strings.Cut(path, "?")
+	}
+	path = strings.TrimPrefix(path, "/antigravity")
+	if path == EndpointGeminiModels {
+		return EndpointGeminiModels, true
+	}
+	if !strings.HasPrefix(path, EndpointGeminiModels+"/") {
+		return "", false
+	}
+	rest := strings.TrimPrefix(path, EndpointGeminiModels+"/")
+	if (method == "" || method == http.MethodGet) && service.IsSafeGeminiModelPathSegment(rest) {
+		return EndpointGeminiModel, true
+	}
+	if method != "" && method != http.MethodPost {
+		return EndpointGeminiModels, true
+	}
+	model, action, err := parseGeminiModelAction(rest)
+	if err != nil || !service.IsSafeGeminiModelPathSegment(model) {
+		return EndpointGeminiModels, true
+	}
+	switch action {
+	case "generateContent":
+		return EndpointGeminiGenerateContent, true
+	case "streamGenerateContent":
+		return EndpointGeminiStreamGenerateContent, true
+	case "countTokens":
+		return EndpointGeminiCountTokens, true
+	default:
+		return EndpointGeminiModels, true
+	}
+}
+
+func isGeminiInboundEndpoint(endpoint string) bool {
+	switch endpoint {
+	case EndpointGeminiModels, EndpointGeminiModel, EndpointGeminiGenerateContent, EndpointGeminiStreamGenerateContent, EndpointGeminiCountTokens:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -234,7 +294,7 @@ func DeriveUpstreamEndpoint(inbound, rawRequestPath, platform string) string {
 
 	case service.PlatformAntigravity:
 		// Antigravity accounts serve both Claude and Gemini.
-		if inbound == EndpointGeminiModels {
+		if isGeminiInboundEndpoint(inbound) {
 			return EndpointGeminiModels
 		}
 		return EndpointMessages
@@ -275,13 +335,17 @@ func responsesSubpathSuffix(rawPath string) string {
 func InboundEndpointMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := ""
+		method := ""
+		if c.Request != nil {
+			method = c.Request.Method
+		}
 		if c.Request != nil && c.Request.URL != nil {
 			path = c.Request.URL.Path
 		}
 		if path == "" {
 			path = c.FullPath()
 		}
-		c.Set(ctxKeyInboundEndpoint, NormalizeInboundEndpoint(path))
+		c.Set(ctxKeyInboundEndpoint, normalizeInboundEndpoint(path, method))
 		c.Next()
 	}
 }
@@ -299,6 +363,9 @@ func InboundEndpointMiddleware() gin.HandlerFunc {
 // otherwise mis-normalize concrete requests like "/v1/responses/compact"
 // to the root Responses endpoint).
 func GetInboundEndpoint(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
 	if v, ok := c.Get(ctxKeyInboundEndpoint); ok {
 		if s, ok := v.(string); ok && s != "" {
 			return s
@@ -306,15 +373,17 @@ func GetInboundEndpoint(c *gin.Context) string {
 	}
 	// Fallback: normalize on the fly.
 	path := ""
-	if c != nil {
-		if c.Request != nil && c.Request.URL != nil {
+	method := ""
+	if c.Request != nil {
+		method = c.Request.Method
+		if c.Request.URL != nil {
 			path = c.Request.URL.Path
 		}
-		if path == "" {
-			path = c.FullPath()
-		}
 	}
-	return NormalizeInboundEndpoint(path)
+	if path == "" {
+		path = c.FullPath()
+	}
+	return normalizeInboundEndpoint(path, method)
 }
 
 // GetUpstreamEndpoint derives the upstream endpoint from the context

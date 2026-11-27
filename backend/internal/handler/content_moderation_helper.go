@@ -81,10 +81,15 @@ func runContentModeration(ctx context.Context, c *gin.Context, reqLog *zap.Logge
 }
 
 func buildContentModerationInput(c *gin.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body []byte) service.ContentModerationCheckInput {
+	endpoint := GetInboundEndpoint(c)
+	// Observability labels must not change existing Gemini moderation rules.
+	if isGeminiInboundEndpoint(endpoint) {
+		endpoint = EndpointGeminiModels
+	}
 	input := service.ContentModerationCheckInput{
 		RequestID: contentModerationRequestID(c.Request.Context()),
 		UserID:    subject.UserID,
-		Endpoint:  GetInboundEndpoint(c),
+		Endpoint:  endpoint,
 		Provider:  contentModerationProvider(apiKey),
 		Model:     clientRequestedModel(c, model),
 		Protocol:  protocol,
