@@ -1225,6 +1225,7 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 }
 
 func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (result *ForwardResult, retErr error) {
+	ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
 	beginUpstreamResponseModelObservation(c)
 	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
@@ -1560,6 +1561,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	if requestID != "" {
 		c.Header("x-request-id", requestID)
 	}
+	ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
 
 	isOAuth := account.Type == AccountTypeOAuth
 
@@ -2301,6 +2303,7 @@ func (s *GeminiMessagesCompatService) handleNonStreamingResponse(c *gin.Context,
 }
 
 func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, resp *http.Response, startTime time.Time, originalModel string) (result *geminiStreamResult, retErr error) {
+	ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
 	upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)
 	if err != nil {
 		var syntaxError *json.SyntaxError

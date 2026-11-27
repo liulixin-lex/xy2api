@@ -99,15 +99,17 @@ func StartGeminiUniqueCandidateKeepalive(c *gin.Context, account *Account, strea
 	return keepaliveFrom(c) != nil
 }
 
-// Header preparation suspends the shared writer. Preserve the original first
-// beat and cadence when resuming the sole candidate's pre-output body wait.
+// Header preparation suspends the shared writer. A committed request owner
+// resumes regardless of the current attempt's initial keepalive eligibility.
+// An uncommitted sole candidate retains its original first-beat schedule.
 func resumeGeminiPreOutputKeepalive(c *gin.Context, resp *http.Response) {
+	interval := time.Duration(resilience.Current().Keepalive.IntervalSeconds) * time.Second
+	ResumeCommittedPreOutputKeepalive(c, interval)
 	g := geminiAttemptOf(resp)
 	k := keepaliveFrom(c)
 	if g == nil || !g.keepalive || k == nil {
 		return
 	}
-	interval := time.Duration(resilience.Current().Keepalive.IntervalSeconds) * time.Second
 	k.mu.Lock()
 	delay := time.Until(k.lastWrite.Add(interval))
 	k.mu.Unlock()

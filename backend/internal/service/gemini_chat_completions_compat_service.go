@@ -613,6 +613,7 @@ func (s *GeminiMessagesCompatService) handleChatCompletionsStreamingResponseFrom
 	isOAuth bool,
 	includeUsage bool,
 ) (result *geminiStreamResult, retErr error) {
+	ResumeCommittedPreOutputKeepalive(c, time.Duration(resilience.Current().Keepalive.IntervalSeconds)*time.Second)
 	upstreamBody, err := geminiJSONStreamReader(c, resp, s.cfg)
 	if err != nil {
 		var syntaxError *json.SyntaxError
