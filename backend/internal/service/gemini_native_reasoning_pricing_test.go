@@ -137,6 +137,102 @@ func TestGeminiNativeReasoningPricingUsesExplicitForwardedLevel(t *testing.T) {
 	}
 }
 
+func TestGeminiNativeRoutingPreservesUpstreamURLAndCustomerAmount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const (
+		model   = "gemini-3.7-flash"
+		baseURL = "https://gemini-upstream.example.test"
+	)
+
+	for _, prefixed := range []bool{false, true} {
+		prefix := "without_antigravity_prefix"
+		pathPrefix := ""
+		upstreamBaseURL := baseURL
+		platform := PlatformGemini
+		if prefixed {
+			prefix = "with_antigravity_prefix"
+			pathPrefix = "/antigravity"
+			upstreamBaseURL += "/antigravity"
+			platform = PlatformAntigravity
+		}
+		for _, stream := range []bool{false, true} {
+			mode := "generateContent"
+			if stream {
+				mode = "streamGenerateContent"
+			}
+			t.Run(prefix+"/"+mode, func(t *testing.T) {
+				account := geminiSignalTestAccount()
+				account.Platform = platform
+				account.Credentials["base_url"] = baseURL
+
+				path := pathPrefix + "/v1beta/models/" + model + ":" + mode
+				if stream {
+					path += "?alt=sse"
+				}
+				body := geminiSignalTestRequest()
+				c, recorder := newAntigravityCompatContext(http.MethodPost, path, body)
+
+				responseBody := `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`
+				contentType := "application/json"
+				wantURL := upstreamBaseURL + "/v1beta/models/" + model + ":" + mode
+				if stream {
+					contentType = "text/event-stream"
+					responseBody = "data: " + responseBody + "\n\n"
+					wantURL += "?alt=sse"
+				}
+				var actualURL string
+				upstream := &queuedHTTPUpstreamStub{
+					responses: []*http.Response{{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{contentType}},
+						Body:       io.NopCloser(strings.NewReader(responseBody)),
+					}},
+					onCall: func(req *http.Request, _ *queuedHTTPUpstreamStub) {
+						actualURL = req.URL.String()
+					},
+				}
+				svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+				result, err := svc.ForwardNative(c.Request.Context(), c, account, model, mode, stream, body)
+
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, http.StatusOK, recorder.Code)
+				require.Len(t, upstream.requestBodies, 1)
+				require.Equal(t, wantURL, actualURL)
+				require.Equal(t, 10, result.Usage.InputTokens)
+				require.Equal(t, 5, result.Usage.OutputTokens)
+
+				groupID := int64(77)
+				apiKey := &APIKey{ID: 10, GroupID: &groupID, Group: &Group{
+					ID: groupID, Platform: account.Platform, Status: StatusActive, Hydrated: true, RateMultiplier: 0.5,
+					ModelPricing: []ChannelModelPricing{{
+						Models: []string{model}, BillingMode: BillingModeToken,
+						InputPrice: testPtrFloat64(0.05), OutputPrice: testPtrFloat64(0.1),
+					}},
+				}}
+				// The legacy bucket and the new action label must bill the same forwarded usage.
+				for _, endpoint := range []string{"/v1beta/models", "/v1beta/models:" + mode} {
+					usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+					userRepo := &openAIRecordUsageUserRepoStub{}
+					billing := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{})
+					billing.resolver = NewModelPricingResolver(nil, billing.billingService)
+					require.NoError(t, billing.RecordUsage(context.Background(), &RecordUsageInput{
+						Result: result, APIKey: apiKey, User: &User{ID: 20}, Account: account,
+						InboundEndpoint: endpoint, UpstreamEndpoint: "/v1beta/models",
+					}))
+					require.NotNil(t, usageRepo.lastLog)
+					require.NotNil(t, usageRepo.lastLog.InboundEndpoint)
+					require.Equal(t, endpoint, *usageRepo.lastLog.InboundEndpoint)
+					require.InDelta(t, 0.5, usageRepo.lastLog.ActualCost, 1e-12)
+					require.Equal(t, 1, userRepo.deductCalls)
+					require.InDelta(t, 0.5, userRepo.lastAmount, 1e-12)
+					t.Logf("upstream_url=%s inbound_endpoint=%s customer_amount=%.2f", actualURL, endpoint, userRepo.lastAmount)
+				}
+			})
+		}
+	}
+}
+
 func TestGeminiChatCompatReasoningPricingUsesForwardedEffort(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, stream := range []bool{false, true} {
