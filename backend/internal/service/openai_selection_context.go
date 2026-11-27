@@ -8,12 +8,11 @@ import (
 // openAISelectionContext carries the effective scheduling group, independently
 // of whether its profit gate is enabled, plus continuation/migration guards.
 type openAISelectionContext struct {
-	service     *OpenAIGatewayService
-	groupID     int64
-	exempt      bool
-	request     *OpenAIAccountScheduleRequest
-	lastResort  bool
-	proxyBypass bool
+	service    *OpenAIGatewayService
+	groupID    int64
+	exempt     bool
+	request    *OpenAIAccountScheduleRequest
+	lastResort bool
 }
 type openAISelectionContextKey struct{}
 type openAISelectionExemptContextKey struct{}
@@ -84,7 +83,6 @@ func attachSelectionContext(ctx context.Context, selection *AccountSelectionResu
 	}
 	copied.exempt = openAISelectionExempt(ctx)
 	copied.lastResort = resilienceLastResortGate(ctx)
-	copied.proxyBypass = openAIProxyStreamQuarantineBypassed(ctx)
 	selection.selectionContext = &copied
 }
 func (r *AccountSelectionResult) constrainedImmediate() bool {
@@ -124,7 +122,6 @@ func contextWithSelectionContext(ctx context.Context, selection *AccountSelectio
 		ctx = context.WithValue(ctx, openAISelectionRequestKey{}, *gate.request)
 	}
 	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, gate.lastResort)
-	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, gate.proxyBypass)
 	return ctx
 }
 

@@ -1219,7 +1219,6 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 		ctx = context.WithValue(ctx, openAISelectionRequestKey{}, parent)
 	}
 	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
-	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
 	// 分组利润控制：legacy 公共入口同样装门，保证不经
@@ -1703,10 +1702,6 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 		observeSelectionFailure(ctx, fresh.ID, "account_scheduling_threshold", nil)
 		return nil
 	}
-	if s.isOpenAIProxyStreamQuarantined(ctx, fresh) {
-		observeSelectionFailure(ctx, fresh.ID, "proxy_stream_quarantined", nil)
-		return nil
-	}
 	return fresh
 }
 
@@ -1757,10 +1752,6 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 			observeSelectionFailure(ctx, account.ID, "shadow_parent_unhealthy", nil)
 			return nil
 		}
-		if s.isOpenAIProxyStreamQuarantined(ctx, account) {
-			observeSelectionFailure(ctx, account.ID, "proxy_stream_quarantined", nil)
-			return nil
-		}
 		return account
 	}
 
@@ -1808,10 +1799,6 @@ func (s *OpenAIGatewayService) recheckLatestOpenAIAccount(ctx context.Context, l
 	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, latest) {
 		observeSelectionFailure(ctx, latest.ID, "account_scheduling_threshold", nil)
-		return nil
-	}
-	if !resilienceLastResortGate(ctx) && s.isOpenAIProxyStreamQuarantined(ctx, latest) {
-		observeSelectionFailure(ctx, latest.ID, "proxy_stream_quarantined", nil)
 		return nil
 	}
 	return latest

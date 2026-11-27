@@ -259,7 +259,6 @@ type SchedAutoState struct { // one row of the account's auto-state list (field 
 	Key, Kind, Scope, Model string
 	Until                   *time.Time
 	Count                   *[2]int // {current, threshold} for counters that have not tripped yet
-	Shared                  int     // other accounts affected when Scope == "proxy"
 	Clearable               bool
 	Why                     string
 }

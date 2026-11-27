@@ -1079,8 +1079,6 @@ type GatewayConfig struct {
 	OpenAICache          OpenAICacheConfig          `mapstructure:"openai_cache"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
 	OpenAIHTTP2 GatewayOpenAIHTTP2Config `mapstructure:"openai_http2"`
-	// OpenAIProxyStreamCircuit: Responses SSE 代理断流熔断策略。
-	OpenAIProxyStreamCircuit GatewayOpenAIProxyStreamCircuitConfig `mapstructure:"openai_proxy_stream_circuit"`
 	// ImageConcurrency: 图片生成独立并发限制配置（默认关闭）
 	ImageConcurrency ImageConcurrencyConfig `mapstructure:"image_concurrency"`
 
@@ -1232,19 +1230,6 @@ type GatewayOpenAIHTTP2Config struct {
 	FallbackWindowSeconds int `mapstructure:"fallback_window_seconds"`
 	// FallbackTTLSeconds: 触发后回退 HTTP/1.1 的持续时间（秒）
 	FallbackTTLSeconds int `mapstructure:"fallback_ttl_seconds"`
-}
-
-// GatewayOpenAIProxyStreamCircuitConfig controls the bounded, in-process
-// proxy-ID circuit used for incomplete OpenAI Responses SSE streams.
-type GatewayOpenAIProxyStreamCircuitConfig struct {
-	// Disabled: 完全关闭代理断流熔断（默认开启）。
-	Disabled bool `mapstructure:"disabled"`
-	// FailureThreshold: 统计窗口内多少次断流后隔离代理。
-	FailureThreshold int `mapstructure:"failure_threshold"`
-	// WindowSeconds: 断流统计窗口（秒）。
-	WindowSeconds int `mapstructure:"window_seconds"`
-	// TTLSeconds: 代理隔离持续时间（秒）。
-	TTLSeconds int `mapstructure:"ttl_seconds"`
 }
 
 // UserMessageQueueConfig 用户消息串行队列配置
@@ -2544,10 +2529,6 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_http2.fallback_error_threshold", 2)
 	viper.SetDefault("gateway.openai_http2.fallback_window_seconds", 60)
 	viper.SetDefault("gateway.openai_http2.fallback_ttl_seconds", 600)
-	viper.SetDefault("gateway.openai_proxy_stream_circuit.disabled", false)
-	viper.SetDefault("gateway.openai_proxy_stream_circuit.failure_threshold", 2)
-	viper.SetDefault("gateway.openai_proxy_stream_circuit.window_seconds", 60)
-	viper.SetDefault("gateway.openai_proxy_stream_circuit.ttl_seconds", 600)
 	// Grok free-tier local soft gate (scheduler-only; admin QueryQuota does not use this).
 	// Enabled by default because free detection requires an explicit free tier marker.
 	viper.SetDefault("gateway.grok.free_quota_soft_gate_enabled", true)
@@ -3627,15 +3608,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIHTTP2.FallbackTTLSeconds < 0 {
 		return fmt.Errorf("gateway.openai_http2.fallback_ttl_seconds must be non-negative")
-	}
-	if c.Gateway.OpenAIProxyStreamCircuit.FailureThreshold < 0 {
-		return fmt.Errorf("gateway.openai_proxy_stream_circuit.failure_threshold must be non-negative")
-	}
-	if c.Gateway.OpenAIProxyStreamCircuit.WindowSeconds < 0 {
-		return fmt.Errorf("gateway.openai_proxy_stream_circuit.window_seconds must be non-negative")
-	}
-	if c.Gateway.OpenAIProxyStreamCircuit.TTLSeconds < 0 {
-		return fmt.Errorf("gateway.openai_proxy_stream_circuit.ttl_seconds must be non-negative")
 	}
 	if c.Gateway.MaxLineSize < 0 {
 		return fmt.Errorf("gateway.max_line_size must be non-negative")

@@ -53,8 +53,6 @@ func TestBudgetCutSupplementsPlannedWithoutChangingClassification(t *testing.T) 
 			require.Equal(t, plan.Start(), wrappedFailover.BudgetCutPlan.Start())
 			require.Equal(t, mode == resilience.BudgetAttributionEnforce, wrappedFailover.BudgetCutPlan.Applied())
 			require.True(t, fe.ShouldReportAccountScheduleFailure())
-			_, _, counted := classifyOpenAIAPIKeyHealthFailure(fe)
-			require.False(t, counted, "planned classifier stays exempt")
 			require.Nil(t, svc.openaiModelTransient, "planned timeouts no longer feed the retired slow-failure breaker")
 			// A mismatched current profile retains the old non-planned classification.
 			st.SetAttemptProfile(resilience.AttemptProfile{AccountID: 8, Model: "later"})
@@ -63,8 +61,6 @@ func TestBudgetCutSupplementsPlannedWithoutChangingClassification(t *testing.T) 
 			require.Equal(t, plan.Start(), fe.BudgetCutPlan.Start())
 			require.Equal(t, mode == resilience.BudgetAttributionEnforce, fe.BudgetCutPlan.Applied())
 			require.NotEqual(t, PlannedFirstOutputTimeoutReason, fe.Reason)
-			_, _, counted = classifyOpenAIAPIKeyHealthFailure(fe)
-			require.True(t, counted)
 		})
 	}
 	var failover *UpstreamFailoverError

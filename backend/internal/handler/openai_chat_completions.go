@@ -461,7 +461,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 						return
 					}
 					if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
-						h.gatewayService.ObserveOpenAIAccountHealthFailure(c.Request.Context(), account, err)
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
 					}
@@ -470,7 +469,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 						streamStarted = true
 					}
 					if failoverErr.ShouldReportAccountScheduleFailure() {
-						h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, reqModel, false, nil), false, nil, err)
+						h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, reqModel, false, nil), false, nil)
 					}
 					if !failoverErr.ShouldRetryNextAccount() {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
@@ -531,7 +530,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					submitChatUsage(result)
 					return
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, reqModel, false, nil), false, nil, err)
+				h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, reqModel, false, nil), false, nil)
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {

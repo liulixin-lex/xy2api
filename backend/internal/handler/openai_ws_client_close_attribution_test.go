@@ -18,8 +18,7 @@ import (
 // shouldReportOpenAIWSProxyAccountFailure —— 而它只排除 model-switch 与
 // session-preempted 两种。于是客户端干净关闭（底层直接回裸 coderws.CloseError{1000}）
 // 与客户端中途断开（context.Canceled，收尾用 1001 关闭）都会喂给
-// ObserveOpenAIAPIKeyHealthFailure 与 scheduler.ReportResult(success=false)，
-// 累积到阈值即把上游账号熔断出调度池。
+// 账号失败报告路径，把客户端断开错误归因给上游账号。
 //
 // 这些用例钉住判定本身，与既有的 TestShouldReportOpenAIWSProxyAccountFailure 同一层级：
 // 调用点位于一个需要真实上游 WS 才能进入的巨型 handler 循环内，仓库既有约定就是直接测判定函数。

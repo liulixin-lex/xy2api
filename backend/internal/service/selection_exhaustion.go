@@ -69,7 +69,6 @@ const (
 	SelectionReasonAccountSchedulingThreshold SelectionReason = "account_scheduling_threshold"
 	SelectionReasonRuntimeBlocked             SelectionReason = "runtime_blocked"
 	SelectionReasonSameSiteHold               SelectionReason = "same_site_hold"
-	SelectionReasonProxyStreamQuarantined     SelectionReason = "proxy_stream_quarantined"
 	SelectionReasonDependencyError            SelectionReason = "dependency_error"
 	SelectionReasonExcluded                   SelectionReason = "excluded"
 	SelectionReasonFailedChangeTarget         SelectionReason = "failed_change_target"

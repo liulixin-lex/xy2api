@@ -270,13 +270,6 @@ func selectionRejectUntil(ctx context.Context, s *OpenAIGatewayService, a *Accou
 		if until.IsZero() {
 			until = s.openAIModelBreakerEnd(a, model, now)
 		}
-	case "proxy_stream_quarantined":
-		if a.ProxyID != nil {
-			circuit := s.getOpenAIProxyStreamCircuit()
-			circuit.mu.Lock()
-			until = circuit.entries[*a.ProxyID].blockedUntil
-			circuit.mu.Unlock()
-		}
 	}
 	if until.IsZero() || !now.Before(until) {
 		return nil

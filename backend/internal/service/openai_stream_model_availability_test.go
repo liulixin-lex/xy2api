@@ -60,8 +60,6 @@ func TestOpenAIStreamModelAvailabilityBeforeOutput(t *testing.T) {
 			require.True(t, failure.ShouldRetryNextAccount())
 			require.False(t, failure.RetryableOnSameAccount)
 			require.False(t, failure.ShouldReportAccountScheduleFailure())
-			_, _, healthFailure := classifyOpenAIAPIKeyHealthFailure(failure)
-			require.False(t, healthFailure)
 			require.Empty(t, rec.Body.String())
 			entry, ok := svc.getOpenAIAccountModelTransientState().readEntry(first.ID, "requested-model", time.Now())
 			require.True(t, ok)

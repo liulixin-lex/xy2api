@@ -527,24 +527,21 @@ type OpenAIGatewayService struct {
 	liveAttestation       liveattestation.Provider
 	liveAttestationCipher SecretEncryptor
 
-	openaiWSPoolOnce               sync.Once
-	openaiWSStateStoreOnce         sync.Once
-	openaiProxyStreamCircuitOnce   sync.Once
-	openaiWSPassthroughDialerOnce  sync.Once
-	openaiModelTransientOnce       sync.Once
-	agentIdentityTaskMu            sync.Mutex
-	openaiWSPool                   *openAIWSConnPool
-	openaiWSStateStore             OpenAIWSStateStore
-	collabContinuations            CollabContinuationStore
-	collabLocalAliases             collabMemoryAliases
-	collabAliasReads               atomic.Int32
-	collabAliasWrites              atomic.Int32
-	collabAliasFailures            atomic.Uint64
-	openaiWSPassthroughDialer      openAIWSClientDialer
-	openaiWSSessionPreemptions     openAIWSSessionPreemptRegistry
-	openaiModelTransient           *openAIAccountModelTransientState
-	openaiProxyStreamCircuit       *openAIProxyStreamCircuit
-	openaiProxyStreamFailOpenLogAt atomic.Int64
+	openaiWSPoolOnce              sync.Once
+	openaiWSStateStoreOnce        sync.Once
+	openaiWSPassthroughDialerOnce sync.Once
+	openaiModelTransientOnce      sync.Once
+	agentIdentityTaskMu           sync.Mutex
+	openaiWSPool                  *openAIWSConnPool
+	openaiWSStateStore            OpenAIWSStateStore
+	collabContinuations           CollabContinuationStore
+	collabLocalAliases            collabMemoryAliases
+	collabAliasReads              atomic.Int32
+	collabAliasWrites             atomic.Int32
+	collabAliasFailures           atomic.Uint64
+	openaiWSPassthroughDialer     openAIWSClientDialer
+	openaiWSSessionPreemptions    openAIWSSessionPreemptRegistry
+	openaiModelTransient          *openAIAccountModelTransientState
 
 	openaiWSFallbackUntil               sync.Map // key: int64(accountID), value: time.Time
 	openaiAccountRuntimeBlockUntil      sync.Map // key: int64(accountID), value: time.Time

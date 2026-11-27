@@ -45,8 +45,6 @@ func terminalRejectionTestRequest(t *testing.T, svc *OpenAIGatewayService, accou
 	require.Error(t, err)
 	var failover *UpstreamFailoverError
 	require.False(t, errors.As(err, &failover))
-	_, _, healthFailure := classifyOpenAIAPIKeyHealthFailure(err)
-	require.False(t, healthFailure)
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	return state
 }

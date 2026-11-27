@@ -600,7 +600,7 @@ func resilienceBindAllowed(ctx context.Context, accountID int64) bool {
 type resilienceLastResortGateKey struct{}
 
 // withResilienceLastResortGate marks a context in which soft runtime blocks
-// (in-memory 429/transient blocks, proxy quarantine) do not veto a
+// (in-memory 429/transient blocks) do not veto a
 // last-resort candidate.
 func withResilienceLastResortGate(ctx context.Context) context.Context {
 	return context.WithValue(ctx, resilienceLastResortGateKey{}, true)

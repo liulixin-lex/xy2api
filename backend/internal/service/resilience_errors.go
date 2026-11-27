@@ -75,7 +75,7 @@ func resilienceNoAccountIsGroupLevel(ctx context.Context, groupID int64, model s
 			SelectionReasonRateLimited, SelectionReasonModelRateLimited, SelectionReasonConcurrencyFull, SelectionReasonQueueFull, SelectionReasonQueueTimeout,
 			SelectionReasonManualDisabled, SelectionReasonAuthError, SelectionReasonExpired, SelectionReasonBalanceExhausted,
 			SelectionReasonQuotaAutoPause5h, SelectionReasonQuotaAutoPause7d, SelectionReasonQuotaAutoPause,
-			SelectionReasonAccountSchedulingThreshold, SelectionReasonRuntimeBlocked, SelectionReasonSameSiteHold, SelectionReasonProxyStreamQuarantined:
+			SelectionReasonAccountSchedulingThreshold, SelectionReasonRuntimeBlocked, SelectionReasonSameSiteHold:
 		default:
 			return false
 		}

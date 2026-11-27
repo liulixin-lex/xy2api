@@ -526,9 +526,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				failureDelivered = true
 			}
 		}
-		if sawTerminalEvent && !sawFailedEvent {
-			s.clearOpenAIProxyStreamDisconnect(ctx, account)
-		}
 		if !sawTerminalEvent && !openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
 			return resultWithUsage(), s.newOpenAIStreamFailoverError(
 				c,
@@ -542,7 +539,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		flushPending("Client disconnected during final flush, returning collected usage")
 		if !sawTerminalEvent {
 			if openAIStreamClientOutputStarted(c, clientOutputStarted) && !clientDisconnected {
-				s.recordOpenAIProxyStreamDisconnect(ctx, account, errors.New("stream ended before terminal event"), upstreamRequestID)
 				resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, nil, true)
 			}
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
@@ -580,7 +576,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if sawTerminalEvent {
 			if !sawFailedEvent {
-				s.clearOpenAIProxyStreamDisconnect(ctx, account)
 				logger.LegacyPrintf("service.openai_gateway", "Upstream scan ended after terminal event: %v", scanErr)
 			}
 			result, err := finalizeStream()
@@ -590,9 +585,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		// 客户端断开/取消请求时，上游读取往往会返回 context canceled。
 		// /v1/responses 的 SSE 事件必须符合 OpenAI 协议；这里不注入自定义 error event，避免下游 SDK 解析失败。
 		if errors.Is(scanErr, context.Canceled) || errors.Is(scanErr, context.DeadlineExceeded) {
-			if clientDisconnected {
-				s.clearOpenAIProxyStreamDisconnect(ctx, account)
-			}
 			if eventShouldFlush {
 				flushPending("Client disconnected during canceled stream flush, returning collected usage")
 			}
@@ -614,7 +606,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if clientDisconnected {
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete after disconnect: %w", scanErr), true
 		}
-		s.recordOpenAIProxyStreamDisconnect(ctx, account, scanErr, upstreamRequestID)
 		resilienceStreamBrokenAfterOutput(ctx, s.rateLimitService, account, resp, scanErr, true)
 		_, message := classifyOpenAIUpstreamStreamReadError(scanErr)
 		sendErrorEvent(message)

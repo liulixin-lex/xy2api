@@ -28,7 +28,6 @@ type SchedAdminAccountRepository interface {
 	SchedAdminClearOverload(context.Context, int64, *time.Time) (bool, error)
 	SchedAdminClearTemp(context.Context, int64, string, *time.Time) (bool, error)
 	SchedAdminClearModelLimit(context.Context, int64, string, any) (bool, error)
-	SchedAdminProxyPeers(context.Context, int64, int64) (int, error)
 }
 type SchedAdminGroupRepository interface {
 	GetByID(context.Context, int64) (*Group, error)

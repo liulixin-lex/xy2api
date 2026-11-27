@@ -150,7 +150,7 @@ func TestSchedAdminTempClearDatabaseRedisAndLegacyDetail(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 }
-func TestSchedAdminHealthCounterResetBeforeThreshold(t *testing.T) {
+func TestSchedAdminCountersResetBeforeThreshold(t *testing.T) {
 	ctx := context.Background()
 	cache := &tempUnschedCache{rdb: testRedis(t)}
 	client := testEntClient(t)
@@ -163,31 +163,19 @@ func TestSchedAdminHealthCounterResetBeforeThreshold(t *testing.T) {
 		_, err = timeout.IncrementTimeoutCount(ctx, a.ID, 5)
 		require.NoError(t, err)
 	}
-	n, tripped, err := cache.RecordOpenAIAPIKeyHealthFailure(ctx, a.ID, 5, 3)
-	require.NoError(t, err)
-	require.EqualValues(t, 1, n)
-	require.False(t, tripped)
-	n, _, err = cache.RecordOpenAIAPIKeyHealthFailure(ctx, a.ID, 5, 3)
-	require.NoError(t, err)
-	require.EqualValues(t, 2, n)
 	rl := service.NewRateLimitService(repo, nil, nil, nil, cache)
 	rl.SetOpenAI403CounterCache(c403)
 	rl.SetTimeoutCounterCache(timeout)
-	rl.SetOpenAIAPIKeyHealthCache(cache)
 	s := service.NewSchedAdminService(service.SchedAdminDependencies{Accounts: repo, Engine: &schedAdminRepoEngine{at: time.Now().UTC()}, RateLimit: rl})
 	result, err := s.Reset(ctx, a.ID, 7)
 	require.NoError(t, err)
 	require.Empty(t, result.Failed)
-	for _, key := range []string{"403_counter", "stream_timeout_counter", "health_counter"} {
+	for _, key := range []string{"403_counter", "stream_timeout_counter"} {
 		require.NotContains(t, result.Cleared, key)
 	}
-	exists, err := cache.rdb.Exists(ctx, cache.openAIAPIKeyHealthKey(a.ID), cache.openAIAPIKeyHealthKey(a.ID)+":sequence", fmt.Sprintf("%s%d", openAI403CounterPrefix, a.ID), fmt.Sprintf("%s%d", timeoutCounterPrefix, a.ID)).Result()
+	exists, err := cache.rdb.Exists(ctx, fmt.Sprintf("%s%d", openAI403CounterPrefix, a.ID), fmt.Sprintf("%s%d", timeoutCounterPrefix, a.ID)).Result()
 	require.NoError(t, err)
 	require.Zero(t, exists)
-	n, tripped, err = cache.RecordOpenAIAPIKeyHealthFailure(ctx, a.ID, 5, 3)
-	require.NoError(t, err)
-	require.EqualValues(t, 1, n)
-	require.False(t, tripped)
 }
 
 type schedAdminReplacingCache struct {

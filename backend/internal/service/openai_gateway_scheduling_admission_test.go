@@ -69,11 +69,10 @@ func TestSelectionAdmissionPreservesRescueContext(t *testing.T) {
 	svc := &OpenAIGatewayService{accountRepo: repo}
 	req := OpenAIAccountScheduleRequest{GroupID: &gid, Platform: PlatformOpenAI, RequestedModel: "gpt-test"}
 	ctx := context.WithValue(context.Background(), openAISelectionRequestKey{}, req)
-	ctx = withOpenAIProxyStreamQuarantineBypass(withResilienceLastResortGate(ctx))
+	ctx = withResilienceLastResortGate(ctx)
 	selection := attachSelectionProfitGate(ctx, &AccountSelectionResult{Account: withoutSoftPenalties(account, time.Now())})
 	admission := ContextWithSelectionProfitGate(context.Background(), selection)
 	require.True(t, resilienceLastResortGate(admission))
-	require.True(t, openAIProxyStreamQuarantineBypassed(admission))
 	_, vetoed, reason := svc.SelectionAdmissionVetoLatest(admission, selection.Account)
 	require.False(t, vetoed, reason)
 	repo.accounts[0].Schedulable = false

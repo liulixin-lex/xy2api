@@ -15,10 +15,8 @@ import (
 
 func TestPlannedFirstOutputTimeoutSkipsAccountLevelPenalties(t *testing.T) {
 	rl, repo, account, _ := newPenaltyFixture(t, PlatformOpenAI)
-	settings := &openAIAPIKeyHealthSettingRepo{value: `{"enabled":true,"action":"temp_unsched","threshold_count":1,"temp_unsched_minutes":1}`}
+	settings := &streamTimeoutSettingRepo{value: `{"enabled":true,"action":"temp_unsched","threshold_count":1,"temp_unsched_minutes":1}`}
 	rl.SetSettingService(NewSettingService(settings, &config.Config{}))
-	healthCache := &openAIAPIKeyHealthCacheStub{tripped: true}
-	rl.SetOpenAIAPIKeyHealthCache(healthCache)
 	account.Credentials = map[string]any{"pool_mode": true}
 	svc := &OpenAIGatewayService{rateLimitService: rl}
 	c, _ := keepaliveStallContext("/v1/responses")
@@ -34,9 +32,7 @@ func TestPlannedFirstOutputTimeoutSkipsAccountLevelPenalties(t *testing.T) {
 	require.Equal(t, PlannedFirstOutputTimeoutReason, failover.Reason)
 	require.True(t, repo.tempUntil.IsZero(), "no cooldown on the account")
 	require.Zero(t, repo.errorCalls)
-	require.False(t, rl.ObserveOpenAIAPIKeyHealthFailure(ctx, account, failover))
-	require.Zero(t, healthCache.recordCalls)
-	require.Zero(t, settings.getCalls, "both account-level penalties are skipped before settings lookup")
+	require.Zero(t, settings.getCalls, "planned timeout skips account-level penalties before settings lookup")
 	require.False(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-5.1"))
 	res := ClassifyFailoverError(failover)
 	require.Equal(t, resilience.CategoryFirstOutputTimeout, res.Category)
@@ -80,15 +76,13 @@ func TestCompatPlannedFirstOutputTimeoutUsesAttemptOutboundModel(t *testing.T) {
 
 func TestUnplannedFirstOutputTimeoutStillHandlesStreamTimeout(t *testing.T) {
 	rl, repo, account, _ := newPenaltyFixture(t, PlatformOpenAI)
-	rl.SetSettingService(NewSettingService(&openAIAPIKeyHealthSettingRepo{value: `{"enabled":true,"action":"temp_unsched","threshold_count":1,"temp_unsched_minutes":1}`}, &config.Config{}))
+	rl.SetSettingService(NewSettingService(&streamTimeoutSettingRepo{value: `{"enabled":true,"action":"temp_unsched","threshold_count":1,"temp_unsched_minutes":1}`}, &config.Config{}))
 	svc := &OpenAIGatewayService{rateLimitService: rl}
 	c, _ := keepaliveStallContext("/v1/responses")
 	failover := svc.newOpenAIFirstOutputTimeoutError(c.Request.Context(), c, account, nil, "",
 		time.Now().Add(-181*time.Second), "gpt-5.1", "high", 180*time.Second, "first_output", http.Header{})
 	require.Equal(t, GatewayFailureReason("first_output_timeout"), failover.Reason)
 	require.False(t, repo.tempUntil.IsZero(), "legacy timeout still triggers the enabled account penalty")
-	_, _, eligible := classifyOpenAIAPIKeyHealthFailure(failover)
-	require.True(t, eligible, "unplanned upstream failure remains eligible for API-key health tracking")
 }
 
 // A first_output_timeout answered by the upstream (a cascaded gateway) is

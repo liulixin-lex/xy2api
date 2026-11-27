@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -247,13 +246,6 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(
 	return selection, decision, err
 }
 
-// selectAccountWithScheduler wraps selectAccountWithSchedulerOnce with a
-// fail-open second pass for the proxy stream circuit (#5056): when the only
-// reason no account is available is that every candidate sits behind a
-// quarantined proxy, the quarantine must degrade to a preference instead of
-// zeroing out capacity. The retry re-runs the exact same selection with the
-// quarantine checks bypassed, so healthy proxies always win the first pass
-// and quarantined ones only serve when nothing else can.
 func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	ctx context.Context,
 	groupID *int64,
@@ -273,7 +265,6 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	defer handoff.finish(&selection)
 	// A new selection must not inherit the previous account's rescue pass.
 	ctx = context.WithValue(ctx, resilienceLastResortGateKey{}, false)
-	ctx = context.WithValue(ctx, openAIProxyStreamQuarantineBypassKey{}, false)
 	ctx = withSelectionFailureEvidence(ctx)
 	newSessionLogState := &openAINewSessionLogState{}
 	firstSelection := resilience.StateFrom(ctx).BeginAccountSelection()
@@ -453,23 +444,7 @@ func (s *OpenAIGatewayService) selectAccountWithoutQualityRouting(
 	requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability,
 	requireCompact bool, platform string, previousResponseCanMove, useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
-	selection, decision, err := s.selectAccountWithSchedulerOnce(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
-	if err == nil || openAIProxyStreamQuarantineBypassed(ctx) {
-		return selection, decision, err
-	}
-	if !errors.Is(err, ErrNoAvailableAccounts) && !errors.Is(err, ErrNoAvailableCompactAccounts) {
-		return selection, decision, err
-	}
-	// The circuit only ever quarantines PlatformOpenAI accounts.
-	if NormalizeOpenAICompatiblePlatform(platform) != PlatformOpenAI {
-		return selection, decision, err
-	}
-	blocked := s.getOpenAIProxyStreamCircuit().activeBlockCount(time.Now())
-	if blocked == 0 {
-		return selection, decision, err
-	}
-	s.logOpenAIProxyStreamQuarantineFailOpen(requestedModel, blocked)
-	return s.selectAccountWithSchedulerOnce(withOpenAIProxyStreamQuarantineBypass(ctx), groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	return s.selectAccountWithSchedulerOnce(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 }
 
 type openAIGroupPrivacyRequirementContextKey struct{}
@@ -734,36 +709,22 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 	return s.getOpenAIWSProtocolResolver().Resolve(account).Transport == requiredTransport
 }
 
-func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Account, model string, success bool, firstTokenMs *int, observedErr ...error) bool {
-	return s.ReportOpenAIAccountScheduleResultWithContext(context.Background(), account, model, success, firstTokenMs, observedErr...)
+func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Account, model string, success bool, firstTokenMs *int) {
+	s.ReportOpenAIAccountScheduleResultWithContext(context.Background(), account, model, success, firstTokenMs)
 }
 
-// ReportOpenAIAccountScheduleResultWithContext reports a request outcome to the
-// scheduler and API-key health observer. Credential, quota and provider
-// Retry-After handlers remain independent.
-func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithContext(ctx context.Context, account *Account, model string, success bool, firstTokenMs *int, observedErr ...error) bool {
+// ReportOpenAIAccountScheduleResultWithContext clears retry and transient state
+// after a successful request. Credential, quota and provider Retry-After
+// handlers remain independent.
+func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithContext(ctx context.Context, account *Account, model string, success bool, firstTokenMs *int) {
 	if account == nil || !resilience.CollabAttemptFrom(ctx).AccountEffectsAllowed() {
-		return false
+		return
 	}
 	accountID := account.ID
-	healthTripped := false
-	if !success && s != nil && s.rateLimitService != nil && len(observedErr) > 0 && observedErr[0] != nil {
-		healthTripped = s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(ctx, account, observedErr[0])
-	}
 	if success {
 		s.openaiOAuth429RetryStartedAt.Delete(accountID)
 		s.ReportOpenAIAttemptSuccess(ctx, account, model)
 	}
-	return healthTripped
-}
-
-// ObserveOpenAIAccountHealthFailure records failures that cannot reach the
-// scheduler-result path, for example after semantic response bytes were sent.
-func (s *OpenAIGatewayService) ObserveOpenAIAccountHealthFailure(ctx context.Context, account *Account, observedErr error) bool {
-	if s == nil || s.rateLimitService == nil || account == nil || observedErr == nil {
-		return false
-	}
-	return s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(ctx, account, observedErr)
 }
 
 func (s *OpenAIGatewayService) openAIWSSessionStickyTTL() time.Duration {

@@ -98,13 +98,10 @@ func (s *OpenAIGatewayService) accountRequestCompatibleWithParent(ctx context.Co
 		return false, "privacy_not_set"
 	}
 	// xy2api resilience: last-resort selection treats in-memory runtime
-	// blocks and proxy quarantine as soft restrictions (design §4.3).
+	// blocks as soft restrictions (design §4.3).
 	lastResort := resilienceLastResortGate(ctx)
 	if !lastResort && s != nil && s.isOpenAIAccountRequestRuntimeBlockedWithContext(ctx, account, req.RequestedModel, req.RequireCompact) {
 		return false, "runtime_blocked"
-	}
-	if !lastResort && s != nil && s.isOpenAIProxyStreamQuarantined(ctx, account) {
-		return false, "proxy_stream_quarantined"
 	}
 	// Quota auto-pause must be evaluated during the initial filter too. Without it the
 	// TopK candidate pool can be filled with paused accounts and the later fresh/DB

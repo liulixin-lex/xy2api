@@ -31,8 +31,8 @@ type openAISameSiteHoldEvent struct {
 	until     time.Time
 }
 
-// openAISameSiteHoldTracker is independent of proxy quarantine. Like the
-// existing post-output tracker it bounds the number of tracked accounts.
+// openAISameSiteHoldTracker bounds the number of tracked accounts, like the
+// existing post-output tracker.
 type openAISameSiteHoldTracker struct {
 	mu         sync.RWMutex
 	generation uint64

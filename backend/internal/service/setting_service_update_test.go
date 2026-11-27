@@ -788,3 +788,18 @@ func TestSettingService_StalePasskeyTrueWithoutConfigReportsDisabled(t *testing.
 	require.NoError(t, err)
 	require.False(t, settings.PasskeyEnabled)
 }
+
+func TestSettingServiceIgnoresRetiredGatewaySettings(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{}
+	baseline, err := NewSettingService(&settingGetAllRepoStub{values: map[string]string{}}, cfg).GetAllSettings(ctx)
+	require.NoError(t, err)
+	for _, value := range []string{`{"enabled":true,"failure_threshold":1}`, "invalid JSON"} {
+		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{
+			"openai_apikey_health_breaker_settings": value,
+		}}, cfg)
+		got, err := svc.GetAllSettings(ctx)
+		require.NoError(t, err)
+		require.Equal(t, baseline, got)
+	}
+}

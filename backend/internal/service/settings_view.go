@@ -596,23 +596,6 @@ const (
 	openAIImagesOAuthUnavailableMaxCooldownMinutes     = 120
 )
 
-// OpenAIAPIKeyHealthBreakerSettings controls cross-instance failure counting for OpenAI pool API keys.
-type OpenAIAPIKeyHealthBreakerSettings struct {
-	Enabled          bool `json:"enabled"`
-	WindowMinutes    int  `json:"window_minutes"`
-	FailureThreshold int  `json:"failure_threshold"`
-	CooldownMinutes  int  `json:"cooldown_minutes"`
-}
-
-func DefaultOpenAIAPIKeyHealthBreakerSettings() *OpenAIAPIKeyHealthBreakerSettings {
-	return &OpenAIAPIKeyHealthBreakerSettings{
-		Enabled:          false,
-		WindowMinutes:    2,
-		FailureThreshold: 10,
-		CooldownMinutes:  5,
-	}
-}
-
 // DefaultOverloadCooldownSettings 返回默认的过载冷却配置（启用，10分钟）
 func DefaultOverloadCooldownSettings() *OverloadCooldownSettings {
 	return &OverloadCooldownSettings{

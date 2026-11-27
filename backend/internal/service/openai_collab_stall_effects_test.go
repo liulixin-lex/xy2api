@@ -54,7 +54,7 @@ func TestCollabOptionalStreamStallKeepsAccount(t *testing.T) {
 					}
 					settings, err := json.Marshal(StreamTimeoutSettings{Enabled: mode != "resilience_stall", Action: action, TempUnschedMinutes: 1, ThresholdCount: threshold, ThresholdWindowMinutes: 1})
 					require.NoError(t, err)
-					rl.SetSettingService(NewSettingService(&openAIAPIKeyHealthSettingRepo{value: string(settings)}, &config.Config{}))
+					rl.SetSettingService(NewSettingService(&streamTimeoutSettingRepo{value: string(settings)}, &config.Config{}))
 					counter := &collabStallCounter{}
 					blocker := &runtimeBlockRecorder{}
 					rl.SetTimeoutCounterCache(counter)

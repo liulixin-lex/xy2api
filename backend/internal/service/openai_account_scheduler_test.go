@@ -1573,76 +1573,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_Enabled_EmbeddingsSkips
 	require.Equal(t, int64(37022), cache.sessionBindings["openai:session_hash_embeddings"])
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_SkipsQuarantinedSharedProxy(t *testing.T) {
-
-	proxyA := int64(4698)
-	proxyB := int64(4699)
-	accounts := []Account{
-		{ID: 469801, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, ProxyID: &proxyA},
-		{ID: 469802, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, ProxyID: &proxyA},
-		{ID: 469803, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, ProxyID: &proxyB},
-	}
-	cfg := &config.Config{}
-	cfg.Gateway.Scheduling.LoadBatchEnabled = false
-	svc := &OpenAIGatewayService{
-		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
-		cfg:                cfg,
-		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
-		openaiProxyStreamCircuit: newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
-			failureThreshold: 1,
-			failureWindow:    time.Minute,
-			quarantineTTL:    10 * time.Minute,
-			maxEntries:       16,
-		}),
-	}
-	svc.openaiProxyStreamCircuit.recordFailure(proxyA, time.Now())
-
-	selection, _, err := svc.SelectAccountWithScheduler(
-		context.Background(), nil, "", "", "gpt-5.6-sol", nil, OpenAIUpstreamTransportAny, false,
-	)
-	require.NoError(t, err)
-	require.NotNil(t, selection)
-	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(469803), selection.Account.ID)
-}
-
-func TestOpenAIGatewayService_SelectAccountWithScheduler_FailsOpenWhenAllProxiesQuarantined(t *testing.T) {
-
-	// Every schedulable account shares the quarantined proxy: the circuit must
-	// degrade to a preference instead of zeroing out capacity (#5056).
-	proxyA := int64(5056)
-	accounts := []Account{
-		{ID: 505601, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, ProxyID: &proxyA},
-		{ID: 505602, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, ProxyID: &proxyA},
-	}
-	cfg := &config.Config{}
-	cfg.Gateway.Scheduling.LoadBatchEnabled = false
-	svc := &OpenAIGatewayService{
-		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
-		cfg:                cfg,
-		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
-		openaiProxyStreamCircuit: newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
-			failureThreshold: 1,
-			failureWindow:    time.Minute,
-			quarantineTTL:    10 * time.Minute,
-			maxEntries:       16,
-		}),
-	}
-	tripped, _ := svc.openaiProxyStreamCircuit.recordFailure(proxyA, time.Now())
-	require.True(t, tripped)
-
-	selection, _, err := svc.SelectAccountWithScheduler(
-		context.Background(), nil, "", "", "gpt-5.6-sol", nil, OpenAIUpstreamTransportAny, false,
-	)
-	require.NoError(t, err, "quarantine must fail open instead of returning no available accounts")
-	require.NotNil(t, selection)
-	require.NotNil(t, selection.Account)
-	require.NotNil(t, selection.Account.ProxyID)
-	require.Equal(t, proxyA, *selection.Account.ProxyID)
-	require.True(t, svc.openaiProxyStreamCircuit.isBlocked(proxyA, time.Now()),
-		"fail-open must not clear the quarantine; only a completed stream or TTL expiry does")
-}
-
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRateLimitedAccountFallsBackToFreshCandidate(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10101)
@@ -3296,4 +3226,23 @@ func (r schedulerTestOpenAIAccountRepo) ListModelAvailabilityCandidates(ctx cont
 		}
 	}
 	return out, nil
+}
+
+func TestReportOpenAIAccountScheduleSuccessClearsRetryAndTransientState(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	const model = "test-model"
+	now := time.Now()
+	svc.openaiOAuth429RetryStartedAt.Store(account.ID, now)
+	svc.recordOpenAIAccountModelTransientFailure(account, model, now)
+	state := svc.getOpenAIAccountModelTransientState()
+	_, hadFailure := state.readEntry(account.ID, model, now)
+	require.True(t, hadFailure)
+
+	svc.ReportOpenAIAccountScheduleResultWithContext(context.Background(), account, model, true, nil)
+
+	_, retryStarted := svc.openaiOAuth429RetryStartedAt.Load(account.ID)
+	require.False(t, retryStarted)
+	_, stillHasFailure := state.readEntry(account.ID, model, now)
+	require.False(t, stillHasFailure)
 }

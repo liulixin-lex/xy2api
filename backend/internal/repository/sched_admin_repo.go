@@ -58,11 +58,6 @@ func (r *accountRepository) SchedAdminClearModelLimit(ctx context.Context, id in
 	result, err := r.sql.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,'{model_rate_limits}',(extra->'model_rate_limits')-$2::text),updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL AND extra->'model_rate_limits'->$2::text=$3::jsonb`, id, key, string(raw))
 	return r.schedAdminChanged(ctx, id, result, err)
 }
-func (r *accountRepository) SchedAdminProxyPeers(ctx context.Context, id, proxy int64) (int, error) {
-	var n int
-	err := scanSingleRow(ctx, r.sql, `SELECT count(*) FROM accounts WHERE proxy_id=$1 AND id<>$2 AND deleted_at IS NULL`, []any{proxy, id}, &n)
-	return n, err
-}
 
 // Compare and delete in Redis so a replacement detail cannot be removed after a read.
 func (c *tempUnschedCache) SchedAdminDeleteTempIf(ctx context.Context, id int64, reason string, until *time.Time) (bool, error) {
@@ -79,10 +74,6 @@ func (c *tempUnschedCache) SchedAdminDeleteTempIf(ctx context.Context, id int64,
 	}
 	n, err := c.rdb.Eval(ctx, `local raw=redis.call('GET',KEYS[1]); if not raw then return 1 end; local ok,a=pcall(cjson.decode,raw); if not ok then return 0 end; local b=cjson.decode(ARGV[1]); for k,v in pairs(b) do if a[k]~=v and not (a[k]==nil and v==0) then return 0 end end; for k,v in pairs(a) do if b[k]==nil and v~=0 and v~='' then return 0 end end; redis.call('DEL',KEYS[1]); return 1`, []string{fmt.Sprintf("%s%d", tempUnschedPrefix, id)}, string(raw)).Int()
 	return n == 1, err
-}
-func (c *tempUnschedCache) SchedAdminClearHealth(ctx context.Context, id int64) error {
-	key := c.openAIAPIKeyHealthKey(id)
-	return c.rdb.Del(ctx, key, key+":sequence").Err()
 }
 
 var _ service.SchedAdminAccountRepository = (*accountRepository)(nil)

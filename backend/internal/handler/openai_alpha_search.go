@@ -213,7 +213,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 
 		var failoverErr *service.UpstreamFailoverError
 		if !errors.As(err, &failoverErr) {
-			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), false, nil, err)
+			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), false, nil)
 			if failoverClientGone(c) {
 				reqLog.Info("openai_alpha_search.forward_aborted_client_disconnected", zap.Int64("account_id", account.ID), zap.Error(err))
 				return
@@ -226,7 +226,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		}
 
 		if failoverErr.Reason != service.OpenAIAlphaSearchE5001Reason {
-			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), false, nil, err)
+			h.gatewayService.ReportOpenAIAccountScheduleResultWithContext(c.Request.Context(), account, openAIAccountScheduleModel(c, account, requestedModel, false, result), false, nil)
 		}
 		if c.Writer.Size() != writerSizeBeforeForward {
 			h.handleFailoverExhausted(c, failoverErr, true)
