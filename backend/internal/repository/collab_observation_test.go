@@ -268,5 +268,5 @@ func TestCollabObservationSparseBillingSnapshotStaysV2(t *testing.T) {
 	var restored service.UsageBillingCommand
 	require.NoError(t, json.Unmarshal(payload, &restored))
 	prepared := prepareUsageLogInsert(restored.Usage)
-	require.Equal(t, string(collabFixture()), prepared.args[len(prepared.args)-1])
+	require.Equal(t, string(collabFixture()), prepared.args[len(prepared.args)-3])
 }
