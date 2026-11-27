@@ -102,8 +102,8 @@
               </span>
             </td>
             <td class="px-2 py-1.5">
-              <div v-if="rec.gateway_request_id" class="flex max-w-[160px] items-center gap-1.5">
-                <span class="truncate font-mono text-gray-500 dark:text-gray-400" :title="rec.gateway_request_id">{{ rec.gateway_request_id }}</span>
+              <div v-if="rec.gateway_request_id" class="flex items-center gap-1">
+                <span class="max-w-[4rem] truncate font-mono text-gray-500 dark:text-gray-400" :title="rec.gateway_request_id">{{ rec.gateway_request_id }}</span>
                 <button
                   type="button"
                   class="shrink-0 rounded p-0.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700 dark:hover:text-gray-300"
