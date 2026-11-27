@@ -51,6 +51,8 @@ func (UsageLog) Fields() []ent.Field {
 		field.Bool("terminal_event_valid").Optional().Nillable(),
 		field.String("response_body_type").Optional().Nillable().SchemaType(map[string]string{dialect.Postgres: "text"}),
 		field.JSON("degradations", json.RawMessage{}).Optional().SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
+		field.Float("supplier_cost_estimate").Optional().Nillable().SchemaType(map[string]string{dialect.Postgres: "numeric(20,10)"}),
+		field.JSON("metering_adjustment", json.RawMessage{}).Optional().SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 		field.JSON("pricing_source", json.RawMessage{}).Optional().SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 		field.JSON("collab_observation", json.RawMessage{}).Optional().SchemaType(map[string]string{dialect.Postgres: "jsonb"}),
 		field.JSON("service_tier_details", json.RawMessage{}).Optional().SchemaType(map[string]string{dialect.Postgres: "jsonb"}),

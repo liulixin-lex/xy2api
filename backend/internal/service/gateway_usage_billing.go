@@ -844,6 +844,21 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	ApplyForwardImageBillingResolution(result)
 	logServiceTierBillingDowngrade("service.gateway", account, result.RequestID, ApplyForwardServiceTierBillingResolution(result))
 
+	// Freeze after semantic normalization, before compensation or TTL policy.
+	metered := freezeMeteredUsage(result.Usage, result.ResponseFactsKnown, result.UsagePresent, result.UsageSource)
+	rawResult := *result
+	rawResult.Usage.RawPromptTokens = cloneUsageFactValue(result.Usage.RawPromptTokens)
+	rawResult.Usage.RawCacheReadTokens = cloneUsageFactValue(result.Usage.RawCacheReadTokens)
+	rawResult.ServiceTier = cloneUsageFactValue(result.ServiceTier)
+	rawResult.ReasoningEffort = cloneUsageFactValue(result.ReasoningEffort)
+	rawResult.ImageOutputSizes = append([]string(nil), result.ImageOutputSizes...)
+	rawResult.ImageSizeBreakdown = cloneImageSizeBreakdown(result.ImageSizeBreakdown)
+	if result.AudioUsage != nil {
+		audio := *result.AudioUsage
+		rawResult.AudioUsage = &audio
+	}
+	var adjustments []meteringAdjustmentKind
+
 	// xy2api resilience: the session's real cache-read share, taken before
 	// the forced cache billing below rewrites the token split.
 	s.resilience.NoteSessionCacheUsage(ctx, result.Usage.CacheReadInputTokens,
@@ -853,6 +868,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	if input.ForceCacheBilling && result.Usage.InputTokens > 0 {
 		logger.LegacyPrintf("service.gateway", "force_cache_billing: %d input_tokens → cache_read_input_tokens (account=%d)",
 			result.Usage.InputTokens, account.ID)
+		adjustments = append(adjustments, meteringAdjustmentKind{Kind: "force_cache_billing", InputToCacheTokens: result.Usage.InputTokens})
 		result.Usage.CacheReadInputTokens += result.Usage.InputTokens
 		result.Usage.InputTokens = 0
 	}
@@ -861,7 +877,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// 显式账号规则仅调整结算副本，不修改供应商用量或客户端响应。
 	cacheTTLOverridden := false
 	if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
+		beforeTTL := result.Usage
 		applyCacheTTLOverride(&result.Usage, overrideTarget)
+		if beforeTTL != result.Usage {
+			adjustments = append(adjustments, meteringAdjustmentKind{Kind: "cache_ttl_override"})
+		}
 		cacheTTLOverridden = (result.Usage.CacheCreation5mTokens + result.Usage.CacheCreation1hTokens) > 0
 	}
 
@@ -909,7 +929,12 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}
 
 	// 计算费用
-	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, pricingAt)
+	meteringPricing := s
+	if len(adjustments) > 0 {
+		meteringPricing = freezeMeteringPricing(s)
+	}
+	meteringBillingModel := billingModel
+	cost := meteringPricing.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, pricingAt)
 	// response_model：按上游成功响应自报的模型计费（渠道显式开启才生效）。
 	// 采纳条件见 responseModelBillingDeclaration + hasIdentifiedResponseModelPricing
 	// + responseModelBillingAdoptable。任一条件不满足都静默回落基线，即开启本模式前的
@@ -920,14 +945,15 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		result.UpstreamResponseModelConflict,
 		result.ImageCount > 0 || result.AudioUsage != nil || result.SearchCount > 0,
 	); responseModel != "" && !strings.EqualFold(responseModel, strings.TrimSpace(billingModel)) {
-		if identified, responseChannelPriced := s.hasIdentifiedResponseModelPricing(ctx, responseModel, apiKey); identified {
-			responseCost := s.calculateRecordUsageCost(ctx, result, apiKey, responseModel, multiplier, imageMultiplier, pricingAt)
-			baselineChannelPriced := s.resolveChannelPricing(ctx, billingModel, apiKey) != nil
+		if identified, responseChannelPriced := meteringPricing.hasIdentifiedResponseModelPricing(ctx, responseModel, apiKey); identified {
+			responseCost := meteringPricing.calculateRecordUsageCost(ctx, result, apiKey, responseModel, multiplier, imageMultiplier, pricingAt)
+			baselineChannelPriced := meteringPricing.resolveChannelPricing(ctx, billingModel, apiKey) != nil
 			if responseModelBillingAdoptable(cost, responseCost, baselineChannelPriced, responseChannelPriced) {
 				// billingModel 到此为止只是定价查表的入参，后续流程只消费 cost，
 				// 因此这里不改写它，改由日志记录实际生效的计费基准。
 				logResponseModelBillingApplied("service.gateway", account, result.RequestID, billingModel, responseModel, cost, responseCost)
 				cost = responseCost
+				meteringBillingModel = responseModel
 			}
 		}
 	}
@@ -964,12 +990,30 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		)
 	}
 
+	grossValue := *cost
+	gross := &grossValue
+	if len(adjustments) > 0 {
+		gross = meteringPricing.calculateRecordUsageCost(ctx, &rawResult, apiKey, meteringBillingModel, multiplier, imageMultiplier, pricingAt)
+	}
+	groupID := int64(0)
+	if servedKey.GroupID != nil {
+		groupID = *servedKey.GroupID
+	}
+	supplier := estimateMeteredSupplierCost(ctx, meteringPricing.channelService, meteringPricing.billingService, usageLog, metered, gross,
+		account.ID, groupID, firstNonEmpty(result.UpstreamModel, result.Model), pricingAt, accountStatsLongContextPricingEnabled(nil), nil)
+	settledActual := usageLog.ActualCost
+
 	// xy2api resilience: a client that left before any output is not billed,
 	// except at upstream cost under the abuse guard (design §8.2).
 	resilienceAnnotateUsage(ctx, usageLog)
 	if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {
 		return nil
 	}
+
+	if usageLog.ActualCost != settledActual {
+		adjustments = append(adjustments, meteringAdjustmentKind{Kind: "legacy_undelivered_abuse"})
+	}
+	applyMeteringAdjustment(usageLog, metered, gross, supplier, adjustments)
 
 	cacheSettlementOutcome := "pending"
 	defer func() {

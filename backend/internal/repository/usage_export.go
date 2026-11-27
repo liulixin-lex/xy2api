@@ -68,7 +68,7 @@ func usageExportSnapshot(ctx context.Context, tx *sql.Tx, o usageexport.Options,
 		fields = append(fields, "service_tier", "service_tier_details")
 	}
 	if o.Format == "xlsx" {
-		fields = append(fields, strings.Fields("user_id account_id group_id upstream_model upstream_response_model upstream_model_mismatch upstream_endpoint input_cost output_cost cache_read_cost cache_creation_cost account_rate_multiplier account_stats_cost request_id upstream_request_id user_agent")...)
+		fields = append(fields, strings.Fields("user_id account_id group_id upstream_model upstream_response_model upstream_model_mismatch upstream_endpoint input_cost output_cost cache_read_cost cache_creation_cost account_rate_multiplier account_stats_cost supplier_cost_estimate metering_adjustment request_id upstream_request_id user_agent")...)
 	}
 	pairs := make([]string, 0, len(fields)+4)
 	for _, f := range fields {

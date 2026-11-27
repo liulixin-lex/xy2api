@@ -342,6 +342,51 @@ func (_u *UsageLogUpdate) ClearDegradations() *UsageLogUpdate {
 	return _u
 }
 
+// SetSupplierCostEstimate sets the "supplier_cost_estimate" field.
+func (_u *UsageLogUpdate) SetSupplierCostEstimate(v float64) *UsageLogUpdate {
+	_u.mutation.ResetSupplierCostEstimate()
+	_u.mutation.SetSupplierCostEstimate(v)
+	return _u
+}
+
+// SetNillableSupplierCostEstimate sets the "supplier_cost_estimate" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableSupplierCostEstimate(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetSupplierCostEstimate(*v)
+	}
+	return _u
+}
+
+// AddSupplierCostEstimate adds value to the "supplier_cost_estimate" field.
+func (_u *UsageLogUpdate) AddSupplierCostEstimate(v float64) *UsageLogUpdate {
+	_u.mutation.AddSupplierCostEstimate(v)
+	return _u
+}
+
+// ClearSupplierCostEstimate clears the value of the "supplier_cost_estimate" field.
+func (_u *UsageLogUpdate) ClearSupplierCostEstimate() *UsageLogUpdate {
+	_u.mutation.ClearSupplierCostEstimate()
+	return _u
+}
+
+// SetMeteringAdjustment sets the "metering_adjustment" field.
+func (_u *UsageLogUpdate) SetMeteringAdjustment(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.SetMeteringAdjustment(v)
+	return _u
+}
+
+// AppendMeteringAdjustment appends value to the "metering_adjustment" field.
+func (_u *UsageLogUpdate) AppendMeteringAdjustment(v jsontext.Value) *UsageLogUpdate {
+	_u.mutation.AppendMeteringAdjustment(v)
+	return _u
+}
+
+// ClearMeteringAdjustment clears the value of the "metering_adjustment" field.
+func (_u *UsageLogUpdate) ClearMeteringAdjustment() *UsageLogUpdate {
+	_u.mutation.ClearMeteringAdjustment()
+	return _u
+}
+
 // SetPricingSource sets the "pricing_source" field.
 func (_u *UsageLogUpdate) SetPricingSource(v jsontext.Value) *UsageLogUpdate {
 	_u.mutation.SetPricingSource(v)
@@ -2108,6 +2153,26 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.DegradationsCleared() {
 		_spec.ClearField(usagelog.FieldDegradations, field.TypeJSON)
 	}
+	if value, ok := _u.mutation.SupplierCostEstimate(); ok {
+		_spec.SetField(usagelog.FieldSupplierCostEstimate, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedSupplierCostEstimate(); ok {
+		_spec.AddField(usagelog.FieldSupplierCostEstimate, field.TypeFloat64, value)
+	}
+	if _u.mutation.SupplierCostEstimateCleared() {
+		_spec.ClearField(usagelog.FieldSupplierCostEstimate, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.MeteringAdjustment(); ok {
+		_spec.SetField(usagelog.FieldMeteringAdjustment, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedMeteringAdjustment(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldMeteringAdjustment, value)
+		})
+	}
+	if _u.mutation.MeteringAdjustmentCleared() {
+		_spec.ClearField(usagelog.FieldMeteringAdjustment, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.PricingSource(); ok {
 		_spec.SetField(usagelog.FieldPricingSource, field.TypeJSON, value)
 	}
@@ -3050,6 +3115,51 @@ func (_u *UsageLogUpdateOne) AppendDegradations(v jsontext.Value) *UsageLogUpdat
 // ClearDegradations clears the value of the "degradations" field.
 func (_u *UsageLogUpdateOne) ClearDegradations() *UsageLogUpdateOne {
 	_u.mutation.ClearDegradations()
+	return _u
+}
+
+// SetSupplierCostEstimate sets the "supplier_cost_estimate" field.
+func (_u *UsageLogUpdateOne) SetSupplierCostEstimate(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetSupplierCostEstimate()
+	_u.mutation.SetSupplierCostEstimate(v)
+	return _u
+}
+
+// SetNillableSupplierCostEstimate sets the "supplier_cost_estimate" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableSupplierCostEstimate(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetSupplierCostEstimate(*v)
+	}
+	return _u
+}
+
+// AddSupplierCostEstimate adds value to the "supplier_cost_estimate" field.
+func (_u *UsageLogUpdateOne) AddSupplierCostEstimate(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddSupplierCostEstimate(v)
+	return _u
+}
+
+// ClearSupplierCostEstimate clears the value of the "supplier_cost_estimate" field.
+func (_u *UsageLogUpdateOne) ClearSupplierCostEstimate() *UsageLogUpdateOne {
+	_u.mutation.ClearSupplierCostEstimate()
+	return _u
+}
+
+// SetMeteringAdjustment sets the "metering_adjustment" field.
+func (_u *UsageLogUpdateOne) SetMeteringAdjustment(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.SetMeteringAdjustment(v)
+	return _u
+}
+
+// AppendMeteringAdjustment appends value to the "metering_adjustment" field.
+func (_u *UsageLogUpdateOne) AppendMeteringAdjustment(v jsontext.Value) *UsageLogUpdateOne {
+	_u.mutation.AppendMeteringAdjustment(v)
+	return _u
+}
+
+// ClearMeteringAdjustment clears the value of the "metering_adjustment" field.
+func (_u *UsageLogUpdateOne) ClearMeteringAdjustment() *UsageLogUpdateOne {
+	_u.mutation.ClearMeteringAdjustment()
 	return _u
 }
 
@@ -4848,6 +4958,26 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.DegradationsCleared() {
 		_spec.ClearField(usagelog.FieldDegradations, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.SupplierCostEstimate(); ok {
+		_spec.SetField(usagelog.FieldSupplierCostEstimate, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedSupplierCostEstimate(); ok {
+		_spec.AddField(usagelog.FieldSupplierCostEstimate, field.TypeFloat64, value)
+	}
+	if _u.mutation.SupplierCostEstimateCleared() {
+		_spec.ClearField(usagelog.FieldSupplierCostEstimate, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.MeteringAdjustment(); ok {
+		_spec.SetField(usagelog.FieldMeteringAdjustment, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedMeteringAdjustment(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, usagelog.FieldMeteringAdjustment, value)
+		})
+	}
+	if _u.mutation.MeteringAdjustmentCleared() {
+		_spec.ClearField(usagelog.FieldMeteringAdjustment, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.PricingSource(); ok {
 		_spec.SetField(usagelog.FieldPricingSource, field.TypeJSON, value)

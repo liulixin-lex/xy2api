@@ -56,6 +56,12 @@ COMMIT;
 - 选号解释的响应含 `enabled`、`healthy_count`、`accounts[]`（`account_id`、`priority`、`tier`、`reason`、`recover_at`、`session_failures`、`avoided`、`capability_learned`）、`last_resort`、`fallback_group`、`session`，以及填了模型时的 `model_restriction`。
 - 统计、未送达与选号解释接口需要“运维监控”模块的查看权限；设置接口只对超级管理员开放（见 [管理员与权限](admin-permissions.md)）。
 
+## 原始计量与采购成本
+
+使用记录的客户 token 仍是补偿及 TTL 政策后的结算值。管理员接口的 `supplier_cost_estimate` 是最终已观测尝试按原始计量计算的采购估计，已含账号倍率；NULL 为未知或历史行，0 为确认免费。`metering_adjustment` 记录原始 token、presence/source、各调整类型、补偿前客户金额及净调整额；成本未知时也写入 `supplier_cost_source=unknown`，以区别漏写。无调整且成本已知的普通行省略 JSON。
+
+看板、账号统计与新版管理员导出优先读取新采购金额，缺失才按旧 `account_stats_cost/total_cost × account_rate_multiplier` 回退；历史不回填。余额、配额与未送达 abuse 扣费继续使用原结算公式。采购估计不含未观测失败尝试，不能据此断言全链真实毛利，字段和导出版本详见 [用量说明](usage.md#计量结算与采购成本)。
+
 ## 未送达请求
 
 管理员接口返回可空的 `gateway_request_id`，与用量、未计费和错误记录的网关请求键相同，上传阶段断开也保留；原 `request_id` 与 `client_request_id` 不变，历史行保持空值，不按客户端编号推测回填。

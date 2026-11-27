@@ -79,10 +79,7 @@ func resilienceUndeliveredUsage(ctx context.Context, usageLog *UsageLog, cost *C
 	if !disconnected || delivered {
 		return false
 	}
-	upstreamCost := usageLog.TotalCost * accountRate
-	if usageLog.AccountStatsCost != nil {
-		upstreamCost = *usageLog.AccountStatsCost
-	}
+	upstreamCost := legacyUndeliveredAbuseCharge(usageLog, accountRate)
 	usageJSON, _ := json.Marshal(map[string]any{
 		"model":                 usageLog.Model,
 		"input_tokens":          usageLog.InputTokens,
@@ -103,6 +100,15 @@ func resilienceUndeliveredUsage(ctx context.Context, usageLog *UsageLog, cost *C
 	}
 	st.NoteUndeliveredUsage(usageJSON, upstreamCost, true)
 	return false
+}
+
+// legacyUndeliveredAbuseCharge preserves the historical settlement-based formula.
+// In particular, an explicit AccountStatsCost is not multiplied by accountRate.
+func legacyUndeliveredAbuseCharge(usageLog *UsageLog, accountRate float64) float64 {
+	if usageLog.AccountStatsCost != nil {
+		return *usageLog.AccountStatsCost
+	}
+	return usageLog.TotalCost * accountRate
 }
 
 // ConfigureUndelivered attaches the undelivered repository, registers the

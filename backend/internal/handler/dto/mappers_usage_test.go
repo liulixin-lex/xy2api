@@ -180,6 +180,8 @@ func TestUsageLogFromService_KeepsUserBillingAndIPWithoutAdminCostFields(t *test
 		IPAddress:             &ipAddress,
 		AccountRateMultiplier: &accountRateMultiplier,
 		AccountStatsCost:      &accountStatsCost,
+		SupplierCostEstimate:  new(0.9),
+		MeteringAdjustment:    json.RawMessage(`{"v":1}`),
 	}
 
 	userDTO := UsageLogFromService(log)
@@ -197,6 +199,11 @@ func TestUsageLogFromService_KeepsUserBillingAndIPWithoutAdminCostFields(t *test
 	require.NoError(t, err)
 	require.NotContains(t, string(userJSON), "account_rate_multiplier")
 	require.NotContains(t, string(userJSON), "account_stats_cost")
+	require.NotContains(t, string(userJSON), "supplier_cost_estimate")
+	require.NotContains(t, string(userJSON), "metering_adjustment")
+	adminDTO := UsageLogFromServiceAdmin(log)
+	require.Equal(t, log.SupplierCostEstimate, adminDTO.SupplierCostEstimate)
+	require.JSONEq(t, string(log.MeteringAdjustment), string(adminDTO.MeteringAdjustment))
 	require.NotContains(t, string(userJSON), "account_cost")
 }
 

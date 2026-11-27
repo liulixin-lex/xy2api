@@ -17,6 +17,8 @@ var xlsxHeaders = []string{"Time", "User", "API Key", "Account", "Requested", "S
 var xlsxHeadersZH = []string{"时间", "用户", "API 密钥", "账户", "请求", "发往上游", "上游响应", "上游响应模型不一致", "请求推理强度", "推理强度", "分组", "入站端点", "上游端点", "类型", "输入 Token", "输出 Token", "缓存读取 Token", "缓存创建 Token", "输入费用", "输出费用", "缓存读取费用", "缓存创建费用", "倍率", "账号倍率", "原始", "用户扣费", "账号计费", "首 Token", "耗时", "请求ID", "上游ID", "User-Agent", "IP"}
 
 const ServiceTierFormatVersion = 2
+const MeteringFormatVersion = 3
+const CurrentFormatVersion = MeteringFormatVersion
 
 func Headers(o Options) []string {
 	headers := xlsxHeaders
@@ -29,7 +31,14 @@ func Headers(o Options) []string {
 		fields = []string{"服务档位", "服务档位详情"}
 	}
 	if o.Version >= ServiceTierFormatVersion {
-		return append(headers[:len(headers):len(headers)], fields...)
+		headers = append(headers[:len(headers):len(headers)], fields...)
+	}
+	if o.Version >= MeteringFormatVersion && o.Format == "xlsx" {
+		fields = []string{"Supplier Cost Estimate", "Metering Adjustment"}
+		if strings.HasPrefix(o.Language, "zh") {
+			fields = []string{"采购成本估计", "计量调整"}
+		}
+		headers = append(headers[:len(headers):len(headers)], fields...)
 	}
 	return headers
 }
@@ -42,7 +51,11 @@ func appendServiceTierFields(row []string, r Record, o Options) []string {
 	if !o.IncludeInternalTierDetails {
 		details = string(usagestats.PublicServiceTierDetails(r["service_tier_details"]))
 	}
-	return append(row, r.s("service_tier"), details)
+	row = append(row, r.s("service_tier"), details)
+	if o.Version >= MeteringFormatVersion && o.Format == "xlsx" {
+		row = append(row, r.s("supplier_cost_estimate"), r.s("metering_adjustment"))
+	}
+	return row
 }
 
 func numericColumn(o Options, i int) bool {
@@ -183,11 +196,15 @@ func Project(r Record, o Options) ([]string, error) {
 	if r.s("account_stats_cost") == "" {
 		accountCost = r.n("total_cost")
 	}
+	accountCost = accountCost.Mul(multiplier)
+	if o.Version >= MeteringFormatVersion && r.s("supplier_cost_estimate") != "" {
+		accountCost = r.n("supplier_cost_estimate")
+	}
 	rate := "1.00"
 	if r.s("rate_multiplier") != "" {
 		rate = fourSignificant(r.n("rate_multiplier"))
 	}
-	return appendServiceTierFields([]string{when, r.s("user_email"), r.s("key_name"), r.s("account_name"), model, upstream, r.s("upstream_response_model"), mismatch, effort(requested), effort(r.s("reasoning_effort")), r.s("group_name"), r.s("inbound_endpoint"), r.s("upstream_endpoint"), kind, r.s("input_tokens"), r.s("output_tokens"), r.s("cache_read_tokens"), r.s("cache_creation_tokens"), r.n("input_cost").StringFixed(6), r.n("output_cost").StringFixed(6), r.n("cache_read_cost").StringFixed(6), r.n("cache_creation_cost").StringFixed(6), rate, fourSignificant(multiplier), r.n("total_cost").StringFixed(6), r.n("actual_cost").StringFixed(6), accountCost.Mul(multiplier).StringFixed(6), r.s("first_token_ms"), r.s("duration_ms"), r.s("request_id"), r.s("upstream_request_id"), r.s("user_agent"), r.s("ip_address")}, r, o), nil
+	return appendServiceTierFields([]string{when, r.s("user_email"), r.s("key_name"), r.s("account_name"), model, upstream, r.s("upstream_response_model"), mismatch, effort(requested), effort(r.s("reasoning_effort")), r.s("group_name"), r.s("inbound_endpoint"), r.s("upstream_endpoint"), kind, r.s("input_tokens"), r.s("output_tokens"), r.s("cache_read_tokens"), r.s("cache_creation_tokens"), r.n("input_cost").StringFixed(6), r.n("output_cost").StringFixed(6), r.n("cache_read_cost").StringFixed(6), r.n("cache_creation_cost").StringFixed(6), rate, fourSignificant(multiplier), r.n("total_cost").StringFixed(6), r.n("actual_cost").StringFixed(6), accountCost.StringFixed(6), r.s("first_token_ms"), r.s("duration_ms"), r.s("request_id"), r.s("upstream_request_id"), r.s("user_agent"), r.s("ip_address")}, r, o), nil
 }
 
 // Match the existing administrator export's four significant digit rate strings.

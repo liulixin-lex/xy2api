@@ -46,6 +46,10 @@ const (
 	FieldResponseBodyType = "response_body_type"
 	// FieldDegradations holds the string denoting the degradations field in the database.
 	FieldDegradations = "degradations"
+	// FieldSupplierCostEstimate holds the string denoting the supplier_cost_estimate field in the database.
+	FieldSupplierCostEstimate = "supplier_cost_estimate"
+	// FieldMeteringAdjustment holds the string denoting the metering_adjustment field in the database.
+	FieldMeteringAdjustment = "metering_adjustment"
 	// FieldPricingSource holds the string denoting the pricing_source field in the database.
 	FieldPricingSource = "pricing_source"
 	// FieldCollabObservation holds the string denoting the collab_observation field in the database.
@@ -254,6 +258,8 @@ var Columns = []string{
 	FieldTerminalEventValid,
 	FieldResponseBodyType,
 	FieldDegradations,
+	FieldSupplierCostEstimate,
+	FieldMeteringAdjustment,
 	FieldPricingSource,
 	FieldCollabObservation,
 	FieldServiceTierDetails,
@@ -492,6 +498,11 @@ func ByTerminalEventValid(opts ...sql.OrderTermOption) OrderOption {
 // ByResponseBodyType orders the results by the response_body_type field.
 func ByResponseBodyType(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldResponseBodyType, opts...).ToFunc()
+}
+
+// BySupplierCostEstimate orders the results by the supplier_cost_estimate field.
+func BySupplierCostEstimate(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSupplierCostEstimate, opts...).ToFunc()
 }
 
 // ByModel orders the results by the model field.

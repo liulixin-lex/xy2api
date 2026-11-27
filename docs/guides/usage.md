@@ -251,3 +251,14 @@ WebSocket 请求继续沿用既有档位与计费规则，仅通过模型名后�
 ### 停用与回滚
 
 依次关闭 `enabled`、等待或取消活动任务、停止服务，再回滚应用。导出相关表由迁移 `252_usage_export_tasks.sql` 追加创建，回滚时不需要删表。
+
+## 计量、结算与采购成本
+
+用量表中的 token 和客户金额继续表示结算口径，缓存补偿与 TTL 政策不改变历史扣款规则；余额、订阅、API Key 与账号配额仍按结算金额处理，未送达 abuse 费用保持原公式。
+
+管理员 API 新增两个字段（普通客户 API 不暴露采购价）：
+
+- `supplier_cost_estimate`：可空金额，按补偿前的原始计量估计最终已观测尝试的采购成本，已包含账号倍率；NULL 表示未知或历史行，0 表示确认免费，不能再次乘倍率。
+- `metering_adjustment`：可空 JSON，保存原始用量及 presence/source、调整类型、补偿前客户价 `customer_gross_cost`、净调整额 `customer_credit` 和采购来源 `supplier_cost_source`（contract/mirror/catalog/fallback/unknown）。TTL 与缓存补偿分列；abuse 旧公式的差额另列。无调整且成本已知时省略，成本未知时保留来源标记。净调整额由同一计价函数的前后结果求差；不是供应商发票或全链毛利保证。
+
+后台看板和统计优先采用 `supplier_cost_estimate`，缺失时回退到 legacy 口径：`COALESCE(account_stats_cost,total_cost) × COALESCE(account_rate_multiplier,1)`；历史记录不回填。管理员 XLSX 导出版本 3 使用同一口径并附采购估计与计量调整两列，旧版本 1/2 仍可按原口径复现。普通客户 CSV 不包含这两列。

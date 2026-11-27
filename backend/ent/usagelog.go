@@ -56,6 +56,10 @@ type UsageLog struct {
 	ResponseBodyType *string `json:"response_body_type,omitempty"`
 	// Degradations holds the value of the "degradations" field.
 	Degradations jsontext.Value `json:"degradations,omitempty"`
+	// SupplierCostEstimate holds the value of the "supplier_cost_estimate" field.
+	SupplierCostEstimate *float64 `json:"supplier_cost_estimate,omitempty"`
+	// MeteringAdjustment holds the value of the "metering_adjustment" field.
+	MeteringAdjustment jsontext.Value `json:"metering_adjustment,omitempty"`
 	// PricingSource holds the value of the "pricing_source" field.
 	PricingSource jsontext.Value `json:"pricing_source,omitempty"`
 	// CollabObservation holds the value of the "collab_observation" field.
@@ -279,11 +283,11 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usagelog.FieldDegradations, usagelog.FieldPricingSource, usagelog.FieldCollabObservation, usagelog.FieldServiceTierDetails, usagelog.FieldProfitBasis, usagelog.FieldDispatchPhases, usagelog.FieldImageSizeBreakdown:
+		case usagelog.FieldDegradations, usagelog.FieldMeteringAdjustment, usagelog.FieldPricingSource, usagelog.FieldCollabObservation, usagelog.FieldServiceTierDetails, usagelog.FieldProfitBasis, usagelog.FieldDispatchPhases, usagelog.FieldImageSizeBreakdown:
 			values[i] = new([]byte)
 		case usagelog.FieldFallback, usagelog.FieldTakeover, usagelog.FieldUsageObserved, usagelog.FieldTerminalEventSeen, usagelog.FieldTerminalEventValid, usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldAnthropicCacheTTLApplied, usagelog.FieldCacheTTLOverridden, usagelog.FieldAnchorEligible:
 			values[i] = new(sql.NullBool)
-		case usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
+		case usagelog.FieldSupplierCostEstimate, usagelog.FieldInputCost, usagelog.FieldOutputCost, usagelog.FieldCacheCreationCost, usagelog.FieldCacheReadCost, usagelog.FieldTotalCost, usagelog.FieldActualCost, usagelog.FieldRateMultiplier, usagelog.FieldAccountRateMultiplier:
 			values[i] = new(sql.NullFloat64)
 		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldResult, usagelog.FieldSwitches, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldEndToEndFirstOutputMs, usagelog.FieldAttemptFirstOutputMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds, usagelog.FieldBodyBytes, usagelog.FieldFirstReadMs, usagelog.FieldBodyEOFMs, usagelog.FieldBodyReceiptRepeat, usagelog.FieldPreDispatchMs, usagelog.FieldKeepaliveCommitMs, usagelog.FieldWireStatus, usagelog.FieldDispatchCount, usagelog.FieldMinDispatchRemainingMs, usagelog.FieldFinalDeadlineMs, usagelog.FieldClientCancelMs, usagelog.FieldBudgetT0UnixMs:
 			values[i] = new(sql.NullInt64)
@@ -419,6 +423,21 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value != nil && len(*value) > 0 {
 				if err := json.Unmarshal(*value, &_m.Degradations); err != nil {
 					return fmt.Errorf("unmarshal field degradations: %w", err)
+				}
+			}
+		case usagelog.FieldSupplierCostEstimate:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field supplier_cost_estimate", values[i])
+			} else if value.Valid {
+				_m.SupplierCostEstimate = new(float64)
+				*_m.SupplierCostEstimate = value.Float64
+			}
+		case usagelog.FieldMeteringAdjustment:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field metering_adjustment", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.MeteringAdjustment); err != nil {
+					return fmt.Errorf("unmarshal field metering_adjustment: %w", err)
 				}
 			}
 		case usagelog.FieldPricingSource:
@@ -1026,6 +1045,14 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("degradations=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Degradations))
+	builder.WriteString(", ")
+	if v := _m.SupplierCostEstimate; v != nil {
+		builder.WriteString("supplier_cost_estimate=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("metering_adjustment=")
+	builder.WriteString(fmt.Sprintf("%v", _m.MeteringAdjustment))
 	builder.WriteString(", ")
 	builder.WriteString("pricing_source=")
 	builder.WriteString(fmt.Sprintf("%v", _m.PricingSource))

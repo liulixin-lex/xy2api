@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -84,6 +85,13 @@ func TestAnthropicCacheTTLSettlementCopy(t *testing.T) {
 	require.Equal(t, 100, logs.lastLog.CacheCreation5mTokens)
 	require.Zero(t, logs.lastLog.CacheCreation1hTokens)
 	require.True(t, logs.lastLog.CacheTTLOverridden)
+	var adjustment meteringAdjustment
+	require.NoError(t, json.Unmarshal(logs.lastLog.MeteringAdjustment, &adjustment))
+	require.Equal(t, 100, adjustment.RawUsage.InputTokens)
+	require.Equal(t, 30, adjustment.RawUsage.CacheCreation5mTokens)
+	require.Equal(t, 20, adjustment.RawUsage.CacheCreation1hTokens)
+	require.Equal(t, []meteringAdjustmentKind{{Kind: "force_cache_billing", InputToCacheTokens: 100}, {Kind: "cache_ttl_override"}}, adjustment.Adjustments)
+	require.InDelta(t, logs.lastLog.ActualCost, adjustment.CustomerGrossCost-adjustment.CustomerCredit, 1e-12)
 	require.Equal(t, &policy, logs.lastLog.AnthropicCacheTTLPolicy)
 	require.Equal(t, &applied, logs.lastLog.AnthropicCacheTTLApplied)
 }

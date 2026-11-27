@@ -212,6 +212,26 @@ func (_c *UsageLogCreate) SetDegradations(v jsontext.Value) *UsageLogCreate {
 	return _c
 }
 
+// SetSupplierCostEstimate sets the "supplier_cost_estimate" field.
+func (_c *UsageLogCreate) SetSupplierCostEstimate(v float64) *UsageLogCreate {
+	_c.mutation.SetSupplierCostEstimate(v)
+	return _c
+}
+
+// SetNillableSupplierCostEstimate sets the "supplier_cost_estimate" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableSupplierCostEstimate(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetSupplierCostEstimate(*v)
+	}
+	return _c
+}
+
+// SetMeteringAdjustment sets the "metering_adjustment" field.
+func (_c *UsageLogCreate) SetMeteringAdjustment(v jsontext.Value) *UsageLogCreate {
+	_c.mutation.SetMeteringAdjustment(v)
+	return _c
+}
+
 // SetPricingSource sets the "pricing_source" field.
 func (_c *UsageLogCreate) SetPricingSource(v jsontext.Value) *UsageLogCreate {
 	_c.mutation.SetPricingSource(v)
@@ -1523,6 +1543,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldDegradations, field.TypeJSON, value)
 		_node.Degradations = value
 	}
+	if value, ok := _c.mutation.SupplierCostEstimate(); ok {
+		_spec.SetField(usagelog.FieldSupplierCostEstimate, field.TypeFloat64, value)
+		_node.SupplierCostEstimate = &value
+	}
+	if value, ok := _c.mutation.MeteringAdjustment(); ok {
+		_spec.SetField(usagelog.FieldMeteringAdjustment, field.TypeJSON, value)
+		_node.MeteringAdjustment = value
+	}
 	if value, ok := _c.mutation.PricingSource(); ok {
 		_spec.SetField(usagelog.FieldPricingSource, field.TypeJSON, value)
 		_node.PricingSource = value
@@ -2205,6 +2233,48 @@ func (u *UsageLogUpsert) UpdateDegradations() *UsageLogUpsert {
 // ClearDegradations clears the value of the "degradations" field.
 func (u *UsageLogUpsert) ClearDegradations() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldDegradations)
+	return u
+}
+
+// SetSupplierCostEstimate sets the "supplier_cost_estimate" field.
+func (u *UsageLogUpsert) SetSupplierCostEstimate(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldSupplierCostEstimate, v)
+	return u
+}
+
+// UpdateSupplierCostEstimate sets the "supplier_cost_estimate" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateSupplierCostEstimate() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldSupplierCostEstimate)
+	return u
+}
+
+// AddSupplierCostEstimate adds v to the "supplier_cost_estimate" field.
+func (u *UsageLogUpsert) AddSupplierCostEstimate(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldSupplierCostEstimate, v)
+	return u
+}
+
+// ClearSupplierCostEstimate clears the value of the "supplier_cost_estimate" field.
+func (u *UsageLogUpsert) ClearSupplierCostEstimate() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldSupplierCostEstimate)
+	return u
+}
+
+// SetMeteringAdjustment sets the "metering_adjustment" field.
+func (u *UsageLogUpsert) SetMeteringAdjustment(v jsontext.Value) *UsageLogUpsert {
+	u.Set(usagelog.FieldMeteringAdjustment, v)
+	return u
+}
+
+// UpdateMeteringAdjustment sets the "metering_adjustment" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateMeteringAdjustment() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldMeteringAdjustment)
+	return u
+}
+
+// ClearMeteringAdjustment clears the value of the "metering_adjustment" field.
+func (u *UsageLogUpsert) ClearMeteringAdjustment() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldMeteringAdjustment)
 	return u
 }
 
@@ -3904,6 +3974,55 @@ func (u *UsageLogUpsertOne) UpdateDegradations() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearDegradations() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearDegradations()
+	})
+}
+
+// SetSupplierCostEstimate sets the "supplier_cost_estimate" field.
+func (u *UsageLogUpsertOne) SetSupplierCostEstimate(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetSupplierCostEstimate(v)
+	})
+}
+
+// AddSupplierCostEstimate adds v to the "supplier_cost_estimate" field.
+func (u *UsageLogUpsertOne) AddSupplierCostEstimate(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddSupplierCostEstimate(v)
+	})
+}
+
+// UpdateSupplierCostEstimate sets the "supplier_cost_estimate" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateSupplierCostEstimate() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateSupplierCostEstimate()
+	})
+}
+
+// ClearSupplierCostEstimate clears the value of the "supplier_cost_estimate" field.
+func (u *UsageLogUpsertOne) ClearSupplierCostEstimate() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearSupplierCostEstimate()
+	})
+}
+
+// SetMeteringAdjustment sets the "metering_adjustment" field.
+func (u *UsageLogUpsertOne) SetMeteringAdjustment(v jsontext.Value) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetMeteringAdjustment(v)
+	})
+}
+
+// UpdateMeteringAdjustment sets the "metering_adjustment" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateMeteringAdjustment() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateMeteringAdjustment()
+	})
+}
+
+// ClearMeteringAdjustment clears the value of the "metering_adjustment" field.
+func (u *UsageLogUpsertOne) ClearMeteringAdjustment() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearMeteringAdjustment()
 	})
 }
 
@@ -5991,6 +6110,55 @@ func (u *UsageLogUpsertBulk) UpdateDegradations() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearDegradations() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearDegradations()
+	})
+}
+
+// SetSupplierCostEstimate sets the "supplier_cost_estimate" field.
+func (u *UsageLogUpsertBulk) SetSupplierCostEstimate(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetSupplierCostEstimate(v)
+	})
+}
+
+// AddSupplierCostEstimate adds v to the "supplier_cost_estimate" field.
+func (u *UsageLogUpsertBulk) AddSupplierCostEstimate(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddSupplierCostEstimate(v)
+	})
+}
+
+// UpdateSupplierCostEstimate sets the "supplier_cost_estimate" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateSupplierCostEstimate() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateSupplierCostEstimate()
+	})
+}
+
+// ClearSupplierCostEstimate clears the value of the "supplier_cost_estimate" field.
+func (u *UsageLogUpsertBulk) ClearSupplierCostEstimate() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearSupplierCostEstimate()
+	})
+}
+
+// SetMeteringAdjustment sets the "metering_adjustment" field.
+func (u *UsageLogUpsertBulk) SetMeteringAdjustment(v jsontext.Value) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetMeteringAdjustment(v)
+	})
+}
+
+// UpdateMeteringAdjustment sets the "metering_adjustment" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateMeteringAdjustment() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateMeteringAdjustment()
+	})
+}
+
+// ClearMeteringAdjustment clears the value of the "metering_adjustment" field.
+func (u *UsageLogUpsertBulk) ClearMeteringAdjustment() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearMeteringAdjustment()
 	})
 }
 

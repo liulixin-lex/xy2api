@@ -147,6 +147,7 @@ func (h *UsageExportHandler) Create(c *gin.Context) {
 		filters.ExactTotal = false
 		o.Filters = filters
 		o.Format = "xlsx"
+		o.Version = usageexport.CurrentFormatVersion
 		o.IncludeInternalTierDetails = operatoraccess.ScopeFrom(c.Request.Context()) == nil
 	} else {
 		parsed, ok := h.user.parseUserUsageFilters(c, false)

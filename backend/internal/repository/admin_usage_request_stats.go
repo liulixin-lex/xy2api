@@ -26,7 +26,7 @@ func (r *usageLogRepository) AdminRequestStats(ctx context.Context, filters Usag
 				cache_read_tokens,
 				total_cost,
 				actual_cost,
-				COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1) AS account_cost,
+				COALESCE(supplier_cost_estimate, COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)) AS account_cost,
 				duration_ms, result, end_to_end_first_output_ms
 			FROM requests
 			%s

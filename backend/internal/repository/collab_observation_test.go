@@ -37,14 +37,14 @@ func TestCollabObservationUsageSingleBatchAndScan(t *testing.T) {
 	require.Equal(t, collabFixture(), restored.Usage.CollabObservation)
 	prepared := prepareUsageLogInsert(restored.Usage)
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
-	require.Equal(t, string(collabFixture()), prepared.args[len(prepared.args)-1])
+	require.Equal(t, string(collabFixture()), prepared.args[len(prepared.args)-3])
 	key := usageLogBatchKey(prepared.requestID, 2)
 	batch, args := buildUsageLogBatchInsertQuery([]string{key}, map[string]usageLogInsertPrepared{key: prepared})
 	best, bestArgs := buildUsageLogBestEffortInsertQuery([]usageLogInsertPrepared{prepared})
 	require.Equal(t, 3, strings.Count(batch, "collab_observation"))
 	require.Equal(t, 3, strings.Count(best, "collab_observation"))
-	require.Equal(t, string(collabFixture()), args[len(args)-1])
-	require.Equal(t, string(collabFixture()), bestArgs[len(bestArgs)-1])
+	require.Equal(t, string(collabFixture()), args[len(args)-3])
+	require.Equal(t, string(collabFixture()), bestArgs[len(bestArgs)-3])
 
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -57,7 +57,7 @@ func TestCollabObservationUsageSingleBatchAndScan(t *testing.T) {
 		values = append(values, v)
 	}
 	for _, raw := range []driver.Value{nil, []byte(collabFixture()), []byte(collabSparseFixture()), []byte("{malformed}")} {
-		values[len(values)-1] = raw
+		values[len(values)-3] = raw
 		mock.ExpectQuery("SELECT fixture").WillReturnRows(sqlmock.NewRows(columns).AddRow(values...))
 		got, err := scanUsageLog(db.QueryRow("SELECT fixture"))
 		require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestCollabObservationOptionalWritesCannotLoseUsageRows(t *testing.T) {
 				if name == "valid" || name == "sparse" {
 					expected = string(collabFixture())
 				}
-				require.Equal(t, expected, prepared.args[len(prepared.args)-1])
+				require.Equal(t, expected, prepared.args[len(prepared.args)-3])
 				repo := newUsageLogRepositoryWithSQL(nil, db)
 				switch path {
 				case "single":
@@ -105,7 +105,7 @@ func TestCollabObservationOptionalWritesCannotLoseUsageRows(t *testing.T) {
 				case "batch":
 					key := usageLogBatchKey(row.RequestID, 2)
 					_, args := buildUsageLogBatchInsertQuery([]string{key}, map[string]usageLogInsertPrepared{key: prepared})
-					require.Equal(t, expected, args[len(args)-1])
+					require.Equal(t, expected, args[len(args)-3])
 					payload, err := json.Marshal([]usageLogBatchRow{{RequestID: row.RequestID, APIKeyID: 2, ID: 7, CreatedAt: now, Inserted: true}})
 					require.NoError(t, err)
 					mock.ExpectQuery("WITH").WithArgs(anySliceToDriverValues(args)...).WillReturnRows(sqlmock.NewRows([]string{"json_agg"}).AddRow(payload))
@@ -114,7 +114,7 @@ func TestCollabObservationOptionalWritesCannotLoseUsageRows(t *testing.T) {
 					require.True(t, inserted[key])
 				case "best_effort":
 					_, args := buildUsageLogBestEffortInsertQuery([]usageLogInsertPrepared{prepared})
-					require.Equal(t, expected, args[len(args)-1])
+					require.Equal(t, expected, args[len(args)-3])
 					mock.ExpectExec("WITH").WithArgs(anySliceToDriverValues(args)...).WillReturnResult(sqlmock.NewResult(7, 1))
 					result := make(chan error, 1)
 					repo.flushBestEffortBatch(db, []usageLogBestEffortRequest{{prepared: prepared, apiKeyID: 2, resultCh: result}})
@@ -153,7 +153,7 @@ func TestCollabObservationCorruptRecordDoesNotBreakBillingIntent(t *testing.T) {
 		require.Equal(t, 1.0, row.ActualCost)
 		require.Equal(t, 10, row.InputTokens)
 		prepared := prepareUsageLogInsert(row)
-		require.Nil(t, prepared.args[len(prepared.args)-1])
+		require.Nil(t, prepared.args[len(prepared.args)-3])
 	}
 }
 

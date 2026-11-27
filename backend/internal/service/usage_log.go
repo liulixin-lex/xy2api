@@ -106,9 +106,11 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 
 type UsageLog struct {
 	// CollabObservation is internal accounting metadata; only the admin DTO exposes it.
-	CollabObservation json.RawMessage `json:"collab_observation,omitempty"`
-	ProfitBasis       json.RawMessage
-	PricingSource     json.RawMessage `json:"pricing_source,omitempty"`
+	CollabObservation    json.RawMessage `json:"collab_observation,omitempty"`
+	MeteringAdjustment   json.RawMessage `json:"metering_adjustment,omitempty"`
+	SupplierCostEstimate *float64        `json:"supplier_cost_estimate,omitempty"`
+	ProfitBasis          json.RawMessage
+	PricingSource        json.RawMessage `json:"pricing_source,omitempty"`
 
 	RequestScope       resilience.GatewayRequestScope
 	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
@@ -195,7 +197,7 @@ type UsageLog struct {
 	LongContextBillingApplied bool
 	// AccountRateMultiplier 账号计费倍率快照（nil 表示历史数据，按 1.0 处理）
 	AccountRateMultiplier *float64
-	// AccountStatsCost 账号统计定价预计算费用（nil = 使用默认公式 total_cost × account_rate_multiplier）
+	// AccountStatsCost legacy 账号统计定价预计算费用（nil = 使用默认公式 total_cost × account_rate_multiplier）
 	AccountStatsCost *float64
 	// OriginGroupID is the group the request was made for when an
 	// availability fallback group served it (xy2api resilience).
