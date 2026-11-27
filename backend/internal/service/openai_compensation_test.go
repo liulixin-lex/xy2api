@@ -41,6 +41,27 @@ func TestOpenAICompensationEligibilityAndMargin(t *testing.T) {
 		{name: "multi_send", known: true, want: 10, reason: "full_chain_cost_unknown", mutate: func(c *UsageBillingCommand, _ *resilience.GatewayRequestMetadata, _ *OpenAICompensationAction) {
 			c.Usage.DispatchCount = new(int64(2))
 		}},
+		{name: "inexact_memory", known: true, want: 10, reason: "full_chain_cost_unknown", mutate: func(c *UsageBillingCommand, _ *resilience.GatewayRequestMetadata, _ *OpenAICompensationAction) {
+			c.Usage.DispatchCountInexact = true
+		}},
+		{name: "inexact_persisted", known: true, want: 10, reason: "full_chain_cost_unknown", mutate: func(c *UsageBillingCommand, _ *resilience.GatewayRequestMetadata, _ *OpenAICompensationAction) {
+			c.Usage.DispatchPhases = json.RawMessage(`{"count_version":2,"count_inexact":true}`)
+			raw, err := json.Marshal(c.Usage)
+			if err != nil {
+				panic(err)
+			}
+			var restored UsageLog
+			if err = json.Unmarshal(raw, &restored); err != nil {
+				panic(err)
+			}
+			c.Usage = &restored
+		}},
+		{name: "malformed_metadata", known: true, want: 10, reason: "full_chain_cost_unknown", mutate: func(c *UsageBillingCommand, _ *resilience.GatewayRequestMetadata, _ *OpenAICompensationAction) {
+			c.Usage.DispatchPhases = json.RawMessage(`{"count_version":2,"count_inexact":"true"}`)
+		}},
+		{name: "missing_count", known: true, want: 10, reason: "full_chain_cost_unknown", mutate: func(c *UsageBillingCommand, _ *resilience.GatewayRequestMetadata, _ *OpenAICompensationAction) {
+			c.Usage.DispatchCount = nil
+		}},
 		{name: "switch", known: true, want: 10, reason: "full_chain_cost_unknown", mutate: func(_ *UsageBillingCommand, m *resilience.GatewayRequestMetadata, a *OpenAICompensationAction) {
 			m.Switches = 1
 			a.Kind = "request_switch"

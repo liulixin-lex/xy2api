@@ -184,12 +184,8 @@ func applyOpenAICompensation(cmd *UsageBillingCommand, meta *resilience.GatewayR
 		decision.Reason = "pricing_unavailable"
 	} else {
 		decision.EstimatedAmount = QuantizeUsageBillingAmount(estimate)
-		var phases struct {
-			CountVersion int `json:"count_version"`
-		}
-		_ = json.Unmarshal(row.DispatchPhases, &phases)
 		switch {
-		case meta.Switches > 0 || action.Kind == "request_switch" || meta.HadFailedAttempt || meta.Result != resilience.RequestSuccess || phases.CountVersion != 2 || row.DispatchCount == nil || *row.DispatchCount != 1:
+		case meta.Switches > 0 || action.Kind == "request_switch" || meta.HadFailedAttempt || meta.Result != resilience.RequestSuccess || !row.DispatchCountExact() || *row.DispatchCount != 1:
 			decision.Reason = "full_chain_cost_unknown"
 		case row.SupplierCostEstimate == nil || !validUsageBillingAmount(*row.SupplierCostEstimate) || row.UsageObserved == nil || !*row.UsageObserved:
 			decision.Reason = "supplier_cost_unknown"
