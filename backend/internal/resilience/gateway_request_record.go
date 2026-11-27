@@ -23,15 +23,16 @@ const (
 // GatewayRequestMetadata is frozen before arranging billing. It must survive a
 // later websocket turn and client cancellation without consulting mutable state.
 type GatewayRequestMetadata struct {
-	CollabObservation  json.RawMessage
-	ProfitBasis        *ProfitBasis
-	RequestScope       GatewayRequestScope
-	ConversionNotices  []apicompat.ConversionNotice `json:"degradations,omitempty"`
-	UsageObserved      *bool
-	UsageSource        *string
-	TerminalEventSeen  *bool
-	TerminalEventValid *bool
-	ResponseBodyType   *string
+	CollabObservation        json.RawMessage
+	ProfitBasis              *ProfitBasis
+	CompensationProfitPolicy CompensationProfitPolicy
+	RequestScope             GatewayRequestScope
+	ConversionNotices        []apicompat.ConversionNotice `json:"degradations,omitempty"`
+	UsageObserved            *bool
+	UsageSource              *string
+	TerminalEventSeen        *bool
+	TerminalEventValid       *bool
+	ResponseBodyType         *string
 
 	RequestID                                         string
 	Result                                            int16
@@ -337,7 +338,7 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 			}
 		}
 		r.final = cloneGatewayRequest(&GatewayRequestMetadata{CollabObservation: freezeCollabObservationForBilling(s.collab), RequestID: s.requestID, Result: result, Switches: r.switches, Fallback: r.fallback, Takeover: r.takeover,
-			HadFailedAttempt: r.failed, CompensationKey: compensationKey, StartedAt: r.started, AccountID: r.lastAccount, AccountChangedAt: optionalTime(r.accountChangedAt), AccountChangedFrom: optionalInt64(r.accountChangedFrom), FirstOutputMs: first, DurationMs: int(time.Since(r.started).Milliseconds()),
+			CompensationProfitPolicy: s.compensationProfitPolicy, HadFailedAttempt: r.failed, CompensationKey: compensationKey, StartedAt: r.started, AccountID: r.lastAccount, AccountChangedAt: optionalTime(r.accountChangedAt), AccountChangedFrom: optionalInt64(r.accountChangedFrom), FirstOutputMs: first, DurationMs: int(time.Since(r.started).Milliseconds()),
 			ErrorClass: r.errorClass, InputTokens: r.input, CacheReadTokens: r.read, CacheCreationTokens: r.creation,
 			RequestScope: r.RequestScope, ConversionNotices: s.conversionNotices,
 			ProfitBasis:   r.profit.snapshot(),

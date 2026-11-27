@@ -8,6 +8,7 @@ import (
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,7 +35,7 @@ func TestCompensationStoreFreezesOnceAndExpires(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "migrate", action.Kind)
 	require.Equal(t, ref, *action.Reference)
-	action, err = store.TakeCompensationAction(ctx, "fixture", "next", 2)
+	action, err = store.TakeCompensationAction(ctx, "fixture", "other", 2)
 	require.NoError(t, err)
 	require.Nil(t, action)
 	ratio, ok, err := store.SessionCacheRatio(ctx, "fixture")
@@ -44,17 +45,17 @@ func TestCompensationStoreFreezesOnceAndExpires(t *testing.T) {
 	// A late old settlement cannot replace a newer cold reference.
 	require.NoError(t, store.SetCompensationReference(ctx, "fixture", ref))
 	require.NoError(t, store.FreezeCompensationAction(ctx, "fixture", service.OpenAICompensationAction{Kind: "migrate", From: 1, To: 2, At: cold.At}))
-	action, err = store.TakeCompensationAction(ctx, "fixture", "next", 2)
+	action, err = store.TakeCompensationAction(ctx, "fixture", "cold-bill", 2)
 	require.NoError(t, err)
 	require.Equal(t, 0, action.Reference.CacheRead)
 	mr.FastForward(10 * time.Minute)
 	require.NoError(t, store.FreezeCompensationAction(ctx, "fixture", service.OpenAICompensationAction{Kind: "migrate", From: 1, To: 2, At: at}))
-	action, err = store.TakeCompensationAction(ctx, "fixture", "next", 2)
+	action, err = store.TakeCompensationAction(ctx, "fixture", "expired-reference", 2)
 	require.NoError(t, err)
 	require.Nil(t, action.Reference)
 	require.NoError(t, store.FreezeCompensationAction(ctx, "fixture", service.OpenAICompensationAction{Kind: "migrate", From: 1, To: 2, At: at}))
 	mr.FastForward(time.Hour)
-	action, err = store.TakeCompensationAction(ctx, "fixture", "next", 2)
+	action, err = store.TakeCompensationAction(ctx, "fixture", "expired-action", 2)
 	require.NoError(t, err)
 	require.Nil(t, action)
 }
@@ -68,9 +69,9 @@ func TestCompensationStoreConcurrentConsumption(t *testing.T) {
 	require.NoError(t, store.FreezeCompensationAction(ctx, "fixture", service.OpenAICompensationAction{Kind: "owner_released", From: 1, At: time.Now()}))
 	var wg sync.WaitGroup
 	var claims atomic.Int32
-	for range 16 {
+	for i := range 16 {
 		wg.Go(func() {
-			a, e := store.TakeCompensationAction(ctx, "fixture", "next", 2)
+			a, e := store.TakeCompensationAction(ctx, "fixture", "bill-"+strconv.Itoa(i), 2)
 			if e != nil {
 				t.Error(e)
 			}

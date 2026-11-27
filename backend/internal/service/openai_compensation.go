@@ -103,11 +103,10 @@ func (s *OpenAIGatewayService) compensationResolver(ctx context.Context, row *Us
 	if key == "" || row.GroupID == nil {
 		return nil, func() {}
 	}
-	// Identical source and precedence to the real-time OpenAI profit gate.
-	group := s.openAIProfitControlGroup(ctx, *row.GroupID)
-	margin, known := 0.0, group != nil
-	if group != nil && group.ProfitControlEnabled {
-		margin = group.ProfitMinMargin
+	policy := meta.CompensationProfitPolicy
+	margin, known := 0.0, policy.Known
+	if policy.Enabled {
+		margin = policy.MinMargin
 	}
 	resolve := func(cmd *UsageBillingCommand) {
 		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionCacheRatioTimeout)

@@ -99,3 +99,30 @@ func CloneProfitBasis(in *ProfitBasis) *ProfitBasis {
 	}
 	return out
 }
+
+// CompensationProfitPolicy is the scheduling gate's configuration, not a
+// billing-time lookup. Known=false distinguishes fail-open from a disabled gate.
+type CompensationProfitPolicy struct {
+	GroupID   int64
+	Known     bool
+	Enabled   bool
+	MinMargin float64
+}
+
+func (s *RequestState) NoteCompensationProfitPolicy(policy CompensationProfitPolicy) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.compensationProfitPolicy = policy
+	s.mu.Unlock()
+}
+
+func (s *RequestState) CompensationProfitPolicy() CompensationProfitPolicy {
+	if s == nil {
+		return CompensationProfitPolicy{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.compensationProfitPolicy
+}

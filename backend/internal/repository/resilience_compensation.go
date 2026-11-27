@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"time"
 
@@ -31,12 +33,16 @@ var compensationFreezeScript = redis.NewScript(`
  return 1
 `)
 var compensationTakeScript = redis.NewScript(`
+ local claimed=redis.call('GET',KEYS[2])
+ if claimed then return claimed end
  local action=redis.call('GET',KEYS[1])
  if action then
   local a=cjson.decode(action)
+  if a.kind=='request_switch' and a.request_id~=ARGV[1] then return nil end
   -- The triggering bill may be emitted after a post-output owner release.
   -- It is not the next bill and cannot consume the next owner's reference.
   if a.request_id==ARGV[1] and a.kind~='request_switch' and a.from==tonumber(ARGV[2]) then return nil end
+  redis.call('SET',KEYS[2],action,'PX',ARGV[3])
   redis.call('DEL',KEYS[1])
  end
  return action
@@ -68,11 +74,13 @@ func (s *resilienceStore) FreezeCompensationAction(ctx context.Context, key stri
 	return compensationFreezeScript.Run(ctx, s.rdb, []string{reference, pending}, string(raw), int64(time.Hour/time.Millisecond)).Err()
 }
 func (s *resilienceStore) TakeCompensationAction(ctx context.Context, key, requestID string, accountID int64) (*service.OpenAICompensationAction, error) {
-	if key == "" {
+	if key == "" || requestID == "" {
 		return nil, nil
 	}
 	_, pending := compensationRedisKeys(key)
-	raw, err := compensationTakeScript.Run(ctx, s.rdb, []string{pending}, requestID, accountID).Text()
+	claimID := sha256.Sum256([]byte(requestID))
+	claimed := pending + ":claimed:" + hex.EncodeToString(claimID[:])
+	raw, err := compensationTakeScript.Run(ctx, s.rdb, []string{pending, claimed}, requestID, accountID, int64(time.Hour/time.Millisecond)).Text()
 	if err == redis.Nil {
 		return nil, nil
 	}

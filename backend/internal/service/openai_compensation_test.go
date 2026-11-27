@@ -194,8 +194,12 @@ func TestOpenAICompensationUsesGateConfigAndRedisFailureIsZero(t *testing.T) {
 		c.Usage.BillingMode = new(string(BillingModeToken))
 		store := &compensationMemoryStore{action: a}
 		svc := &OpenAIGatewayService{resilience: &ResilienceService{store: store}}
-		ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{ID: 7, Hydrated: true, Status: StatusActive, Platform: PlatformOpenAI, ProfitControlEnabled: enabled, ProfitMinMargin: .2})
-		ctx = resilience.WithGatewayRequestMetadata(ctx, m)
+		st := resilience.NewRequestState()
+		requestCtx := resilience.WithRequestState(context.Background(), st)
+		requestCtx = context.WithValue(requestCtx, ctxkey.Group, &Group{ID: 7, Hydrated: true, Status: StatusActive, Platform: PlatformOpenAI, ProfitControlEnabled: enabled, ProfitMinMargin: .2})
+		svc.withOpenAIProfitControlGate(requestCtx, c.Usage.GroupID)
+		m.CompensationProfitPolicy = st.CompensationProfitPolicy()
+		ctx := resilience.WithGatewayRequestMetadata(context.Background(), m)
 		resolve, note := svc.compensationResolver(ctx, c.Usage, func(float64) (float64, error) { return 8, nil })
 		require.NotNil(t, resolve)
 		resolve(c)
@@ -264,7 +268,9 @@ func TestOpenAICompensationRecordUsageKeepsRawCostAndUsesTierQuote(t *testing.T)
 	ctx := resilience.WithRequestState(context.Background(), st)
 	ctx = context.WithValue(ctx, ctxkey.Group, key.Group)
 	meta := &resilience.GatewayRequestMetadata{RequestID: "fixture", Result: resilience.RequestSuccess, RequestScope: resilience.GatewayRequestScopeText, CompensationKey: st.TurnKey()}
-	ctx = resilience.WithGatewayRequestMetadata(ctx, meta)
+	svc.withOpenAIProfitControlGate(ctx, key.GroupID)
+	meta.CompensationProfitPolicy = st.CompensationProfitPolicy()
+	ctx = resilience.WithGatewayRequestMetadata(resilience.WithRequestState(context.Background(), st), meta)
 	// Real dispatch reading stays the same as the production NoteDispatch path.
 	st.NoteDispatch(time.Now(), "direct")
 	store.action = &OpenAICompensationAction{Kind: "migrate", From: 1, To: 3, At: at.Add(-time.Second), Reference: &OpenAICompensationReference{CacheRead: 80, Total: 100, At: at.Add(-time.Minute)}}

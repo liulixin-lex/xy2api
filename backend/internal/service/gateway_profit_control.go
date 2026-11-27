@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 // withGatewayProfitControlGate installs the gate only for explicitly marked
@@ -15,14 +16,17 @@ func (s *GatewayService) withGatewayProfitControlGate(ctx context.Context, group
 		return ctx
 	}
 	if existing, ok := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); ok && existing != nil && existing.groupID == *groupID {
+		resilience.StateFrom(ctx).NoteCompensationProfitPolicy(existing.compensationPolicy())
 		return ctx
 	}
 
+	noteCompensationProfitGroup(ctx, *groupID, nil)
 	group, err := s.resolveProfitControlGroup(ctx, *groupID)
 	if err != nil {
 		slog.Warn("profit_control_group_load_failed", "group_id", *groupID, "error", err)
 		return s.clearForeignProfitControlGate(ctx, groupID)
 	}
+	noteCompensationProfitGroup(ctx, *groupID, group)
 	if group == nil || (!group.ProfitControlEnabled && groupProfitFloor(group) <= 0) || !profitControlPlatformSupported(group.Platform) {
 		return s.clearForeignProfitControlGate(ctx, groupID)
 	}
@@ -49,6 +53,7 @@ func (s *GatewayService) withGatewayProfitControlGate(ctx context.Context, group
 		platform:  group.Platform,
 		threshold: threshold,
 		ceilingOn: group.ProfitControlEnabled,
+		minMargin: group.ProfitMinMargin,
 		floor:     groupProfitFloor(group),
 		sell:      downstream,
 		pricingAt: pricingAt,

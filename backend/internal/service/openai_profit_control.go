@@ -73,6 +73,7 @@ import (
 
 	"github.com/liulixin-lex/xy2api/internal/pkg/ctxkey"
 	"github.com/liulixin-lex/xy2api/internal/pkg/timezone"
+	"github.com/liulixin-lex/xy2api/internal/resilience"
 )
 
 const (
@@ -129,6 +130,7 @@ type openAIProfitControlGate struct {
 	// threshold = D(pricingAt) × (1 − margin − buffer)，账号倍率必须 <= 它。
 	threshold float64
 	ceilingOn bool
+	minMargin float64
 	floor     float64
 	sell      float64
 	// pricingAt 是本请求的统一定价时刻（D 侧）。
@@ -214,6 +216,7 @@ func (s *OpenAIGatewayService) withOpenAIProfitControlGate(ctx context.Context, 
 	}
 	if groupID != nil {
 		if existing, ok := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); ok && existing != nil && existing.groupID == *groupID {
+			resilience.StateFrom(ctx).NoteCompensationProfitPolicy(existing.compensationPolicy())
 			return ctx
 		}
 	}
@@ -232,6 +235,7 @@ func (s *OpenAIGatewayService) withOpenAIProfitControlGate(ctx context.Context, 
 }
 
 func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Context, groupID *int64) *openAIProfitControlGate {
+	noteCompensationProfitGroup(ctx, derefGroupID(groupID), nil)
 	if s == nil || groupID == nil || *groupID <= 0 {
 		return nil
 	}
@@ -239,7 +243,21 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 	// 直接复用 auth cache 分组，热路径零额外查询；composite 父分组路由到成员
 	// 分组等 ID 不一致场景才回源仓库读取。auth 快照的分组字段完备性由
 	// GetByKeyForAuth 投影 + 集成测试保证（防投影漏列导致门静默失效）。
-	group := s.openAIProfitControlGroup(ctx, *groupID)
+	var group *Group
+	if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) && ctxGroup.ID == *groupID {
+		group = ctxGroup
+	} else if s.schedulerSnapshot != nil {
+		// Lite 读取：门只用平台/倍率/利润/高峰字段，不需要账号计数聚合。
+		loaded, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, *groupID)
+		if err != nil {
+			// fail-open：配置系统故障时可用性优先，该窗口内利润保证不成立，
+			// 依赖 WARN 暴露；不把瞬时 DB 抖动放大成全站不可调度。
+			slog.Warn("profit_control_group_load_failed", "group_id", *groupID, "error", err)
+			return nil
+		}
+		group = loaded
+	}
+	noteCompensationProfitGroup(ctx, *groupID, group)
 	if group == nil || (!group.ProfitControlEnabled && groupProfitFloor(group) <= 0) ||
 		(group.Platform != PlatformOpenAI && group.Platform != PlatformGrok) {
 		return nil
@@ -269,6 +287,7 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 		platform:  group.Platform,
 		threshold: threshold,
 		ceilingOn: group.ProfitControlEnabled,
+		minMargin: group.ProfitMinMargin,
 		floor:     groupProfitFloor(group),
 		sell:      downstream,
 		pricingAt: pricingAt,
@@ -284,8 +303,11 @@ func attachSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult)
 		return nil
 	}
 	attachSelectionContext(ctx, sel)
+	policy := resilience.StateFrom(ctx).CompensationProfitPolicy()
+	sel.compensationProfitPolicy = &policy
 	if gate, ok := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); ok && gate != nil {
 		sel.profitGate = gate
+		policy = gate.compensationPolicy()
 	}
 	return sel
 }
@@ -296,6 +318,13 @@ func attachSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult)
 // 绑定，否则这两步会因为看不到调度栈内安装的门而退化为空操作。
 func ContextWithSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult) context.Context {
 	ctx = contextWithSelectionContext(ctx, sel)
+	if sel != nil {
+		if sel.profitGate != nil {
+			resilience.StateFrom(ctx).NoteCompensationProfitPolicy(sel.profitGate.compensationPolicy())
+		} else if sel.compensationProfitPolicy != nil {
+			resilience.StateFrom(ctx).NoteCompensationProfitPolicy(*sel.compensationProfitPolicy)
+		}
+	}
 	if sel == nil || sel.profitGate == nil {
 		return ctx
 	}
@@ -481,21 +510,16 @@ func (o *openAIProfitControlObserver) maybeLog(groupID int64, platform string, t
 	)
 }
 
-// Shared with compensation so a missing configuration is never a disabled gate.
-func (s *OpenAIGatewayService) openAIProfitControlGroup(ctx context.Context, groupID int64) *Group {
-	var group *Group
-	if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) && ctxGroup.ID == groupID {
-		group = ctxGroup
-	} else if s.schedulerSnapshot != nil {
-		// Lite 读取：门只用平台/倍率/利润/高峰字段，不需要账号计数聚合。
-		loaded, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, groupID)
-		if err != nil {
-			// fail-open：配置系统故障时可用性优先，该窗口内利润保证不成立，
-			// 依赖 WARN 暴露；不把瞬时 DB 抖动放大成全站不可调度。
-			slog.Warn("profit_control_group_load_failed", "group_id", groupID, "error", err)
-			return nil
-		}
-		group = loaded
+func (g *openAIProfitControlGate) compensationPolicy() resilience.CompensationProfitPolicy {
+	return resilience.CompensationProfitPolicy{GroupID: g.groupID, Known: true, Enabled: g.ceilingOn, MinMargin: g.minMargin}
+}
+
+func noteCompensationProfitGroup(ctx context.Context, groupID int64, group *Group) {
+	policy := resilience.CompensationProfitPolicy{GroupID: groupID}
+	if group != nil {
+		policy.Known = true
+		policy.Enabled = group.ProfitControlEnabled
+		policy.MinMargin = group.ProfitMinMargin
 	}
-	return group
+	resilience.StateFrom(ctx).NoteCompensationProfitPolicy(policy)
 }
