@@ -572,7 +572,35 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		quotaPlatform = PlatformFromAPIKey(billingKey)
 	}
 
+	var resolveCompensation func(*UsageBillingCommand)
+	noteReference := func() {}
+	if account.Platform == PlatformOpenAI {
+		frozen := freezeMeteringPricing(&GatewayService{billingService: s.billingService, channelService: s.channelService, resolver: s.resolver})
+		pricing := &OpenAIGatewayService{billingService: frozen.billingService, channelService: frozen.channelService, resolver: frozen.resolver, cfg: s.cfg}
+		quoteCompensated := func(adjusted UsageTokens) (float64, error) {
+			quoteTier := func(tier string) (*CostBreakdown, error) {
+				return pricing.calculateOpenAIRecordUsageCost(ctx, result, apiKey, billingModels, multiplier, imageMultiplier, videoMultiplier, baseMultiplier, adjusted, tier, longContextBillingGate, pricingAt)
+			}
+			adjustedCost, e := quoteTier(serviceTier)
+			if e != nil {
+				return 0, e
+			}
+			if _, e = settleOpenAITierCharge(result, billingAccount, apiKey, tierResolution, adjustedCost, quoteTier); e != nil {
+				return 0, e
+			}
+			return adjustedCost.ActualCost, nil
+		}
+		creditQuote := func(gap float64) (float64, error) {
+			gross, e := quoteCompensated(tokens)
+			if e != nil {
+				return 0, e
+			}
+			return compensationQuote(tokens, gross, quoteCompensated)(gap)
+		}
+		resolveCompensation, noteReference = s.compensationResolver(ctx, usageLog, creditQuote, meteringAdjustment{Version: 1, RawUsage: metered, CustomerGrossCost: grossValue.ActualCost, CustomerCredit: grossValue.ActualCost - usageLog.ActualCost, SupplierCostSource: supplier.Source, CostScope: "final_observed_attempt"})
+	}
 	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+		ResolveCompensation:        resolveCompensation,
 		Cost:                       cost,
 		User:                       user,
 		APIKey:                     billingKey,
@@ -590,6 +618,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		// Retain the frozen pending intent instead of misreporting a free request.
 		return billingErr
 	}
+	noteReference()
 	writeUsageLogAfterBilling(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 	s.logCacheSettlement(result, usageLog)
 

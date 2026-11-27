@@ -148,6 +148,9 @@ func (s *selectionSession) selectOwner(ctx context.Context, groupID int64, sessi
 	}
 	change := &openAIStickyChange{groupID: groupID, session: strings.TrimSpace(sessionHash), key: key, model: model, expected: expected,
 		fromPriority: new(owner.Priority), fromModel: OpenAIAttemptModel(owner, model), kind: kind, voluntary: facts, ttl: s.bindingTTL, cache: s.cache, resetAt: s.resetAt, leases: s.leases, trialSession: sessionHash}
+	if pending := pendingOpenAIStickyChange(ctx); pending != nil {
+		change.recordCompensationAction = pending.recordCompensationAction
+	}
 	soft, veto := s.voluntaryAvoid(ctx, groupID, sessionHash, facts)
 	avoided, err := sessionAvoidAfterReset(ctx, s.store, groupID, strings.TrimSpace(sessionHash), s.resetAt)
 	if err != nil {

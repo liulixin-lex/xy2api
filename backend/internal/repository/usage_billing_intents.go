@@ -38,7 +38,15 @@ func (r *usageBillingRepository) prepareBillingIntent(ctx context.Context, cmd *
 	if err != nil {
 		return nil, fmt.Errorf("encode billing intent: %w", err)
 	}
-	_, err = r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = enableTierBillingProtocol(ctx, tx); err != nil {
+		return nil, err
+	}
+	inserted, err := tx.ExecContext(ctx, `
 		INSERT INTO usage_billing_intents (request_id, api_key_id, user_id, request_fingerprint, command)
 		VALUES ($1, $2, $3, $4, $5::jsonb)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
@@ -46,8 +54,27 @@ func (r *usageBillingRepository) prepareBillingIntent(ctx context.Context, cmd *
 	if err != nil {
 		return nil, fmt.Errorf("persist billing intent: %w", err)
 	}
+	n, err := inserted.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n > 0 && cmd.ResolveCompensation != nil {
+		frozen := *cmd
+		frozen.Usage = service.BillingUsageSnapshot(cmd.Usage)
+		cmd.ResolveCompensation(&frozen)
+		if err = frozen.Validate(); err != nil {
+			return nil, err
+		}
+		payload, err = json.Marshal(&frozen)
+		if err != nil {
+			return nil, err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE usage_billing_intents SET command=$3::jsonb WHERE request_id=$1 AND api_key_id=$2`, cmd.RequestID, cmd.APIKeyID, string(payload)); err != nil {
+			return nil, err
+		}
+	}
 	var fingerprint string
-	if err := r.db.QueryRowContext(ctx, `SELECT request_fingerprint, command FROM usage_billing_intents
+	if err := tx.QueryRowContext(ctx, `SELECT request_fingerprint, command FROM usage_billing_intents
 		WHERE request_id = $1 AND api_key_id = $2`, cmd.RequestID, cmd.APIKeyID).Scan(&fingerprint, &payload); err != nil {
 		return nil, err
 	}
@@ -58,7 +85,13 @@ func (r *usageBillingRepository) prepareBillingIntent(ctx context.Context, cmd *
 	if err := json.Unmarshal(payload, &original); err != nil {
 		return nil, err
 	}
-	return &original, original.Validate()
+	if err = original.Validate(); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &original, nil
 }
 
 func lockBillingIntent(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) error {

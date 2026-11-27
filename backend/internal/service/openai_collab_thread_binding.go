@@ -185,6 +185,7 @@ func (b *openAICollabThreadBinding) deleteOwner(ctx context.Context, expected in
 	}
 	if err == nil && deleted {
 		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
+		s.recordOpenAICompensationAction(ctx, "owner_released", expected, 0)
 	}
 	return err
 }
