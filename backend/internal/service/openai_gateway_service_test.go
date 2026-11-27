@@ -1730,15 +1730,13 @@ func TestOpenAIStreamingReadErrorAfterOutputUsesResponsesErrorSchema(t *testing.
 	}
 }
 
-func TestOpenAIStreamingPostOutputDisconnectKeepsSharedProxyWithoutSameStreamFailover(t *testing.T) {
+func TestOpenAIStreamingPostOutputDisconnectDoesNotFailoverAfterOutput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	proxyID := int64(4698)
 	account := &Account{
 		ID:       469801,
-		Name:     "oauth-on-shared-proxy",
+		Name:     "oauth",
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
-		ProxyID:  &proxyID,
 	}
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
 		MaxLineSize: defaultMaxLineSize,
@@ -1764,7 +1762,7 @@ func TestOpenAIStreamingPostOutputDisconnectKeepsSharedProxyWithoutSameStreamFai
 				}, "\n")),
 				err: readErr,
 			},
-			Header: http.Header{"X-Request-Id": []string{"rid-proxy-disconnect"}},
+			Header: http.Header{"X-Request-Id": []string{"rid-disconnect"}},
 		}
 
 		_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "gpt-5.6-sol", "gpt-5.6-sol")
@@ -1778,11 +1776,6 @@ func TestOpenAIStreamingPostOutputDisconnectKeepsSharedProxyWithoutSameStreamFai
 		require.Equal(t, "stream_read_error", events[0].Reason)
 		require.Equal(t, string(resilience.CategoryTransient), events[0].ResilienceCategory)
 	}
-
-	scheduler := svc
-	compatible, reason := scheduler.isAccountRequestCompatibleReason(context.Background(), account, OpenAIAccountScheduleRequest{})
-	require.True(t, compatible, "a disconnected stream does not exclude the shared proxy from the next request")
-	require.Empty(t, reason)
 }
 
 func TestOpenAIStreamingTerminalAndClientCancellationKeepSharedProxy(t *testing.T) {
@@ -2615,10 +2608,9 @@ func TestOpenAIStreamingPassthroughMissingTerminalEventReturnsIncompleteError(t 
 	require.Equal(t, "missing_terminal", events[0].Reason)
 }
 
-func TestOpenAIStreamingPassthroughPostOutputDisconnectKeepsSharedProxy(t *testing.T) {
+func TestOpenAIStreamingPassthroughPostOutputDisconnectDoesNotFailoverAfterOutput(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	proxyID := int64(4698)
-	account := &Account{ID: 469804, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, ProxyID: &proxyID}
+	account := &Account{ID: 469804, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
 
 	for _, readErr := range []error{io.ErrUnexpectedEOF, errors.New("http2: client connection lost")} {
@@ -2631,7 +2623,7 @@ func TestOpenAIStreamingPassthroughPostOutputDisconnectKeepsSharedProxy(t *testi
 				reader: strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"),
 				err:    readErr,
 			},
-			Header: http.Header{"X-Request-Id": []string{"rid-passthrough-proxy-disconnect"}},
+			Header: http.Header{"X-Request-Id": []string{"rid-passthrough-disconnect"}},
 		}
 
 		_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "model", "model")
@@ -2640,10 +2632,6 @@ func TestOpenAIStreamingPassthroughPostOutputDisconnectKeepsSharedProxy(t *testi
 		require.False(t, errors.As(err, &failoverErr), "post-output disconnect must not fail over inside the same stream")
 		require.Contains(t, rec.Body.String(), "partial")
 	}
-
-	compatible, reason := svc.isAccountRequestCompatibleReason(context.Background(), account, OpenAIAccountScheduleRequest{})
-	require.True(t, compatible)
-	require.Empty(t, reason)
 }
 
 func TestOpenAIStreamingPassthroughResponseFailedBeforeOutputReturnsFailover(t *testing.T) {
