@@ -35,7 +35,7 @@ func TestCollabWiringConstructionKeepsResponse(t *testing.T) {
 				cache := &collabWiringFaultCache{GatewayCache: memory, panics: panics}
 				settings := resilience.Defaults()
 				settings.Collab.Records = enabled
-				settings.Collab.Ladder = true
+				settings.Collab.Ladder = enabled
 				const output = `{"id":"resp_sample","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`
 				f := newCollabWiringFixture(t, settings, func(*http.Request, int64) (*http.Response, error) {
 					return replayResponse(200, "application/json", output), nil
