@@ -164,14 +164,11 @@ func meteredContractCost(card *ChannelModelPricing, tokens UsageTokens, count in
 	if card == nil {
 		return nil
 	}
-	if cost := calculateStatsCost(card, tokens, count); cost != nil {
-		return cost
-	}
 	if card.BillingMode != "" && card.BillingMode != BillingModeToken {
 		if card.PerRequestPrice != nil && *card.PerRequestPrice == 0 {
 			return new(float64)
 		}
-		return nil
+		return calculateStatsCost(card, tokens, count)
 	}
 	p := accountStatsPriceAt(card, tokens.InputTokens+tokens.OutputTokens+tokens.CacheReadTokens+tokens.CacheCreationTokens)
 	cache5m, cache1h := normalizeCacheCreationBreakdown(tokens)
@@ -182,7 +179,7 @@ func meteredContractCost(card *ChannelModelPricing, tokens UsageTokens, count in
 	if cachePrice1h == nil {
 		cachePrice1h = p.CacheWritePrice
 	}
-	used := false
+	used, free := false, true
 	for _, part := range []struct {
 		count int
 		price *float64
@@ -195,11 +192,18 @@ func meteredContractCost(card *ChannelModelPricing, tokens UsageTokens, count in
 			continue
 		}
 		used = true
-		if part.price == nil || *part.price != 0 {
+		if part.price == nil {
 			return nil
 		}
+		free = free && *part.price == 0
 	}
-	if used {
+	if !used {
+		return nil
+	}
+	if cost := calculateStatsCost(card, tokens, count); cost != nil {
+		return cost
+	}
+	if free {
 		return new(float64)
 	}
 	return nil

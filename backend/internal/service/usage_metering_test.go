@@ -133,6 +133,92 @@ func TestMeteringKnownUnknownAndFree(t *testing.T) {
 	}
 }
 
+func TestMeteringPartialContractFallsThrough(t *testing.T) {
+	tokens := UsageTokens{InputTokens: 10, OutputTokens: 10}
+	card := &ChannelModelPricing{InputPrice: new(0.01)}
+	for _, tc := range []struct {
+		name    string
+		mirror  bool
+		gross   *float64
+		catalog *CostBreakdown
+		source  string
+		want    *float64
+	}{
+		{"unknown", false, nil, nil, "unknown", nil},
+		{"mirror", true, new(4.0), &CostBreakdown{TotalCost: 6}, "mirror", new(2.0)},
+		{"catalog", false, new(4.0), &CostBreakdown{TotalCost: 6}, "catalog", new(3.0)},
+		{"fallback", false, new(4.0), nil, "fallback", new(2.0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cost := supplierCostFromMetering(tokens, 1, tc.gross, card, tc.mirror, tc.catalog, "", 0.5)
+			require.Equal(t, tc.source, cost.Source)
+			require.Equal(t, tc.want, cost.Amount)
+		})
+	}
+	// An explicit zero completes the contract; a missing price never means free.
+	card.OutputPrice = new(0.0)
+	cost := supplierCostFromMetering(tokens, 1, nil, card, false, nil, "", 0.5)
+	require.Equal(t, "contract", cost.Source)
+	require.NotNil(t, cost.Amount)
+	require.InDelta(t, 0.05, *cost.Amount, 1e-12)
+}
+
+func TestMeteringOpenAITierProcurementPreservesSettlement(t *testing.T) {
+	const model = "gpt-6.2-astra"
+	logs := &openAIRecordUsageLogRepoStub{inserted: true}
+	bills := &openAIRecordUsageBillingRepoStub{}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(logs, bills, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.billingService = NewBillingService(nil, &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		model: {InputCostPerToken: 0.001, OutputCostPerToken: 0.004, CacheReadInputTokenCost: 0.0002},
+	}})
+	svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+	group := &Group{ID: 10, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true,
+		RateMultiplier: 0.2, OpenAITierPolicyVersion: OpenAITierPolicyExplicit, FreeOpenAIUltrafast: true,
+		ModelPricing: []ChannelModelPricing{{Models: []string{model}, BillingMode: BillingModeToken,
+			InputPrice: new(0.01), OutputPrice: new(0.03), CacheReadPrice: new(0.002), UltrafastMultiplier: new(4.5)}}}
+	key := &APIKey{ID: 2, GroupID: &group.ID, Group: group, Quota: 100, RateLimit5h: 100}
+	account := &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		RateMultiplier: new(0.7), Extra: map[string]any{"quota_limit": 100.0}}
+	// The official credential selects tier-specific purchase pricing independently
+	// of the group's retail tier and customer waiver.
+	prices := &openAITierPrices{at: time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC), group: group, credential: account,
+		billing: svc.billingService}
+	u := OpenAIUsage{InputTokens: 100, CacheReadInputTokens: 20, OutputTokens: 10}
+	result := &OpenAIForwardResult{RequestID: "openai-tier-metering", Model: model, Usage: u,
+		ResponseFactsKnown: true, UsagePresent: true, UsageSource: "upstream", UpstreamResponseServiceTier: OpenAIFastTierUltrafast,
+		TierDecision: &OpenAITierDecision{OutboundTier: OpenAIFastTierUltrafast, PolicyVersion: OpenAITierPolicyExplicit,
+			FreeUltrafast: true, CredentialAccountID: account.ID, prices: prices}}
+	require.NoError(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: result, APIKey: key, User: &User{ID: 1}, Account: account, APIKeyService: &APIKeyService{},
+	}))
+	row, cmd := logs.lastLog, bills.lastCmd
+	require.NotNil(t, row)
+	require.NotNil(t, cmd)
+	require.Equal(t, u, result.Usage)
+	require.Equal(t, 80, row.InputTokens)
+	require.Equal(t, 20, row.CacheReadTokens)
+	require.Equal(t, 10, row.OutputTokens)
+	require.Equal(t, OpenAIFastTierUltrafast, *row.ServiceTier)
+	require.NotNil(t, row.SupplierCostEstimate)
+	require.InDelta(t, (80*0.001+20*0.0002+10*0.004)*3*0.7, *row.SupplierCostEstimate, 1e-12)
+	require.Empty(t, row.MeteringAdjustment)
+	// The pre-existing retail ledger and all debit commands retain their values.
+	require.InDelta(t, 5.13, row.TotalCost, 1e-12)
+	require.InDelta(t, 0.228, row.ActualCost, 1e-12)
+	require.NotNil(t, row.AccountStatsCost)
+	require.InDelta(t, 0.372, *row.AccountStatsCost, 1e-12)
+	for _, got := range []float64{cmd.BalanceCost, cmd.APIKeyQuotaCost, cmd.APIKeyRateLimitCost} {
+		require.Equal(t, 0.228, got)
+	}
+	require.Zero(t, cmd.SubscriptionCost)
+	require.Equal(t, 3.591, cmd.AccountQuotaCost)
+	var tier openAITierChargeDetails
+	require.NoError(t, json.Unmarshal(row.ServiceTierDetails, &tier))
+	require.Equal(t, OpenAIFastTierUltrafast, tier.SettledTier)
+	require.Equal(t, OpenAIFastTierUltrafast, tier.FreeTier)
+	require.Equal(t, PricingSourceGroup, tier.PriceSource)
+}
+
 func TestMeteringSnapshotAndLegacyIntent(t *testing.T) {
 	var old UsageBillingCommand
 	require.NoError(t, json.Unmarshal([]byte(`{"RequestID":"old","UserID":1,"APIKeyID":2,"AccountID":3,"BalanceCost":1.25,"Usage":{"RequestID":"old","UserID":1,"APIKeyID":2,"AccountID":3,"ActualCost":1.25,"TotalCost":1.25}}`), &old))
