@@ -2,9 +2,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OpsResilienceCard from '../OpsResilienceCard.vue'
 
-const mocks = vi.hoisted(() => ({ stats: vi.fn(), list: vi.fn(), groups: vi.fn() }))
+const mocks = vi.hoisted(() => ({ stats: vi.fn(), list: vi.fn(), groups: vi.fn(), copy: vi.fn(async () => true) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, te: () => false }) }))
 vi.mock('@/utils/format', () => ({ formatNumber: (n: number) => String(n), formatDateTime: (d: string) => d, formatCostFixed: (n: number) => n.toFixed(6) }))
+vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copyToClipboard: mocks.copy }) }))
 vi.mock('@/api/admin', () => ({ adminAPI: { resilience: { stats: mocks.stats, listUndelivered: mocks.list }, groups: { getAll: mocks.groups } } }))
 
 function mountCard(refreshToken = 0) {
@@ -26,7 +27,7 @@ describe('ops resilience card', () => {
     })
     mocks.list.mockResolvedValue({
       items: [{
-        id: 9, request_id: 'r1', client_request_id: '', user_id: 2, api_key_id: 4, group_id: 3, platform: 'openai',
+        id: 9, gateway_request_id: 'gw-7f3a', request_id: 'r1', client_request_id: '', user_id: 2, api_key_id: 4, group_id: 3, platform: 'openai',
         model: 'gpt-5.5', inbound_endpoint: '/v1/responses', disconnect_stage: 'pre_output', duration_ms: 125400,
         estimated_upstream_cost: 0, billed: false, created_at: '2026-10-15T08:00:00Z'
       }],
@@ -46,6 +47,13 @@ describe('ops resilience card', () => {
     expect(table).toContain('/v1/responses')
     expect(table).toContain('125.4s')
     expect(table).toContain('admin.resilience.undelivered.notBilled')
+    expect(table).toContain('gw-7f3a')
+  })
+
+  it('copies the gateway key of an undelivered request', async () => {
+    const w = mountCard(); await flushPromises()
+    await w.get('[data-testid="resilience-undelivered-table"] button').trigger('click')
+    expect(mocks.copy).toHaveBeenCalledWith('gw-7f3a', 'admin.usage.requestIdCopied')
   })
 
   it('reloads when the dashboard refreshes and shows empty states', async () => {

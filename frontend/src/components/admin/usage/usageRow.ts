@@ -5,15 +5,40 @@ import type { AdminUsageLog } from '@/types'
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
 
-/** The account-billed cost: (account_stats_cost ?? total_cost) × account rate. */
+/**
+ * The account-billed cost: the procurement estimate when the row has one (already at the account rate), else the
+ * legacy (account_stats_cost ?? total_cost) × account rate.
+ */
 export function accountBilled(row: {
   total_cost?: number | null
   account_stats_cost?: number | null
   account_rate_multiplier?: number | null
+  supplier_cost_estimate?: number | null
 }): number {
+  if (row.supplier_cost_estimate != null) return row.supplier_cost_estimate
   const base = row.account_stats_cost != null ? row.account_stats_cost : (row.total_cost ?? 0)
   const result = base * (row.account_rate_multiplier ?? 1)
   return Number.isNaN(result) ? 0 : result
+}
+
+/**
+ * The row's voluntary cache-gap compensation: the amount taken off the bill, and the voucher awaiting settlement, if
+ * any: its estimate, which is a price only when every pending item was priced (0 can be a price). Null where the row has
+ * neither.
+ */
+export function voluntaryCompensation(row: Pick<AdminUsageLog, 'metering_adjustment'>):
+  { credited: number; pending: { amount: number; priced: boolean } | null } | null {
+  let credited = 0
+  let pending: { amount: number; priced: boolean } | null = null
+  for (const item of row.metering_adjustment?.adjustments ?? []) {
+    if (item.kind === 'openai_voluntary_compensation') credited += item.amount ?? 0
+    else if (item.kind === 'openai_voluntary_compensation_pending') {
+      pending ??= { amount: 0, priced: true }
+      pending.amount += item.estimated_amount ?? 0
+      if (item.reason === 'pricing_unavailable') pending.priced = false
+    }
+  }
+  return credited > 0 || pending !== null ? { credited, pending } : null
 }
 
 /** A latency: "800ms", "51.00s", past a minute "1m 10s", past an hour "1h 2m"; no value is "—". */

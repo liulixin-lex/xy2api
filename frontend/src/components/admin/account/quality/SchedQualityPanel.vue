@@ -148,17 +148,6 @@
     @confirm="applyExemption"
     @undo="undoExemption"
   />
-
-  <BaseDialog :show="proxyItem !== null" :title="t('admin.schedQuality.proxy.title')" width="narrow" @close="proxyItem = null">
-    <p class="text-sm text-fg-primary">
-      <span class="text-fg-secondary">{{ t('admin.schedQuality.proxy.affected') }}</span>
-      <span class="ml-2 font-medium tabular-nums">{{ proxyItem?.shared ?? 0 }}</span>
-    </p>
-    <template #footer>
-      <button type="button" class="btn btn-secondary btn-sm" @click="proxyItem = null">{{ t('admin.schedQuality.action.cancel') }}</button>
-      <button type="button" class="btn btn-primary btn-sm" @click="confirmProxyClear">{{ t('admin.schedQuality.action.clear') }}</button>
-    </template>
-  </BaseDialog>
 </template>
 
 <script setup lang="ts">
@@ -183,11 +172,10 @@
  *   panel (data-quality-opener) the content switches instead; layers opened from the panel are not outside. Escape
  *   and the close button close it too and give focus back to the dot that opened it.
  */
-import { computed, nextTick, onScopeDispose, reactive, ref, shallowRef, useId, watch } from 'vue'
+import { computed, nextTick, onScopeDispose, reactive, ref, useId, watch } from 'vue'
 import { useEventListener, useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { gsap } from 'gsap'
-import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import SchedPanelGroups from './SchedPanelGroups.vue'
 import SchedOverridePopover from './SchedOverridePopover.vue'
@@ -252,7 +240,7 @@ const layer = useOverlayLayer(open, {
   initialFocus: () => titleRef.value,
   floor: 40,
   onEscape: () => close(true),
-  // A dialog opened from the panel (the proxy confirmation, the account editor) covers it; the panel stays.
+  // A dialog opened from the panel (the account editor) covers it; the panel stays.
   onCovered: () => {}
 })
 
@@ -334,11 +322,10 @@ watch(() => [drawer.accountId, drawer.raise] as const, ([id]) => {
   if (id !== null && fresh.value) applyRequest(false)
 })
 
-// The small layers opened for one account (the exemption popover, the proxy confirmation) close when the account
-// changes: confirming them would act on the new one (7h-2).
+// The exemption popover opened for one account closes when the account changes: confirming it would act on the new
+// one (7h-2).
 watch(() => drawer.accountId, () => {
   popover.open = false
-  proxyItem.value = null
 })
 
 watch(detail, (value, previous) => {
@@ -457,7 +444,6 @@ function startRecover() {
 // ---- Automatic states: each model's own time ----
 function scopeLabel(item: BackendAutoState) {
   if (item.scope === 'account') return t('admin.schedQuality.scope.account')
-  if (item.scope === 'proxy') return t('admin.schedQuality.scope.proxy')
   return item.model || '—'
 }
 
@@ -489,9 +475,7 @@ function gotoOf(item: BackendAutoState): { label: string; run: () => void } | nu
   return null
 }
 
-const proxyItem = shallowRef<BackendAutoState | null>(null)
-
-async function runClear(item: BackendAutoState) {
+async function clearAuto(item: BackendAutoState) {
   const id = drawer.accountId
   if (id === null) return
   try {
@@ -503,22 +487,10 @@ async function runClear(item: BackendAutoState) {
   }
 }
 
-function clearAuto(item: BackendAutoState) {
-  if (item.kind === 'proxy_circuit') proxyItem.value = item
-  else void runClear(item)
-}
-
-function confirmProxyClear() {
-  const item = proxyItem.value
-  proxyItem.value = null
-  if (item && canManage.value) void runClear(item)
-}
-
 // A write layer opened before accounts:manage was withdrawn closes with it.
 watch(canManage, (allowed) => {
   if (allowed) return
   popover.open = false
-  proxyItem.value = null
 })
 
 // Slides in from the right (--motion-panel, ease-out) and out in --motion-exit; at once under reduced motion. Only the

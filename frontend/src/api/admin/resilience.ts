@@ -127,6 +127,8 @@ export interface ResilienceStats {
 
 export interface UndeliveredRequest {
   id: number
+  /** The gateway's own key for the request (null on rows written before it was recorded). */
+  gateway_request_id: string | null
   request_id: string
   client_request_id: string
   user_id?: number

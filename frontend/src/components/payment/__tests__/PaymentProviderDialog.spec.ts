@@ -23,6 +23,11 @@ const messages: Record<string, string> = {
   'admin.settings.payment.airwallexWebhookHint': 'Select payment_intent.succeeded and use the latest stable API version.',
 }
 
+// The dialog reports a validation error through a lazy import('@/stores'); the real chain (stores → api → client)
+// would load after the test environment is torn down.
+const showError = vi.hoisted(() => vi.fn())
+vi.mock('@/stores', () => ({ useAppStore: () => ({ showError }) }))
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, string>) => {
@@ -272,8 +277,10 @@ describe('PaymentProviderDialog payment guide', () => {
     await typeInput.setValue(type)
     await upstreamTypeInput.setValue(upstreamType)
     await displayNameInput.setValue('Custom payment')
+    showError.mockClear()
     await wrapper.find('form').trigger('submit.prevent')
 
     expect(wrapper.emitted('save')).toBeUndefined()
+    await vi.waitFor(() => expect(showError).toHaveBeenCalledTimes(1))
   })
 })

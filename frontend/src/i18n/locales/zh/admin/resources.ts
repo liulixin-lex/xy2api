@@ -522,6 +522,8 @@ export default {
       requestId: '请求ID',
       upstreamRequestId: '上游ID',
       requestIdCopied: '请求ID已复制',
+      compensationCredited: '补偿抵扣',
+      compensationPending: '待结算补偿',
       upstreamRequestIdCopied: '上游ID已复制',
       allModels: '全部模型',
       allAccounts: '全部账户',

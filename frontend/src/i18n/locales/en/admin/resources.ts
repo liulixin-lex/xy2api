@@ -525,6 +525,8 @@ export default {
       requestId: 'Request ID',
       upstreamRequestId: 'Upstream ID',
       requestIdCopied: 'Request ID copied',
+      compensationCredited: 'Compensation',
+      compensationPending: 'Pending compensation',
       upstreamRequestIdCopied: 'Upstream ID copied',
       allModels: 'All Models',
       allAccounts: 'All Accounts',

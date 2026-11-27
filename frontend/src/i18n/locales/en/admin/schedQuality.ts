@@ -73,7 +73,6 @@ export default {
     },
     scope: {
       account: 'Account',
-      proxy: 'Proxy',
     },
     goto: {
       iq: 'IQ check',
@@ -107,10 +106,6 @@ export default {
       batchOk: 'Recovered {n}',
       batchPartial: 'Recovered {ok} · Failed {failed}',
     },
-    proxy: {
-      title: 'Proxy isolation',
-      affected: 'Affected',
-    },
     kind: {
       gemini_rate_limit: 'Gemini rate limit',
       gemini_account_concurrency: 'Gemini concurrency limit',
@@ -124,7 +119,6 @@ export default {
       iq_gate: 'IQ gate',
       same_site: 'Same-site pause',
       post_output: 'Post-output fails',
-      proxy_circuit: 'Proxy isolation',
       capability_learned: 'Stream only',
       capability_marked: 'Capability mismatch',
       manual_off: 'Disabled',
@@ -141,7 +135,6 @@ export default {
       temp_rule: 'Rule pause',
       temp_403: '403 pause',
       temp_auth: 'Auth pause',
-      temp_health: 'Health breaker',
       temp_stream_timeout: 'Stream timeout',
       auto_states: 'Auto states',
     },
@@ -158,7 +151,6 @@ export default {
       account_scheduling_threshold: 'Account gate',
       privacy_not_set: 'No privacy',
       runtime_blocked: 'Runtime block',
-      proxy_stream_quarantined: 'Proxy isolation',
       shadow_parent_unhealthy: 'Parent blocked',
       channel_upstream_restricted: 'Upstream limit',
       channel_pricing_restricted: 'Pricing limit',
