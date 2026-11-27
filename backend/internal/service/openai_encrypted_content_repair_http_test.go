@@ -190,7 +190,7 @@ func TestHTTPEncryptedRepairM7RespectsAttemptCap(t *testing.T) {
 			account := webSearchReplayAccount(false)
 			body := []byte(`{"input":[{"type":"reasoning","id":"rs_one","encrypted_content":"synthetic-cipher"}]}`)
 			payload := []byte(`{"error":{"code":"invalid_encrypted_content","param":"input[0].encrypted_content","message":"Encrypted content could not be verified for item rs_one"}}`)
-			repair := armOpenAIRequestRepair(req.c, account, body)
+			repair := armOpenAIRequestRepair(req.c, account, nil)
 			_, allowed := planHTTPEncryptedContentRepair(ctx, req.c, account, repair, body, payload)
 			require.Equal(t, maxAttempts > 1, allowed)
 		})
