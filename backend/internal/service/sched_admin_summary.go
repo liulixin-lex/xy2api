@@ -189,7 +189,7 @@ func schedAdminGroupStatus(v schedquality.StateView, exempt, effective bool) str
 
 // Single-model restrictions and untriggered counters do not stop the entire account.
 func schedAdminStop(states []SchedAutoState) *SchedAdminStop {
-	order := []string{"manual_off", "error", "temp_transient", "temp_post_output", "temp_balance", "temp_usage", "temp_rule", "temp_403", "temp_auth", "temp_health", "temp_stream_timeout", "rate_limit", "overload", "expired", "quota", "quota_auto_pause", "parent_blocked", "same_site", "post_output", "proxy_circuit"}
+	order := []string{"manual_off", "error", "temp_transient", "temp_post_output", "temp_balance", "temp_usage", "temp_rule", "temp_403", "temp_auth", "temp_stream_timeout", "rate_limit", "overload", "expired", "quota", "quota_auto_pause", "parent_blocked", "same_site", "post_output"}
 	for _, kind := range order {
 		for _, v := range states {
 			if v.Kind != kind || v.Scope == "model" || (v.Count != nil && v.Count[0] < v.Count[1]) {
@@ -315,7 +315,7 @@ func (s *SchedAdminService) Detail(ctx context.Context, id int64) (SchedAdminAcc
 		return out, err
 	}
 	for _, v := range states {
-		x := SchedAdminAccountDetailAutoStates{Key: v.Key, Kind: v.Kind, Scope: v.Scope, Model: v.Model, Count: v.Count, Shared: v.Shared, Clearable: v.Clearable, Why: v.Why}
+		x := SchedAdminAccountDetailAutoStates{Key: v.Key, Kind: v.Kind, Scope: v.Scope, Model: v.Model, Count: v.Count, Clearable: v.Clearable, Why: v.Why}
 		if v.Until != nil {
 			x.Until = schedAdminTime(*v.Until)
 		}

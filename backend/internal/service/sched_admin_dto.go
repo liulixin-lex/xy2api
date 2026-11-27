@@ -185,7 +185,6 @@ type SchedAdminAccountDetailAutoStates struct {
 	Model     string  `json:"model"`
 	Until     *string `json:"until"`
 	Count     *[2]int `json:"count"`
-	Shared    int     `json:"shared"`
 	Clearable bool    `json:"clearable"`
 	Why       string  `json:"why"`
 }

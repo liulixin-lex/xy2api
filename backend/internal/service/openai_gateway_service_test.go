@@ -1730,7 +1730,7 @@ func TestOpenAIStreamingReadErrorAfterOutputUsesResponsesErrorSchema(t *testing.
 	}
 }
 
-func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStreamFailover(t *testing.T) {
+func TestOpenAIStreamingPostOutputDisconnectKeepsSharedProxyWithoutSameStreamFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	proxyID := int64(4698)
 	account := &Account{
@@ -1743,14 +1743,6 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
 		MaxLineSize: defaultMaxLineSize,
 	}}}
-	// collapseInterval 0: the two loop iterations below record within the
-	// production collapse window and must count as distinct failure events here.
-	svc.openaiProxyStreamCircuit = newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
-		failureThreshold: 2,
-		failureWindow:    time.Minute,
-		quarantineTTL:    10 * time.Minute,
-		maxEntries:       16,
-	})
 
 	for _, readErr := range []error{
 		io.ErrUnexpectedEOF,
@@ -1789,11 +1781,11 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 
 	scheduler := svc
 	compatible, reason := scheduler.isAccountRequestCompatibleReason(context.Background(), account, OpenAIAccountScheduleRequest{})
-	require.False(t, compatible, "the next request must exclude accounts sharing the quarantined proxy")
-	require.Equal(t, "proxy_stream_quarantined", reason)
+	require.True(t, compatible, "a disconnected stream does not exclude the shared proxy from the next request")
+	require.Empty(t, reason)
 }
 
-func TestOpenAIStreamingTerminalAndClientCancellationDoNotQuarantineProxy(t *testing.T) {
+func TestOpenAIStreamingTerminalAndClientCancellationKeepSharedProxy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	proxyID := int64(4699)
 	account := &Account{ID: 469901, Name: "oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, ProxyID: &proxyID}
@@ -2623,19 +2615,11 @@ func TestOpenAIStreamingPassthroughMissingTerminalEventReturnsIncompleteError(t 
 	require.Equal(t, "missing_terminal", events[0].Reason)
 }
 
-func TestOpenAIStreamingPassthroughPostOutputDisconnectQuarantinesSharedProxy(t *testing.T) {
+func TestOpenAIStreamingPassthroughPostOutputDisconnectKeepsSharedProxy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	proxyID := int64(4698)
 	account := &Account{ID: 469804, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, ProxyID: &proxyID}
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
-	// collapseInterval 0: the loop below records within the production collapse
-	// window and must count as distinct failure events here.
-	svc.openaiProxyStreamCircuit = newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
-		failureThreshold: 2,
-		failureWindow:    time.Minute,
-		quarantineTTL:    10 * time.Minute,
-		maxEntries:       16,
-	})
 
 	for _, readErr := range []error{io.ErrUnexpectedEOF, errors.New("http2: client connection lost")} {
 		rec := httptest.NewRecorder()
@@ -2657,7 +2641,9 @@ func TestOpenAIStreamingPassthroughPostOutputDisconnectQuarantinesSharedProxy(t 
 		require.Contains(t, rec.Body.String(), "partial")
 	}
 
-	require.True(t, svc.isOpenAIProxyStreamQuarantined(context.Background(), account))
+	compatible, reason := svc.isAccountRequestCompatibleReason(context.Background(), account, OpenAIAccountScheduleRequest{})
+	require.True(t, compatible)
+	require.Empty(t, reason)
 }
 
 func TestOpenAIStreamingPassthroughResponseFailedBeforeOutputReturnsFailover(t *testing.T) {

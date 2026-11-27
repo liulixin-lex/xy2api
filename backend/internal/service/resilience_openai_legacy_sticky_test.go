@@ -292,35 +292,6 @@ func TestOpenAIStickyBypassDeleteNoopDoesNotMarkBindingChange(t *testing.T) {
 	require.True(t, state.StickyBypassChangesBinding(), "a confirmed owner deletion must still be reported")
 }
 
-func TestOpenAIStickyBypassProxyRetryUsesFinalPassReason(t *testing.T) {
-	withResilienceSettings(t, nil)
-	owner := Account{ID: 36051, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1}
-	target := owner
-	target.ID = 36052
-	target.ProxyID = int64Ptr(5056)
-	repo := &selectionRuntimeRepo{schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{owner, target}}}
-	svc := &OpenAIGatewayService{
-		cfg: &config.Config{}, accountRepo: repo,
-		cache:                    &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:proxy-retry-session": owner.ID}},
-		openaiProxyStreamCircuit: newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{failureThreshold: 1, failureWindow: time.Minute, quarantineTTL: 10 * time.Minute, maxEntries: 16}),
-	}
-	svc.openaiProxyStreamCircuit.recordFailure(5056, time.Now())
-	logs := captureOpenAIObservationLogs(t)
-	state := resilience.NewRequestState()
-	state.KeepSticky(owner.ID)
-	ctx := resilience.WithRequestState(context.Background(), state)
-	selection, _, err := svc.SelectAccountWithScheduler(ctx, nil, "", "proxy-retry-session", "gpt-5.1", map[int64]struct{}{owner.ID: {}}, OpenAIUpstreamTransportAny, false)
-	require.NoError(t, err)
-	require.Equal(t, target.ID, selection.Account.ID)
-	require.Positive(t, svc.openaiProxyStreamFailOpenLogAt.Load(), "exercise the internal quarantine retry")
-	require.Equal(t, "owner_excluded", state.StickyBypassReason())
-	require.False(t, state.StickyBypassChangesBinding(), "binding diagnostics also belong to the final pass")
-	require.Contains(t, logs.String(), `"reason":"owner_excluded"`)
-	require.Contains(t, logs.String(), `"level":"INFO"`)
-	require.Equal(t, 1, strings.Count(logs.String(), `"msg":"openai.sticky_bypass"`))
-	require.False(t, state.ClaimStickyBypassLog(), "internal resets must preserve the request's log claim")
-}
-
 func TestResilienceOpenAILegacySchedulerKeepsSoftBinding(t *testing.T) {
 	const key = "openai:" + lrSession
 

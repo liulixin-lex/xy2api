@@ -50,8 +50,6 @@ func TestM8PreDispatchPreservesFailure(t *testing.T) {
 			require.Equal(t, previous.ResponseBody, blocked.ResponseBody)
 			require.True(t, blocked.PreDispatchSelectionInvalidated)
 			require.False(t, blocked.ShouldReportAccountScheduleFailure())
-			_, _, healthFailure := classifyOpenAIAPIKeyHealthFailure(blocked)
-			require.False(t, healthFailure)
 			require.False(t, blocked.ShouldRetryNextAccount())
 			require.False(t, previous.PreDispatchSelectionInvalidated)
 			require.True(t, previous.ShouldRetryNextAccount())

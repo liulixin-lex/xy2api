@@ -185,38 +185,6 @@ func TestOpenAINewSessionDispatchList(t *testing.T) {
 }
 
 func TestOpenAINewSessionDispatchPoolBoundaries(t *testing.T) {
-	t.Run("quarantine retry replaces only the new snapshot", func(t *testing.T) {
-		logs := captureSelectionNewSessionLog(t)
-		a, b := selectionFixtureAccount(1, 1), selectionFixtureAccount(2, 1)
-		proxy := int64(9)
-		b.ProxyID = &proxy
-		f := newSelectionRuntimeFixture(t, a, b)
-		f.repo.onList = func(round int) ([]Account, error) {
-			if round == 1 {
-				return []Account{a}, nil
-			}
-			return []Account{b}, nil
-		}
-		f.svc.openaiProxyStreamCircuit = newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
-			failureThreshold: 1, failureWindow: time.Minute, quarantineTTL: time.Minute, maxEntries: 4,
-		})
-		f.svc.openaiProxyStreamCircuit.recordFailure(proxy, time.Now())
-		f.loads.acquireResults = map[int64]bool{a.ID: false, b.ID: true}
-		ctx := WithOpenAISelectionNoWait(context.Background())
-		selected, err := selectOrdinaryNewSessionForTest(t, f, ctx, "ordinary", nil, false)
-		require.NoError(t, err)
-		defer selected.ReleaseFunc()
-		require.Equal(t, b.ID, selected.Account.ID)
-		require.Equal(t, 2, f.repo.lists)
-		events := selectionNewSessionEvents(t, logs.String())
-		require.Len(t, events, 1)
-		event := events[0]
-		require.Equal(t, float64(2), event["pool_rounds"])
-		require.Equal(t, float64(1), event["eligible_candidate_count"])
-		require.Equal(t, float64(2), event["front_or_trial_with_seat_count"])
-		require.Equal(t, float64(1), event["slot_unavailable_skipped_count"])
-		require.Equal(t, []newSessionCandidateLog{{AccountID: 2, Placement: "front", Rank: 1}}, requireNewSessionLists(t, event, b.ID))
-	})
 
 	t.Run("load full falls through to ordinary wait", func(t *testing.T) {
 		logs := captureSelectionNewSessionLog(t)
@@ -237,32 +205,6 @@ func TestOpenAINewSessionDispatchPoolBoundaries(t *testing.T) {
 		require.Zero(t, final.AccountID, "a wait plan did not send an upstream request")
 		require.Equal(t, final.RequestID, events[0]["gateway_request_id"])
 		require.Equal(t, []newSessionCandidateLog{{AccountID: 1, Placement: "front", Rank: 1, Skip: []string{"load_full"}}}, requireNewSessionLists(t, events[0], 1))
-	})
-
-	t.Run("failed reopen retains the last successful pool", func(t *testing.T) {
-		logs := captureSelectionNewSessionLog(t)
-		a := selectionFixtureAccount(1, 1)
-		f := newSelectionRuntimeFixture(t, a)
-		listErr := errors.New("synthetic reopen failure")
-		f.repo.onList = func(round int) ([]Account, error) {
-			if round == 1 {
-				return []Account{a}, nil
-			}
-			return nil, listErr
-		}
-		f.svc.openaiProxyStreamCircuit = newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{
-			failureThreshold: 1, failureWindow: time.Minute, quarantineTTL: time.Minute, maxEntries: 4,
-		})
-		f.svc.openaiProxyStreamCircuit.recordFailure(9, time.Now())
-		f.loads.acquireResults = map[int64]bool{1: false}
-		selected, err := selectOrdinaryNewSessionForTest(t, f, WithOpenAISelectionNoWait(context.Background()), "ordinary", nil, false)
-		require.ErrorIs(t, err, listErr)
-		require.Nil(t, selected)
-		require.Equal(t, 2, f.repo.lists)
-		events := selectionNewSessionEvents(t, logs.String())
-		require.Len(t, events, 1)
-		require.Equal(t, float64(1), events[0]["pool_rounds"])
-		require.Equal(t, []newSessionCandidateLog{{AccountID: 1, Placement: "front", Rank: 1, Skip: []string{"slot_unavailable"}}}, requireNewSessionLists(t, events[0], 0))
 	})
 
 	for _, takeSlot := range []bool{true, false} {

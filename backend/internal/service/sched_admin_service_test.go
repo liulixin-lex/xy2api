@@ -158,9 +158,6 @@ func (r *schedAdminAccounts) SchedAdminClearModelLimit(_ context.Context, id int
 	delete(m, key)
 	return true, nil
 }
-func (r *schedAdminAccounts) SchedAdminProxyPeers(context.Context, int64, int64) (int, error) {
-	return 2, nil
-}
 
 type schedAdminGroups map[int64]*Group
 
@@ -370,8 +367,7 @@ func TestSchedAdminResetClearsCountersPreservesSharedAndManual(t *testing.T) {
 	counter := &schedAdminCounter{count: 2}
 	s.d.RateLimit = &RateLimitService{openAI403CounterCache: counter}
 	s.d.Transient = &schedAdminTransient{entries: map[string]bool{"m": true}}
-	gateway := &OpenAIGatewayService{openaiProxyStreamCircuit: newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{})}
-	gateway.openaiProxyStreamCircuit.entries[proxy] = openAIProxyStreamCircuitEntry{blockedUntil: e.resetAt.Add(time.Hour)}
+	gateway := &OpenAIGatewayService{}
 	gateway.openaiOAuth429RetryStartedAt.Store(int64(1), e.resetAt)
 	s.d.Gateway = gateway
 	e.overrides = []SchedOverride{{AccountID: 1, Mode: schedquality.OverrideExempt}}
@@ -390,11 +386,10 @@ func TestSchedAdminResetClearsCountersPreservesSharedAndManual(t *testing.T) {
 	require.Nil(t, a.TempUnschedulableUntil)
 	require.Empty(t, a.TempUnschedulableReason)
 	require.Len(t, e.overrides, 1)
-	require.Contains(t, gateway.openaiProxyStreamCircuit.entries, proxy)
 	_, ok := gateway.openaiOAuth429RetryStartedAt.Load(int64(1))
 	require.False(t, ok)
 	require.ElementsMatch(t, []string{"quality", "session_avoid", "same_site", "post_output", "model_transient", "temp_balance", "model_limit"}, result.Cleared)
-	require.ElementsMatch(t, []SchedAdminResetKept{{Kind: "proxy_circuit", Until: schedAdminTime(e.resetAt.Add(time.Hour))}, {Kind: "iq_gate"}, {Kind: "manual_off"}}, result.Kept)
+	require.ElementsMatch(t, []SchedAdminResetKept{{Kind: "iq_gate"}, {Kind: "manual_off"}}, result.Kept)
 }
 func TestSchedAdminResetContinuesAfterFailureAndClearLocalCallback(t *testing.T) {
 	s, e, r := schedAdminFixture()
@@ -450,7 +445,7 @@ func (c *schedAdminCapabilityClear) ClearAccountCapabilityMarks(context.Context,
 	return nil
 }
 
-func TestSchedAdminAutoStatesProxyCapabilityAndReadonly(t *testing.T) {
+func TestSchedAdminAutoStatesCapabilityAndReadonly(t *testing.T) {
 	s, e, r := schedAdminFixture()
 	a := r.rows[1]
 	a.Type = AccountTypeAPIKey
@@ -462,8 +457,6 @@ func TestSchedAdminAutoStatesProxyCapabilityAndReadonly(t *testing.T) {
 	s.d.Capability = capability
 	proxy := int64(9)
 	a.ProxyID = &proxy
-	s.d.Gateway = &OpenAIGatewayService{openaiProxyStreamCircuit: newOpenAIProxyStreamCircuit(openAIProxyStreamCircuitSettings{})}
-	s.d.Gateway.openaiProxyStreamCircuit.entries[proxy] = openAIProxyStreamCircuitEntry{blockedUntil: until}
 	a.AutoPauseOnExpired = true
 	past := e.resetAt.Add(-time.Hour)
 	a.ExpiresAt = &past
@@ -476,16 +469,12 @@ func TestSchedAdminAutoStatesProxyCapabilityAndReadonly(t *testing.T) {
 	for _, v := range states {
 		byKey[v.Key] = v
 	}
-	require.Equal(t, 2, byKey["proxy_circuit"].Shared)
 	require.True(t, byKey["capability_learned"].Clearable)
 	require.Equal(t, "expired", byKey["expired"].Why)
 	require.Equal(t, "quota", byKey["quota"].Why)
 	_, err = s.ClearAutoState(context.Background(), 1, "iq:m", 7)
 	require.Error(t, err)
 	require.Contains(t, a.Extra["model_rate_limits"], "iq:m")
-	_, err = s.ClearAutoState(context.Background(), 1, "proxy_circuit", 7)
-	require.NoError(t, err)
-	require.Empty(t, s.d.Gateway.openaiProxyStreamCircuit.entries)
 	_, err = s.ClearAutoState(context.Background(), 1, "capability_learned", 7)
 	require.NoError(t, err)
 	require.Equal(t, 1, capability.calls)
@@ -561,38 +550,22 @@ func (c *schedAdminTimeoutCounter) ResetTimeoutCount(context.Context, int64) err
 	return nil
 }
 
-type schedAdminHealthCounter struct {
-	OpenAIAPIKeyHealthCache
-	count int
-	err   error
-}
-
-func (c *schedAdminHealthCounter) SchedAdminClearHealth(context.Context, int64) error {
-	if c.err != nil {
-		return c.err
-	}
-	c.count = 0
-	return nil
-}
-
 func TestSchedAdminResetCountersOnlyReportFailures(t *testing.T) {
 	s, _, _ := schedAdminFixture()
 	c403 := &schedAdminCounter{}
 	timeout := &schedAdminTimeoutCounter{}
-	health := &schedAdminHealthCounter{}
-	s.d.RateLimit = &RateLimitService{openAI403CounterCache: c403, timeoutCounterCache: timeout, openAIAPIKeyHealth: health}
+	s.d.RateLimit = &RateLimitService{openAI403CounterCache: c403, timeoutCounterCache: timeout}
 	out, err := s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
 	require.Equal(t, []string{"quality", "session_avoid"}, out.Cleared)
 	require.Empty(t, out.Failed)
-	c403.err, timeout.err, health.err = errors.New("403 failed"), errors.New("timeout failed"), errors.New("health failed")
+	c403.err, timeout.err = errors.New("403 failed"), errors.New("timeout failed")
 	out, err = s.Reset(context.Background(), 1, 7)
 	require.NoError(t, err)
 	require.Equal(t, []string{"quality", "session_avoid"}, out.Cleared)
 	require.ElementsMatch(t, []SchedAdminResetFailed{
 		{Kind: "temp_403"},
 		{Kind: "temp_stream_timeout"},
-		{Kind: "temp_health"},
 	}, out.Failed)
 }
 
@@ -600,7 +573,6 @@ func TestSchedAdminTempSourcesClearOnlyOwnCounters(t *testing.T) {
 	cases := []struct{ source, reason string }{
 		{"403", "auth:403_cooldown"},
 		{"stream_timeout", `{"matched_keyword":"stream_timeout"}`},
-		{"health", `{"matched_keyword":"openai_apikey_health_breaker"}`},
 		{"post_output", "transient:POST_OUTPUT failure"},
 		{"usage", BuildAccountSchedulingThresholdReason("high usage")},
 		{"rule", `{"matched_keyword":"busy"}`},
@@ -616,8 +588,8 @@ func TestSchedAdminTempSourcesClearOnlyOwnCounters(t *testing.T) {
 			a := r.rows[1]
 			until := e.resetAt.Add(time.Hour)
 			a.TempUnschedulableReason, a.TempUnschedulableUntil = tc.reason, &until
-			c403, timeout, health := &schedAdminCounter{count: 2}, &schedAdminTimeoutCounter{count: 2}, &schedAdminHealthCounter{count: 2}
-			s.d.RateLimit = &RateLimitService{openAI403CounterCache: c403, timeoutCounterCache: timeout, openAIAPIKeyHealth: health}
+			c403, timeout := &schedAdminCounter{count: 2}, &schedAdminTimeoutCounter{count: 2}
+			s.d.RateLimit = &RateLimitService{openAI403CounterCache: c403, timeoutCounterCache: timeout}
 			s.d.Resilience = &ResilienceService{}
 			s.d.Resilience.postOutput.add(1, e.resetAt)
 			s.d.Gateway = &OpenAIGatewayService{}
@@ -634,7 +606,7 @@ func TestSchedAdminTempSourcesClearOnlyOwnCounters(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, ok)
 			require.Nil(t, a.TempUnschedulableUntil)
-			for source, count := range map[string]int{"403": c403.count, "stream_timeout": timeout.count, "health": health.count} {
+			for source, count := range map[string]int{"403": c403.count, "stream_timeout": timeout.count} {
 				want := 2
 				if source == tc.source {
 					want = 0

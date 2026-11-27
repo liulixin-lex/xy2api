@@ -126,8 +126,6 @@ func TestConversionRetryQualification(t *testing.T) {
 				require.NotNil(t, retry)
 				require.Equal(t, 200, retry.StatusCode)
 				require.False(t, retry.ShouldReportAccountScheduleFailure())
-				_, _, health := classifyOpenAIAPIKeyHealthFailure(retry)
-				require.False(t, health)
 			} else {
 				require.Nil(t, retry)
 			}

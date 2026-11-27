@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"time"
-
-	infraerrors "github.com/liulixin-lex/xy2api/internal/pkg/errors"
 )
 
 func (r *ResilienceService) schedAdminResetLocalStates(id int64) []SchedAutoState {
@@ -69,27 +67,6 @@ func (r *ResilienceService) schedAdminClearPostOutput(id int64) bool {
 	delete(r.postOutput.failures, id)
 	return ok
 }
-func (g *OpenAIGatewayService) schedAdminProxyState(proxy int64, now time.Time) *SchedAutoState {
-	if g == nil {
-		return nil
-	}
-	c := g.getOpenAIProxyStreamCircuit()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	e, ok := c.entries[proxy]
-	if !ok || !now.Before(e.blockedUntil) {
-		return nil
-	}
-	until := e.blockedUntil
-	return &SchedAutoState{Key: "proxy_circuit", Kind: "proxy_circuit", Scope: "proxy", Until: &until, Clearable: true}
-}
-func (g *OpenAIGatewayService) schedAdminClearProxy(proxy int64) bool {
-	if g == nil {
-		return false
-	}
-	return g.getOpenAIProxyStreamCircuit().recordSuccess(proxy)
-}
-
 func (s *SchedAdminService) ClearLocal(id int64, at time.Time) {
 	if s.d.Transient != nil {
 		s.d.Transient.ClearAll(id)
@@ -121,15 +98,6 @@ func (s *SchedAdminService) schedAdminCounters(ctx context.Context, id int64, so
 	case "stream_timeout":
 		if rl.timeoutCounterCache != nil {
 			return rl.timeoutCounterCache.ResetTimeoutCount(ctx, id)
-		}
-	case "health":
-		if rl.openAIAPIKeyHealth != nil {
-			if cache, ok := rl.openAIAPIKeyHealth.(interface {
-				SchedAdminClearHealth(context.Context, int64) error
-			}); ok {
-				return cache.SchedAdminClearHealth(ctx, id)
-			}
-			return infraerrors.ServiceUnavailable("HEALTH_CLEAR_UNAVAILABLE", "Health counter clearing is unavailable")
 		}
 	}
 	return nil

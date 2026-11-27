@@ -33,13 +33,11 @@ func schedAdminTempSource(reason string) string {
 		return "403"
 	case v.MatchedKeyword == "stream_timeout":
 		return "stream_timeout"
-	case v.MatchedKeyword == openAIAPIKeyHealthBreakerReason:
-		return "health"
 	case strings.HasPrefix(reason, resilience.ReasonPrefixTransient):
 		return "transient"
 	case v.Source == "auth" || strings.HasPrefix(reason, "auth:"):
 		return "auth"
-	case v.Source == "transient" || v.Source == "post_output" || v.Source == "balance" || v.Source == "usage" || v.Source == "403" || v.Source == "health" || v.Source == "stream_timeout":
+	case v.Source == "transient" || v.Source == "post_output" || v.Source == "balance" || v.Source == "usage" || v.Source == "403" || v.Source == "stream_timeout":
 		return v.Source
 	case v.MatchedKeyword != "" || strings.HasPrefix(strings.TrimSpace(reason), "{"):
 		return "rule"
@@ -118,16 +116,6 @@ func (s *SchedAdminService) autoStates(ctx context.Context, a *Account, now time
 	}
 	if s.d.Resilience != nil {
 		out = append(out, s.d.Resilience.schedAdminLocalStates(a, now)...)
-	}
-	if a.ProxyID != nil {
-		if v := s.d.Gateway.schedAdminProxyState(*a.ProxyID, now); v != nil {
-			n, e := s.d.Accounts.SchedAdminProxyPeers(ctx, a.ID, *a.ProxyID)
-			if e != nil {
-				return nil, e
-			}
-			v.Shared = n
-			out = append(out, *v)
-		}
 	}
 	learned := a.CapabilityLearned(now)
 	if len(learned) > 0 {
@@ -250,11 +238,6 @@ func (s *SchedAdminService) clearState(ctx context.Context, a *Account, key stri
 		return s.d.Resilience.schedAdminClearSameSite(a.ID), nil
 	case "post_output":
 		return s.d.Resilience.schedAdminClearPostOutput(a.ID), nil
-	case "proxy_circuit":
-		if a.ProxyID == nil {
-			return false, nil
-		}
-		return s.d.Gateway.schedAdminClearProxy(*a.ProxyID), nil
 	case "capability_learned", "capability_marked":
 		if s.d.Capability == nil {
 			return false, infraerrors.ServiceUnavailable("CAPABILITY_UNAVAILABLE", "Capability service is unavailable")
@@ -380,7 +363,7 @@ func (s *SchedAdminService) Reset(ctx context.Context, id, op int64) (SchedAdmin
 		}
 		finish(v.Kind, ok, e)
 	}
-	for _, source := range []string{"403", "stream_timeout", "health"} {
+	for _, source := range []string{"403", "stream_timeout"} {
 		if err := s.schedAdminCounters(ctx, id, source); err != nil {
 			kind := "temp_" + source
 			if a.Status == StatusError && ((source == "403" && strings.Contains(a.ErrorMessage, "403")) || (source == "stream_timeout" && strings.Contains(strings.ToLower(a.ErrorMessage), "timeout"))) {
@@ -395,7 +378,7 @@ func (s *SchedAdminService) Reset(ctx context.Context, id, op int64) (SchedAdmin
 		finish("auto_states", false, e)
 	} else {
 		for _, v := range states {
-			if !v.Clearable || v.Kind == "proxy_circuit" {
+			if !v.Clearable {
 				item := SchedAdminResetKept{Kind: v.Kind}
 				if v.Until != nil {
 					item.Until = schedAdminTime(*v.Until)

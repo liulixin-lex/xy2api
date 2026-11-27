@@ -26,7 +26,6 @@ func TestCollabOptionalEffectsStayUnwritten(t *testing.T) {
 		require.False(t, svc.handleOpenAIAccountUpstreamError(ctx, account, status, nil, nil))
 	}
 	require.Zero(t, repo.rateLimitedCalls)
-	require.False(t, rl.ObserveOpenAIAPIKeyHealthFailure(ctx, account, errors.New("network failure")))
 	require.Nil(t, svc.capabilityFailureLearner(ctx, account, []byte(`{"model":"synthetic-model"}`), "responses"))
 	require.False(t, svc.learnOpenAITierRefusal(ctx, account, "synthetic-model", "priority", "responses", 400, []byte(`{"error":{"code":"unsupported_service_tier"}}`)))
 	require.Nil(t, svc.newSchedAttemptCapture(ctx, account, nil, false, time.Now(), nil))

@@ -92,7 +92,7 @@ func TestStallIgnoredAfterClientLeft(t *testing.T) {
 // skips a request whose client already left and still applies otherwise.
 func TestStreamTimeoutIgnoredAfterClientLeft(t *testing.T) {
 	rl, repo, account, _ := newPenaltyFixture(t, PlatformOpenAI)
-	rl.SetSettingService(NewSettingService(&openAIAPIKeyHealthSettingRepo{value: `{"enabled":true,"action":"temp_unsched","threshold_count":1,"temp_unsched_minutes":1}`}, &config.Config{}))
+	rl.SetSettingService(NewSettingService(&streamTimeoutSettingRepo{value: `{"enabled":true,"action":"temp_unsched","threshold_count":1,"temp_unsched_minutes":1}`}, &config.Config{}))
 
 	client, cancel := context.WithCancel(context.Background())
 	cancel()

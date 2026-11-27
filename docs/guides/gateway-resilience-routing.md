@@ -65,7 +65,7 @@
 
 - `budget.model_overrides` 按模型（精确名或 `前缀*`）覆盖档位，冷尝试同样取覆盖值与下限中较大者。
 - 非最后候选的截止不短于本请求到这次尝试开始时已耗费的时间，再受剩余预算约束：上游都慢时，被截断的尝试逐次放宽。
-- 截止到期按“计划内截止”处理：客户端行为不变（输出前换号，耗尽时 `error.type` 为 `first_output_timeout`），但不施加账号级流超时惩罚，不计入 API Key 健康熔断与会话失败。在 OpenAI 的[质量状态](group-quality-gate.md)里，普通首输出超时只有已等时间达到该组上限才算首字超限；被预算截短且 `budget.budget_cut_attribution=enforce` 的归网关截止，不计报错失败，也不提供首输出超时证据。
+- 截止到期按“计划内截止”处理：客户端行为不变（输出前换号，耗尽时 `error.type` 为 `first_output_timeout`），但不施加账号级流超时惩罚，不计入会话失败。在 OpenAI 的[质量状态](group-quality-gate.md)里，普通首输出超时只有已等时间达到该组上限才算首字超限；被预算截短且 `budget.budget_cut_attribution=enforce` 的归网关截止，不计报错失败，也不提供首输出超时证据。
 - 普通 OpenAI HTTP 流式文本会话的原归属号等够本档时限后，后续选号优先避开它，时长由 `session.avoid_seconds` 控制（默认 10 分钟）。避让确认后，同一请求由合格前排号更快且完整救回时，可将会话交给救场号。关闭 `session.enabled` 同时停用这两项。见 [OpenAI 会话的去留](scheduling.md#openai-会话的去留)。
 - 判断“唯一能服务该模型”时，其他账号要通过本请求完整的选号资格（能力与传输方式、隐私、利润门）；软罚账号算替代，硬罚不算。
 - 要恢复更长的旧档位，直接修改 `budget.first_output_timeout_seconds`（例如 180/180/200/220），保存即生效。
@@ -140,3 +140,8 @@ OpenAI 账号的某个出站模型被 [智商检测](iq-check.md)判为降智后
 - 用量记录：`usage_logs.group_id` 为实际服务的兜底组，`origin_group_id` 为原分组；扣款仍针对原 Key 和用户。用户侧只显示原分组；管理端用量主标签显示原分组，下方提示“兜底 → 兜底组名”，筛选、统计、导出按服务分组。
 - 可服务数可用 `GET /api/v1/admin/groups/:id/profit-control-preview?margin=&floor=` 预览，返回成员、可调度与准入数及 `ceiling`、`floor`、`below_floor`、`pinned`、`range_empty`、`pinned_loss`。`margin` 取值 `[0,1)`；`floor=0` 表示不设下限，省略时用保存值。固定号免倍率上下限，质量后排仍只改变排序；预览不保存配置。
 - 带工具且需要 Responses 的 Chat 请求在兜底分组里同样只选能用 Responses 服务它的账号，耗尽后不再另换分组。
+
+## 已移除的熔断配置
+
+代理断流不再按代理隔离其他账号；OpenAI 池 API Key 也不再累计失败触发健康熔断。账号 × 模型暂态熔断、403 冷却、流超时处理和质量门保持原有规则。
+旧部署中的 `gateway.openai_proxy_stream_circuit` 及其环境变量会被忽略；数据库中残留的 `openai_apikey_health_breaker_settings` 设置不再读取，无需迁移。

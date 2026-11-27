@@ -80,8 +80,6 @@ func TestOpenAIModelAvailabilityForwardSwitchesAccount(t *testing.T) {
 				require.False(t, failover.RetryableOnSameAccount)
 				require.False(t, failover.ShouldReportAccountScheduleFailure())
 				require.Equal(t, expectedCategory, ClassifyFailoverError(failover).Category)
-				_, _, healthFailure := classifyOpenAIAPIKeyHealthFailure(failover)
-				require.False(t, healthFailure)
 				require.False(t, IsResponseCommitted(c))
 				require.Empty(t, rec.Body.String())
 				events, ok := c.Get(OpsUpstreamErrorsKey)

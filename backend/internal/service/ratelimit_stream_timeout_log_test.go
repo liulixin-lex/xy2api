@@ -30,7 +30,7 @@ func TestStreamTimeoutClientGoneSkipRequiresEnabledPenalty(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 			defer slog.SetDefault(oldLogger)
 			rl, repo, account, _ := newPenaltyFixture(t, PlatformOpenAI)
-			rl.SetSettingService(NewSettingService(&openAIAPIKeyHealthSettingRepo{value: tc.settings}, &config.Config{}))
+			rl.SetSettingService(NewSettingService(&streamTimeoutSettingRepo{value: tc.settings}, &config.Config{}))
 			client, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if tc.gone {
@@ -42,4 +42,15 @@ func TestStreamTimeoutClientGoneSkipRequiresEnabledPenalty(t *testing.T) {
 			require.Equal(t, tc.wantPenalty, !repo.tempUntil.IsZero())
 		})
 	}
+}
+
+type streamTimeoutSettingRepo struct {
+	SettingRepository
+	value    string
+	getCalls int
+}
+
+func (r *streamTimeoutSettingRepo) GetValue(context.Context, string) (string, error) {
+	r.getCalls++
+	return r.value, nil
 }

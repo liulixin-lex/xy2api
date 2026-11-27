@@ -153,7 +153,6 @@
       "model": "model-a",
       "until": "2026-11-01T12:01:50Z",
       "count": null,
-      "shared": 0,
       "clearable": true,
       "why": ""
     }

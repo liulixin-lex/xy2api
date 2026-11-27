@@ -654,25 +654,6 @@ func TestLoadDefaultOpenAIHTTP2Enabled(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, cfg.Gateway.OpenAIHTTP2.Enabled)
 	require.True(t, cfg.Gateway.OpenAIHTTP2.AllowProxyFallbackToHTTP1)
-	require.False(t, cfg.Gateway.OpenAIProxyStreamCircuit.Disabled)
-	require.Equal(t, 2, cfg.Gateway.OpenAIProxyStreamCircuit.FailureThreshold)
-	require.Equal(t, 60, cfg.Gateway.OpenAIProxyStreamCircuit.WindowSeconds)
-	require.Equal(t, 600, cfg.Gateway.OpenAIProxyStreamCircuit.TTLSeconds)
-}
-
-func TestLoadOpenAIProxyStreamCircuitFromEnv(t *testing.T) {
-	resetViperWithJWTSecret(t)
-	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_DISABLED", "true")
-	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_FAILURE_THRESHOLD", "3")
-	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_WINDOW_SECONDS", "90")
-	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_TTL_SECONDS", "420")
-
-	cfg, err := Load()
-	require.NoError(t, err)
-	require.True(t, cfg.Gateway.OpenAIProxyStreamCircuit.Disabled)
-	require.Equal(t, 3, cfg.Gateway.OpenAIProxyStreamCircuit.FailureThreshold)
-	require.Equal(t, 90, cfg.Gateway.OpenAIProxyStreamCircuit.WindowSeconds)
-	require.Equal(t, 420, cfg.Gateway.OpenAIProxyStreamCircuit.TTLSeconds)
 }
 
 func TestLoadOpenAIHTTP2DisabledFromEnv(t *testing.T) {
@@ -1990,21 +1971,6 @@ func TestValidateConfigErrors(t *testing.T) {
 			wantErr: "gateway.openai_http2.fallback_ttl_seconds",
 		},
 		{
-			name:    "gateway openai proxy stream circuit threshold",
-			mutate:  func(c *Config) { c.Gateway.OpenAIProxyStreamCircuit.FailureThreshold = -1 },
-			wantErr: "gateway.openai_proxy_stream_circuit.failure_threshold",
-		},
-		{
-			name:    "gateway openai proxy stream circuit window",
-			mutate:  func(c *Config) { c.Gateway.OpenAIProxyStreamCircuit.WindowSeconds = -1 },
-			wantErr: "gateway.openai_proxy_stream_circuit.window_seconds",
-		},
-		{
-			name:    "gateway openai proxy stream circuit ttl",
-			mutate:  func(c *Config) { c.Gateway.OpenAIProxyStreamCircuit.TTLSeconds = -1 },
-			wantErr: "gateway.openai_proxy_stream_circuit.ttl_seconds",
-		},
-		{
 			name:    "gateway stream data interval range",
 			mutate:  func(c *Config) { c.Gateway.StreamDataIntervalTimeout = 5 },
 			wantErr: "gateway.stream_data_interval_timeout",
@@ -2625,4 +2591,26 @@ func TestLoadSimpleModeAutoCreateDefaultGroups(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadIgnoresRetiredGatewayConfig(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configFile, []byte(`gateway:
+  openai_http2:
+    enabled: false
+  openai_proxy_stream_circuit:
+    disabled: false
+    failure_threshold: -1
+    window_seconds: -1
+    ttl_seconds: -1
+`), 0o600))
+	t.Setenv("CONFIG_FILE", configFile)
+	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_DISABLED", "invalid")
+	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_FAILURE_THRESHOLD", "invalid")
+	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_WINDOW_SECONDS", "invalid")
+	t.Setenv("GATEWAY_OPENAI_PROXY_STREAM_CIRCUIT_TTL_SECONDS", "invalid")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.Gateway.OpenAIHTTP2.Enabled)
 }
