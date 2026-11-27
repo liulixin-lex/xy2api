@@ -58,6 +58,8 @@ COMMIT;
 
 ## 未送达请求
 
+Gemini 入口按实际方法与动作分别记录模型列表 `/v1beta/models`、模型详情 `/v1beta/models/{model}`、生成 `/v1beta/models:generateContent`、流式生成 `/v1beta/models:streamGenerateContent` 和令牌计数 `/v1beta/models:countTokens`；标签不含模型名，未知动作不归生成，历史 `/v1beta/models` 仍是旧版混合桶，统计时应保留该桶。
+
 客户端在任何语义输出前断开的请求记入未送达表（保留 30 天，每 6 小时清理），列出时间、断开阶段、耗时、用户、Key、模型、入口、上游成本估算与是否计费。断开阶段：
 
 | 阶段 | 含义 |

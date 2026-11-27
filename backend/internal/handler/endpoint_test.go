@@ -43,7 +43,7 @@ func TestNormalizeInboundEndpoint(t *testing.T) {
 		{"/openai/v1/responses", EndpointResponses},
 		{"/openai/v1/images/generations", EndpointImagesGenerations},
 		{"/openai/v1/images/edits", EndpointImagesEdits},
-		{"/antigravity/v1beta/models/gemini:generateContent", EndpointGeminiModels},
+		{"/antigravity/v1beta/models/gemini:generateContent", EndpointGeminiGenerateContent},
 
 		// Prefixed paths — "/responses/compact" is its OWN distinct
 		// inbound endpoint, not folded into the root Responses endpoint.
@@ -398,7 +398,7 @@ func TestInboundEndpointMiddleware_WildcardRoutes(t *testing.T) {
 // TestInboundEndpointMiddleware_GeminiWildcardRoute verifies that a Gemini
 // wildcard route (e.g. "/v1beta/models/*modelAction", used to capture the
 // ":generateContent"-style action suffix embedded in the path) is normalized
-// to EndpointGeminiModels via InboundEndpointMiddleware, using the same real
+// to EndpointGeminiGenerateContent via InboundEndpointMiddleware, using the same real
 // Gin routing path as TestInboundEndpointMiddleware_WildcardRoutes above.
 func TestInboundEndpointMiddleware_GeminiWildcardRoute(t *testing.T) {
 	router := gin.New()
@@ -415,7 +415,7 @@ func TestInboundEndpointMiddleware_GeminiWildcardRoute(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, EndpointGeminiModels, captured)
+	require.Equal(t, EndpointGeminiGenerateContent, captured)
 }
 
 // TestGetInboundEndpoint_FallbackWildcardRouteWithoutMiddleware verifies
