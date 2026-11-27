@@ -1133,6 +1133,9 @@ func TestOpenAIGatewayServiceRecordUsage_AccountStatsLongContextFollowsAccountGa
 			require.InDelta(t, tt.wantTotalCost, usageRepo.lastLog.TotalCost, 1e-10)
 			require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
 			require.InDelta(t, tt.wantAccountCost, *usageRepo.lastLog.AccountStatsCost, 1e-10)
+			require.NotNil(t, usageRepo.lastLog.SupplierCostEstimate)
+			require.InDelta(t, tt.wantAccountCost, *usageRepo.lastLog.SupplierCostEstimate, 1e-10)
+			require.Empty(t, usageRepo.lastLog.MeteringAdjustment)
 		})
 	}
 }

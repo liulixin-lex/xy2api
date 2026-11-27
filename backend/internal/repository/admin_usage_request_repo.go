@@ -28,7 +28,7 @@ const adminRequestsCTE = `WITH requests AS (
 		upstream_model_mismatch, origin_group_id, upstream_model, model_mapping_chain, image_count,
 		end_to_end_first_output_ms, first_token_ms, duration_ms, input_tokens, output_tokens, cache_read_tokens,
 		cache_creation_tokens, total_cost, actual_cost, account_stats_cost, account_rate_multiplier,
-		inbound_endpoint, upstream_endpoint, collab_observation
+		inbound_endpoint, upstream_endpoint, collab_observation, supplier_cost_estimate
 	FROM usage_logs
 	UNION ALL
 	SELECT 'unbilled', id, request_id, result, switches, fallback, takeover,
@@ -36,7 +36,7 @@ const adminRequestsCTE = `WITH requests AS (
 		request_type, stream, request_type=3, NULL, NULL, NULL,
 		NULL, NULL, NULL, NULL, 0,
 		first_output_ms, NULL, duration_ms, input_tokens, NULL, cache_read_tokens,
-		cache_creation_tokens, NULL, NULL, NULL, NULL, NULL, NULL, collab_observation
+		cache_creation_tokens, NULL, NULL, NULL, NULL, NULL, NULL, collab_observation, NULL::numeric
 	FROM gateway_unbilled_requests
 ) `
 

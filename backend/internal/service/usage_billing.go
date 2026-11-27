@@ -94,6 +94,8 @@ func BillingUsageSnapshot(usage *UsageLog) *UsageLog {
 	snapshot.ActualCost = QuantizeUsageBillingAmount(snapshot.ActualCost)
 	snapshot.ProfitBasis = append([]byte(nil), usage.ProfitBasis...)
 	snapshot.PricingSource = append([]byte(nil), usage.PricingSource...)
+	snapshot.MeteringAdjustment = append([]byte(nil), usage.MeteringAdjustment...)
+	snapshot.SupplierCostEstimate = cloneUsageFactValue(usage.SupplierCostEstimate)
 	snapshot.ServiceTierDetails = append([]byte(nil), usage.ServiceTierDetails...)
 	snapshot.DispatchPhases = append([]byte(nil), usage.DispatchPhases...)
 	snapshot.ConversionNotices = copyConversionNotices(usage.ConversionNotices)

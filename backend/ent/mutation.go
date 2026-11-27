@@ -45614,6 +45614,10 @@ type UsageLogMutation struct {
 	response_body_type            *string
 	degradations                  *jsontext.Value
 	appenddegradations            jsontext.Value
+	supplier_cost_estimate        *float64
+	addsupplier_cost_estimate     *float64
+	metering_adjustment           *jsontext.Value
+	appendmetering_adjustment     jsontext.Value
 	pricing_source                *jsontext.Value
 	appendpricing_source          jsontext.Value
 	collab_observation            *jsontext.Value
@@ -46624,6 +46628,141 @@ func (m *UsageLogMutation) ResetDegradations() {
 	m.degradations = nil
 	m.appenddegradations = nil
 	delete(m.clearedFields, usagelog.FieldDegradations)
+}
+
+// SetSupplierCostEstimate sets the "supplier_cost_estimate" field.
+func (m *UsageLogMutation) SetSupplierCostEstimate(f float64) {
+	m.supplier_cost_estimate = &f
+	m.addsupplier_cost_estimate = nil
+}
+
+// SupplierCostEstimate returns the value of the "supplier_cost_estimate" field in the mutation.
+func (m *UsageLogMutation) SupplierCostEstimate() (r float64, exists bool) {
+	v := m.supplier_cost_estimate
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSupplierCostEstimate returns the old "supplier_cost_estimate" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldSupplierCostEstimate(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSupplierCostEstimate is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSupplierCostEstimate requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSupplierCostEstimate: %w", err)
+	}
+	return oldValue.SupplierCostEstimate, nil
+}
+
+// AddSupplierCostEstimate adds f to the "supplier_cost_estimate" field.
+func (m *UsageLogMutation) AddSupplierCostEstimate(f float64) {
+	if m.addsupplier_cost_estimate != nil {
+		*m.addsupplier_cost_estimate += f
+	} else {
+		m.addsupplier_cost_estimate = &f
+	}
+}
+
+// AddedSupplierCostEstimate returns the value that was added to the "supplier_cost_estimate" field in this mutation.
+func (m *UsageLogMutation) AddedSupplierCostEstimate() (r float64, exists bool) {
+	v := m.addsupplier_cost_estimate
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearSupplierCostEstimate clears the value of the "supplier_cost_estimate" field.
+func (m *UsageLogMutation) ClearSupplierCostEstimate() {
+	m.supplier_cost_estimate = nil
+	m.addsupplier_cost_estimate = nil
+	m.clearedFields[usagelog.FieldSupplierCostEstimate] = struct{}{}
+}
+
+// SupplierCostEstimateCleared returns if the "supplier_cost_estimate" field was cleared in this mutation.
+func (m *UsageLogMutation) SupplierCostEstimateCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldSupplierCostEstimate]
+	return ok
+}
+
+// ResetSupplierCostEstimate resets all changes to the "supplier_cost_estimate" field.
+func (m *UsageLogMutation) ResetSupplierCostEstimate() {
+	m.supplier_cost_estimate = nil
+	m.addsupplier_cost_estimate = nil
+	delete(m.clearedFields, usagelog.FieldSupplierCostEstimate)
+}
+
+// SetMeteringAdjustment sets the "metering_adjustment" field.
+func (m *UsageLogMutation) SetMeteringAdjustment(j jsontext.Value) {
+	m.metering_adjustment = &j
+	m.appendmetering_adjustment = nil
+}
+
+// MeteringAdjustment returns the value of the "metering_adjustment" field in the mutation.
+func (m *UsageLogMutation) MeteringAdjustment() (r jsontext.Value, exists bool) {
+	v := m.metering_adjustment
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMeteringAdjustment returns the old "metering_adjustment" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldMeteringAdjustment(ctx context.Context) (v jsontext.Value, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMeteringAdjustment is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMeteringAdjustment requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMeteringAdjustment: %w", err)
+	}
+	return oldValue.MeteringAdjustment, nil
+}
+
+// AppendMeteringAdjustment adds j to the "metering_adjustment" field.
+func (m *UsageLogMutation) AppendMeteringAdjustment(j jsontext.Value) {
+	m.appendmetering_adjustment = append(m.appendmetering_adjustment, j...)
+}
+
+// AppendedMeteringAdjustment returns the list of values that were appended to the "metering_adjustment" field in this mutation.
+func (m *UsageLogMutation) AppendedMeteringAdjustment() (jsontext.Value, bool) {
+	if len(m.appendmetering_adjustment) == 0 {
+		return nil, false
+	}
+	return m.appendmetering_adjustment, true
+}
+
+// ClearMeteringAdjustment clears the value of the "metering_adjustment" field.
+func (m *UsageLogMutation) ClearMeteringAdjustment() {
+	m.metering_adjustment = nil
+	m.appendmetering_adjustment = nil
+	m.clearedFields[usagelog.FieldMeteringAdjustment] = struct{}{}
+}
+
+// MeteringAdjustmentCleared returns if the "metering_adjustment" field was cleared in this mutation.
+func (m *UsageLogMutation) MeteringAdjustmentCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldMeteringAdjustment]
+	return ok
+}
+
+// ResetMeteringAdjustment resets all changes to the "metering_adjustment" field.
+func (m *UsageLogMutation) ResetMeteringAdjustment() {
+	m.metering_adjustment = nil
+	m.appendmetering_adjustment = nil
+	delete(m.clearedFields, usagelog.FieldMeteringAdjustment)
 }
 
 // SetPricingSource sets the "pricing_source" field.
@@ -50751,7 +50890,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 86)
+	fields := make([]string, 0, 88)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -50799,6 +50938,12 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.degradations != nil {
 		fields = append(fields, usagelog.FieldDegradations)
+	}
+	if m.supplier_cost_estimate != nil {
+		fields = append(fields, usagelog.FieldSupplierCostEstimate)
+	}
+	if m.metering_adjustment != nil {
+		fields = append(fields, usagelog.FieldMeteringAdjustment)
 	}
 	if m.pricing_source != nil {
 		fields = append(fields, usagelog.FieldPricingSource)
@@ -51050,6 +51195,10 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.ResponseBodyType()
 	case usagelog.FieldDegradations:
 		return m.Degradations()
+	case usagelog.FieldSupplierCostEstimate:
+		return m.SupplierCostEstimate()
+	case usagelog.FieldMeteringAdjustment:
+		return m.MeteringAdjustment()
 	case usagelog.FieldPricingSource:
 		return m.PricingSource()
 	case usagelog.FieldCollabObservation:
@@ -51231,6 +51380,10 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldResponseBodyType(ctx)
 	case usagelog.FieldDegradations:
 		return m.OldDegradations(ctx)
+	case usagelog.FieldSupplierCostEstimate:
+		return m.OldSupplierCostEstimate(ctx)
+	case usagelog.FieldMeteringAdjustment:
+		return m.OldMeteringAdjustment(ctx)
 	case usagelog.FieldPricingSource:
 		return m.OldPricingSource(ctx)
 	case usagelog.FieldCollabObservation:
@@ -51491,6 +51644,20 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetDegradations(v)
+		return nil
+	case usagelog.FieldSupplierCostEstimate:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSupplierCostEstimate(v)
+		return nil
+	case usagelog.FieldMeteringAdjustment:
+		v, ok := value.(jsontext.Value)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMeteringAdjustment(v)
 		return nil
 	case usagelog.FieldPricingSource:
 		v, ok := value.(jsontext.Value)
@@ -51996,6 +52163,9 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addswitches != nil {
 		fields = append(fields, usagelog.FieldSwitches)
 	}
+	if m.addsupplier_cost_estimate != nil {
+		fields = append(fields, usagelog.FieldSupplierCostEstimate)
+	}
 	if m.addchannel_id != nil {
 		fields = append(fields, usagelog.FieldChannelID)
 	}
@@ -52113,6 +52283,8 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedResult()
 	case usagelog.FieldSwitches:
 		return m.AddedSwitches()
+	case usagelog.FieldSupplierCostEstimate:
+		return m.AddedSupplierCostEstimate()
 	case usagelog.FieldChannelID:
 		return m.AddedChannelID()
 	case usagelog.FieldInputTokens:
@@ -52205,6 +52377,13 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddSwitches(v)
+		return nil
+	case usagelog.FieldSupplierCostEstimate:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSupplierCostEstimate(v)
 		return nil
 	case usagelog.FieldChannelID:
 		v, ok := value.(int64)
@@ -52495,6 +52674,12 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldDegradations) {
 		fields = append(fields, usagelog.FieldDegradations)
 	}
+	if m.FieldCleared(usagelog.FieldSupplierCostEstimate) {
+		fields = append(fields, usagelog.FieldSupplierCostEstimate)
+	}
+	if m.FieldCleared(usagelog.FieldMeteringAdjustment) {
+		fields = append(fields, usagelog.FieldMeteringAdjustment)
+	}
 	if m.FieldCleared(usagelog.FieldPricingSource) {
 		fields = append(fields, usagelog.FieldPricingSource)
 	}
@@ -52691,6 +52876,12 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldDegradations:
 		m.ClearDegradations()
+		return nil
+	case usagelog.FieldSupplierCostEstimate:
+		m.ClearSupplierCostEstimate()
+		return nil
+	case usagelog.FieldMeteringAdjustment:
+		m.ClearMeteringAdjustment()
 		return nil
 	case usagelog.FieldPricingSource:
 		m.ClearPricingSource()
@@ -52894,6 +53085,12 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldDegradations:
 		m.ResetDegradations()
+		return nil
+	case usagelog.FieldSupplierCostEstimate:
+		m.ResetSupplierCostEstimate()
+		return nil
+	case usagelog.FieldMeteringAdjustment:
+		m.ResetMeteringAdjustment()
 		return nil
 	case usagelog.FieldPricingSource:
 		m.ResetPricingSource()

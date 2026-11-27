@@ -130,6 +130,11 @@ func ResponseBodyType(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldResponseBodyType, v))
 }
 
+// SupplierCostEstimate applies equality check predicate on the "supplier_cost_estimate" field. It's identical to SupplierCostEstimateEQ.
+func SupplierCostEstimate(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldSupplierCostEstimate, v))
+}
+
 // Model applies equality check predicate on the "model" field. It's identical to ModelEQ.
 func Model(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldModel, v))
@@ -1083,6 +1088,66 @@ func DegradationsIsNil() predicate.UsageLog {
 // DegradationsNotNil applies the NotNil predicate on the "degradations" field.
 func DegradationsNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldDegradations))
+}
+
+// SupplierCostEstimateEQ applies the EQ predicate on the "supplier_cost_estimate" field.
+func SupplierCostEstimateEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldSupplierCostEstimate, v))
+}
+
+// SupplierCostEstimateNEQ applies the NEQ predicate on the "supplier_cost_estimate" field.
+func SupplierCostEstimateNEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldSupplierCostEstimate, v))
+}
+
+// SupplierCostEstimateIn applies the In predicate on the "supplier_cost_estimate" field.
+func SupplierCostEstimateIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldSupplierCostEstimate, vs...))
+}
+
+// SupplierCostEstimateNotIn applies the NotIn predicate on the "supplier_cost_estimate" field.
+func SupplierCostEstimateNotIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldSupplierCostEstimate, vs...))
+}
+
+// SupplierCostEstimateGT applies the GT predicate on the "supplier_cost_estimate" field.
+func SupplierCostEstimateGT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldSupplierCostEstimate, v))
+}
+
+// SupplierCostEstimateGTE applies the GTE predicate on the "supplier_cost_estimate" field.
+func SupplierCostEstimateGTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldSupplierCostEstimate, v))
+}
+
+// SupplierCostEstimateLT applies the LT predicate on the "supplier_cost_estimate" field.
+func SupplierCostEstimateLT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldSupplierCostEstimate, v))
+}
+
+// SupplierCostEstimateLTE applies the LTE predicate on the "supplier_cost_estimate" field.
+func SupplierCostEstimateLTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldSupplierCostEstimate, v))
+}
+
+// SupplierCostEstimateIsNil applies the IsNil predicate on the "supplier_cost_estimate" field.
+func SupplierCostEstimateIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldSupplierCostEstimate))
+}
+
+// SupplierCostEstimateNotNil applies the NotNil predicate on the "supplier_cost_estimate" field.
+func SupplierCostEstimateNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldSupplierCostEstimate))
+}
+
+// MeteringAdjustmentIsNil applies the IsNil predicate on the "metering_adjustment" field.
+func MeteringAdjustmentIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldMeteringAdjustment))
+}
+
+// MeteringAdjustmentNotNil applies the NotNil predicate on the "metering_adjustment" field.
+func MeteringAdjustmentNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldMeteringAdjustment))
 }
 
 // PricingSourceIsNil applies the IsNil predicate on the "pricing_source" field.

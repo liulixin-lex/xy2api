@@ -143,6 +143,8 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // dispatch_phases
 			sqlmock.AnyArg(), // service_tier_details
 			nil,              // collab_observation
+			nil,              // metering_adjustment
+			nil,              // supplier_cost_estimate
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -278,6 +280,8 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // dispatch_phases
 			sqlmock.AnyArg(), // service_tier_details
 			nil,              // collab_observation
+			nil,              // metering_adjustment
+			nil,              // supplier_cost_estimate
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
@@ -1042,46 +1046,48 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},
 			false, // native_compaction_v2
 			now,
-			sql.NullInt64{},  // origin_group_id
-			sql.NullInt64{},  // end_to_end_first_output_ms
-			sql.NullInt64{},  // attempt_first_output_ms
-			sql.NullString{}, // anthropic_cache_ttl_policy
-			sql.NullBool{},   // anthropic_cache_ttl_applied
-			sql.NullInt64{},  // body_bytes
-			sql.NullInt64{},  // first_read_ms
-			sql.NullInt64{},  // body_eof_ms
-			sql.NullString{}, // anchor_basis
-			sql.NullBool{},   // anchor_eligible
-			sql.NullInt64{},  // body_receipt_repeat
-			sql.NullInt64{},  // pre_dispatch_ms
-			sql.NullInt64{},  // keepalive_commit_ms
-			sql.NullInt64{},  // wire_status
-			sql.NullInt64{},  // dispatch_count
-			sql.NullInt64{},  // min_dispatch_remaining_ms
-			sql.NullInt64{},  // final_deadline_ms
-			sql.NullString{}, // client_family
-			sql.NullInt64{},  // client_cancel_ms
-			sql.NullString{}, // cancel_stage
-			sql.NullString{}, // cdn_observed
-			sql.NullString{}, // budget_start_mode
-			sql.NullInt64{},  // budget_t0_unix_ms
-			(*string)(nil),   // gateway_request_id
-			(*int16)(nil),    // result
-			(*int16)(nil),    // switches
-			(*bool)(nil),     // fallback
-			(*bool)(nil),     // takeover
-			(*string)(nil),   // request_scope
-			(*bool)(nil),     // usage_observed
-			(*string)(nil),   // usage_source
-			(*bool)(nil),     // terminal_event_seen
-			(*bool)(nil),     // terminal_event_valid
-			(*string)(nil),   // response_body_type
-			[]byte(nil),      // degradations
-			[]byte(nil),      // pricing_source
-			[]byte(nil),      // profit_basis
-			[]byte(nil),      // dispatch_phases
-			[]byte(nil),      // service_tier_details
-			[]byte(nil),      // collab_observation
+			sql.NullInt64{},   // origin_group_id
+			sql.NullInt64{},   // end_to_end_first_output_ms
+			sql.NullInt64{},   // attempt_first_output_ms
+			sql.NullString{},  // anthropic_cache_ttl_policy
+			sql.NullBool{},    // anthropic_cache_ttl_applied
+			sql.NullInt64{},   // body_bytes
+			sql.NullInt64{},   // first_read_ms
+			sql.NullInt64{},   // body_eof_ms
+			sql.NullString{},  // anchor_basis
+			sql.NullBool{},    // anchor_eligible
+			sql.NullInt64{},   // body_receipt_repeat
+			sql.NullInt64{},   // pre_dispatch_ms
+			sql.NullInt64{},   // keepalive_commit_ms
+			sql.NullInt64{},   // wire_status
+			sql.NullInt64{},   // dispatch_count
+			sql.NullInt64{},   // min_dispatch_remaining_ms
+			sql.NullInt64{},   // final_deadline_ms
+			sql.NullString{},  // client_family
+			sql.NullInt64{},   // client_cancel_ms
+			sql.NullString{},  // cancel_stage
+			sql.NullString{},  // cdn_observed
+			sql.NullString{},  // budget_start_mode
+			sql.NullInt64{},   // budget_t0_unix_ms
+			(*string)(nil),    // gateway_request_id
+			(*int16)(nil),     // result
+			(*int16)(nil),     // switches
+			(*bool)(nil),      // fallback
+			(*bool)(nil),      // takeover
+			(*string)(nil),    // request_scope
+			(*bool)(nil),      // usage_observed
+			(*string)(nil),    // usage_source
+			(*bool)(nil),      // terminal_event_seen
+			(*bool)(nil),      // terminal_event_valid
+			(*string)(nil),    // response_body_type
+			[]byte(nil),       // degradations
+			[]byte(nil),       // pricing_source
+			[]byte(nil),       // profit_basis
+			[]byte(nil),       // dispatch_phases
+			[]byte(nil),       // service_tier_details
+			[]byte(nil),       // collab_observation
+			[]byte(nil),       // metering_adjustment
+			sql.NullFloat64{}, // supplier_cost_estimate
 		}})
 		require.NoError(t, err)
 		require.Equal(t, 2, log.ImageCount)
@@ -1162,46 +1168,48 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // session_id
 			false,             // native_compaction_v2
 			now,
-			sql.NullInt64{},  // origin_group_id
-			sql.NullInt64{},  // end_to_end_first_output_ms
-			sql.NullInt64{},  // attempt_first_output_ms
-			sql.NullString{}, // anthropic_cache_ttl_policy
-			sql.NullBool{},   // anthropic_cache_ttl_applied
-			sql.NullInt64{},  // body_bytes
-			sql.NullInt64{},  // first_read_ms
-			sql.NullInt64{},  // body_eof_ms
-			sql.NullString{}, // anchor_basis
-			sql.NullBool{},   // anchor_eligible
-			sql.NullInt64{},  // body_receipt_repeat
-			sql.NullInt64{},  // pre_dispatch_ms
-			sql.NullInt64{},  // keepalive_commit_ms
-			sql.NullInt64{},  // wire_status
-			sql.NullInt64{},  // dispatch_count
-			sql.NullInt64{},  // min_dispatch_remaining_ms
-			sql.NullInt64{},  // final_deadline_ms
-			sql.NullString{}, // client_family
-			sql.NullInt64{},  // client_cancel_ms
-			sql.NullString{}, // cancel_stage
-			sql.NullString{}, // cdn_observed
-			sql.NullString{}, // budget_start_mode
-			sql.NullInt64{},  // budget_t0_unix_ms
-			(*string)(nil),   // gateway_request_id
-			(*int16)(nil),    // result
-			(*int16)(nil),    // switches
-			(*bool)(nil),     // fallback
-			(*bool)(nil),     // takeover
-			(*string)(nil),   // request_scope
-			(*bool)(nil),     // usage_observed
-			(*string)(nil),   // usage_source
-			(*bool)(nil),     // terminal_event_seen
-			(*bool)(nil),     // terminal_event_valid
-			(*string)(nil),   // response_body_type
-			[]byte(nil),      // degradations
-			[]byte(nil),      // pricing_source
-			[]byte(nil),      // profit_basis
-			[]byte(nil),      // dispatch_phases
-			[]byte(nil),      // service_tier_details
-			[]byte(nil),      // collab_observation
+			sql.NullInt64{},   // origin_group_id
+			sql.NullInt64{},   // end_to_end_first_output_ms
+			sql.NullInt64{},   // attempt_first_output_ms
+			sql.NullString{},  // anthropic_cache_ttl_policy
+			sql.NullBool{},    // anthropic_cache_ttl_applied
+			sql.NullInt64{},   // body_bytes
+			sql.NullInt64{},   // first_read_ms
+			sql.NullInt64{},   // body_eof_ms
+			sql.NullString{},  // anchor_basis
+			sql.NullBool{},    // anchor_eligible
+			sql.NullInt64{},   // body_receipt_repeat
+			sql.NullInt64{},   // pre_dispatch_ms
+			sql.NullInt64{},   // keepalive_commit_ms
+			sql.NullInt64{},   // wire_status
+			sql.NullInt64{},   // dispatch_count
+			sql.NullInt64{},   // min_dispatch_remaining_ms
+			sql.NullInt64{},   // final_deadline_ms
+			sql.NullString{},  // client_family
+			sql.NullInt64{},   // client_cancel_ms
+			sql.NullString{},  // cancel_stage
+			sql.NullString{},  // cdn_observed
+			sql.NullString{},  // budget_start_mode
+			sql.NullInt64{},   // budget_t0_unix_ms
+			(*string)(nil),    // gateway_request_id
+			(*int16)(nil),     // result
+			(*int16)(nil),     // switches
+			(*bool)(nil),      // fallback
+			(*bool)(nil),      // takeover
+			(*string)(nil),    // request_scope
+			(*bool)(nil),      // usage_observed
+			(*string)(nil),    // usage_source
+			(*bool)(nil),      // terminal_event_seen
+			(*bool)(nil),      // terminal_event_valid
+			(*string)(nil),    // response_body_type
+			[]byte(nil),       // degradations
+			[]byte(nil),       // pricing_source
+			[]byte(nil),       // profit_basis
+			[]byte(nil),       // dispatch_phases
+			[]byte(nil),       // service_tier_details
+			[]byte(nil),       // collab_observation
+			[]byte(nil),       // metering_adjustment
+			sql.NullFloat64{}, // supplier_cost_estimate
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1265,46 +1273,48 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // session_id
 			true,              // native_compaction_v2
 			now,
-			sql.NullInt64{},  // origin_group_id
-			sql.NullInt64{},  // end_to_end_first_output_ms
-			sql.NullInt64{},  // attempt_first_output_ms
-			sql.NullString{}, // anthropic_cache_ttl_policy
-			sql.NullBool{},   // anthropic_cache_ttl_applied
-			sql.NullInt64{},  // body_bytes
-			sql.NullInt64{},  // first_read_ms
-			sql.NullInt64{},  // body_eof_ms
-			sql.NullString{}, // anchor_basis
-			sql.NullBool{},   // anchor_eligible
-			sql.NullInt64{},  // body_receipt_repeat
-			sql.NullInt64{},  // pre_dispatch_ms
-			sql.NullInt64{},  // keepalive_commit_ms
-			sql.NullInt64{},  // wire_status
-			sql.NullInt64{},  // dispatch_count
-			sql.NullInt64{},  // min_dispatch_remaining_ms
-			sql.NullInt64{},  // final_deadline_ms
-			sql.NullString{}, // client_family
-			sql.NullInt64{},  // client_cancel_ms
-			sql.NullString{}, // cancel_stage
-			sql.NullString{}, // cdn_observed
-			sql.NullString{}, // budget_start_mode
-			sql.NullInt64{},  // budget_t0_unix_ms
-			(*string)(nil),   // gateway_request_id
-			(*int16)(nil),    // result
-			(*int16)(nil),    // switches
-			(*bool)(nil),     // fallback
-			(*bool)(nil),     // takeover
-			(*string)(nil),   // request_scope
-			(*bool)(nil),     // usage_observed
-			(*string)(nil),   // usage_source
-			(*bool)(nil),     // terminal_event_seen
-			(*bool)(nil),     // terminal_event_valid
-			(*string)(nil),   // response_body_type
-			[]byte(nil),      // degradations
-			[]byte(nil),      // pricing_source
-			[]byte(nil),      // profit_basis
-			[]byte(nil),      // dispatch_phases
-			[]byte(nil),      // service_tier_details
-			[]byte(nil),      // collab_observation
+			sql.NullInt64{},   // origin_group_id
+			sql.NullInt64{},   // end_to_end_first_output_ms
+			sql.NullInt64{},   // attempt_first_output_ms
+			sql.NullString{},  // anthropic_cache_ttl_policy
+			sql.NullBool{},    // anthropic_cache_ttl_applied
+			sql.NullInt64{},   // body_bytes
+			sql.NullInt64{},   // first_read_ms
+			sql.NullInt64{},   // body_eof_ms
+			sql.NullString{},  // anchor_basis
+			sql.NullBool{},    // anchor_eligible
+			sql.NullInt64{},   // body_receipt_repeat
+			sql.NullInt64{},   // pre_dispatch_ms
+			sql.NullInt64{},   // keepalive_commit_ms
+			sql.NullInt64{},   // wire_status
+			sql.NullInt64{},   // dispatch_count
+			sql.NullInt64{},   // min_dispatch_remaining_ms
+			sql.NullInt64{},   // final_deadline_ms
+			sql.NullString{},  // client_family
+			sql.NullInt64{},   // client_cancel_ms
+			sql.NullString{},  // cancel_stage
+			sql.NullString{},  // cdn_observed
+			sql.NullString{},  // budget_start_mode
+			sql.NullInt64{},   // budget_t0_unix_ms
+			(*string)(nil),    // gateway_request_id
+			(*int16)(nil),     // result
+			(*int16)(nil),     // switches
+			(*bool)(nil),      // fallback
+			(*bool)(nil),      // takeover
+			(*string)(nil),    // request_scope
+			(*bool)(nil),      // usage_observed
+			(*string)(nil),    // usage_source
+			(*bool)(nil),      // terminal_event_seen
+			(*bool)(nil),      // terminal_event_valid
+			(*string)(nil),    // response_body_type
+			[]byte(nil),       // degradations
+			[]byte(nil),       // pricing_source
+			[]byte(nil),       // profit_basis
+			[]byte(nil),       // dispatch_phases
+			[]byte(nil),       // service_tier_details
+			[]byte(nil),       // collab_observation
+			[]byte(nil),       // metering_adjustment
+			sql.NullFloat64{}, // supplier_cost_estimate
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)
@@ -1410,6 +1420,8 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			[]byte(nil),                              // dispatch_phases
 			[]byte(nil),                              // service_tier_details
 			[]byte(nil),                              // collab_observation
+			[]byte(nil),                              // metering_adjustment
+			sql.NullFloat64{},                        // supplier_cost_estimate
 		}})
 		require.NoError(t, err)
 		require.NotNil(t, log.ServiceTier)

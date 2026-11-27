@@ -516,12 +516,39 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		)
 	}
 
+	metered := freezeMeteredUsage(ClaudeUsage{
+		InputTokens: actualInputTokens, OutputTokens: result.Usage.OutputTokens,
+		CacheReadInputTokens: result.Usage.CacheReadInputTokens, CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
+		CacheCreation5mTokens: result.Usage.CacheCreation5mTokens, CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
+		ImageOutputTokens: result.Usage.ImageOutputTokens, InputTokensPresent: result.Usage.InputTokensPresent,
+		OutputTokensPresent: result.Usage.OutputTokensPresent, CacheReadInputTokensPresent: result.Usage.CacheReadInputTokensPresent,
+		CacheCreationInputTokensPresent: result.Usage.CacheCreationInputTokensPresent,
+		CacheCreation5mTokensPresent:    result.Usage.CacheCreation5mTokensPresent, CacheCreation1hTokensPresent: result.Usage.CacheCreation1hTokensPresent,
+		UsageIncomplete: result.Usage.UsageIncomplete, UsageInconsistent: result.Usage.UsageInconsistent,
+		RawPromptTokens: result.Usage.RawPromptTokens, RawCacheReadTokens: result.Usage.RawCacheReadTokens,
+	}, result.ResponseFactsKnown, result.UsagePresent, result.UsageSource)
+	metered.ImageInputTokens, metered.ImageCacheReadTokens = tokens.ImageInputTokens, tokens.ImageCacheReadTokens
+	groupID := int64(0)
+	if apiKey.GroupID != nil {
+		groupID = *apiKey.GroupID
+	}
+	grossValue := *cost
+	supplier := estimateMeteredSupplierCost(ctx, s.channelService, s.tierBillingService(ctx), usageLog, metered, &grossValue,
+		account.ID, groupID, firstNonEmpty(result.UpstreamModel, result.Model), pricingAt,
+		accountStatsLongContextPricingEnabled(longContextBillingGate), openAITierProcurementAccount(result, details, billingAccount))
+	settledActual := usageLog.ActualCost
+
 	// xy2api resilience: a client that left before any output is not billed,
 	// except at upstream cost under the abuse guard (design §8.2).
 	resilienceAnnotateUsage(ctx, usageLog)
 	if resilienceUndeliveredUsage(ctx, usageLog, cost, accountRateMultiplier) {
 		return nil
 	}
+	var meteringAdjustments []meteringAdjustmentKind
+	if usageLog.ActualCost != settledActual {
+		meteringAdjustments = append(meteringAdjustments, meteringAdjustmentKind{Kind: "legacy_undelivered_abuse"})
+	}
+	applyMeteringAdjustment(usageLog, metered, &grossValue, supplier, meteringAdjustments)
 	if details != nil {
 		details.ActualCost = QuantizeUsageBillingAmount(cost.ActualCost)
 		usageLog.ServiceTierDetails, err = json.Marshal(details)

@@ -60,3 +60,31 @@ func TestProjectServiceTierEvidenceVisibility(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, row[34], "serving_group_id")
 }
+
+func TestMeteringProjectionDoesNotMultiplySupplierTwice(t *testing.T) {
+	var r Record
+	require.NoError(t, json.Unmarshal([]byte(`{"created_at":"2026-01-01T00:00:00Z","total_cost":2,"account_stats_cost":1,"account_rate_multiplier":0.5,"supplier_cost_estimate":0.9,"metering_adjustment":{"v":1}}`), &r))
+	o := options()
+	o.Format, o.Version = "xlsx", MeteringFormatVersion
+	row, err := Project(r, o)
+	require.NoError(t, err)
+	require.Len(t, row, len(Headers(o)))
+	require.Equal(t, "0.900000", row[26])
+	require.Equal(t, "0.9", row[35])
+	require.JSONEq(t, `{"v":1}`, row[36])
+	r["supplier_cost_estimate"] = json.RawMessage("0")
+	row, err = Project(r, o)
+	require.NoError(t, err)
+	require.Equal(t, "0.000000", row[26])
+	for _, version := range []int{1, ServiceTierFormatVersion} {
+		o.Version = version
+		row, err = Project(r, o)
+		require.NoError(t, err)
+		require.Equal(t, "0.500000", row[26])
+	}
+	o.Format, o.Version = "csv", MeteringFormatVersion
+	row, err = Project(r, o)
+	require.NoError(t, err)
+	require.Len(t, row, 19)
+	require.NotContains(t, row, `{"v":1}`)
+}
