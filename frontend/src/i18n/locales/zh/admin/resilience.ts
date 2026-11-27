@@ -218,6 +218,7 @@ export default {
       cost: '上游成本估算',
       billed: '已计费',
       notBilled: '未计费',
+      requestId: '请求 ID',
       stages: {
         upload: '上传请求中',
         select: '选号或等待槽位',

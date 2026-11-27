@@ -82,6 +82,7 @@
             <th class="px-2 py-2 font-semibold">{{ t('admin.resilience.undelivered.endpoint') }}</th>
             <th class="px-2 py-2 text-right font-semibold">{{ t('admin.resilience.undelivered.cost') }}</th>
             <th class="px-2 py-2 font-semibold">{{ t('admin.resilience.undelivered.billed') }}</th>
+            <th class="px-2 py-2 font-semibold">{{ t('admin.resilience.undelivered.requestId') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -100,6 +101,22 @@
                 {{ rec.billed ? t('admin.resilience.undelivered.billed') : t('admin.resilience.undelivered.notBilled') }}
               </span>
             </td>
+            <td class="px-2 py-1.5">
+              <div v-if="rec.gateway_request_id" class="flex max-w-[160px] items-center gap-1.5">
+                <span class="truncate font-mono text-gray-500 dark:text-gray-400" :title="rec.gateway_request_id">{{ rec.gateway_request_id }}</span>
+                <button
+                  type="button"
+                  class="shrink-0 rounded p-0.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700 dark:hover:text-gray-300"
+                  :class="copiedId === rec.gateway_request_id ? 'text-green-500 hover:text-green-500' : ''"
+                  :title="copiedId === rec.gateway_request_id ? t('keys.copied') : t('keys.copyToClipboard')"
+                  :aria-label="t('keys.copyToClipboard')"
+                  @click="copyId(rec.gateway_request_id)"
+                >
+                  <Icon :name="copiedId === rec.gateway_request_id ? 'check' : 'copy'" size="sm" class="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <span v-else>-</span>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -113,11 +130,13 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
+import Icon from '@/components/icons/Icon.vue'
 import OpsResilienceExplain from './OpsResilienceExplain.vue'
 import { adminAPI } from '@/api/admin'
 import type { ResilienceMetricRow, ResilienceStats, UndeliveredRequest } from '@/api/admin/resilience'
 import { formatCostFixed, formatDateTime, formatNumber } from '@/utils/format'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { useClipboard } from '@/composables/useClipboard'
 
 const props = defineProps<{ refreshToken: number }>()
 
@@ -188,6 +207,14 @@ function metricHint(name: string): string | undefined {
 function stageLabel(stage: string): string {
   const key = `admin.resilience.undelivered.stages.${stage}`
   return stage && te(key) ? t(key) : stage || '-'
+}
+
+const { copyToClipboard } = useClipboard()
+const copiedId = ref<string | null>(null)
+async function copyId(id: string) {
+  if (!(await copyToClipboard(id, t('admin.usage.requestIdCopied')))) return
+  copiedId.value = id
+  window.setTimeout(() => { if (copiedId.value === id) copiedId.value = null }, 2000)
 }
 
 function formatSeconds(ms: number): string {

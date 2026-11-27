@@ -216,6 +216,7 @@ export default {
       cost: 'Estimated upstream cost',
       billed: 'Billed',
       notBilled: 'Not billed',
+      requestId: 'Request ID',
       stages: {
         upload: 'Uploading the request',
         select: 'Selecting or waiting for a slot',
