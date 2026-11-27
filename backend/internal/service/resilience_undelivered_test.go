@@ -216,12 +216,28 @@ func TestUndeliveredRecordRetriesOnce(t *testing.T) {
 	repo := &flakyUndeliveredRepo{fails: 1}
 	r := NewResilienceService(nil, nil)
 	r.undelivered = repo
-	r.RecordUndelivered(&UndeliveredRequest{RequestID: "req-retry"})
+	gatewayID := resilience.NewRequestState().GatewayRequestID()
+	r.RecordUndelivered(&UndeliveredRequest{RequestID: "req-retry", GatewayRequestID: &gatewayID})
 	require.Eventually(t, func() bool {
 		repo.mu.Lock()
 		defer repo.mu.Unlock()
 		return len(repo.rows) == 1
 	}, 3*time.Second, 20*time.Millisecond, "a short database failure is retried")
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Equal(t, &gatewayID, repo.rows[0].GatewayRequestID)
+}
+
+func TestUndeliveredGatewayIdentityMatchesBillingMetadata(t *testing.T) {
+	st := resilience.NewRequestState()
+	st.EnableGatewayRequest(time.Now())
+	meta, _ := st.ClaimGatewayRequest(true)
+	row := &UsageLog{RequestID: "client-reused"}
+	applyGatewayRequestMetadata(resilience.WithGatewayRequestMetadata(context.Background(), meta), row)
+	gatewayID := st.GatewayRequestID()
+	undelivered := UndeliveredRequest{RequestID: "client-reused", GatewayRequestID: &gatewayID}
+	require.Equal(t, row.GatewayRequestID, undelivered.GatewayRequestID)
+	require.NotEqual(t, undelivered.RequestID, *undelivered.GatewayRequestID)
 }
 
 func TestUndeliveredRecordWritersAreBounded(t *testing.T) {

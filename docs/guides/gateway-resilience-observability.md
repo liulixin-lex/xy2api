@@ -58,6 +58,8 @@ COMMIT;
 
 ## 未送达请求
 
+管理员接口返回可空的 `gateway_request_id`，与用量、未计费和错误记录的网关请求键相同，上传阶段断开也保留；原 `request_id` 与 `client_request_id` 不变，历史行保持空值，不按客户端编号推测回填。
+
 Gemini 入口按实际方法与动作分别记录模型列表 `/v1beta/models`、模型详情 `/v1beta/models/{model}`、生成 `/v1beta/models:generateContent`、流式生成 `/v1beta/models:streamGenerateContent` 和令牌计数 `/v1beta/models:countTokens`；标签不含模型名，未知动作不归生成，历史 `/v1beta/models` 仍是旧版混合桶，统计时应保留该桶。
 
 客户端在任何语义输出前断开的请求记入未送达表（保留 30 天，每 6 小时清理），列出时间、断开阶段、耗时、用户、Key、模型、入口、上游成本估算与是否计费。断开阶段：

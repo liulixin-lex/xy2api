@@ -2,15 +2,47 @@ package admin
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/liulixin-lex/xy2api/internal/pkg/pagination"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
 	"github.com/liulixin-lex/xy2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+type undeliveredAdminRepo struct{ service.UndeliveredRepository }
+
+func (*undeliveredAdminRepo) ListUndelivered(context.Context, service.UndeliveredFilter, pagination.PaginationParams) ([]service.UndeliveredRequest, *pagination.PaginationResult, error) {
+	return []service.UndeliveredRequest{
+		{RequestID: "reused", GatewayRequestID: new("00000000-0000-4000-8000-000000000001")},
+		{RequestID: "reused"},
+	}, &pagination.PaginationResult{Total: 2, Page: 1, PageSize: 50}, nil
+}
+
+func TestUndeliveredAdminResponsePreservesGatewayIdentityAndNull(t *testing.T) {
+	svc := service.NewResilienceService(nil, nil)
+	svc.ConfigureUndelivered(&undeliveredAdminRepo{})
+	t.Cleanup(func() { svc.ConfigureUndelivered(nil); resilience.SetUndeliveredAbuseCheck(nil) })
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/resilience/undelivered", nil)
+	NewResilienceHandler(svc).ListUndelivered(c)
+	require.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Data struct{ Items []map[string]json.RawMessage }
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Len(t, body.Data.Items, 2)
+	var id string
+	require.NoError(t, json.Unmarshal(body.Data.Items[0]["gateway_request_id"], &id))
+	require.Equal(t, "00000000-0000-4000-8000-000000000001", id)
+	require.JSONEq(t, "null", string(body.Data.Items[1]["gateway_request_id"]))
+}
 
 func putResilienceSettings(t *testing.T, h *ResilienceHandler, body string) int {
 	t.Helper()

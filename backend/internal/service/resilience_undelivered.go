@@ -21,6 +21,7 @@ const UsageBillingModeUndeliveredAbuse = "undelivered_abuse"
 // output.
 type UndeliveredRequest struct {
 	ID                    int64           `json:"id"`
+	GatewayRequestID      *string         `json:"gateway_request_id"`
 	RequestID             string          `json:"request_id"`
 	ClientRequestID       string          `json:"client_request_id"`
 	UserID                *int64          `json:"user_id,omitempty"`
