@@ -65,6 +65,7 @@ func (s *OpenAIGatewayService) deleteStickySessionAccountIDIfOwner(ctx context.C
 			deleted, err := reporter.DeleteSessionAccountIDIfOwnerAndReport(ctx, derefGroupID(groupID), s.openAISessionCacheKey(sessionHash), owner)
 			if err == nil && deleted {
 				resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
+				s.recordOpenAICompensationAction(ctx, "owner_released", owner, 0)
 			}
 			return err
 		}
@@ -82,6 +83,7 @@ func (s *OpenAIGatewayService) deleteOpenAIStickyAliases(ctx context.Context, gr
 	deleted, err := cache.DeleteSessionBindingAliases(ctx, derefGroupID(groupID), s.openAISessionCacheKey(sessionHash), legacy, owner)
 	if err == nil && deleted {
 		resilience.StateFrom(ctx).NoteStickyBypassBindingChange()
+		s.recordOpenAICompensationAction(ctx, "owner_released", owner, 0)
 	}
 	return true, err
 }

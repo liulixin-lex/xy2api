@@ -124,8 +124,9 @@ type RequestState struct {
 		accountID int64
 		at        time.Time
 	}
-	stickyChange   any // Service-owned pending binding change; completed by the send lifecycle.
-	selectionFlags schedSelectionFlags
+	accountSwitchObserver func(int64, int64)
+	stickyChange          any // Service-owned pending binding change; completed by the send lifecycle.
+	selectionFlags        schedSelectionFlags
 
 	// turn identifies the conversation for the failed-turn cap (design
 	// §9.7); turnFailed is set once the request counted as a failure.
@@ -390,9 +391,13 @@ func (s *RequestState) MarkOpsUpstreamSendBoundary(accountID int64) uint64 {
 	}
 	s.upstreamRecoveryHint = nil
 	s.opsUpstreamSendBoundaries[accountID] = s.opsUpstreamEventSequence
+	from, observer := s.accountSwitchObservationLocked(accountID)
 	s.noteGatewaySendLocked(accountID)
 	seq := s.nextUpstreamSendSeqLocked()
 	s.mu.Unlock()
+	if observer != nil {
+		observer(from, accountID)
+	}
 	return seq
 }
 

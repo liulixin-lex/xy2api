@@ -39,6 +39,10 @@ type GatewayRequestMetadata struct {
 	Fallback, Takeover                                bool
 	StartedAt                                         time.Time
 	AccountID                                         int64
+	AccountChangedAt                                  *time.Time
+	AccountChangedFrom                                *int64
+	HadFailedAttempt                                  bool
+	CompensationKey                                   string
 	FirstOutputMs                                     *int64
 	DurationMs                                        int
 	ErrorClass                                        string
@@ -61,6 +65,8 @@ type gatewayRequestTrace struct {
 	failedBeforeSend           bool
 	currentFailed              bool
 	lastAccount                int64
+	accountChangedAt           time.Time
+	accountChangedFrom         int64
 	switches                   int16
 	fallback, takeover         bool
 	failed, complete, canceled bool
@@ -169,8 +175,14 @@ func (s *RequestState) noteGatewaySendLocked(accountID int64) {
 	if r == nil || r.final != nil || accountID <= 0 {
 		return
 	}
-	if r.lastAccount != 0 && r.lastAccount != accountID && r.switches < 32767 {
-		r.switches++
+	if r.lastAccount != 0 && r.lastAccount != accountID {
+		if r.switches < 32767 {
+			r.switches++
+		}
+		if r.accountChangedAt.IsZero() {
+			r.accountChangedAt = time.Now()
+			r.accountChangedFrom = r.lastAccount
+		}
 	}
 	r.lastAccount = accountID
 	r.profit.noteSend(accountID)
@@ -187,13 +199,36 @@ func (s *RequestState) noteGatewaySendLocked(accountID int64) {
 }
 
 // NoteGatewaySend also serves native WS sends, which have no HTTP boundary.
+// SetAccountSwitchObserver installs a billing-only observer, called outside
+// the state mutex. It never decides whether a send is allowed.
+func (s *RequestState) SetAccountSwitchObserver(observer func(int64, int64)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.accountSwitchObserver = observer
+	s.mu.Unlock()
+}
+
 func (s *RequestState) NoteGatewaySend(accountID int64) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	from, observer := s.accountSwitchObservationLocked(accountID)
 	s.noteGatewaySendLocked(accountID)
+	s.mu.Unlock()
+	if observer != nil {
+		observer(from, accountID)
+	}
+}
+
+func (s *RequestState) accountSwitchObservationLocked(accountID int64) (int64, func(int64, int64)) {
+	r := s.gatewayRecord
+	if r == nil || r.final != nil || accountID <= 0 || r.lastAccount <= 0 || r.lastAccount == accountID {
+		return 0, nil
+	}
+	return r.lastAccount, s.accountSwitchObserver
 }
 
 func (s *RequestState) NoteGatewayAttempt(success bool, detail string, input, read, creation *int) {
@@ -265,6 +300,7 @@ func (s *RequestState) GatewayRequestFinalized() bool {
 }
 
 func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadata, bool) {
+	compensationKey := s.TurnKey()
 	if s == nil {
 		return nil, false
 	}
@@ -301,7 +337,7 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 			}
 		}
 		r.final = cloneGatewayRequest(&GatewayRequestMetadata{CollabObservation: freezeCollabObservationForBilling(s.collab), RequestID: s.requestID, Result: result, Switches: r.switches, Fallback: r.fallback, Takeover: r.takeover,
-			StartedAt: r.started, AccountID: r.lastAccount, FirstOutputMs: first, DurationMs: int(time.Since(r.started).Milliseconds()),
+			HadFailedAttempt: r.failed, CompensationKey: compensationKey, StartedAt: r.started, AccountID: r.lastAccount, AccountChangedAt: optionalTime(r.accountChangedAt), AccountChangedFrom: optionalInt64(r.accountChangedFrom), FirstOutputMs: first, DurationMs: int(time.Since(r.started).Milliseconds()),
 			ErrorClass: r.errorClass, InputTokens: r.input, CacheReadTokens: r.read, CacheCreationTokens: r.creation,
 			RequestScope: r.RequestScope, ConversionNotices: s.conversionNotices,
 			ProfitBasis:   r.profit.snapshot(),
@@ -324,6 +360,22 @@ func (s *RequestState) ClaimGatewayRequest(billing bool) (*GatewayRequestMetadat
 // Text and search transfer ownership only after an explicit undelivered waiver.
 func gatewayRequestWaiverTailEnabled(scope GatewayRequestScope) bool {
 	return scope == GatewayRequestScopeSearch || scope == GatewayRequestScopeText
+}
+
+func optionalTime(v time.Time) *time.Time {
+	if v.IsZero() {
+		return nil
+	}
+	n := v
+	return &n
+}
+
+func optionalInt64(v int64) *int64 {
+	if v == 0 {
+		return nil
+	}
+	n := v
+	return &n
 }
 
 func cloneGatewayRequest(in *GatewayRequestMetadata) *GatewayRequestMetadata {
@@ -360,6 +412,14 @@ func cloneGatewayRequest(in *GatewayRequestMetadata) *GatewayRequestMetadata {
 	v.TerminalEventSeen, v.TerminalEventValid = copyBool(in.TerminalEventSeen), copyBool(in.TerminalEventValid)
 	v.ResponseBodyType = copyString(in.ResponseBodyType)
 	v.ConversionNotices = append([]apicompat.ConversionNotice(nil), in.ConversionNotices...)
+	if in.AccountChangedAt != nil {
+		n := *in.AccountChangedAt
+		v.AccountChangedAt = &n
+	}
+	if in.AccountChangedFrom != nil {
+		n := *in.AccountChangedFrom
+		v.AccountChangedFrom = &n
+	}
 	if in.FirstOutputMs != nil {
 		n := *in.FirstOutputMs
 		v.FirstOutputMs = &n

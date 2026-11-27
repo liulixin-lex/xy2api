@@ -158,8 +158,9 @@ type openAIStickyChange struct {
 	// ownerReleased: selection hit a branch that deletes the owner's binding
 	// (hard unavailable, failure streak). Only then may an ordinary placement
 	// replace an existing owner (§5.2); other bypasses serve the request elsewhere.
-	ownerReleased bool
-	resetAt       func(int64) time.Time
+	ownerReleased            bool
+	resetAt                  func(int64) time.Time
+	recordCompensationAction func(context.Context, string, int64, int64)
 }
 
 func noteOpenAIStickyAttemptOutcome(attempt *schedAttemptCapture, success bool) {
@@ -256,6 +257,7 @@ func openAIStickyBindingKept(ctx context.Context, session string, target int64) 
 // Capture before selection can clear an unavailable owner or eagerly bind its
 // replacement. A capacity spillover still borrows without changing ownership.
 func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, groupID *int64, session string) {
+	s.installOpenAICompensationObserver(ctx)
 	if resilience.StateFrom(ctx) == nil || s == nil || s.resilience == nil || s.resilience.store == nil || session == "" || s.qualityOwnsSticky(ctx, groupID, session) {
 		return
 	}
@@ -296,8 +298,9 @@ func (s *OpenAIGatewayService) prepareOpenAIStickyChange(ctx context.Context, gr
 		kind: kind, expected: expected, ttl: s.openAIStickyBindingTTL(groupID), cache: cache,
 		dualWriteLegacy: s.openAISessionHashDualWriteOldEnabled(),
 		skipCommit:      unreadable, aliasPairMissing: pairMissing,
-		resetAt: s.resilience.sessionAccountResetAt,
-		leases:  s.selectionTrialLeases(), trialSession: session, ownerLookup: s.selectionTrialOwner,
+		resetAt:                  s.resilience.sessionAccountResetAt,
+		recordCompensationAction: s.recordOpenAICompensationAction,
+		leases:                   s.selectionTrialLeases(), trialSession: session, ownerLookup: s.selectionTrialOwner,
 	})
 }
 
@@ -359,7 +362,8 @@ func (change *openAIStickyChange) replacement(kind, model string, target int64, 
 		fromPriority: change.fromPriority,
 		kind:         kind, expected: change.expected, target: target, ttl: change.ttl, cache: change.cache,
 		dualWriteLegacy: change.dualWriteLegacy, skipCommit: change.skipCommit, ownerReleased: change.ownerReleased,
-		resetAt: change.resetAt, leases: change.leases, fromModel: change.fromModel,
+		recordCompensationAction: change.recordCompensationAction,
+		resetAt:                  change.resetAt, leases: change.leases, fromModel: change.fromModel,
 		ownerLookup: change.ownerLookup, trialSession: change.trialSession, reason: reason,
 	}
 }
@@ -697,6 +701,10 @@ func (change *openAIStickyChange) finish(ctx context.Context, success, canceled,
 	st := resilience.StateFrom(ctx)
 	st.ClearKeptStickyIfOwner(change.expected.AccountID)
 	st.NoteStickyBypassBindingChange()
+	if change.expected.AccountID > 0 && change.expected.AccountID != change.target && change.recordCompensationAction != nil && change.reason != "owner_group_mismatch" && change.reason != "identity_conflict" &&
+		(change.kind == "migrate" || change.kind == "takeover" || change.kind == "owner_released" || change.kind == stickyFollow) {
+		change.recordCompensationAction(ctx, change.kind, change.expected.AccountID, change.target)
+	}
 }
 
 func (c *openAIStickyChange) trialSessionKey() string {

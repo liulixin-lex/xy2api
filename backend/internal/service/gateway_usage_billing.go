@@ -75,6 +75,7 @@ type usageLogBestEffortWriter interface {
 
 // postUsageBillingParams 统一扣费所需的参数
 type postUsageBillingParams struct {
+	ResolveCompensation   func(*UsageBillingCommand)
 	Cost                  *CostBreakdown
 	User                  *User
 	APIKey                *APIKey
@@ -293,13 +294,14 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	}
 
 	cmd := &UsageBillingCommand{
-		RequestID:          requestID,
-		APIKeyID:           p.APIKey.ID,
-		UserID:             p.User.ID,
-		AccountID:          p.Account.ID,
-		AccountType:        p.Account.Type,
-		RequestPayloadHash: strings.TrimSpace(p.RequestPayloadHash),
-		Usage:              BillingUsageSnapshot(usageLog),
+		RequestID:           requestID,
+		APIKeyID:            p.APIKey.ID,
+		UserID:              p.User.ID,
+		AccountID:           p.Account.ID,
+		AccountType:         p.Account.Type,
+		RequestPayloadHash:  strings.TrimSpace(p.RequestPayloadHash),
+		Usage:               BillingUsageSnapshot(usageLog),
+		ResolveCompensation: p.ResolveCompensation,
 	}
 	if usageLog != nil {
 		cmd.Model = usageLog.Model
@@ -391,6 +393,11 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	}
 	if usageLog != nil && cmd.Usage != nil && cmd.Usage.ID > 0 {
 		usageLog.ID, usageLog.CreatedAt, usageLog.ActualCost = cmd.Usage.ID, cmd.Usage.CreatedAt, cmd.Usage.ActualCost
+		usageLog.MeteringAdjustment = cmd.Usage.MeteringAdjustment
+		usageLog.ServiceTierDetails = cmd.Usage.ServiceTierDetails
+		if p.ResolveCompensation != nil {
+			p.Cost.ActualCost = cmd.Usage.ActualCost
+		}
 	}
 	if durable, ok := repo.(UsageBillingRecoveryRepository); ok && cmd.Usage != nil && result != nil {
 		// Invalidate instead of replaying cache deltas. A lost commit acknowledgement

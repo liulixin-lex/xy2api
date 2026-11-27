@@ -48,7 +48,8 @@ type UsageBillingCommand struct {
 
 	// Usage is the immutable, credential-free snapshot persisted before settlement.
 	// It is deliberately excluded from the historical dedup fingerprint algorithm.
-	Usage *UsageLog `json:",omitempty"`
+	Usage               *UsageLog                  `json:",omitempty"`
+	ResolveCompensation func(*UsageBillingCommand) `json:"-"`
 	// Platform quota follows this frozen bill and commits with its balance debit.
 	QuotaPlatform string `json:",omitempty"`
 	// SchedulingAttemptID is retained only so intents persisted by 0.2.5 decode

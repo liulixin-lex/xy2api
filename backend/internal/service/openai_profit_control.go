@@ -239,20 +239,7 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 	// 直接复用 auth cache 分组，热路径零额外查询；composite 父分组路由到成员
 	// 分组等 ID 不一致场景才回源仓库读取。auth 快照的分组字段完备性由
 	// GetByKeyForAuth 投影 + 集成测试保证（防投影漏列导致门静默失效）。
-	var group *Group
-	if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) && ctxGroup.ID == *groupID {
-		group = ctxGroup
-	} else if s.schedulerSnapshot != nil {
-		// Lite 读取：门只用平台/倍率/利润/高峰字段，不需要账号计数聚合。
-		loaded, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, *groupID)
-		if err != nil {
-			// fail-open：配置系统故障时可用性优先，该窗口内利润保证不成立，
-			// 依赖 WARN 暴露；不把瞬时 DB 抖动放大成全站不可调度。
-			slog.Warn("profit_control_group_load_failed", "group_id", *groupID, "error", err)
-			return nil
-		}
-		group = loaded
-	}
+	group := s.openAIProfitControlGroup(ctx, *groupID)
 	if group == nil || (!group.ProfitControlEnabled && groupProfitFloor(group) <= 0) ||
 		(group.Platform != PlatformOpenAI && group.Platform != PlatformGrok) {
 		return nil
@@ -492,4 +479,23 @@ func (o *openAIProfitControlObserver) maybeLog(groupID int64, platform string, t
 		"veto_invalid_account_rate_total", s.vetoInvalidRate.Load(),
 		"refresh_failure_total", s.refreshFailures.Load(),
 	)
+}
+
+// Shared with compensation so a missing configuration is never a disabled gate.
+func (s *OpenAIGatewayService) openAIProfitControlGroup(ctx context.Context, groupID int64) *Group {
+	var group *Group
+	if ctxGroup, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(ctxGroup) && ctxGroup.ID == groupID {
+		group = ctxGroup
+	} else if s.schedulerSnapshot != nil {
+		// Lite 读取：门只用平台/倍率/利润/高峰字段，不需要账号计数聚合。
+		loaded, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, groupID)
+		if err != nil {
+			// fail-open：配置系统故障时可用性优先，该窗口内利润保证不成立，
+			// 依赖 WARN 暴露；不把瞬时 DB 抖动放大成全站不可调度。
+			slog.Warn("profit_control_group_load_failed", "group_id", groupID, "error", err)
+			return nil
+		}
+		group = loaded
+	}
+	return group
 }
