@@ -130,11 +130,13 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 			"internal/service/openai_fco_compat_runtime.go:openAIFCOCompatAttempt.afterHTTP":                    1,
 			"internal/service/antigravity_gateway_retry.go:AntigravityGatewayService.antigravityRetryLoop":      3,
 			"internal/service/openai_encrypted_content_http.go:planHTTPEncryptedContentRepair":                  1,
-			"internal/service/openai_m3.go:openAIM3Attempt.learn":                                               1,
 			"internal/service/openai_messages_continuation.go:resilienceContinuationReplayAllowed":              1,
 			"internal/service/resilience_budget.go:resilienceInServiceRetryAllowed":                             1,
 			"internal/service/resilience_request_repair_replay.go:newOpenAIRejectedFieldRepairSignal":           1,
 			"internal/service/resilience_web_search_replay.go:OpenAIGatewayService.openAIWebSearchReplayDecide": 1,
+		},
+		"ConsumeM3StateRepairRetry": {
+			"internal/service/openai_m3.go:openAIM3Attempt.learn": 1,
 		},
 		"ConsumeInPlaceRetryWithTimer": {
 			"internal/resilience/budget.go:Budget.ConsumeInPlaceRetry":                     1,
@@ -168,7 +170,7 @@ func TestBudgetDeadlineConsumerASTU10(t *testing.T) {
 		// Deadline is read once for the non-gating request timing observation.
 		"Deadline": {"internal/resilience/request_timing.go:RequestState.Timing": 1},
 	}
-	for _, method := range []string{"CanAttempt", "ConsumeInPlaceRetry", "ConsumeInPlaceRetryWithTimer", "AdmissionRemaining", "Remaining", "ClampWait", "ClampWaitWithTimer", "AttemptTimeout", "Deadline"} {
+	for _, method := range []string{"CanAttempt", "ConsumeInPlaceRetry", "ConsumeInPlaceRetryWithTimer", "ConsumeM3StateRepairRetry", "AdmissionRemaining", "Remaining", "ClampWait", "ClampWaitWithTimer", "AttemptTimeout", "Deadline"} {
 		got := productionResilienceCallsites(t, method, method == "Deadline")
 		if !reflect.DeepEqual(got, want[method]) {
 			t.Errorf("%s callsites changed; review the §2.2.1 consumer list before updating this AST guard\n got: %s\nwant: %s", method, strings.Join(sortedCallsiteKeys(got), ", "), strings.Join(sortedCallsiteKeys(want[method]), ", "))

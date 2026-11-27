@@ -310,7 +310,7 @@ func (a *openAIM3Attempt) learn(ctx context.Context, body, payload []byte, messa
 	if itemID != "" {
 		a.persist(ctx, evidence)
 	}
-	if ctx.Err() != nil || !resilience.StateFrom(ctx).Budget().ConsumeInPlaceRetry(a.account.ID, false, time.Now(), resilience.ReasonEncryptedContent) {
+	if ctx.Err() != nil || !resilience.StateFrom(ctx).Budget().ConsumeM3StateRepairRetry(a.account.ID, time.Now()) {
 		return a.failure(family, itemID, "budget")
 	}
 	next := body

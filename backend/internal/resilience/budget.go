@@ -326,24 +326,34 @@ func (b *Budget) AllowStateSwitch() bool {
 // (and, for sameAccount, the per-account retry cap allows one more);
 // otherwise it changes nothing and the failure surfaces to the handler,
 // which records it there.
-func (b *Budget) ConsumeInPlaceRetry(accountID int64, sameAccount bool, now time.Time, reason ...string) bool {
-	return b.ConsumeInPlaceRetryWithTimer(accountID, sameAccount, now, false, reason...)
+func (b *Budget) ConsumeInPlaceRetry(accountID int64, sameAccount bool, now time.Time) bool {
+	return b.ConsumeInPlaceRetryWithTimer(accountID, sameAccount, now, false)
 }
 
 // ConsumeInPlaceRetryWithTimer preserves D only when the retry is covered by
 // an existing shared guard. All other callers use the conservative wrapper.
-func (b *Budget) ConsumeInPlaceRetryWithTimer(accountID int64, sameAccount bool, now time.Time, hasTimer bool, reason ...string) bool {
+func (b *Budget) ConsumeInPlaceRetryWithTimer(accountID int64, sameAccount bool, now time.Time, hasTimer bool) bool {
+	return b.consumeInPlaceRetry(accountID, sameAccount, now, hasTimer, false)
+}
+
+// ConsumeM3StateRepairRetry admits an M3 repair step independently of the attempt
+// count cap. Cancellation and the remaining time budget still apply. Ordinary
+// retries, including M7 encrypted-content repair, must use ConsumeInPlaceRetry.
+func (b *Budget) ConsumeM3StateRepairRetry(accountID int64, now time.Time) bool {
+	return b.consumeInPlaceRetry(accountID, false, now, false, true)
+}
+
+func (b *Budget) consumeInPlaceRetry(accountID int64, sameAccount bool, now time.Time, hasTimer, m3StateRepair bool) bool {
 	if b == nil {
 		return true
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	encryptedRepair := len(reason) == 1 && reason[0] == ReasonEncryptedContent
 	deadline := b.admissionDeadlineLocked(hasTimer)
 	switch {
 	case b.ctx != nil && b.ctx.Err() != nil:
 		return false
-	case !encryptedRepair && b.attempts+1 >= b.maxAttempts:
+	case !m3StateRepair && b.attempts+1 >= b.maxAttempts:
 		return false
 	case !deadline.IsZero() && deadline.Sub(now) < minAttemptWindow:
 		if BudgetTraceEnabledForTest {

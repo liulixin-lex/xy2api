@@ -101,7 +101,7 @@ func TestM8AdmittedEncryptedRepairReachesLastAttempt(t *testing.T) {
 	st.SetLastUpstreamFailure(&UpstreamFailoverError{StatusCode: 429,
 		ResponseBody: []byte(`{"error":{"message":"previous account rate limit"}}`)})
 	require.True(t, budget.CanAttempt(time.Now()))
-	require.True(t, budget.ConsumeInPlaceRetry(44, false, time.Now(), resilience.ReasonEncryptedContent))
+	require.True(t, budget.ConsumeM3StateRepairRetry(44, time.Now()))
 	require.False(t, budget.CanAttempt(time.Now()), "the repair has already consumed its grant")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://upstream.example/v1/responses", nil)
 	require.NoError(t, err)
