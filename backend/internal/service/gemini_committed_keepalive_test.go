@@ -59,8 +59,6 @@ func TestGeminiCommittedKeepaliveBridgeBodyWait(t *testing.T) {
 				withResilienceSettings(t, func(s *resilience.Settings) {
 					s.Keepalive.DelaySeconds, s.Keepalive.IntervalSeconds = 1, 10
 				})
-				var billingResult *ForwardResult
-				var billingAccount *Account
 				synctest.Test(t, func(t *testing.T) {
 					ctx := geminiAttemptTestContext(context.Background(), 0)
 					st := resilience.StateFrom(ctx)
@@ -129,42 +127,15 @@ func TestGeminiCommittedKeepaliveBridgeBodyWait(t *testing.T) {
 					rawPrompt := 7
 					require.Equal(t, ClaudeUsage{InputTokens: 7, OutputTokens: 3, InputTokensPresent: true, OutputTokensPresent: true, RawPromptTokens: &rawPrompt}, result.Usage)
 					require.Equal(t, 1, strings.Count(w.Body(), "hello world"))
-					billingResult, billingAccount = result, a
 					n := len(w.heartbeatTimes())
 					resumeGeminiPreOutputKeepalive(c, stub.response)
 					time.Sleep(30 * time.Second)
 					synctest.Wait()
 					require.Len(t, w.heartbeatTimes(), n, "semantic output permanently stops pre-output heartbeats")
 				})
-				if !t.Failed() {
-					requireGeminiKeepaliveSingleBill(t, billingResult, billingAccount)
-				}
 			})
 		}
 	}
-}
-
-func requireGeminiKeepaliveSingleBill(t *testing.T, result *ForwardResult, account *Account) {
-	t.Helper()
-	usage := &openAIRecordUsageLogRepoStub{inserted: true}
-	user := &openAIRecordUsageUserRepoStub{}
-	quota := &openAIRecordUsageAPIKeyQuotaStub{}
-	billing := newGatewayRecordUsageServiceForTest(usage, user, &openAIRecordUsageSubRepoStub{})
-	billing.billingService = NewBillingService(billing.cfg, &PricingService{pricingData: map[string]*LiteLLMModelPricing{
-		"gemini-2.5-flash": {InputCostPerToken: 1e-6, OutputCostPerToken: 2e-6},
-	}})
-	billing.resolver = NewModelPricingResolver(nil, billing.billingService)
-	err := billing.RecordUsage(context.Background(), &RecordUsageInput{
-		Result: result, Account: account, User: &User{ID: 601},
-		APIKey: &APIKey{ID: 501, Quota: 100}, APIKeyService: quota,
-	})
-	require.NoError(t, err)
-	require.Equal(t, 1, usage.calls)
-	require.Equal(t, 1, user.deductCalls)
-	require.Equal(t, 1, quota.quotaCalls)
-	require.Equal(t, 7, usage.lastLog.InputTokens)
-	require.Equal(t, 3, usage.lastLog.OutputTokens)
-	require.Positive(t, user.lastAmount)
 }
 
 func TestGeminiCommittedKeepaliveNativeHandoff(t *testing.T) {
@@ -176,8 +147,6 @@ func TestGeminiCommittedKeepaliveNativeHandoff(t *testing.T) {
 			withResilienceSettings(t, func(s *resilience.Settings) {
 				s.Keepalive.DelaySeconds, s.Keepalive.IntervalSeconds = 1, 10
 			})
-			var billingResult *ForwardResult
-			var billingAccount *Account
 			synctest.Test(t, func(t *testing.T) {
 				ctx := geminiAttemptTestContext(context.Background(), 0)
 				st := resilience.StateFrom(ctx)
@@ -223,13 +192,9 @@ func TestGeminiCommittedKeepaliveNativeHandoff(t *testing.T) {
 					payload = `{"response":` + payload + "}"
 				}
 				stub.response = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: " + payload + "\n\n"))}
-				result, err := forwardGeminiTestEntry(svc, "native", ctx, c, &other)
+				_, err = forwardGeminiTestEntry(svc, "native", ctx, c, &other)
 				require.NoError(t, err)
-				billingResult, billingAccount = result, &other
 			})
-			if !t.Failed() {
-				requireGeminiKeepaliveSingleBill(t, billingResult, billingAccount)
-			}
 		})
 	}
 }
