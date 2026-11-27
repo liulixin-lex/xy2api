@@ -1929,6 +1929,34 @@ export interface UsageLogAccountSummary {
   name: string
 }
 
+/** One adjustment on a usage row's metering record. */
+export interface UsageMeteringAdjustmentItem {
+  /**
+   * force_cache_billing | cache_ttl_override | legacy_undelivered_abuse |
+   * openai_voluntary_compensation (credited: amount) | openai_voluntary_compensation_pending (to settle: estimated_amount)
+   */
+  kind: string
+  input_to_cache_tokens?: number
+  amount?: number
+  estimated_amount?: number
+  reason?: string
+  action_kind?: string
+  reference_ratio?: number
+  reference_age_ms?: number
+}
+
+/** A usage row's metering record (admin only): the raw usage, its adjustments and the customer price before them. */
+export interface UsageMeteringAdjustment {
+  v: number
+  raw_usage?: Record<string, unknown>
+  adjustments?: UsageMeteringAdjustmentItem[]
+  customer_gross_cost?: number
+  customer_credit?: number
+  supplier_cost_source?: string
+  cost_scope?: string
+  failed_attempt_cost_known?: boolean
+}
+
 export interface AdminUsageLog extends UsageLog {
   // 后端 0.6.5 的请求层：管理端列表里也有没有账单的请求（多为失败或取消）。这些行没有费用、账号，Token 数也可能为空。
   /** usage = 一条 usage 日志；unbilled = 没有账单的请求。两者 id 各自成序列。 */
@@ -1958,6 +1986,10 @@ export interface AdminUsageLog extends UsageLog {
   account_rate_multiplier?: number | null
   // 自定义定价规则计算的账号统计费用（nil 时使用 total_cost * multiplier）
   account_stats_cost?: number | null
+  /** 按补偿前原始计量估计的采购成本，已含账号倍率；null = 未知或历史行（回退到 account_stats_cost 口径），0 = 确认免费。 */
+  supplier_cost_estimate?: number | null
+  /** 计量调整凭证（v=1）；无调整且成本已知时省略。 */
+  metering_adjustment?: UsageMeteringAdjustment | null
 
   // 渠道 ID 和计费等级（仅管理员可见）
   channel_id?: number | null

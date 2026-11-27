@@ -5,12 +5,17 @@ import type { AdminUsageLog } from '@/types'
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
 
-/** The account-billed cost: (account_stats_cost ?? total_cost) × account rate. */
+/**
+ * The account-billed cost: the procurement estimate when the row has one (already at the account rate), else the
+ * legacy (account_stats_cost ?? total_cost) × account rate.
+ */
 export function accountBilled(row: {
   total_cost?: number | null
   account_stats_cost?: number | null
   account_rate_multiplier?: number | null
+  supplier_cost_estimate?: number | null
 }): number {
+  if (row.supplier_cost_estimate != null) return row.supplier_cost_estimate
   const base = row.account_stats_cost != null ? row.account_stats_cost : (row.total_cost ?? 0)
   const result = base * (row.account_rate_multiplier ?? 1)
   return Number.isNaN(result) ? 0 : result
