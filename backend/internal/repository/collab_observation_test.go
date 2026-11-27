@@ -22,6 +22,10 @@ func collabFixture() json.RawMessage {
 	return resilience.EncodeCollabObservation(&resilience.CollabObservation{Thread: resilience.CollabDigest(strings.Repeat("a", 64)), StopReason: resilience.CollabReasonCanceled, SendTotal: 2})
 }
 
+func collabSparseFixture() json.RawMessage {
+	return json.RawMessage(`{"v":3,"thread":"` + strings.Repeat("a", 64) + `","stop_reason":"canceled","send_total":2}`)
+}
+
 func TestCollabObservationUsageSingleBatchAndScan(t *testing.T) {
 	row := &service.UsageLog{UserID: 1, APIKeyID: 2, AccountID: 3, RequestID: "synthetic-observation", Model: "synthetic", CreatedAt: time.Now().UTC(), CollabObservation: collabFixture()}
 	frozen := service.BillingUsageSnapshot(row)
@@ -52,7 +56,7 @@ func TestCollabObservationUsageSingleBatchAndScan(t *testing.T) {
 		require.NoError(t, e)
 		values = append(values, v)
 	}
-	for _, raw := range []driver.Value{nil, []byte(collabFixture()), []byte("{malformed}")} {
+	for _, raw := range []driver.Value{nil, []byte(collabFixture()), []byte(collabSparseFixture()), []byte("{malformed}")} {
 		values[len(values)-1] = raw
 		mock.ExpectQuery("SELECT fixture").WillReturnRows(sqlmock.NewRows(columns).AddRow(values...))
 		got, err := scanUsageLog(db.QueryRow("SELECT fixture"))
@@ -69,6 +73,7 @@ func TestCollabObservationUsageSingleBatchAndScan(t *testing.T) {
 func TestCollabObservationOptionalWritesCannotLoseUsageRows(t *testing.T) {
 	for name, raw := range map[string]json.RawMessage{
 		"valid":  collabFixture(),
+		"sparse": collabSparseFixture(),
 		"absent": nil,
 		"nul":    json.RawMessage("{\"v\":2,\"thread\":\"\\u0000\"}"),
 		"utf8":   append([]byte("{\"v\":2,\"thread\":\""), append([]byte{0xff}, []byte("\"}")...)...),
@@ -82,7 +87,7 @@ func TestCollabObservationOptionalWritesCannotLoseUsageRows(t *testing.T) {
 				row := &service.UsageLog{UserID: 1, APIKeyID: 2, AccountID: 3, RequestID: "synthetic-write", CreatedAt: now, CollabObservation: raw}
 				prepared := prepareUsageLogInsert(row)
 				var expected any
-				if name == "valid" {
+				if name == "valid" || name == "sparse" {
 					expected = string(collabFixture())
 				}
 				require.Equal(t, expected, prepared.args[len(prepared.args)-1])
@@ -159,7 +164,7 @@ func TestCollabObservationAdminUnionProjectsBothSources(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
 	for _, source := range []string{"usage", "unbilled"} {
-		for _, raw := range []driver.Value{nil, []byte(collabFixture()), []byte("{malformed}")} {
+		for _, raw := range []driver.Value{nil, []byte(collabFixture()), []byte(collabSparseFixture()), []byte("{malformed}")} {
 			values := []driver.Value{source, int64(7), "synthetic-request", int64(4), int64(0), false, false, time.Now(), int64(1), int64(2), nil, nil, "synthetic", int64(2), true, nil, nil, int64(20), nil, nil, nil, nil, raw}
 			columns := make([]string, len(values))
 			for i := range columns {
@@ -250,4 +255,18 @@ func TestCollabObservationSingleInsertCreatesUsageRow(t *testing.T) {
 	require.True(t, inserted)
 	require.Less(t, time.Since(started), 100*time.Millisecond)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCollabObservationSparseBillingSnapshotStaysV2(t *testing.T) {
+	row := &service.UsageLog{CollabObservation: collabSparseFixture(), ActualCost: 1, InputTokens: 10}
+	frozen := service.BillingUsageSnapshot(row)
+	require.Equal(t, collabFixture(), frozen.CollabObservation)
+	require.Equal(t, row.ActualCost, frozen.ActualCost)
+	require.Equal(t, row.InputTokens, frozen.InputTokens)
+	payload, err := json.Marshal(service.UsageBillingCommand{Usage: frozen})
+	require.NoError(t, err)
+	var restored service.UsageBillingCommand
+	require.NoError(t, json.Unmarshal(payload, &restored))
+	prepared := prepareUsageLogInsert(restored.Usage)
+	require.Equal(t, string(collabFixture()), prepared.args[len(prepared.args)-1])
 }

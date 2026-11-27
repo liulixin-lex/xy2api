@@ -46,7 +46,7 @@ func (s *OpenAIGatewayService) NewCollabRecordDelivery(in CollabRecordDeliveryIn
 	if !in.HasTools && !in.AgentCiphertext {
 		return nil
 	}
-	if s == nil || !in.Settings.CollabRecordsOn() {
+	if s == nil || !in.Settings.CollabRecoveryRecordsWriteOn() {
 		return nil
 	}
 	store := s.CollabRecords()
@@ -221,7 +221,7 @@ func (c *CollabRecordDelivery) eachCall(e resilience.CollabDeliveryEvent, visit 
 // unchanged ciphertext items. The boolean means normal upstream completion,
 // not HTTP success, a local ending or an abandoned optional send.
 func (s *OpenAIGatewayService) RecordCollabConsumed(ctx context.Context, settings *resilience.Settings, normal bool, account resilience.CollabDigest, unchanged []resilience.CollabDeliveryKey) {
-	if len(unchanged) == 0 || !normal || s == nil || !settings.CollabRecordsOn() {
+	if len(unchanged) == 0 || !normal || s == nil || !settings.CollabRecoveryRecordsWriteOn() {
 		return
 	}
 	store := s.CollabRecords()

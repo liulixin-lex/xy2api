@@ -7,7 +7,10 @@ type CollabSendSequence uint64
 type CollabGeneration uint64
 
 const (
+	// Writers and the expanded admin representation remain v2 until all readers
+	// have deployed support for sparse v3 documents.
 	CollabObservationVersion       = 2
+	collabObservationSparseVersion = 3
 	CollabObservationMaxBytes      = 32 << 10
 	CollabObservationMaxSends      = 16
 	CollabObservationMaxDeliveries = 64

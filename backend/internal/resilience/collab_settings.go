@@ -226,6 +226,13 @@ func (s *CollabSettings) normalize() {
 func (s *Settings) CollabIncrementalDeclarationsOn() bool {
 	return s.master() && s.Collab.IncrementalDeclarations
 }
+
+// CollabRecoveryRecordsWriteOn gates new recovery evidence using the request's
+// settings snapshot. Existing deliveries still confirm or void their records.
+func (s *Settings) CollabRecoveryRecordsWriteOn() bool {
+	return s.CollabRecordsOn() && s.CollabLadderOn()
+}
+
 func (s *Settings) CollabRecordsOn() bool          { return s.master() && s.Collab.Records }
 func (s *Settings) CollabTreeAffinityOn() bool     { return s.master() && s.Collab.TreeAffinity }
 func (s *Settings) CollabLadderOn() bool           { return s.master() && s.Collab.Ladder }

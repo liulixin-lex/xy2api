@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/liulixin-lex/xy2api/internal/config"
 	"github.com/liulixin-lex/xy2api/internal/pkg/apicompat"
@@ -171,6 +172,27 @@ func TestHTTPEncryptedRepairUnlocatedMultipleItems(t *testing.T) {
 			require.Equal(t, `"q"`, gjson.GetBytes(upstream.bodies[1], "input.3.content").Raw)
 			require.Contains(t, resilience.SnapshotConversionNotices(req.ctx), apicompat.ConversionNotice{Field: "input[].encrypted_content", Action: "omit"})
 			require.Empty(t, req.session.failures)
+		})
+	}
+}
+
+func TestHTTPEncryptedRepairM7RespectsAttemptCap(t *testing.T) {
+	for _, maxAttempts := range []int{1, 2} {
+		t.Run(fmt.Sprint(maxAttempts), func(t *testing.T) {
+			withResilienceSettings(t, nil)
+			req := newWebSearchReplayRequest(t)
+			settings := resilience.Defaults()
+			settings.Budget.MaxAttempts = maxAttempts
+			budget := resilience.NewBudget(req.ctx, &settings, resilience.KindText, time.Now())
+			state := resilience.NewRequestState()
+			state.SetBudget(budget)
+			ctx := resilience.WithRequestState(req.ctx, state)
+			account := webSearchReplayAccount(false)
+			body := []byte(`{"input":[{"type":"reasoning","id":"rs_one","encrypted_content":"synthetic-cipher"}]}`)
+			payload := []byte(`{"error":{"code":"invalid_encrypted_content","param":"input[0].encrypted_content","message":"Encrypted content could not be verified for item rs_one"}}`)
+			repair := armOpenAIRequestRepair(req.c, account, nil)
+			_, allowed := planHTTPEncryptedContentRepair(ctx, req.c, account, repair, body, payload)
+			require.Equal(t, maxAttempts > 1, allowed)
 		})
 	}
 }
