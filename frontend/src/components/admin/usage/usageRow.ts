@@ -21,6 +21,20 @@ export function accountBilled(row: {
   return Number.isNaN(result) ? 0 : result
 }
 
+/**
+ * The row's voluntary cache-gap compensation: the amount taken off the bill, and whether a voucher awaits settlement
+ * (pending: its estimate, 0 when it could not be priced). Null where the row has neither.
+ */
+export function voluntaryCompensation(row: Pick<AdminUsageLog, 'metering_adjustment'>): { credited: number; pending: number | null } | null {
+  let credited = 0
+  let pending: number | null = null
+  for (const item of row.metering_adjustment?.adjustments ?? []) {
+    if (item.kind === 'openai_voluntary_compensation') credited += item.amount ?? 0
+    else if (item.kind === 'openai_voluntary_compensation_pending') pending = (pending ?? 0) + (item.estimated_amount ?? 0)
+  }
+  return credited > 0 || pending !== null ? { credited, pending } : null
+}
+
 /** A latency: "800ms", "51.00s", past a minute "1m 10s", past an hour "1h 2m"; no value is "—". */
 export function formatLatency(ms: number | null | undefined): string {
   if (ms == null) return '—'

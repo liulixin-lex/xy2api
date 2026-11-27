@@ -98,6 +98,14 @@
       <span :class="tone.label">{{ t('usage.original') }}</span>
       <span :class="tone.value">{{ formatUsd(row.total_cost, 6) }}</span>
     </div>
+    <div v-if="compensation && compensation.credited > 0" class="flex items-center justify-between gap-6" data-testid="usage-compensation-credited">
+      <span :class="tone.label">{{ t('admin.usage.compensationCredited') }}</span>
+      <span :class="tone.billed">−{{ formatUsd(compensation.credited, 6) }}</span>
+    </div>
+    <div v-if="compensation && compensation.pending !== null" class="flex items-center justify-between gap-6" data-testid="usage-compensation-pending">
+      <span :class="tone.label">{{ t('admin.usage.compensationPending') }}</span>
+      <span :class="tone.pending">{{ compensation.pending > 0 ? formatUsd(compensation.pending, 6) : '—' }}</span>
+    </div>
     <div class="flex items-center justify-between gap-6">
       <span :class="tone.label">{{ t('usage.userBilled') }}</span>
       <span :class="tone.billed">{{ formatUsd(row.actual_cost, 6) }}</span>
@@ -137,7 +145,7 @@ import {
   textInputTokens,
   textOutputTokens,
 } from '@/utils/imageUsage'
-import { accountBilled } from './usageRow'
+import { accountBilled, voluntaryCompensation } from './usageRow'
 import type { AdminUsageLog } from '@/types'
 
 /**
@@ -167,6 +175,7 @@ const TONES = {
     cyan: 'font-semibold text-cyan-300',
     blue: 'font-semibold tabular-nums text-blue-400',
     billed: 'font-semibold tabular-nums text-green-400',
+    pending: 'font-medium tabular-nums text-amber-300',
     divider: 'border-gray-700',
   },
   panel: {
@@ -179,9 +188,12 @@ const TONES = {
     cyan: 'font-medium text-gray-900 dark:text-gray-100',
     blue: 'font-medium tabular-nums text-gray-900 dark:text-gray-100',
     billed: 'font-semibold tabular-nums text-green-700 dark:text-green-400',
+    pending: 'font-medium tabular-nums text-amber-700 dark:text-amber-400',
     divider: 'border-gray-200 dark:border-dark-600',
   },
 } as const
 
 const tone = computed(() => TONES[props.variant])
+// Admin evidence like account billing: the user page shows only what was billed.
+const compensation = computed(() => (props.showAccountBilling ? voluntaryCompensation(props.row) : null))
 </script>

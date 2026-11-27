@@ -192,6 +192,28 @@ describe('UsageTable request detail', () => {
     expect(detail.get('[data-testid="usage-detail-model"]').text()).toBe('gpt-6.1-sol → gpt-6.1')
   })
 
+  it('shows the admin what a compensated row took off the bill and what awaits settlement, at the procurement cost', async () => {
+    const compensated = {
+      ...row, supplier_cost_estimate: 0.000111,
+      metering_adjustment: { v: 1, adjustments: [
+        { kind: 'openai_voluntary_compensation', amount: 0.0021, estimated_amount: 0.003 },
+        { kind: 'openai_voluntary_compensation_pending', amount: 0, estimated_amount: 0.0009 }
+      ] }
+    }
+    const wrapper = mountTable(ADMIN, [compensated])
+    await cell(wrapper, 'created_at').get('button').trigger('click')
+    const detail = wrapper.get('[data-testid="usage-request-detail"]')
+    expect(detail.get('[data-testid="usage-compensation-credited"]').text()).toContain('−$0.002100')
+    expect(detail.get('[data-testid="usage-compensation-pending"]').text()).toContain('$0.000900')
+    expect(detail.text()).toContain('$0.000111')
+    expect(detail.text()).not.toContain('$0.000237')
+
+    const user = mountTable(USER, [compensated])
+    await cell(user, 'created_at').get('button').trigger('click')
+    expect(user.find('[data-testid="usage-compensation-credited"]').exists()).toBe(false)
+    expect(user.find('[data-testid="usage-compensation-pending"]').exists()).toBe(false)
+  })
+
   it('projects the user page: no account billing, upstream endpoint, fallback or user wait, even if the answer has them', async () => {
     const wrapper = mountTable(USER)
     await cell(wrapper, 'created_at').get('button').trigger('click')
