@@ -284,6 +284,7 @@ func (r *pluginRuntime) roundTrip(ctx context.Context, request *http.Request, pr
 	}
 	requestID := strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.FormatInt(account.ID, 36)
 	RecordOpsUpstreamSendBoundary(ctx, account.ID)
+	resilience.StateFrom(ctx).NoteDispatch(time.Now(), "plugin")
 	if err := stream.Send(&pluginv1.ForwardRequest{Frame: &pluginv1.ForwardRequest_Start{Start: &pluginv1.ForwardRequestStart{
 		RequestId:          requestID,
 		Method:             request.Method,

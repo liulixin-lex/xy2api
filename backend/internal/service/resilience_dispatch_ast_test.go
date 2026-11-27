@@ -13,9 +13,10 @@ import (
 )
 
 // Walk every gateway method plus its transitive package-function calls. Shared
-// plugin routing is another root: the actual transport begins after beginRequest.
+// plugin routing is another root. Shared HTTPUpstream owns the observation below
+// its fallback wrappers; direct clients must use doObservedHTTP.
 // The check discovers new transport points rather than pinning a hand-written list.
-func TestOpenAIDispatchASTCoverage(t *testing.T) {
+func TestDispatchASTCoverage(t *testing.T) {
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -85,7 +86,7 @@ func TestOpenAIDispatchASTCoverage(t *testing.T) {
 			if !ok {
 				return true
 			}
-			for i, stmt := range block.List {
+			for _, stmt := range block.List {
 				var calls []*ast.CallExpr
 				// Only this statement's expressions; nested blocks get their own adjacency check.
 				ast.Inspect(stmt, func(n ast.Node) bool {
@@ -98,6 +99,10 @@ func TestOpenAIDispatchASTCoverage(t *testing.T) {
 					return true
 				})
 				for _, call := range calls {
+					if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "doObservedHTTP" {
+						dispatches++ // direct entrypoints remain part of the coverage count
+						continue
+					}
 					selector, ok := call.Fun.(*ast.SelectorExpr)
 					if !ok {
 						continue
@@ -118,17 +123,17 @@ func TestOpenAIDispatchASTCoverage(t *testing.T) {
 					}
 					dispatches++
 					marked := false
-					if i > 0 {
-						if expr, ok := block.List[i-1].(*ast.ExprStmt); ok {
-							if marker, ok := expr.X.(*ast.CallExpr); ok {
-								if id, ok := marker.Fun.(*ast.Ident); ok && id.Name == "noteOpenAIDispatch" {
-									marked = true
-								}
-							}
-						}
+					if receiver, ok := selector.X.(*ast.SelectorExpr); ok && receiver.Sel.Name == "httpUpstream" {
+						marked = true // the shared implementation owns each physical send
+					}
+					if f.decl.Name.Name == "doObservedHTTP" && method == "Do" {
+						marked = true // observed RoundTripper, including redirects/retries
+					}
+					if f.file == "plugin_manager.go" && method == "roundTrip" {
+						marked = true // pluginRuntime counts after local preparation succeeds
 					}
 					if !marked {
-						t.Errorf("HTTP dispatch lacks adjacent observation: %s:%d %s", filepath.Base(f.file), fset.Position(call.Pos()).Line, f.decl.Name.Name)
+						t.Errorf("HTTP dispatch has no transport observation owner: %s:%d %s", filepath.Base(f.file), fset.Position(call.Pos()).Line, f.decl.Name.Name)
 					}
 				}
 			}

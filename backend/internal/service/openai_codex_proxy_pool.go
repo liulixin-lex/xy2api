@@ -136,11 +136,9 @@ func (s *OpenAIGatewayService) probeCodexProxyExit(ctx context.Context, rawURL s
 			if e != nil {
 				continue
 			}
-			noteOpenAIDispatch(req.Context(), "codex_proxy")
-			resp, err = client.Do(req)
+			resp, err = doObservedHTTP(client, req, "codex_proxy")
 			client.CloseIdleConnections()
 		} else if s.httpUpstream != nil {
-			noteOpenAIDispatch(req.Context(), "codex_proxy")
 			resp, err = s.httpUpstream.Do(req, proxyURL, 0, 1)
 		} else {
 			err = errors.New("transport unavailable")

@@ -25,6 +25,14 @@ type g9AuditAUpstream struct {
 }
 
 func (u *g9AuditAUpstream) Do(req *http.Request, p string, id int64, n int) (*http.Response, error) {
+	// Match HTTPUpstream's physical transport boundary before reading the
+	// observation; service callers no longer count shared sends themselves.
+	return resilience.ObserveDispatchTransport(dispatchServiceTransport(func(req *http.Request) (*http.Response, error) {
+		return u.roundTrip(req, p, id, n)
+	}), "direct").RoundTrip(req)
+}
+
+func (u *g9AuditAUpstream) roundTrip(req *http.Request, p string, id int64, n int) (*http.Response, error) {
 	tm := u.state.Timing()
 	metric := map[string]int64{}
 	for _, r := range resilience.Snapshot(time.Minute) {

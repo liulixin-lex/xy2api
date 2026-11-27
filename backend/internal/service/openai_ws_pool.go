@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/liulixin-lex/xy2api/internal/resilience"
@@ -602,7 +603,14 @@ func (c *openAIWSConn) writeJSON(value any, writeCtx context.Context) error {
 	if writeCtx == nil {
 		writeCtx = context.Background()
 	}
-	if err := c.ws.WriteJSON(writeCtx, value); err != nil {
+	// Serialization is preparation, not a send. Pass the encoded value to the
+	// connection so custom marshalers run once and a failed encode is not counted.
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("failed to write JSON message: failed to marshal JSON: %w", err)
+	}
+	resilience.StateFrom(writeCtx).NoteDispatch(time.Now(), "websocket")
+	if err := c.ws.WriteJSON(writeCtx, json.RawMessage(payload)); err != nil {
 		return err
 	}
 	c.touch()

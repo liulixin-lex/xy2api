@@ -104,10 +104,10 @@ func (s *RequestState) FinishRejectedDispatch(at time.Time) {
 }
 
 func (s *RequestState) dispatchPhasesLocked() map[string]int64 {
+	out := map[string]int64{"count_version": 2, "dispatch_count": s.timing.dispatchCount}
 	if s.timing.phasesFinished.IsZero() {
-		return nil
+		return out
 	}
-	out := make(map[string]int64, len(s.timing.dispatchPhases))
 	for name, elapsed := range s.timing.dispatchPhases {
 		out[name] = elapsed.Milliseconds()
 	}
@@ -150,6 +150,7 @@ func (s *RequestState) Timing() RequestTiming {
 			out.FinalDeadlineMs = observed(b.Deadline().Sub(start).Milliseconds())
 		}
 	}
+	out.DispatchCount = observed(trace.dispatchCount)
 	if start.IsZero() {
 		return out
 	}
@@ -169,8 +170,7 @@ func (s *RequestState) Timing() RequestTiming {
 	if trace.wireStatus != 0 {
 		out.WireStatus = observed(trace.wireStatus)
 	}
-	out.DispatchCount = observed(trace.dispatchCount)
-	if trace.dispatchCount > 0 {
+	if trace.dispatchCount > 0 && b != nil && b.Kind() == KindText {
 		out.MinDispatchRemainingMs = observed(trace.minRemaining.Milliseconds())
 	}
 	out.LateAttemptCount = observed(int64(lateCount))
@@ -300,19 +300,19 @@ func (s *RequestState) ObserveAttemptStart() {
 // already published at dispatch; completion must not count them again.
 func (s *RequestState) FinishTiming() {}
 
-// NoteOpenAIDispatch is called immediately before an actual HTTP transport.
-// It observes only: it does not admit, consume an attempt, or change a deadline.
-func (s *RequestState) NoteOpenAIDispatch(at time.Time, path string) {
+// NoteDispatch observes one actual upstream send attempt, including failed dials.
+// It never admits an attempt, consumes budget, or changes a deadline. A request
+// state is sufficient: non-text and requests without budgets count sends too.
+func (s *RequestState) NoteDispatch(at time.Time, path string) {
 	if s == nil {
 		return
 	}
 	b := s.Budget()
-	if b == nil || b.Kind() != KindText {
-		return
+	textBudget := b != nil && b.Kind() == KindText
+	var rem time.Duration
+	if textBudget {
+		rem = b.Remaining(at)
 	}
-	rem := b.Remaining(at)
-	// All OpenAI HTTP routes, including non-native protocol fallbacks, share
-	// this existing transport observation point after their guard decision.
 	s.ObserveAttemptStart()
 	s.mu.Lock()
 	if s.timing.dispatchCount == 0 {
@@ -324,5 +324,7 @@ func (s *RequestState) NoteOpenAIDispatch(at time.Time, path string) {
 	s.timing.minRemaining = min(s.timing.minRemaining, rem)
 	bytes, committed := s.bodyBytes, !s.timing.keepaliveCommit.IsZero()
 	s.mu.Unlock()
-	ObserveDispatchRemaining(path, bytes, committed, rem, at)
+	if textBudget {
+		ObserveDispatchRemaining(path, bytes, committed, rem, at)
+	}
 }

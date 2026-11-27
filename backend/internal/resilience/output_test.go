@@ -99,14 +99,14 @@ func TestFirstoutRequestClockAndDispatchPhases(t *testing.T) {
 	state.MarkBodyReceived(start.Add(100*time.Millisecond), "test", 100)
 	state.BeginDispatchPhase("request_validation_ms", start.Add(110*time.Millisecond))
 	state.BeginDispatchPhase("account_selection_ms", start.Add(150*time.Millisecond))
-	state.NoteOpenAIDispatch(start.Add(180*time.Millisecond), "test")
+	state.NoteDispatch(start.Add(180*time.Millisecond), "test")
 	state.BeginDispatchPhase("ignored_retry_ms", start.Add(190*time.Millisecond))
 	state.NoteSemanticOutput(start.Add(400 * time.Millisecond))
 	timing := state.Timing()
 	require.EqualValues(t, 100, *timing.BodyEOFMs)
 	require.EqualValues(t, 400, *state.EndToEndFirstOutputMs())
 	require.EqualValues(t, 300, *state.EndToEndFirstOutputMs()-*timing.BodyEOFMs)
-	require.JSONEq(t, `{"body_decode_ms":10,"request_validation_ms":40,"account_selection_ms":30}`, string(timing.DispatchPhases))
+	require.JSONEq(t, `{"count_version":2,"dispatch_count":1,"body_decode_ms":10,"request_validation_ms":40,"account_selection_ms":30}`, string(timing.DispatchPhases))
 	require.Equal(t, string(timing.DispatchPhases), string(state.Timing().DispatchPhases))
 }
 
@@ -147,20 +147,20 @@ func TestFirstoutUndispatchedTimingDoesNotIncludeGeneration(t *testing.T) {
 	state.MarkBodyReceived(start.Add(time.Millisecond), "test", 123)
 	state.BeginDispatchPhase("routing_validation_ms", start.Add(2*time.Millisecond))
 	before := state.timing.phaseStarted
-	require.Empty(t, state.Timing().DispatchPhases)
-	require.Empty(t, state.Timing().DispatchPhases)
+	require.JSONEq(t, `{"count_version":2,"dispatch_count":0}`, string(state.Timing().DispatchPhases))
+	require.JSONEq(t, `{"count_version":2,"dispatch_count":0}`, string(state.Timing().DispatchPhases))
 	require.Equal(t, before, state.timing.phaseStarted, "Timing must not advance an unfinished phase")
 	state.FinishRejectedDispatch(start.Add(9 * time.Millisecond))
-	require.JSONEq(t, `{"body_decode_ms":1,"routing_validation_ms":7}`, string(state.Timing().DispatchPhases))
+	require.JSONEq(t, `{"count_version":2,"dispatch_count":0,"body_decode_ms":1,"routing_validation_ms":7}`, string(state.Timing().DispatchPhases))
 	state.FinishRejectedDispatch(start.Add(time.Minute))
-	require.JSONEq(t, `{"body_decode_ms":1,"routing_validation_ms":7}`, string(state.Timing().DispatchPhases))
+	require.JSONEq(t, `{"count_version":2,"dispatch_count":0,"body_decode_ms":1,"routing_validation_ms":7}`, string(state.Timing().DispatchPhases))
 	sent := NewRequestState()
 	sent.InitDelivery(context.Background(), start, nil)
 	sent.MarkBodyReceived(start.Add(time.Millisecond), "test", 123)
 	sent.EnableGatewayRequest(start)
 	sent.NoteGatewaySend(123)
 	sent.FinishRejectedDispatch(start.Add(time.Minute))
-	require.Empty(t, sent.Timing().DispatchPhases, "uninstrumented provider sends must not publish generation as dispatch time")
+	require.JSONEq(t, `{"count_version":2,"dispatch_count":0}`, string(sent.Timing().DispatchPhases), "delivery adoption must not manufacture sends or dispatch phase durations")
 }
 
 func TestFirstoutMCPListAndDuplicateKeysAreUnknown(t *testing.T) {

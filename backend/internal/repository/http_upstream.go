@@ -219,6 +219,9 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 
 	// 执行请求
 	client := s.httpClientForUpstreamRequest(entry.client, req)
+	observedClient := *client
+	observedClient.Transport = resilience.ObserveDispatchTransport(client.Transport, "direct")
+	client = &observedClient
 	if !service.HTTPUpstreamSingleAttempt(req.Context()) {
 		client = httpClientWithGrokAccessDeniedFallback(client)
 	}
@@ -282,6 +285,9 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	}
 
 	client := s.httpClientForUpstreamRequest(entry.client, req)
+	observedClient := *client
+	observedClient.Transport = resilience.ObserveDispatchTransport(client.Transport, "direct")
+	client = &observedClient
 	if !service.HTTPUpstreamSingleAttempt(req.Context()) {
 		client = httpClientWithGrokAccessDeniedFallback(client)
 	}
